@@ -57,7 +57,7 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
     return this.activeKey ? this.webviews.get(this.activeKey) : undefined;
   }
 
-  async openPdfAtAnchor(pdfPath: string, anchorId?: string, page?: number): Promise<void> {
+  async openPdfAtAnchor(pdfPath: string, anchorId?: string, page?: number, chunkId?: string): Promise<void> {
     const pdfUri = vscode.Uri.file(path.join(this.vaultRoot, decodePath(pdfPath)));
     const key = pdfUri.toString();
 
@@ -68,11 +68,27 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
     let payload: Record<string, unknown> = {};
     if (anchorId) {
       const db = await openDatabase(this.vaultRoot);
-      runMigrations(db);
-      const anchor = resolveAnchor(db, anchorId);
-      closeDatabase(db);
-      if (anchor) {
-        payload = locatorToWebviewAnchor(anchor.locator_json, anchor.text_quote ?? '');
+      try {
+        runMigrations(db);
+        const anchor = resolveAnchor(db, anchorId);
+        if (anchor) {
+          payload = locatorToWebviewAnchor(anchor.locator_json, anchor.text_quote ?? '');
+        }
+      } finally {
+        closeDatabase(db);
+      }
+    } else if (chunkId) {
+      const db = await openDatabase(this.vaultRoot);
+      try {
+        runMigrations(db);
+        const row = db.prepare(
+          'SELECT metadata_json, text FROM chunks WHERE id = ? AND active = 1',
+        ).get(chunkId) as { metadata_json?: string; text?: string } | undefined;
+        if (row) {
+          payload = chunkToWebviewAnchor(row.metadata_json, row.text ?? '');
+        }
+      } finally {
+        closeDatabase(db);
       }
     } else if (page) {
       payload = { page };
@@ -454,6 +470,40 @@ function locatorToWebviewAnchor(locatorJson: string, quote: string): Record<stri
   } catch {
     return { page: 1, snippet: quote };
   }
+}
+
+function chunkToWebviewAnchor(metadataJson: string | undefined, text: string): Record<string, unknown> {
+  const metadata = parseJsonObject(metadataJson);
+  const page = numberValue(metadata.page_start) ?? numberValue(metadata.page) ?? 1;
+  return {
+    page,
+    textItemIndex: numberValue(metadata.text_item_start),
+    charOffset: numberValue(metadata.char_offset_start),
+    endTextItemIndex: numberValue(metadata.text_item_end),
+    endCharOffset: numberValue(metadata.char_offset_end),
+    snippet: text.replace(/\s+/g, ' ').trim().slice(0, 240),
+  };
+}
+
+function parseJsonObject(raw: string | undefined): Record<string, unknown> {
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+function numberValue(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return undefined;
 }
 
 function decodePath(input: string): string {

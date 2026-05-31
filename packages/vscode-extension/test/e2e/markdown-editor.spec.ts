@@ -9,7 +9,7 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
     );
   }
 
-  test('markdown editor loads, receives setText, and renders hl:// links as clickable widgets', async ({ page }) => {
+  test('markdown editor loads, receives setText, and renders native source links as clickable widgets', async ({ page }) => {
     await page.goto('http://localhost:8979/test.html');
     await waitForEditorBootstrap(page);
 
@@ -17,7 +17,7 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
     const testDoc = [
       '# Test Note',
       '',
-      'This references a [PDF quote](hl://pdf/raw/pdf/paper.pdf?anchor=anc_pdf_abc123).',
+      'This references a [PDF quote](raw/pdf/paper.pdf#page=7&anchor=anc_pdf_abc123).',
       '',
       'See also [[FlashAttention]] for background.',
     ].join('\n');
@@ -29,7 +29,7 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
     // Wait for the editor to appear
     await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
 
-    // The hl:// link should be replaced by an .cm-hl-link widget button
+    // The native PDF link should be replaced by an .cm-hl-link widget button
     const linkWidget = page.locator('.cm-hl-link');
     await expect(linkWidget.first()).toBeVisible({ timeout: 3000 });
 
@@ -421,7 +421,7 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
       'd = 0     # running sum',
       '```',
       '',
-      'For details see [[FlashAttention]] and [PDF link](hl://pdf/raw/pdf/flash-attention.pdf?anchor=anc_pdf).',
+      'For details see [[FlashAttention]] and [PDF link](raw/pdf/flash-attention.pdf#page=7&anchor=anc_pdf).',
     ].join('\n');
 
     await page.evaluate((text) => {
@@ -552,7 +552,7 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
     const doc = [
       'Links:',
       '',
-      'See [[FlashAttention]] and [paper](hl://pdf/raw/pdf/flash-attention.pdf).',
+      'See [[FlashAttention]] and [paper](raw/pdf/flash-attention.pdf).',
       '',
       'Tail line',
     ].join('\n');
@@ -600,7 +600,7 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
       document.execCommand('copy');
     }));
 
-    expect(copiedPdfLink).toBe('[paper](hl://pdf/raw/pdf/flash-attention.pdf)');
+    expect(copiedPdfLink).toBe('[paper](raw/pdf/flash-attention.pdf)');
   });
 
   test('copying a rendered image widget puts the raw markdown image on the clipboard', async ({ page }) => {
@@ -1105,7 +1105,7 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
 
       const html = [
         '<h1>Online Softmax</h1>',
-        '<p>Keep <strong>running max</strong> and <code>d</code>. See <a href="hl://note/notes/Concepts/FlashAttention.md">FlashAttention</a>.</p>',
+        '<p>Keep <strong>running max</strong> and <code>d</code>. See <a href="notes/Concepts/FlashAttention.md">FlashAttention</a>.</p>',
         '<pre><code class="language-python">m = -inf\n',
         'd = 0</code></pre>',
       ].join('');
@@ -1127,7 +1127,7 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
       '',
       '# Online Softmax',
       '',
-      'Keep **running max** and `d`. See [FlashAttention](hl://note/notes/Concepts/FlashAttention.md).',
+      'Keep **running max** and `d`. See [FlashAttention](notes/Concepts/FlashAttention.md).',
       '',
       '```python',
       'm = -inf',
@@ -2726,7 +2726,7 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
   test('link widgets render and clicking them sends openUri messages', async ({ page }) => {
     await page.goto('http://localhost:8979/test.html');
 
-    const testDoc = '# Note\n\nClick [the PDF link](hl://pdf/raw/paper.pdf?anchor=anc_test) here.\n';
+    const testDoc = '# Note\n\nClick [the PDF link](raw/paper.pdf#page=7&anchor=anc_test) here.\n';
 
     await page.evaluate((text) => {
       window.postMessage({ type: 'setText', text }, '*');
@@ -2750,7 +2750,7 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
     );
 
     expect(openUriMessages.length).toBe(1);
-    expect(openUriMessages[0].uri).toBe('hl://pdf/raw/paper.pdf?anchor=anc_test');
+    expect(openUriMessages[0].uri).toBe('raw/paper.pdf#page=7&anchor=anc_test');
   });
 
   test('folder-qualified Obsidian wikilinks preserve vault paths when opened', async ({ page }) => {
@@ -2780,9 +2780,9 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
       window.__mockMessages?.filter((message) => message.type === 'openUri')
     );
     expect(openUriMessages).toEqual([
-      { type: 'openUri', uri: 'hl://note/notes/Daily%20Notes/2026-05-25.md' },
-      { type: 'openUri', uri: 'hl://note/notes/Concepts/FlashAttention.md' },
-      { type: 'openUri', uri: 'hl://note/notes/Projects/Roadmap.md#Milestones' },
+      { type: 'openUri', uri: 'notes/Daily Notes/2026-05-25.md' },
+      { type: 'openUri', uri: 'notes/Concepts/FlashAttention.md' },
+      { type: 'openUri', uri: 'notes/Projects/Roadmap.md#Milestones' },
     ]);
   });
 
@@ -2817,7 +2817,7 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
       window.__mockMessages?.filter((message) => message.type === 'openUri')
     );
     expect(openUriMessages).toEqual([
-      { type: 'openUri', uri: 'hl://note/notes/Papers/FlashAttention%20Paper.md' },
+      { type: 'openUri', uri: 'notes/Papers/FlashAttention Paper.md' },
     ]);
   });
 
@@ -2850,7 +2850,7 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
       window.__mockMessages?.filter((message) => message.type === 'openUri')
     );
     expect(openUriMessages).toEqual([
-      { type: 'openUri', uri: 'hl://note/notes/Concepts/Online%20Softmax.md#Why%20This%20Matters' },
+      { type: 'openUri', uri: 'notes/Concepts/Online Softmax.md#Why This Matters' },
     ]);
   });
 
@@ -2883,7 +2883,7 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
       window.__mockMessages?.filter((message) => message.type === 'openUri')
     );
     expect(openUriMessages).toEqual([
-      { type: 'openUri', uri: 'hl://note/notes/Concepts/Online%20Softmax.md#%5Efact123' },
+      { type: 'openUri', uri: 'notes/Concepts/Online Softmax.md#^fact123' },
     ]);
   });
 
@@ -3304,7 +3304,7 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
 
     await page.evaluate((text) => {
       window.postMessage({ type: 'setText', text }, '*');
-    }, '# Note\n\nClick [the PDF link](hl://pdf/raw/paper.pdf?anchor=anc_test) here.\n');
+    }, '# Note\n\nClick [the PDF link](raw/paper.pdf#page=7&anchor=anc_test) here.\n');
 
     await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
 
@@ -3797,9 +3797,9 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
     await page.goto('http://localhost:8979/test.html');
 
     const doc = [
-      'Inline code `https://example.com [[FlashAttention]] [paper](hl://pdf/raw/paper.pdf) #literal [^code]` stays literal.',
+      'Inline code `https://example.com [[FlashAttention]] [paper](raw/paper.pdf) #literal [^code]` stays literal.',
       '',
-      'Outside https://example.com [[FlashAttention]] [paper](hl://pdf/raw/paper.pdf) #real [^out].',
+      'Outside https://example.com [[FlashAttention]] [paper](raw/paper.pdf) #real [^out].',
       '[^out]: rendered footnote.',
     ].join('\n');
 
@@ -3821,7 +3821,7 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
     }));
 
     expect(inlineCodeLine.text).toBe(
-      'Inline code https://example.com [[FlashAttention]] [paper](hl://pdf/raw/paper.pdf) #literal [^code] stays literal.',
+      'Inline code https://example.com [[FlashAttention]] [paper](raw/paper.pdf) #literal [^code] stays literal.',
     );
     expect(inlineCodeLine.linkCount).toBe(0);
     expect(inlineCodeLine.tagCount).toBe(0);
@@ -3855,9 +3855,9 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
     await page.goto('http://localhost:8979/test.html');
 
     const doc = [
-      'Double ticks ``run `literal` [paper](hl://pdf/raw/paper.pdf) [[FlashAttention]] #literal [^code]`` stay literal.',
+      'Double ticks ``run `literal` [paper](raw/paper.pdf) [[FlashAttention]] #literal [^code]`` stay literal.',
       '',
-      'Outside [paper](hl://pdf/raw/paper.pdf) [[FlashAttention]] #real [^out].',
+      'Outside [paper](raw/paper.pdf) [[FlashAttention]] #real [^out].',
       '[^out]: rendered footnote.',
     ].join('\n');
 
@@ -3879,7 +3879,7 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
     }));
 
     expect(inactiveLine.text).toBe(
-      'Double ticks run `literal` [paper](hl://pdf/raw/paper.pdf) [[FlashAttention]] #literal [^code] stay literal.',
+      'Double ticks run `literal` [paper](raw/paper.pdf) [[FlashAttention]] #literal [^code] stay literal.',
     );
     expect(inactiveLine.linkCount).toBe(0);
     expect(inactiveLine.tagCount).toBe(0);
@@ -5316,6 +5316,118 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
     await expect(page.locator('.cm-line').filter({ hasText: 'graph TD' })).toBeVisible();
   });
 
+  test('hybrid rendering keeps compact Mermaid diagrams at natural Obsidian-like scale', async ({ page }) => {
+    await page.setViewportSize({ width: 900, height: 700 });
+    await page.goto('http://localhost:8979/test.html');
+
+    const mermaidSource = [
+      '```mermaid',
+      'graph TD',
+      '  A[Markdown note] --> B[Rendered diagram]',
+      '  B --> C[Click to edit source]',
+      '```',
+    ].join('\n');
+    const doc = [
+      '# Mermaid Preview',
+      '',
+      mermaidSource,
+      '',
+      'Tail line',
+    ].join('\n');
+
+    await page.evaluate((text) => {
+      window.postMessage({ type: 'setText', text }, '*');
+    }, doc);
+
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      view.dispatch({ selection: { anchor: view.state.doc.length } });
+    });
+
+    await expect(page.locator('.cm-hybrid-mermaid-block svg')).toBeVisible({ timeout: 10_000 });
+
+    const metrics = await page.evaluate(() => {
+      const inner = document.querySelector<HTMLElement>('.cm-hybrid-mermaid-block-inner');
+      const svg = inner?.querySelector<SVGSVGElement>('svg');
+      const firstLabel = svg?.querySelector<Element>('.nodeLabel, foreignObject p, text');
+      if (!inner || !svg) throw new Error('Missing rendered Mermaid diagram');
+      const svgRect = svg.getBoundingClientRect();
+      const labelRect = firstLabel?.getBoundingClientRect();
+      return {
+        containerWidth: inner.clientWidth,
+        scrollWidth: inner.scrollWidth,
+        svgWidth: svgRect.width,
+        svgHeight: svgRect.height,
+        labelHeight: labelRect?.height ?? 0,
+      };
+    });
+
+    expect(metrics.scrollWidth).toBeLessThanOrEqual(metrics.containerWidth + 1);
+    expect(metrics.svgWidth).toBeGreaterThan(150);
+    expect(metrics.svgWidth).toBeLessThan(320);
+    expect(metrics.svgHeight).toBeLessThan(260);
+    expect(metrics.labelHeight).toBeGreaterThan(10);
+    expect(metrics.labelHeight).toBeLessThan(20);
+  });
+
+  test('hybrid rendering keeps wide Mermaid diagrams readable by scrolling instead of shrinking', async ({ page }) => {
+    await page.setViewportSize({ width: 900, height: 700 });
+    await page.goto('http://localhost:8979/test.html');
+
+    const mermaidSource = [
+      '```mermaid',
+      'graph LR',
+      '  A[Input activations with a deliberately long readable label] --> B[Tile 1 computes local statistics]',
+      '  B --> C[Tile 2 updates the running maximum]',
+      '  C --> D[Tile 3 rescales the denominator]',
+      '  D --> E[Tile 4 accumulates the partial output]',
+      '  E --> F[Tile 5 writes the normalized result]',
+      '  F --> G[Output stays readable without shrinking the diagram]',
+      '```',
+    ].join('\n');
+    const doc = [
+      '# Mermaid Preview',
+      '',
+      mermaidSource,
+      '',
+      'Tail line',
+    ].join('\n');
+
+    await page.evaluate((text) => {
+      window.postMessage({ type: 'setText', text }, '*');
+    }, doc);
+
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      view.dispatch({ selection: { anchor: view.state.doc.length } });
+    });
+
+    await expect(page.locator('.cm-hybrid-mermaid-block svg')).toBeVisible({ timeout: 10_000 });
+
+    const metrics = await page.evaluate(() => {
+      const inner = document.querySelector<HTMLElement>('.cm-hybrid-mermaid-block-inner');
+      const svg = inner?.querySelector<SVGSVGElement>('svg');
+      const firstLabel = svg?.querySelector<Element>('.nodeLabel, foreignObject p, text');
+      if (!inner || !svg) throw new Error('Missing rendered Mermaid diagram');
+      const svgRect = svg.getBoundingClientRect();
+      const labelRect = firstLabel?.getBoundingClientRect();
+      return {
+        containerWidth: inner.clientWidth,
+        scrollWidth: inner.scrollWidth,
+        svgWidth: svgRect.width,
+        labelHeight: labelRect?.height ?? 0,
+        overflowX: getComputedStyle(inner).overflowX,
+      };
+    });
+
+    expect(metrics.overflowX).toMatch(/auto|scroll/);
+    expect(metrics.scrollWidth).toBeGreaterThan(metrics.containerWidth + 32);
+    expect(metrics.svgWidth).toBeGreaterThan(metrics.containerWidth + 32);
+    expect(metrics.labelHeight).toBeGreaterThan(8);
+  });
+
   test('hybrid rendering displays fenced code language names like Obsidian', async ({ page }) => {
     await page.goto('http://localhost:8979/test.html');
 
@@ -5348,7 +5460,7 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
       '| Name | Description |',
       '| --- | --- |',
       '| vkid.official_account | 小企鹅公众号 |',
-      'Keep [PDF link](hl://pdf/raw/paper.pdf?anchor=anc_hybrid) clickable.',
+      'Keep [PDF link](raw/paper.pdf#page=7&anchor=anc_hybrid) clickable.',
       '',
       'cursor lands here',
     ].join('\n');
@@ -5541,7 +5653,7 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
 
     await table.getByRole('button', { name: 'FlashAttention' }).click({ modifiers: ['Meta'] });
     await expect.poll(() => page.evaluate(() => window.__mockMessages.filter((message) => message.type === 'openUri')))
-      .toEqual([{ type: 'openUri', uri: 'hl://note/notes/Concepts/FlashAttention.md' }]);
+      .toEqual([{ type: 'openUri', uri: 'notes/Concepts/FlashAttention.md' }]);
   });
 
   test('hybrid rendering resolves reference links and images inside table cells like Obsidian', async ({ page }) => {
@@ -6057,7 +6169,7 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
 
     const testDoc = [
       '> [!tip] Related [[FlashAttention]]',
-      '> See [[Online Softmax]] and [paper](hl://pdf/raw/pdf/flash-attention.pdf?anchor=anc_callout).',
+      '> See [[Online Softmax]] and [paper](raw/pdf/flash-attention.pdf#page=7&anchor=anc_callout).',
       '',
       'cursor lands here',
     ].join('\n');
@@ -6092,9 +6204,9 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
 
     const openMessages = await page.evaluate(() => window.__mockMessages.filter((m) => m.type === 'openUri'));
     expect(openMessages).toEqual([
-      { type: 'openUri', uri: 'hl://note/notes/Concepts/FlashAttention.md' },
-      { type: 'openUri', uri: 'hl://note/notes/Concepts/Online%20Softmax.md' },
-      { type: 'openUri', uri: 'hl://pdf/raw/pdf/flash-attention.pdf?anchor=anc_callout' },
+      { type: 'openUri', uri: 'notes/Concepts/FlashAttention.md' },
+      { type: 'openUri', uri: 'notes/Concepts/Online Softmax.md' },
+      { type: 'openUri', uri: 'raw/pdf/flash-attention.pdf#page=7&anchor=anc_callout' },
     ]);
   });
 
@@ -6142,7 +6254,7 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
     const testDoc = [
       'plain text',
       '- [ ] task',
-      'Click [PDF link](hl://pdf/raw/paper.pdf?anchor=anc_cmd).',
+      'Click [PDF link](raw/paper.pdf#page=7&anchor=anc_cmd).',
       '',
       '| A | B |',
       '| --- | --- |',
@@ -6195,7 +6307,7 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
       window.postMessage({ type: 'executeCommand', command: 'editor:follow-link' }, '*');
     });
     const openMessages = await page.evaluate(() => window.__mockMessages.filter((m) => m.type === 'openUri'));
-    expect(openMessages).toEqual([{ type: 'openUri', uri: 'hl://pdf/raw/paper.pdf?anchor=anc_cmd' }]);
+    expect(openMessages).toEqual([{ type: 'openUri', uri: 'raw/paper.pdf#page=7&anchor=anc_cmd' }]);
   });
 
   test('Obsidian-like formatting commands unwrap the current formatted span when the cursor is inside it', async ({ page }) => {
@@ -6839,7 +6951,7 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
   test('Cmd+Enter follows the link under the cursor in Vim mode', async ({ page }) => {
     await page.goto('http://localhost:8979/test.html');
 
-    const testDoc = 'Jump to [PDF link](hl://pdf/raw/paper.pdf?anchor=anc_cmd_enter).';
+    const testDoc = 'Jump to [PDF link](raw/paper.pdf#page=7&anchor=anc_cmd_enter).';
 
     await page.evaluate((text) => {
       window.postMessage({ type: 'setVimMode', enabled: true }, '*');
@@ -6858,7 +6970,7 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
     await page.keyboard.press('Meta+Enter');
 
     const openMessages = await page.evaluate(() => window.__mockMessages.filter((m) => m.type === 'openUri'));
-    expect(openMessages).toEqual([{ type: 'openUri', uri: 'hl://pdf/raw/paper.pdf?anchor=anc_cmd_enter' }]);
+    expect(openMessages).toEqual([{ type: 'openUri', uri: 'raw/paper.pdf#page=7&anchor=anc_cmd_enter' }]);
   });
 
   test('Cmd+Enter also follows regular markdown links in Vim mode', async ({ page }) => {
@@ -6908,7 +7020,7 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
     });
 
     // Send insertText (simulates PDF viewer sending a link)
-    const insertMd = '[PDF](hl://pdf/raw/paper.pdf?anchor=anc_insert)';
+    const insertMd = '[PDF](raw/paper.pdf#page=7&anchor=anc_insert)';
     await page.evaluate((md) => {
       window.postMessage({ type: 'insertText', text: md }, '*');
     }, insertMd);
@@ -6924,6 +7036,6 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
       return el?.textContent ?? '';
     });
 
-    expect(content).toContain('[PDF](hl://pdf/raw/paper.pdf?anchor=anc_insert)');
+    expect(content).toContain('[PDF](raw/paper.pdf#page=7&anchor=anc_insert)');
   });
 });

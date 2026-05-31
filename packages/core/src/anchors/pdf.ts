@@ -2,6 +2,7 @@ import { createHash } from 'crypto';
 import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { Database } from '../db/connection';
+import { pdfHref } from '../links/reference-target';
 import { getSource, registerSource } from '../sources/registry';
 import { appendAnchorToFile } from './store';
 
@@ -67,7 +68,7 @@ export function createPdfAnchorFromQuote(
     .update(`${source.id}:${quote}:${locator.page}:${offset}`)
     .digest('hex')
     .substring(0, 12);
-  const uri = `hl://pdf/${encodePath(source.path)}?anchor=${id}`;
+  const uri = pdfHref(source.path, { page: locator.page, anchorId: id });
   const textHash = createHash('sha256').update(quote).digest('hex');
 
   db.prepare(`
@@ -143,7 +144,7 @@ export function createPdfAnchorFromSelection(
     ].join(':'))
     .digest('hex')
     .substring(0, 12);
-  const uri = `hl://pdf/${encodePath(source.path)}?anchor=${id}`;
+  const uri = pdfHref(source.path, { page: locator.page, anchorId: id });
   const textHash = createHash('sha256').update(quote).digest('hex');
 
   db.prepare(`
@@ -186,8 +187,4 @@ function inferPage(text: string, quote: string): number {
   const explicit = [...before.matchAll(/\bpage\s+(\d+)\b/gi)].pop();
   if (explicit?.[1]) return Number(explicit[1]);
   return before.split('\f').length;
-}
-
-function encodePath(path: string): string {
-  return path.split('/').map(segment => encodeURIComponent(segment)).join('/');
 }

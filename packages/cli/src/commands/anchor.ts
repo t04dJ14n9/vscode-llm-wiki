@@ -47,7 +47,7 @@ export function anchorCommand(): Command {
 
   cmd.command('resolve')
     .description('Resolve an anchor by id or URI')
-    .argument('<id-or-uri>', 'Anchor id or hl:// URI')
+    .argument('<id-or-uri>', 'Anchor id or native PDF anchor URI')
     .option('--json', 'Output JSON')
     .action(async (idOrUri: string, options: { json?: boolean }) => {
       const vaultRoot = detectVaultRoot(process.cwd());

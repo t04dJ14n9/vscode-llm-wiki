@@ -3,7 +3,7 @@ import { createHash } from 'crypto';
 import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { parseMarkdownLinks, ParsedLink } from './link-parser';
-import { parseHlUri } from './uri-parser';
+import { classifyReferenceTarget } from './reference-target';
 
 export interface LinkRecord {
   id: string;
@@ -46,8 +46,7 @@ export function rebuildLinksForNote(
     const linkId = 'lnk_' + createHash('sha256')
       .update(`${notePath}:${link.line}:${link.uri}`)
       .digest('hex').substring(0, 12);
-    const parsed = parseHlUri(link.uri);
-    const anchorId = parsed?.anchorId ?? (parsed?.kind === 'anchor' ? parsed.path ?? null : null);
+    const anchorId = link.target.anchorId ?? null;
     insertLink.run(linkId, notePath, link.line, link.uri, anchorId, link.label);
     inserted++;
   }
@@ -126,39 +125,54 @@ export function checkLinks(
 
   for (const link of links) {
     const linkIssues: Array<{ link_id: string; status: string; message: string }> = [];
-    const parsed = parseHlUri(link.to_uri);
-    if (!parsed) {
+    const target = classifyReferenceTarget(link.to_uri);
+    if (target.kind === 'note' && target.path) {
+      const source = db.prepare('SELECT id FROM sources WHERE path = ?').get(target.path);
+      if (!source) {
+        linkIssues.push({
+          link_id: link.id,
+          status: 'broken',
+          message: `Target note not found: ${target.path}`,
+        });
+      }
+    } else if ((target.kind === 'pdf' || target.kind === 'code' || target.kind === 'image' || target.kind === 'text') && target.path) {
+      const source = db.prepare('SELECT id FROM sources WHERE path = ?').get(target.path);
+      if (!source) {
+        linkIssues.push({
+          link_id: link.id,
+          status: 'broken',
+          message: `Target source not found: ${target.path}`,
+        });
+      }
+    } else if (target.kind === 'web' && target.webTargetId) {
+      const webTarget = db.prepare('SELECT id FROM web_targets WHERE id = ?').get(target.webTargetId);
+      if (!webTarget) {
+        linkIssues.push({
+          link_id: link.id,
+          status: 'broken',
+          message: `Target web selection not found: ${target.webTargetId}`,
+        });
+      }
+    } else if (target.kind === 'unknown') {
       linkIssues.push({
         link_id: link.id,
         status: 'broken',
-        message: `Invalid Human Learning URI: ${link.to_uri}`,
+        message: `Unrecognized link target: ${link.to_uri}`,
       });
-    } else if (parsed.kind === 'note' && parsed.path) {
-      const notePath = decodeURIComponent(parsed.path);
-      const source = db.prepare('SELECT id FROM sources WHERE path = ?').get(notePath);
-      if (!source) {
+    }
+
+    if (target.chunkId) {
+      const chunk = db.prepare('SELECT id FROM chunks WHERE id = ? AND active = 1').get(target.chunkId);
+      if (!chunk) {
         linkIssues.push({
           link_id: link.id,
           status: 'broken',
-          message: `Target note not found: ${notePath}`,
-        });
-      }
-    } else if ((parsed.kind === 'pdf' || parsed.kind === 'code' || parsed.kind === 'web' || parsed.kind === 'image') && parsed.path) {
-      const sourcePath = decodeURIComponent(parsed.path);
-      const source = db.prepare('SELECT id FROM sources WHERE path = ?').get(sourcePath);
-      if (!source) {
-        linkIssues.push({
-          link_id: link.id,
-          status: 'broken',
-          message: `Target source not found: ${sourcePath}`,
+          message: `Target chunk not found: ${target.chunkId}`,
         });
       }
     }
 
-    // Check if target anchor exists
-    const anchorId = parsed
-      ? link.to_anchor_id ?? parsed.anchorId ?? (parsed.kind === 'anchor' ? parsed.path : undefined)
-      : link.to_anchor_id;
+    const anchorId = link.to_anchor_id ?? target.anchorId;
     if (anchorId) {
       const anchor = db.prepare('SELECT id FROM anchors WHERE id = ?').get(anchorId);
       if (!anchor) {
@@ -192,18 +206,18 @@ export function safeRepairLinks(
   ).all() as Array<{ id: string; to_uri: string }>;
 
   for (const link of brokenLinks) {
-    if (link.to_uri.startsWith('hl://note/')) {
-      const notePath = link.to_uri.replace('hl://note/', '');
+    const target = classifyReferenceTarget(link.to_uri);
+    if (target.kind === 'note' && target.path) {
+      const notePath = target.path;
       // Try fuzzy match: case-insensitive
       const matches = db.prepare(
         'SELECT path FROM sources WHERE LOWER(path) = LOWER(?)'
       ).all(notePath) as Array<{ path: string }>;
 
       if (matches.length === 1) {
-        const newUri = `hl://note/${matches[0]!.path}`;
         db.prepare(
           "UPDATE links SET to_uri = ?, status = 'resolved', updated_at = datetime('now') WHERE id = ?"
-        ).run(newUri, link.id);
+        ).run(matches[0]!.path, link.id);
         fixed++;
       } else if (matches.length > 1) {
         ambiguous++;

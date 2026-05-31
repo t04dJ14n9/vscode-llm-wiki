@@ -20,8 +20,14 @@ export { extractPdfText, extractPdfFullText } from './sources/pdf-extract';
 export type { PdfPageText } from './sources/pdf-extract';
 
 // Links
-export { parseHlUri, formatHlUri, normalizeUri } from './links/uri-parser';
-export type { HlUri } from './links/uri-parser';
+export {
+  classifyReferenceTarget,
+  noteHref,
+  pdfHref,
+  codeHref,
+  normalizeRelativePath,
+} from './links/reference-target';
+export type { ReferenceTarget, ReferenceKind } from './links/reference-target';
 export { parseMarkdownLinks, hasLinks } from './links/link-parser';
 export type { ParsedLink } from './links/link-parser';
 export {
@@ -64,3 +70,7 @@ export {
 export { exportSourceContext } from './context/export';
 export type { ExportContextOptions, ExportedContext } from './context/export';
 export { generateAgentInstructions } from './context/agent-files';
+
+// Web targets
+export { upsertWebTarget, resolveWebTarget } from './web/targets';
+export type { WebTargetRecord, UpsertWebTargetInput } from './web/targets';

@@ -55,18 +55,19 @@ test('dispatchUri opens markdown note links with the Human Learning markdown edi
   const { dispatchUri } = loadTsModule('src/uriDispatcher.ts', {
     vscode,
     '@human-learning/core': {
-      parseHlUri: () => ({
+      classifyReferenceTarget: () => ({
         kind: 'note',
-        path: 'notes/Concepts/Online%20Softmax.md',
+        path: 'notes/Concepts/Online Softmax.md',
       }),
       openDatabase: async () => ({}),
       closeDatabase: () => undefined,
       runMigrations: () => undefined,
+      resolveWebTarget: () => undefined,
     },
     fs: { existsSync: () => true },
   });
 
-  await dispatchUri('/vault', 'hl://note/notes/Concepts/Online%20Softmax.md');
+  await dispatchUri('/vault', 'notes/Concepts/Online Softmax.md');
 
   assert.deepEqual(executeCommandCalls, [
     [
@@ -95,19 +96,20 @@ test('dispatchUri reveals note headings inside the Human Learning markdown edito
   const { dispatchUri } = loadTsModule('src/uriDispatcher.ts', {
     vscode,
     '@human-learning/core': {
-      parseHlUri: () => ({
+      classifyReferenceTarget: () => ({
         kind: 'note',
-        path: 'notes/Concepts/Online%20Softmax.md',
+        path: 'notes/Concepts/Online Softmax.md',
         heading: 'Online Softmax',
       }),
       openDatabase: async () => ({}),
       closeDatabase: () => undefined,
       runMigrations: () => undefined,
+      resolveWebTarget: () => undefined,
     },
     fs: { existsSync: () => true },
   });
 
-  await dispatchUri('/vault', 'hl://note/notes/Concepts/Online%20Softmax.md#Online%20Softmax');
+  await dispatchUri('/vault', 'notes/Concepts/Online Softmax.md#Online Softmax');
 
   assert.deepEqual(executeCommandCalls, [
     [
@@ -141,19 +143,20 @@ test('dispatchUri reveals Obsidian block references inside markdown notes', asyn
   const { dispatchUri } = loadTsModule('src/uriDispatcher.ts', {
     vscode,
     '@human-learning/core': {
-      parseHlUri: () => ({
+      classifyReferenceTarget: () => ({
         kind: 'note',
-        path: 'notes/Concepts/Online%20Softmax.md',
+        path: 'notes/Concepts/Online Softmax.md',
         heading: '^fact123',
       }),
       openDatabase: async () => ({}),
       closeDatabase: () => undefined,
       runMigrations: () => undefined,
+      resolveWebTarget: () => undefined,
     },
     fs: { existsSync: () => true },
   });
 
-  await dispatchUri('/vault', 'hl://note/notes/Concepts/Online%20Softmax.md#%5Efact123');
+  await dispatchUri('/vault', 'notes/Concepts/Online Softmax.md#^fact123');
 
   assert.deepEqual(executeCommandCalls, [
     [
@@ -186,26 +189,34 @@ test('dispatchUri waits for resolved anchor URIs to finish dispatching', async (
   const { dispatchUri } = loadTsModule('src/uriDispatcher.ts', {
     vscode,
     '@human-learning/core': {
-      parseHlUri: uri => uri === 'hl://anchor/anc_pdf_123'
-        ? { kind: 'anchor', path: 'anc_pdf_123' }
+      classifyReferenceTarget: uri => uri === 'raw/pdf/paper.pdf#page=7&anchor=anc_pdf_123'
+        ? {
+          kind: 'pdf',
+          uri,
+          path: 'raw/pdf/paper.pdf',
+          anchorId: 'anc_pdf_123',
+          page: 7,
+        }
         : {
           kind: 'pdf',
+          uri,
           path: 'raw/pdf/paper.pdf',
           anchorId: 'anc_pdf_123',
           page: 7,
         },
       openDatabase: async () => ({
         prepare: () => ({
-          get: () => ({ uri: 'hl://pdf/raw/pdf/paper.pdf?anchor=anc_pdf_123&page=7' }),
+          get: () => ({ uri: 'raw/pdf/paper.pdf#page=7&anchor=anc_pdf_123' }),
         }),
       }),
       closeDatabase: () => undefined,
       runMigrations: () => undefined,
+      resolveWebTarget: () => undefined,
     },
     fs: { existsSync: () => true },
   });
 
-  await dispatchUri('/vault', 'hl://anchor/anc_pdf_123');
+  await dispatchUri('/vault', 'anc_pdf_123');
 
   assert.deepEqual(executeCommandCalls, [
     [

@@ -49,6 +49,13 @@ mermaid.initialize({
   startOnLoad: false,
   securityLevel: 'strict',
   theme: 'dark',
+  flowchart: {
+    nodeSpacing: 36,
+    rankSpacing: 36,
+  },
+  themeVariables: {
+    fontSize: '12px',
+  },
 });
 let mermaidRenderSequence = 0;
 
@@ -955,6 +962,7 @@ async function renderMermaidInto(
     const { svg, bindFunctions } = await mermaid.render(id, source);
     if (!root.isConnected) return;
     container.innerHTML = svg;
+    normalizeMermaidSvg(container);
     bindFunctions?.(container);
   } catch (error) {
     if (!root.isConnected) return;
@@ -964,6 +972,33 @@ async function renderMermaidInto(
     fallback.textContent = error instanceof Error ? error.message : source;
     container.appendChild(fallback);
   }
+}
+
+function normalizeMermaidSvg(container: HTMLElement): void {
+  const svg = container.querySelector<SVGSVGElement>('svg');
+  if (!svg) return;
+
+  const naturalWidth = readSvgNaturalWidth(svg);
+  svg.classList.add('cm-hybrid-mermaid-svg');
+  svg.style.maxWidth = 'none';
+  svg.style.width = `${Math.ceil(naturalWidth)}px`;
+  svg.style.height = 'auto';
+}
+
+function readSvgNaturalWidth(svg: SVGSVGElement): number {
+  const viewBox = svg.getAttribute('viewBox')?.trim().split(/\s+/).map(Number);
+  const viewBoxWidth = viewBox?.length === 4 ? viewBox[2] : undefined;
+  if (typeof viewBoxWidth === 'number' && Number.isFinite(viewBoxWidth) && viewBoxWidth > 0) return viewBoxWidth;
+
+  const styleWidth = svg.getAttribute('style')?.match(/max-width:\s*([0-9.]+)px/i)?.[1];
+  const parsedStyleWidth = styleWidth ? Number(styleWidth) : 0;
+  if (Number.isFinite(parsedStyleWidth) && parsedStyleWidth > 0) return parsedStyleWidth;
+
+  const attrWidth = svg.getAttribute('width');
+  const parsedAttrWidth = attrWidth && attrWidth.endsWith('%') ? 0 : Number.parseFloat(attrWidth ?? '');
+  if (Number.isFinite(parsedAttrWidth) && parsedAttrWidth > 0) return parsedAttrWidth;
+
+  return 720;
 }
 
 export const setHybridPreviewEnabled = StateEffect.define<boolean>();

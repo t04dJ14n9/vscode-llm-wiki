@@ -1,23 +1,25 @@
-import { parseHlUri } from './uri-parser';
+import { classifyReferenceTarget, noteHref, ReferenceTarget } from './reference-target';
 
 export interface ParsedLink {
   /** The raw matched text */
   raw: string;
-  /** Canonical hl:// URI */
+  /** Native markdown-compatible target URI */
   uri: string;
+  /** Parsed target metadata */
+  target: ReferenceTarget;
   /** Display label */
   label: string;
   /** Line number in source (1-indexed) */
   line: number;
   /** Link kind */
-  kind: 'hl_uri' | 'wikilink' | 'heading_wikilink';
+  kind: 'markdown' | 'wikilink' | 'heading_wikilink' | 'image_embed';
 }
 
 export interface ParseMarkdownLinksOptions {
   notePaths?: string[];
 }
 
-/** Parse all links from markdown content */
+/** Parse all markdown links that should create graph edges. */
 export function parseMarkdownLinks(
   content: string,
   sourcePath: string,
@@ -29,11 +31,17 @@ export function parseMarkdownLinks(
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]!;
 
-    // Standard markdown links: [label](hl://...)
-    for (const m of line.matchAll(/\[([^\]]*)\]\((hl:\/\/[^)]+)\)/g)) {
-      const label = m[1] || '';
-      const uri = m[2]!;
-      links.push({ raw: m[0], uri, label, line: i + 1, kind: 'hl_uri' });
+    for (const m of line.matchAll(/(?<!!)\[([^\]]*)\]\(([^)]+)\)/g)) {
+      const uri = normalizeMarkdownDestination(m[2]!);
+      if (!uri) continue;
+      links.push({
+        raw: m[0],
+        uri,
+        target: classifyReferenceTarget(uri),
+        label: m[1] || '',
+        line: i + 1,
+        kind: 'markdown',
+      });
     }
 
     // Wikilinks: [[Note]], [[Note#Heading]], [[#Heading]], with optional aliases.
@@ -46,22 +54,29 @@ export function parseMarkdownLinks(
       if (!noteName && !heading) continue;
       const notePath = resolveWikilink(noteName, sourcePath, options.notePaths);
       if (!notePath) continue;
-      let uri: string;
-      if (heading) {
-        uri = `hl://note/${notePath}#${encodeURIComponent(heading)}`;
-      } else {
-        uri = `hl://note/${notePath}`;
-      }
-
+      const uri = noteHref(notePath, heading);
       const label = alias || wikilinkDisplayLabel(noteName, heading);
-      links.push({ raw: m[0], uri, label, line: i + 1, kind: heading ? 'heading_wikilink' : 'wikilink' });
+      links.push({
+        raw: m[0],
+        uri,
+        target: classifyReferenceTarget(uri),
+        label,
+        line: i + 1,
+        kind: heading ? 'heading_wikilink' : 'wikilink',
+      });
     }
 
-    // Image embeds: ![[image.png]]
     for (const m of line.matchAll(/!\[\[([^\]]+)\]\]/g)) {
       const imgPath = m[1]!.trim();
-      const uri = `hl://image/notes/assets/ink/${imgPath}`;
-      links.push({ raw: m[0], uri, label: imgPath, line: i + 1, kind: 'wikilink' });
+      const uri = `notes/assets/ink/${imgPath}`;
+      links.push({
+        raw: m[0],
+        uri,
+        target: classifyReferenceTarget(uri),
+        label: imgPath,
+        line: i + 1,
+        kind: 'image_embed',
+      });
     }
   }
 
@@ -79,7 +94,7 @@ function resolveWikilink(name: string, sourcePath: string, notePaths: string[] |
 
   if (cleanedSegments.length === 1) {
     const existingPath = findUniqueNotePathByBasename(cleanedSegments[0]!, notePaths);
-    if (existingPath) return encodePath(existingPath);
+    if (existingPath) return existingPath;
   }
 
   const rootedSegments = cleanedSegments[0] === 'notes'
@@ -90,7 +105,7 @@ function resolveWikilink(name: string, sourcePath: string, notePaths: string[] |
   const pathSegments = rootedSegments.at(-1)!.endsWith('.md')
     ? rootedSegments
     : [...rootedSegments.slice(0, -1), `${rootedSegments.at(-1)!}.md`];
-  return encodePath(pathSegments.join('/'));
+  return pathSegments.join('/');
 }
 
 function findUniqueNotePathByBasename(noteName: string, notePaths: string[] | undefined): string | undefined {
@@ -128,7 +143,7 @@ function normalizeNotePath(notePath: string): string {
   const pathSegments = cleanedSegments.at(-1)?.endsWith('.md')
     ? cleanedSegments
     : [...cleanedSegments.slice(0, -1), `${cleanedSegments.at(-1) ?? ''}.md`];
-  return encodePath(pathSegments.join('/'));
+  return pathSegments.join('/');
 }
 
 function wikilinkDisplayLabel(noteName: string, heading: string | undefined): string {
@@ -141,11 +156,18 @@ function wikilinkDisplayLabel(noteName: string, heading: string | undefined): st
   return displayName ? `${displayName} > ${heading}` : heading;
 }
 
-function encodePath(path: string): string {
-  return path.split('/').map(segment => encodeURIComponent(segment)).join('/');
+function normalizeMarkdownDestination(raw: string): string | undefined {
+  const destination = raw.trim();
+  if (!destination) return undefined;
+  if (destination.startsWith('<')) {
+    const end = destination.indexOf('>');
+    return end > 1 ? destination.slice(1, end) : undefined;
+  }
+  const match = destination.match(/^(\S+)(?:\s+(?:"[^"]*"|'[^']*'|\([^)]*\)))?$/);
+  return match?.[1];
 }
 
 /** Quick check: does a line contain any link syntax? */
 export function hasLinks(line: string): boolean {
-  return /\[\[[^\]]+\]\]|\[[^\]]*\]\(hl:\/\/[^)]+\)/.test(line);
+  return /\[\[[^\]]+\]\]|\[[^\]]*\]\([^)]+\)/.test(line);
 }

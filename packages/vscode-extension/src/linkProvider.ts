@@ -7,11 +7,12 @@ export function registerLinkProvider(context: vscode.ExtensionContext): void {
       const links: vscode.DocumentLink[] = [];
       const text = document.getText();
 
-      // Match [label](hl://...)
-      const hlLinkRegex = /\[([^\]]*)\]\((hl:\/\/[^)]+)\)/g;
+      // Match native markdown links.
+      const markdownLinkRegex = /(?<!!)\[([^\]]*)\]\(([^)]+)\)/g;
       let match;
-      while ((match = hlLinkRegex.exec(text)) !== null) {
-        const uri = match[2]!;
+      while ((match = markdownLinkRegex.exec(text)) !== null) {
+        const uri = normalizeMarkdownDestination(match[2]!);
+        if (!uri) continue;
         const startPos = document.positionAt(match.index);
         const endPos = document.positionAt(match.index + match[0].length);
 
@@ -51,4 +52,15 @@ export function registerLinkProvider(context: vscode.ExtensionContext): void {
       provider,
     ),
   );
+}
+
+function normalizeMarkdownDestination(raw: string): string | undefined {
+  const destination = raw.trim();
+  if (!destination) return undefined;
+  if (destination.startsWith('<')) {
+    const end = destination.indexOf('>');
+    return end > 1 ? destination.slice(1, end) : undefined;
+  }
+  const match = destination.match(/^(\S+)(?:\s+(?:"[^"]*"|'[^']*'|\([^)]*\)))?$/);
+  return match?.[1];
 }

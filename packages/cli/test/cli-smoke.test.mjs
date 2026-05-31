@@ -93,7 +93,7 @@ test('hl smoke flow initializes, ingests, embeds, searches, links, anchors, and 
     '--json',
   ], root);
   assert.equal(anchor.status, 'ok');
-  assert.match(anchor.anchor.uri, /^hl:\/\/pdf\/raw\/pdf\/fa.txt\?anchor=anc_pdf_/);
+  assert.match(anchor.anchor.uri, /^raw\/pdf\/fa.txt#page=\d+&anchor=anc_pdf_/);
 
   const context = run([
     'context',

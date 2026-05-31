@@ -1,5 +1,12 @@
 import * as vscode from 'vscode';
-import { parseHlUri, openDatabase, closeDatabase, runMigrations } from '@human-learning/core';
+import { execFile } from 'child_process';
+import {
+  classifyReferenceTarget,
+  closeDatabase,
+  openDatabase,
+  resolveWebTarget,
+  runMigrations,
+} from '@human-learning/core';
 import { existsSync } from 'fs';
 import { join } from 'path';
 
@@ -8,85 +15,135 @@ interface AnchorRow {
 }
 
 export async function dispatchUri(vaultRoot: string, uri: string): Promise<void> {
-  const parsed = parseHlUri(uri);
-  if (!parsed) {
-    vscode.window.showErrorMessage(`Invalid hl:// URI: ${uri}`);
+  if (uri.startsWith('anc_')) {
+    await dispatchAnchorId(vaultRoot, uri);
     return;
   }
 
-  switch (parsed.kind) {
+  const target = classifyReferenceTarget(uri);
+
+  switch (target.kind) {
     case 'note': {
-      if (!parsed.path) break;
-      const filePath = join(vaultRoot, decodePath(parsed.path));
-      const fileUri = vscode.Uri.file(filePath);
+      if (!target.path) break;
+      const fileUri = vscode.Uri.file(join(vaultRoot, target.path));
       await vscode.commands.executeCommand(
         'vscode.openWith',
         fileUri,
         'human-learning.markdownEditor',
       );
-      const selection = await resolveNoteSelection(fileUri, parsed.heading, parsed.lines);
+      const selection = await resolveNoteSelection(fileUri, target.heading, target.lines);
       if (selection) {
         await vscode.commands.executeCommand('human-learning.revealInMarkdownEditor', {
           uri: fileUri,
           selection,
         });
       }
-      break;
+      return;
     }
 
     case 'code': {
-      if (!parsed.path) break;
-      const decoded = decodePath(parsed.path);
-      const direct = join(vaultRoot, decoded);
-      const fallback = join(vaultRoot, 'raw', 'code', decoded.split('/').pop() || decoded);
+      if (!target.path) break;
+      const direct = join(vaultRoot, target.path);
+      const fallback = join(vaultRoot, 'raw', 'code', target.path.split('/').pop() || target.path);
       const filePath = existsSync(direct) ? direct : fallback;
       try {
         const doc = await vscode.workspace.openTextDocument(filePath);
         const editor = await vscode.window.showTextDocument(doc);
-        if (parsed.lines) {
+        if (target.lines) {
           const range = new vscode.Range(
-            parsed.lines.start - 1, 0,
-            parsed.lines.end - 1, 0,
+            target.lines.start - 1, 0,
+            target.lines.end - 1, 0,
           );
+          editor.selection = new vscode.Selection(range.start, range.end);
           editor.revealRange(range, vscode.TextEditorRevealType.AtTop);
         }
       } catch {
-        vscode.window.showErrorMessage(`Code file not found: ${parsed.path}`);
+        vscode.window.showErrorMessage(`Code file not found: ${target.path}`);
       }
-      break;
+      return;
     }
 
     case 'pdf': {
-      if (!parsed.path) break;
-      await vscode.commands.executeCommand('human-learning.openPdfAtAnchor', {
-        pdfPath: decodePath(parsed.path),
-        anchorId: parsed.anchorId,
-        page: parsed.page,
-      });
-      break;
+      if (!target.path) break;
+      const args: { pdfPath: string; anchorId?: string; chunkId?: string; page?: number } = {
+        pdfPath: target.path,
+      };
+      if (target.anchorId) args.anchorId = target.anchorId;
+      if (target.chunkId) args.chunkId = target.chunkId;
+      if (target.page) args.page = target.page;
+      await vscode.commands.executeCommand('human-learning.openPdfAtAnchor', args);
+      return;
     }
 
-    case 'anchor': {
-      const db = await openDatabase(vaultRoot);
-      runMigrations(db);
-      const anchorId = parsed.anchorId ?? parsed.path;
-      const anchor = db.prepare(
-        'SELECT uri, source_id FROM anchors WHERE id = ?',
-      ).get(anchorId) as AnchorRow | undefined;
-      closeDatabase(db);
+    case 'web': {
+      await openWebTarget(vaultRoot, target.url ?? uri, target.webTargetId);
+      return;
+    }
 
-      if (typeof anchor?.uri === 'string') {
-        await dispatchUri(vaultRoot, anchor.uri);
-      } else {
-        vscode.window.showErrorMessage(`Anchor not found: ${anchorId}`);
+    case 'image':
+    case 'text':
+    case 'unknown': {
+      if (target.path) {
+        const filePath = join(vaultRoot, target.path);
+        if (existsSync(filePath)) {
+          await vscode.commands.executeCommand('vscode.open', vscode.Uri.file(filePath));
+          return;
+        }
       }
-      break;
+      if (/^https?:\/\//i.test(uri)) {
+        await openWebTarget(vaultRoot, uri);
+        return;
+      }
+      vscode.window.showErrorMessage(`Cannot open link target: ${uri}`);
+      return;
     }
+  }
+
+  vscode.window.showErrorMessage(`Cannot open link target: ${uri}`);
+}
+
+async function dispatchAnchorId(vaultRoot: string, anchorId: string): Promise<void> {
+  const db = await openDatabase(vaultRoot);
+  runMigrations(db);
+  const anchor = db.prepare(
+    'SELECT uri, source_id FROM anchors WHERE id = ?',
+  ).get(anchorId) as AnchorRow | undefined;
+  closeDatabase(db);
+
+  if (typeof anchor?.uri === 'string') {
+    await dispatchUri(vaultRoot, anchor.uri);
+  } else {
+    vscode.window.showErrorMessage(`Anchor not found: ${anchorId}`);
   }
 }
 
-function decodePath(input: string): string {
-  return input.split('/').map(segment => decodeURIComponent(segment)).join('/');
+async function openWebTarget(vaultRoot: string, url: string, webTargetId?: string): Promise<void> {
+  let targetUrl = url;
+  if (webTargetId) {
+    const db = await openDatabase(vaultRoot);
+    try {
+      runMigrations(db);
+      const target = resolveWebTarget(db, webTargetId);
+      if (target?.text_fragment) {
+        targetUrl = target.text_fragment;
+      } else if (target?.url) {
+        targetUrl = target.url;
+      }
+    } finally {
+      closeDatabase(db);
+    }
+  }
+
+  if (await openInChrome(targetUrl)) return;
+  await vscode.env.openExternal(vscode.Uri.parse(targetUrl));
+}
+
+function openInChrome(url: string): Promise<boolean> {
+  return new Promise(resolve => {
+    execFile('open', ['-a', 'Google Chrome', url], error => {
+      resolve(!error);
+    });
+  });
 }
 
 async function resolveNoteSelection(

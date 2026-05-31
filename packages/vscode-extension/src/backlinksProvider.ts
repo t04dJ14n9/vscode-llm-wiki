@@ -48,7 +48,7 @@ export class BacklinksProvider implements vscode.TreeDataProvider<vscode.TreeIte
           item.command = {
             command: 'human-learning.openAnchor',
             title: 'Open',
-            arguments: [`hl://note/${b.from_note_path}`],
+            arguments: [b.from_note_path],
           };
           item.iconPath = new vscode.ThemeIcon('arrow-left');
           return item;
@@ -109,12 +109,11 @@ export function formatForwardLinkLabel(link: ForwardLinkLike): string {
 }
 
 function noteTitleFromUri(uri: string): string | undefined {
-  const notePath = uri.match(/^hl:\/\/note\/([^#]+)/)?.[1];
-  if (!notePath) return undefined;
+  const notePath = uri.split('#')[0];
+  if (!notePath?.toLowerCase().endsWith('.md')) return undefined;
 
   try {
-    const decodedPath = decodeURIComponent(notePath);
-    const filename = decodedPath.split('/').filter(Boolean).pop();
+    const filename = decodeURIComponent(notePath).split('/').filter(Boolean).pop();
     return filename?.replace(/\.md$/i, '');
   } catch {
     return undefined;

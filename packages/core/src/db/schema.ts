@@ -1,7 +1,7 @@
 // SQLite schema for Human Learning.
 // Uses sql.js (WASM, zero native deps) — works in VS Code Extension Host + CLI.
 
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 export const MIGRATIONS: Record<number, string[]> = {
   1: [
@@ -167,5 +167,22 @@ export const MIGRATIONS: Record<number, string[]> = {
   2: [
     `ALTER TABLE chunks ADD COLUMN metadata_json TEXT NOT NULL DEFAULT '{}'`,
     `ALTER TABLE chunk_embeddings ADD COLUMN vector_json TEXT NOT NULL DEFAULT '[]'`,
+  ],
+  3: [
+    `CREATE TABLE IF NOT EXISTS web_targets (
+      id TEXT PRIMARY KEY,
+      url TEXT NOT NULL,
+      title TEXT,
+      selected_text TEXT,
+      text_fragment TEXT,
+      css_selector TEXT,
+      xpath TEXT,
+      text_hash TEXT,
+      captured_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      metadata_json TEXT NOT NULL DEFAULT '{}'
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_web_targets_url ON web_targets(url)`,
+    `CREATE INDEX IF NOT EXISTS idx_web_targets_text_hash ON web_targets(text_hash)`,
   ],
 };

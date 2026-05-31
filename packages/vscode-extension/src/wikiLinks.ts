@@ -17,7 +17,7 @@ export function parseWikiLinkTarget(
   if (!notePath || /\.pdf$/i.test(notePath)) return null;
 
   const noteName = notePath.replace(/^notes\//, '').replace(/\.md$/i, '');
-  const uri = `hl://note/${encodePath(notePath)}${heading ? `#${encodeURIComponent(heading.trim())}` : ''}`;
+  const uri = `${notePath}${heading ? `#${heading.trim()}` : ''}`;
   const cleanAlias = alias?.trim();
   const cleanHeading = heading?.trim();
   const sameNoteHeading = rawNoteName.trim().length === 0 && Boolean(cleanHeading);
@@ -41,7 +41,7 @@ export function wikiLinkTargetToUri(
 }
 
 export function notePathToUri(notePath: string): string {
-  return `hl://note/${encodePath(notePath)}`;
+  return notePath;
 }
 
 function notePathFromWikiTarget(
@@ -105,8 +105,4 @@ function splitOnce(input: string, separator: string): [string, string | undefine
   const index = input.indexOf(separator);
   if (index < 0) return [input, undefined];
   return [input.slice(0, index), input.slice(index + separator.length)];
-}
-
-function encodePath(path: string): string {
-  return path.split('/').map(segment => encodeURIComponent(segment)).join('/');
 }

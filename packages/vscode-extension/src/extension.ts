@@ -38,7 +38,7 @@ export function activate(context: vscode.ExtensionContext) {
 
   console.log(`[Human Learning] Vault detected at ${vaultRoot}`);
 
-  // Register link provider for hl:// links
+  // Register link provider for native markdown/Obsidian links
   registerLinkProvider(context);
   registerMarkdownOutlineProvider(context);
   markdownOutlineProvider = registerMarkdownOutlineTreeProvider(context);
@@ -85,26 +85,22 @@ export function activate(context: vscode.ExtensionContext) {
 
     vscode.commands.registerCommand('human-learning.openAnchor', async (uri?: string) => {
       if (!uri) {
-        uri = await vscode.window.showInputBox({ prompt: 'Enter hl:// URI to open' });
+        uri = await vscode.window.showInputBox({ prompt: 'Enter a note, PDF, code, web, or anchor link to open' });
       }
       if (uri) await dispatchUri(vaultRoot, uri);
     }),
 
     vscode.commands.registerCommand('human-learning.openLinkTarget', async (uri?: string) => {
       if (!uri) return;
-      if (uri.startsWith('hl://')) {
-        await dispatchUri(vaultRoot, uri);
-        return;
-      }
-      await vscode.env.openExternal(vscode.Uri.parse(uri));
+      await dispatchUri(vaultRoot, uri);
     }),
 
-    vscode.commands.registerCommand('human-learning.openPdfAtAnchor', async (args?: { pdfPath?: string; anchorId?: string; page?: number }) => {
+    vscode.commands.registerCommand('human-learning.openPdfAtAnchor', async (args?: { pdfPath?: string; anchorId?: string; chunkId?: string; page?: number }) => {
       if (!args?.pdfPath) {
         vscode.window.showErrorMessage('Missing PDF path');
         return;
       }
-      await pdfEditorProvider.openPdfAtAnchor(args.pdfPath, args.anchorId, args.page);
+      await pdfEditorProvider.openPdfAtAnchor(args.pdfPath, args.anchorId, args.page, args.chunkId);
     }),
 
     vscode.commands.registerCommand('human-learning.openInMarkdownEditor', async () => {

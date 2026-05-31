@@ -15,6 +15,6 @@ FlashAttention is an IO-aware attention algorithm that uses tiling to reduce mem
 
 ## References
 
-The original paper is in [flash-attention.pdf](hl://pdf/raw/pdf/flash-attention.pdf?anchor=anc_pdf_001).
+The original paper is in [flash-attention.pdf](raw/pdf/flash-attention.pdf#page=1&anchor=anc_pdf_001).
 
 See also [[Online Softmax]] for the mathematical foundation.

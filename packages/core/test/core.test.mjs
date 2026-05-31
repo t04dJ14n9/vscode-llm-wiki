@@ -27,6 +27,9 @@ const {
   createPdfAnchorFromSelection,
   resolveAnchor,
   exportSourceContext,
+  classifyReferenceTarget,
+  generateAgentInstructions,
+  upsertWebTarget,
 } = core;
 
 function makeVault() {
@@ -57,7 +60,7 @@ test('ingests markdown links and returns backlinks', async () => {
   );
   writeFileSync(
     join(root, 'notes', 'Concepts', 'FlashAttention.md'),
-    '# FlashAttention\n\nUses [[Online Softmax]] and cites [the paper](hl://pdf/raw/pdf/fa.txt?anchor=anc_missing).\n',
+    '# FlashAttention\n\nUses [[Online Softmax]] and cites [the paper](raw/pdf/fa.txt#page=1&anchor=anc_missing).\n',
   );
 
   await withDb(root, async (db) => {
@@ -72,7 +75,7 @@ test('ingests markdown links and returns backlinks', async () => {
     assert.equal(result.notes, 2);
     assert.equal(result.total_inserted, 2);
 
-    const backlinks = getBacklinks(db, 'hl://note/notes/Concepts/Online%20Softmax.md');
+    const backlinks = getBacklinks(db, 'notes/Concepts/Online Softmax.md');
     assert.equal(backlinks.length, 1);
     assert.equal(backlinks[0].from_note_path, 'notes/Concepts/FlashAttention.md');
 
@@ -162,7 +165,7 @@ test('ingests folder-qualified Obsidian wikilinks without flattening paths', asy
     }
     rebuildAllLinks(db, root);
 
-    const backlinks = getBacklinks(db, 'hl://note/notes/Daily%20Notes/2026-05-25.md');
+    const backlinks = getBacklinks(db, 'notes/Daily Notes/2026-05-25.md');
     assert.equal(backlinks.length, 1);
     assert.equal(backlinks[0].from_note_path, 'notes/Concepts/Source.md');
     assert.equal(checkLinks(db).length, 0);
@@ -194,7 +197,7 @@ test('link rebuild resolves unqualified Obsidian wikilinks by registered note ba
 
     const forward = getForwardLinks(db, 'notes/Daily Notes/2026-05-25.md');
     assert.equal(forward.length, 1);
-    assert.equal(forward[0].to_uri, 'hl://note/notes/Papers/FlashAttention%20Paper.md');
+    assert.equal(forward[0].to_uri, 'notes/Papers/FlashAttention Paper.md');
     assert.equal(forward[0].label, 'FlashAttention Paper');
     assert.equal(checkLinks(db).length, 0);
   });
@@ -216,9 +219,9 @@ test('parses folder-qualified Obsidian wikilinks with basename display labels', 
   assert.deepEqual(
     links.map(link => link.uri),
     [
-      'hl://note/notes/Concepts/FlashAttention.md',
-      'hl://note/notes/Projects/Roadmap.md#Milestones',
-      'hl://note/notes/Daily%20Notes/2026-05-25.md',
+      'notes/Concepts/FlashAttention.md',
+      'notes/Projects/Roadmap.md#Milestones',
+      'notes/Daily Notes/2026-05-25.md',
     ],
   );
 });
@@ -230,7 +233,7 @@ test('parses same-note Obsidian heading wikilinks against the source note path',
   );
 
   assert.equal(links.length, 1);
-  assert.equal(links[0].uri, 'hl://note/notes/Concepts/Source.md#Local%20Section');
+  assert.equal(links[0].uri, 'notes/Concepts/Source.md#Local Section');
   assert.equal(links[0].label, 'local section');
   assert.equal(links[0].kind, 'heading_wikilink');
 });
@@ -272,7 +275,7 @@ test('refreshes deterministic embeddings and supports semantic and hybrid search
     assert.ok(lexical.length >= 1);
     assert.equal(
       sharedMemory?.anchor_uri,
-      'hl://note/notes/Concepts/CUDA%20Shared%20Memory.md',
+      'notes/Concepts/CUDA Shared Memory.md',
     );
     assert.ok(semantic.length >= 1);
     assert.ok(hybrid.length >= 1);
@@ -303,7 +306,7 @@ test('creates a quote-based PDF anchor and exports source context files', async 
     });
     assert.match(anchor.id, /^anc_pdf_/);
     assert.equal(anchor.status, 'resolved');
-    assert.match(anchor.uri, /^hl:\/\/pdf\/raw\/pdf\/fa.txt\?anchor=anc_pdf_/);
+    assert.match(anchor.uri, /^raw\/pdf\/fa.txt#page=\d+&anchor=anc_pdf_/);
 
     const resolved = resolveAnchor(db, anchor.id);
     assert.equal(resolved?.text_quote, 'FlashAttention uses tiling');
@@ -338,7 +341,7 @@ test('creates resolved PDF anchors from trusted webview selections', async () =>
 
     assert.equal(anchor.status, 'resolved');
     assert.equal(anchor.confidence, 1);
-    assert.match(anchor.uri, /^hl:\/\/pdf\/raw\/pdf\/paper.pdf\?anchor=anc_pdf_/);
+    assert.match(anchor.uri, /^raw\/pdf\/paper.pdf#page=3&anchor=anc_pdf_/);
 
     const locator = JSON.parse(anchor.locator_json);
     assert.equal(locator.strategy, 'webview-selection');
@@ -350,4 +353,161 @@ test('creates resolved PDF anchors from trusted webview selections', async () =>
     assert.equal(locator.quote_length, 'Attention is all you need'.length);
     assert.equal(locator.quote_offset, null);
   });
+});
+
+test('parses native markdown reference targets without generating hl URIs', () => {
+  const links = parseMarkdownLinks(
+    [
+      'See [[Online Softmax#Why This Matters]].',
+      '[kernel](raw/code/attention.cu#L42-L57)',
+      '[paper p7](raw/pdf/flash-attention.pdf#page=7)',
+      '[chunk](raw/pdf/flash-attention.pdf#page=7&chunk=chk_pdf_abc123)',
+      '[selection](raw/pdf/flash-attention.pdf#page=7&anchor=anc_pdf_abc123)',
+      '[section](https://example.com/article#results)',
+      '[quote](https://example.com/article#:~:text=selected%20text)',
+      '[DOM block](https://example.com/article#hl-web=web_abc123)',
+    ].join('\n'),
+    'notes/Concepts/Source.md',
+    { notePaths: ['notes/Concepts/Online Softmax.md'] },
+  );
+
+  assert.deepEqual(
+    links.map(link => link.uri),
+    [
+      'notes/Concepts/Online Softmax.md#Why This Matters',
+      'raw/code/attention.cu#L42-L57',
+      'raw/pdf/flash-attention.pdf#page=7',
+      'raw/pdf/flash-attention.pdf#page=7&chunk=chk_pdf_abc123',
+      'raw/pdf/flash-attention.pdf#page=7&anchor=anc_pdf_abc123',
+      'https://example.com/article#results',
+      'https://example.com/article#:~:text=selected%20text',
+      'https://example.com/article#hl-web=web_abc123',
+    ],
+  );
+  assert.ok(links.every(link => !link.uri.startsWith('hl://')));
+
+  assert.deepEqual(classifyReferenceTarget('raw/code/attention.cu#L42-L57'), {
+    kind: 'code',
+    uri: 'raw/code/attention.cu#L42-L57',
+    path: 'raw/code/attention.cu',
+    lines: { start: 42, end: 57 },
+  });
+  assert.deepEqual(classifyReferenceTarget('raw/pdf/flash-attention.pdf#page=7&chunk=chk_pdf_abc123'), {
+    kind: 'pdf',
+    uri: 'raw/pdf/flash-attention.pdf#page=7&chunk=chk_pdf_abc123',
+    path: 'raw/pdf/flash-attention.pdf',
+    page: 7,
+    chunkId: 'chk_pdf_abc123',
+  });
+  assert.deepEqual(classifyReferenceTarget('https://example.com/article#hl-web=web_abc123'), {
+    kind: 'web',
+    uri: 'https://example.com/article#hl-web=web_abc123',
+    url: 'https://example.com/article#hl-web=web_abc123',
+    webTargetId: 'web_abc123',
+  });
+});
+
+test('PDF chunk links validate through chunks without requiring anchors', async () => {
+  const root = makeVault();
+  writeFileSync(join(root, 'raw', 'pdf', 'flash-attention.pdf'), 'PDF bytes');
+  writeFileSync(
+    join(root, 'notes', 'Concepts', 'Chunk Link.md'),
+    '# Chunk Link\n\n[quote](raw/pdf/flash-attention.pdf#page=7&chunk=chk_pdf_test)\n[selection](raw/pdf/flash-attention.pdf#page=7&anchor=anc_missing)\n',
+  );
+
+  await withDb(root, async (db) => {
+    const pdf = registerSource(db, root, 'raw/pdf/flash-attention.pdf', 'pdf');
+    db.prepare(`
+      INSERT INTO chunks (id, source_id, text, title, token_count, content_hash, metadata_json)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      'chk_pdf_test',
+      pdf.id,
+      'FlashAttention avoids materializing attention.',
+      'flash-attention p7',
+      4,
+      'hash',
+      JSON.stringify({ page_start: 7, page_end: 7, source_path: 'raw/pdf/flash-attention.pdf' }),
+    );
+    const note = registerSource(db, root, 'notes/Concepts/Chunk Link.md');
+    ingestFile(db, root, 'notes/Concepts/Chunk Link.md', note.id);
+
+    rebuildAllLinks(db, root);
+
+    const forward = getForwardLinks(db, 'notes/Concepts/Chunk Link.md');
+    assert.equal(forward.length, 2);
+    assert.equal(forward[0].to_uri, 'raw/pdf/flash-attention.pdf#page=7&chunk=chk_pdf_test');
+    assert.equal(forward[0].to_anchor_id, null);
+    assert.equal(forward[1].to_anchor_id, 'anc_missing');
+
+    const issues = checkLinks(db);
+    assert.equal(issues.length, 1);
+    assert.match(issues[0].message, /Target anchor not found: anc_missing/);
+  });
+});
+
+test('PDF search results emit chunk links with page locators', async () => {
+  const root = makeVault();
+  writeFileSync(join(root, 'raw', 'pdf', 'paper.pdf'), 'PDF bytes');
+
+  await withDb(root, async (db) => {
+    const pdf = registerSource(db, root, 'raw/pdf/paper.pdf', 'pdf');
+    db.prepare(`
+      INSERT INTO chunks (id, source_id, text, title, token_count, content_hash, metadata_json)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      'chk_pdf_semantic',
+      pdf.id,
+      'FlashAttention tiles attention to reduce memory traffic.',
+      'paper p7',
+      7,
+      'hash-semantic',
+      JSON.stringify({ page_start: 7, page_end: 7, source_path: 'raw/pdf/paper.pdf' }),
+    );
+    refreshEmbeddings(db, { changedOnly: true });
+
+    const result = searchSemantic(db, 'memory traffic', 1)[0];
+    assert.equal(result.anchor_uri, 'raw/pdf/paper.pdf#page=7&chunk=chk_pdf_semantic');
+  });
+});
+
+test('web fallback links validate against durable web target records', async () => {
+  const root = makeVault();
+  writeFileSync(
+    join(root, 'notes', 'Concepts', 'Web Citation.md'),
+    '# Web Citation\n\n[DOM block](https://example.com/article#hl-web=web_test_target)\n',
+  );
+
+  await withDb(root, async (db) => {
+    const note = registerSource(db, root, 'notes/Concepts/Web Citation.md');
+    ingestFile(db, root, 'notes/Concepts/Web Citation.md', note.id);
+    rebuildAllLinks(db, root);
+
+    assert.match(checkLinks(db)[0]?.message ?? '', /Target web selection not found: web_test_target/);
+
+    upsertWebTarget(db, {
+      id: 'web_test_target',
+      url: 'https://example.com/article',
+      title: 'Example Article',
+      selectedText: 'selected DOM text',
+      cssSelector: 'article #results',
+      xpath: '//*[@id="results"]',
+      textFragment: 'https://example.com/article#:~:text=selected%20DOM%20text',
+    });
+
+    assert.equal(checkLinks(db).length, 0);
+  });
+});
+
+test('generated agent instructions prefer qmd and native markdown links', () => {
+  const root = makeVault();
+  generateAgentInstructions(root);
+
+  const agents = readFileSync(join(root, 'AGENTS.md'), 'utf8');
+  const skill = readFileSync(join(root, '.agents', 'skills', 'human-learning', 'SKILL.md'), 'utf8');
+  assert.match(agents, /native Markdown\/Obsidian links/);
+  assert.match(skill, /qmd/);
+  assert.match(skill, /Qwen/);
+  assert.doesNotMatch(agents, /hl:\/\//);
+  assert.doesNotMatch(skill, /hl:\/\//);
 });

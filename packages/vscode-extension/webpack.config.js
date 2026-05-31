@@ -2,6 +2,7 @@ const path = require('path');
 const CopyPlugin = require('copy-webpack-plugin');
 
 const dist = path.resolve(__dirname, 'dist');
+const webviewBundleBudget = 7 * 1024 * 1024;
 
 const tsRule = (configFile = 'tsconfig.json') => ({
   test: /\.ts$/,
@@ -24,6 +25,11 @@ const markdownEditorAliases = {
   '@lezer/highlight$': resolveFromPackage('@codemirror/language', '@lezer/highlight'),
   '@lezer/lr$': resolveFromPackage('@codemirror/language', '@lezer/lr'),
   '@lezer/markdown$': resolveFromPackage('@codemirror/lang-markdown', '@lezer/markdown'),
+};
+
+const webviewPerformance = {
+  maxAssetSize: webviewBundleBudget,
+  maxEntrypointSize: webviewBundleBudget,
 };
 
 module.exports = [
@@ -88,6 +94,7 @@ module.exports = [
         ],
       }),
     ],
+    performance: webviewPerformance,
     devtool: 'source-map',
   },
   {
@@ -110,6 +117,7 @@ module.exports = [
     module: {
       rules: [tsRule()],
     },
+    performance: webviewPerformance,
     devtool: 'source-map',
   },
 ];

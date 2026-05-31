@@ -26,20 +26,20 @@ function loadTsModule(relativePath) {
   return mod.exports;
 }
 
-test('wikilink resolver preserves note names and encodes spaces', () => {
+test('wikilink resolver preserves native note paths with spaces', () => {
   const { notePathToUri, wikiLinkTargetToUri } = loadTsModule('src/wikiLinks.ts');
 
   assert.equal(
     wikiLinkTargetToUri('Online Softmax'),
-    'hl://note/notes/Concepts/Online%20Softmax.md',
+    'notes/Concepts/Online Softmax.md',
   );
   assert.equal(
     wikiLinkTargetToUri('FlashAttention#Algorithm|paper section'),
-    'hl://note/notes/Concepts/FlashAttention.md#Algorithm',
+    'notes/Concepts/FlashAttention.md#Algorithm',
   );
   assert.equal(
     notePathToUri('notes/Concepts/Online Softmax.md'),
-    'hl://note/notes/Concepts/Online%20Softmax.md',
+    'notes/Concepts/Online Softmax.md',
   );
 });
 
@@ -48,11 +48,11 @@ test('wikilink resolver preserves Obsidian folder-qualified note paths', () => {
 
   assert.equal(
     wikiLinkTargetToUri('Daily Notes/2026-05-25|today'),
-    'hl://note/notes/Daily%20Notes/2026-05-25.md',
+    'notes/Daily Notes/2026-05-25.md',
   );
   assert.equal(
     wikiLinkTargetToUri('notes/Projects/Roadmap.md#Milestones'),
-    'hl://note/notes/Projects/Roadmap.md#Milestones',
+    'notes/Projects/Roadmap.md#Milestones',
   );
 });
 
@@ -65,7 +65,7 @@ test('wikilink resolver matches Obsidian basename lookup across vault folders', 
 
   assert.equal(
     wikiLinkTargetToUri('FlashAttention Paper', 'notes/Daily Notes/2026-05-25.md', notePaths),
-    'hl://note/notes/Papers/FlashAttention%20Paper.md',
+    'notes/Papers/FlashAttention Paper.md',
   );
   assert.equal(
     parseWikiLinkTarget('FlashAttention Paper#Algorithm', 'notes/Daily Notes/2026-05-25.md', notePaths)?.label,
@@ -95,7 +95,7 @@ test('wikilink resolver supports same-note heading links like Obsidian', () => {
 
   assert.equal(
     wikiLinkTargetToUri('#Why This Matters|this section', 'notes/Concepts/Online Softmax.md'),
-    'hl://note/notes/Concepts/Online%20Softmax.md#Why%20This%20Matters',
+    'notes/Concepts/Online Softmax.md#Why This Matters',
   );
   assert.equal(
     wikiLinkTargetToUri('#Why This Matters'),

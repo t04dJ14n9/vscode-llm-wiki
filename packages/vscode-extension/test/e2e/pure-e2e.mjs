@@ -41,7 +41,7 @@ function makeVault(name) {
   return root;
 }
 
-// ─── WIKI LINK + HL:// LINK PARSER (mirrors core/src/links/link-parser.ts) ───
+// ─── WIKI LINK + NATIVE MARKDOWN LINK PARSER (mirrors core/src/links/link-parser.ts) ───
 
 function parseWikiLinks(text) {
   const refs = [];
@@ -59,9 +59,9 @@ function parseWikiLinks(text) {
   return refs;
 }
 
-function parseHlLinks(text) {
+function parseMarkdownLinks(text) {
   const refs = [];
-  const regex = /\[([^\]]*)\]\((hl:\/\/[^)]+)\)/g;
+  const regex = /(?<!!)\[([^\]]*)\]\(([^)]+)\)/g;
   let match;
   while ((match = regex.exec(text)) !== null) {
     refs.push({ label: match[1], uri: match[2], raw: match[0] });
@@ -108,7 +108,7 @@ test('E2E: full bidirectional link pipeline', async (t) => {
     '--json',
   ], root);
   assert.equal(anchor1.status, 'ok');
-  assert.match(anchor1.anchor.uri, /^hl:\/\/pdf\/raw\/pdf\/transformer-paper.txt\?anchor=anc_pdf_/);
+  assert.match(anchor1.anchor.uri, /^raw\/pdf\/transformer-paper.txt#page=\d+&anchor=anc_pdf_/);
 
   const anchor2 = runCli([
     'anchor', 'create-pdf',
@@ -166,7 +166,7 @@ test('E2E: full bidirectional link pipeline', async (t) => {
   const linkCheck = runCli(['links', 'check', '--json'], root);
   assert.equal(linkCheck.status, 'clean', `Expected clean links, got: ${JSON.stringify(linkCheck.issues)}`);
 
-  // ── 8. Parse wiki links and hl:// links from markdown ──
+  // ── 8. Parse wiki links and native markdown source links ──
 
   const transformersText = readFileSync(
     join(root, 'notes', 'Concepts', 'Transformers.md'), 'utf8',
@@ -175,8 +175,9 @@ test('E2E: full bidirectional link pipeline', async (t) => {
   assert.equal(wikiRefs.length, 1, 'Transformers.md has 1 wiki link');
   assert.equal(wikiRefs[0].noteName, 'Attention Mechanism');
 
-  const hlRefs = parseHlLinks(transformersText);
-  assert.ok(hlRefs.length >= 1, 'Transformers.md has hl:// links');
+  const markdownRefs = parseMarkdownLinks(transformersText);
+  assert.ok(markdownRefs.length >= 1, 'Transformers.md has native markdown links');
+  assert.ok(markdownRefs.every(link => !link.uri.startsWith('hl://')));
 
   const attentionText = readFileSync(
     join(root, 'notes', 'Concepts', 'Attention Mechanism.md'), 'utf8',
@@ -187,7 +188,7 @@ test('E2E: full bidirectional link pipeline', async (t) => {
 
   // ── 9. Verify bidirectional backlinks ──
 
-  const transformersUri = 'hl://note/notes/Concepts/Transformers.md';
+  const transformersUri = 'notes/Concepts/Transformers.md';
   const backlinksToTransformers = runCli(['links', 'backlinks', transformersUri, '--json'], root);
   assert.equal(backlinksToTransformers.count, 1, '1 backlink to Transformers');
   assert.equal(
@@ -196,7 +197,7 @@ test('E2E: full bidirectional link pipeline', async (t) => {
     'Backlink comes from Attention Mechanism',
   );
 
-  const attentionUri = 'hl://note/notes/Concepts/Attention%20Mechanism.md';
+  const attentionUri = 'notes/Concepts/Attention Mechanism.md';
   const backlinksToAttention = runCli(['links', 'backlinks', attentionUri, '--json'], root);
   assert.equal(backlinksToAttention.count, 1, '1 backlink to Attention Mechanism');
   assert.equal(
@@ -244,14 +245,15 @@ test('E2E: full bidirectional link pipeline', async (t) => {
   ], root);
   assert.equal(context.status, 'ok');
   assert.ok(context.context.markdown.includes('Transformers'));
-  assert.ok(context.context.markdown.includes('hl://'));
+  assert.ok(context.context.markdown.includes('notes/Concepts/Transformers.md'));
   assert.ok(existsSync(join(root, '.hl', 'agent', 'context.md')));
   assert.ok(existsSync(join(root, '.hl', 'agent', 'context.json')));
 
   // ── 12. Verify context file has link references ──
 
   const contextMd = readFileSync(join(root, '.hl', 'agent', 'context.md'), 'utf8');
-  assert.ok(contextMd.includes('hl://'), 'Agent context includes hl:// links');
+  assert.ok(!contextMd.includes('hl://'), 'Agent context does not emit hl:// links');
+  assert.ok(contextMd.includes('notes/Concepts/Transformers.md'), 'Agent context includes native links');
 });
 
 test('E2E: PDF anchor → markdown link → anchor resolution round-trip', async () => {
@@ -281,11 +283,11 @@ test('E2E: PDF anchor → markdown link → anchor resolution round-trip', async
 
   // Verify the anchor URI follows the expected format
   const uri = anchor.anchor.uri;
-  assert.match(uri, /^hl:\/\/pdf\/raw\/pdf\/paper.txt\?anchor=anc_pdf_/);
+  assert.match(uri, /^raw\/pdf\/paper.txt#page=\d+&anchor=anc_pdf_/);
 
   // This URI can be embedded in markdown as [label](uri)
   const markdownLink = `[see paper](${uri})`;
-  assert.match(markdownLink, /\[see paper\]\(hl:\/\/pdf\/raw\/pdf\/paper.txt\?anchor=anc_pdf_/);
+  assert.match(markdownLink, /\[see paper\]\(raw\/pdf\/paper.txt#page=\d+&anchor=anc_pdf_/);
 
   // Resolve anchor from URI
   const resolved = runCli(['anchor', 'resolve', uri, '--json'], root);

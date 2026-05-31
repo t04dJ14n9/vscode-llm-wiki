@@ -1,11 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { join, resolve } from 'node:path';
 
 const extensionRoot = resolve(import.meta.dirname, '..');
 const dist = join(extensionRoot, 'dist');
 const manifest = JSON.parse(readFileSync(join(extensionRoot, 'package.json'), 'utf8'));
+const require = createRequire(import.meta.url);
 
 test('build emits all VS Code extension and webview runtime artifacts', () => {
   for (const file of ['extension.js', 'markdown-editor.js', 'pdf-viewer.js', 'pdfium.wasm', 'sql-wasm.wasm']) {
@@ -35,6 +37,18 @@ test('webview bundles do not depend on webpack automatic publicPath detection', 
       false,
       `${file} still uses webpack automatic publicPath detection`,
     );
+  }
+});
+
+test('webview webpack entries use VS Code webview size budgets', () => {
+  const configs = require('../webpack.config.js');
+  const byName = new Map(configs.map(config => [config.name, config]));
+
+  for (const name of ['pdf-viewer', 'markdown-editor']) {
+    const performance = byName.get(name)?.performance;
+    assert.ok(performance, `${name} should define an explicit performance budget`);
+    assert.equal(performance.maxAssetSize, 7 * 1024 * 1024);
+    assert.equal(performance.maxEntrypointSize, 7 * 1024 * 1024);
   }
 });
 

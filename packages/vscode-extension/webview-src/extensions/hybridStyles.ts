@@ -407,13 +407,18 @@ export function hybridStyles() {
       color: 'var(--vscode-editor-foreground)',
     },
     '.cm-hybrid-mermaid-block-inner': {
-      display: 'flex',
-      justifyContent: 'center',
-      overflowX: 'auto',
-      padding: '0',
+      display: 'block',
+      boxSizing: 'border-box',
+      maxWidth: '100%',
+      maxHeight: 'min(70vh, 720px)',
+      overflow: 'auto',
+      padding: '0.35em 0',
+      textAlign: 'center',
+      scrollbarGutter: 'stable both-edges',
     },
     '.cm-hybrid-mermaid-block svg': {
-      maxWidth: '100%',
+      display: 'inline-block',
+      maxWidth: 'none',
       height: 'auto',
     },
     '.cm-hybrid-mermaid-error': {

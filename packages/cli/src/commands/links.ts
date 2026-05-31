@@ -58,8 +58,8 @@ export function linksCommand(): Command {
     });
 
   cmd.command('backlinks')
-    .description('Show backlinks to a URI')
-    .argument('<uri>', 'Target hl:// URI')
+    .description('Show backlinks to a native note/PDF/code/web target')
+    .argument('<uri>', 'Target URI, for example notes/Foo.md or raw/pdf/paper.pdf#page=7')
     .option('--json', 'Output JSON')
     .action(async (uri: string, options: { json?: boolean }) => {
       const vaultRoot = detectVaultRoot(process.cwd());

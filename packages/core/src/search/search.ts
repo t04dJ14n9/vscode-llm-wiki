@@ -1,5 +1,6 @@
 import { Database } from '../db/connection';
 import { cosineSimilarity, embedText, LOCAL_EMBEDDING_MODEL } from '../embeddings/local';
+import { codeHref, pdfHref } from '../links/reference-target';
 
 export interface SearchResult {
   chunk_id: string;
@@ -35,6 +36,7 @@ export function searchLexical(
       c.text,
       s.path as source_path,
       s.kind as source_kind,
+      c.metadata_json,
       COUNT(si.token) as matched_tokens,
       c.token_count
     FROM search_index si
@@ -47,6 +49,7 @@ export function searchLexical(
   `).all(...tokens, limit) as Array<{
     chunk_id: string; title: string; text: string;
     source_path: string; source_kind: string;
+    metadata_json?: string;
     matched_tokens: number; token_count: number;
   }>;
 
@@ -57,7 +60,7 @@ export function searchLexical(
     source_path: r.source_path,
     source_kind: r.source_kind,
     rank: -r.matched_tokens,
-    anchor_uri: uriForSource(r.source_kind, r.source_path),
+    anchor_uri: hrefForChunk(r.source_kind, r.source_path, r.chunk_id, r.metadata_json),
   }));
 }
 
@@ -75,6 +78,7 @@ export function searchSemantic(
       c.text,
       s.path as source_path,
       s.kind as source_kind,
+      c.metadata_json,
       e.vector_json
     FROM chunk_embeddings e
     JOIN chunks c ON e.chunk_id = c.id
@@ -86,6 +90,7 @@ export function searchSemantic(
     text: string;
     source_path: string;
     source_kind: string;
+    metadata_json?: string;
     vector_json: string;
   }>;
 
@@ -100,7 +105,7 @@ export function searchSemantic(
         source_path: row.source_path,
         source_kind: row.source_kind,
         rank: score,
-        anchor_uri: uriForSource(row.source_kind, row.source_path),
+        anchor_uri: hrefForChunk(row.source_kind, row.source_path, row.chunk_id, row.metadata_json),
       };
     })
     .filter(result => result.rank > 0)
@@ -160,6 +165,7 @@ export function searchNotes(
       c.text,
       s.path as source_path,
       s.kind as source_kind,
+      c.metadata_json,
       COUNT(si.token) as matched_tokens
     FROM search_index si
     JOIN chunks c ON si.chunk_id = c.id
@@ -171,6 +177,7 @@ export function searchNotes(
   `).all(...tokens, limit) as Array<{
     chunk_id: string; title: string; text: string;
     source_path: string; source_kind: string;
+    metadata_json?: string;
     matched_tokens: number;
   }>;
 
@@ -181,7 +188,7 @@ export function searchNotes(
     source_path: r.source_path,
     source_kind: r.source_kind,
     rank: -r.matched_tokens,
-    anchor_uri: uriForSource(r.source_kind, r.source_path),
+    anchor_uri: hrefForChunk(r.source_kind, r.source_path, r.chunk_id, r.metadata_json),
   }));
 }
 
@@ -194,11 +201,46 @@ function parseVector(raw: string): number[] {
   }
 }
 
-function uriForSource(sourceKind: string, sourcePath: string): string {
-  const kind = sourceKind === 'markdown' ? 'note' : sourceKind;
-  return `hl://${kind}/${encodePath(sourcePath)}`;
+function hrefForChunk(
+  sourceKind: string,
+  sourcePath: string,
+  chunkId: string,
+  metadataJson: string | undefined,
+): string {
+  const metadata = parseMetadata(metadataJson);
+  if (sourceKind === 'pdf') {
+    return pdfHref(sourcePath, {
+      page: firstNumber(metadata.page_start, metadata.page, metadata.pageStart),
+      chunkId,
+    });
+  }
+  if (sourceKind === 'code') {
+    const start = firstNumber(metadata.line_start, metadata.lineStart);
+    const end = firstNumber(metadata.line_end, metadata.lineEnd) ?? start;
+    return codeHref(sourcePath, start ? { start, end } : undefined);
+  }
+  return sourcePath;
 }
 
-function encodePath(path: string): string {
-  return path.split('/').map(segment => encodeURIComponent(segment)).join('/');
+function parseMetadata(raw: string | undefined): Record<string, unknown> {
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+function firstNumber(...values: unknown[]): number | undefined {
+  for (const value of values) {
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+    if (typeof value === 'string' && value.trim()) {
+      const parsed = Number(value);
+      if (Number.isFinite(parsed)) return parsed;
+    }
+  }
+  return undefined;
 }

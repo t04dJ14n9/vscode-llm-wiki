@@ -592,9 +592,10 @@ test('activation registers a Vim mode toggle command for the markdown custom edi
   assert.deepEqual(informationMessages.at(-1), 'Human Learning Vim mode enabled');
 });
 
-test('activation routes external markdown link targets through vscode.env.openExternal', async () => {
+test('activation routes markdown link targets through the Human Learning dispatcher', async () => {
   const executeCommandCalls = [];
   const openExternalCalls = [];
+  const dispatched = [];
   const vscode = createVscodeMock({
     executeCommandCalls,
     openExternalCalls,
@@ -627,7 +628,7 @@ test('activation routes external markdown link targets through vscode.env.openEx
       },
       addSelectionToContext: async () => undefined,
     },
-    './uriDispatcher': { dispatchUri: () => undefined },
+    './uriDispatcher': { dispatchUri: (...args) => dispatched.push(args) },
     './pdfEditorProvider': {
       PdfEditorProvider: class {
         static viewType = 'human-learning.pdfViewer';
@@ -656,8 +657,8 @@ test('activation routes external markdown link targets through vscode.env.openEx
   assert.ok(vscode.__registeredCommands['human-learning.openLinkTarget']);
   await vscode.__registeredCommands['human-learning.openLinkTarget']('https://example.com/docs');
 
-  assert.equal(openExternalCalls.length, 1);
-  assert.equal(openExternalCalls[0][0].toString(), 'https://example.com/docs');
+  assert.equal(openExternalCalls.length, 0);
+  assert.deepEqual(dispatched, [['/vault', 'https://example.com/docs']]);
 });
 
 test('activation refreshes Human Learning side panes when the active custom editor tab changes', async () => {

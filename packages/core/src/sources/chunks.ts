@@ -4,6 +4,14 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import { extractPdfFullText } from './pdf-extract';
 
+interface RawChunk {
+  title: string;
+  text: string;
+  lineStart: number;
+  lineEnd: number;
+  metadata?: Record<string, unknown>;
+}
+
 export interface ChunkRecord {
   id: string;
   source_id: string;
@@ -61,17 +69,43 @@ export function chunkMarkdown(content: string, sourcePath: string): Array<{
   return chunks.length > 0 ? chunks : [{ title: sourcePath, text: content, lineStart: 1, lineEnd: lines.length }];
 }
 
-/** Chunk PDF text by page break markers. Each \f-delimited segment is a page chunk. */
-export function chunkPdfText(content: string, sourcePath: string): Array<{
-  title: string; text: string; lineStart: number; lineEnd: number;
-}> {
+/** Chunk PDF text into layout-ish blocks with durable locator metadata. */
+export function chunkPdfText(content: string, sourcePath: string): RawChunk[] {
   const pages = content.split('\f').filter(s => s.trim());
-  return pages.map((text, i) => ({
-    title: `${sourcePath} p.${i + 1}`,
-    text: text.trim(),
-    lineStart: 1,
-    lineEnd: text.split('\n').length,
-  }));
+  const chunks: RawChunk[] = [];
+
+  pages.forEach((pageText, pageIndex) => {
+    const page = pageIndex + 1;
+    const blocks = splitPdfPageIntoBlocks(pageText);
+    let readingOrder = 0;
+    let pageOffset = 0;
+    for (const block of blocks) {
+      const textOffsetStart = pageText.indexOf(block.text, pageOffset);
+      const textOffsetEnd = textOffsetStart >= 0 ? textOffsetStart + block.text.length : undefined;
+      if (textOffsetEnd !== undefined) pageOffset = textOffsetEnd;
+      chunks.push({
+        title: `${sourcePath} p.${page} ${block.type}`,
+        text: block.text,
+        lineStart: block.lineStart,
+        lineEnd: block.lineEnd,
+        metadata: {
+          source_path: sourcePath,
+          page_start: page,
+          page_end: page,
+          block_type: block.type,
+          reading_order: readingOrder++,
+          text_offset_start: textOffsetStart >= 0 ? textOffsetStart : null,
+          text_offset_end: textOffsetEnd ?? null,
+          bbox_rects: [],
+          section_path: [],
+          source_hash: hashContent(content),
+          chunk_hash: hashContent(block.text),
+        },
+      });
+    }
+  });
+
+  return chunks;
 }
 
 /** Chunk code by logical blocks (functions, classes via simple heuristic) */
@@ -122,7 +156,8 @@ export async function ingestFile(
   const fullPath = relativePath.startsWith('/') ? relativePath : join(vaultPath, relativePath);
   const ext = relativePath.split('.').pop()?.toLowerCase();
 
-  let rawChunks: Array<{ title: string; text: string; lineStart: number; lineEnd: number }>;
+  let rawChunks: RawChunk[];
+  let chunkIdPrefix = 'chk_';
 
   if (ext === 'pdf') {
     // Extract text from PDF and chunk by page
@@ -131,6 +166,7 @@ export async function ingestFile(
       return { chunkCount: 0, newChunks: 0, updatedChunks: 0 };
     }
     rawChunks = chunkPdfText(content, relativePath);
+    chunkIdPrefix = 'chk_pdf_';
   } else if (ext === 'md') {
     const content = readFileSync(fullPath, 'utf-8');
     rawChunks = chunkMarkdown(content, relativePath);
@@ -150,7 +186,7 @@ export async function ingestFile(
   const transaction = db.transaction(() => {
     for (const c of rawChunks) {
       const ch = hashContent(c.text);
-      const chunkId = 'chk_' + ch.substring(0, 12);
+      const chunkId = chunkIdPrefix + ch.substring(0, 12);
 
       const existing = db.prepare(
         'SELECT content_hash FROM chunks WHERE id = ?'
@@ -162,6 +198,7 @@ export async function ingestFile(
             line_start: c.lineStart,
             line_end: c.lineEnd,
             source_path: relativePath,
+            ...(c.metadata ?? {}),
           }));
           updatedCount++;
         }
@@ -170,6 +207,7 @@ export async function ingestFile(
           line_start: c.lineStart,
           line_end: c.lineEnd,
           source_path: relativePath,
+          ...(c.metadata ?? {}),
         }));
         newCount++;
       }
@@ -181,7 +219,7 @@ export async function ingestFile(
   // Rebuild search index (simple token-based, no FTS5 dependency)
   for (const c of rawChunks) {
     const ch = hashContent(c.text);
-    const chunkId = 'chk_' + ch.substring(0, 12);
+    const chunkId = chunkIdPrefix + ch.substring(0, 12);
     // Delete old tokens and re-index
     db.prepare('DELETE FROM search_index WHERE chunk_id = ?').run(chunkId);
     const tokens = tokenize(c.text);
@@ -192,6 +230,60 @@ export async function ingestFile(
   }
 
   return { chunkCount: rawChunks.length, newChunks: newCount, updatedChunks: updatedCount };
+}
+
+function splitPdfPageIntoBlocks(pageText: string): Array<{
+  text: string;
+  lineStart: number;
+  lineEnd: number;
+  type: 'paragraph' | 'heading' | 'caption' | 'table' | 'list' | 'formula';
+}> {
+  const lines = pageText.split('\n');
+  const blocks: Array<{ text: string; lineStart: number; lineEnd: number; type: 'paragraph' | 'heading' | 'caption' | 'table' | 'list' | 'formula' }> = [];
+  let current: string[] = [];
+  let start = 1;
+
+  const flush = (endLine: number) => {
+    const text = current.join('\n').trim();
+    if (!text) {
+      current = [];
+      return;
+    }
+    blocks.push({
+      text,
+      lineStart: start,
+      lineEnd: endLine,
+      type: classifyPdfBlock(text),
+    });
+    current = [];
+  };
+
+  lines.forEach((line, index) => {
+    if (!line.trim()) {
+      flush(index);
+      start = index + 2;
+      return;
+    }
+    if (current.length === 0) start = index + 1;
+    current.push(line);
+  });
+  flush(lines.length);
+
+  if (blocks.length > 0) return blocks;
+  const trimmed = pageText.trim();
+  return trimmed
+    ? [{ text: trimmed, lineStart: 1, lineEnd: lines.length, type: classifyPdfBlock(trimmed) }]
+    : [];
+}
+
+function classifyPdfBlock(text: string): 'paragraph' | 'heading' | 'caption' | 'table' | 'list' | 'formula' {
+  const first = text.split('\n').find(line => line.trim())?.trim() ?? '';
+  if (/^(figure|fig\.|table)\s+\d+/i.test(first)) return 'caption';
+  if (/^[-*•]\s+|^\d+\.\s+/.test(first)) return 'list';
+  if ((text.match(/\|/g)?.length ?? 0) >= 2 || /\t/.test(text)) return 'table';
+  if (/[$=∑∫√≤≥≈]/.test(text) && text.length < 240) return 'formula';
+  if (text.length < 120 && /^[A-Z0-9][A-Za-z0-9 .:-]+$/.test(first) && !/[.!?]$/.test(first)) return 'heading';
+  return 'paragraph';
 }
 
 /** Simple tokenizer — splits on non-word boundaries, lowercases, filters short tokens */

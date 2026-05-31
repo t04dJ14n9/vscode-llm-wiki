@@ -95,8 +95,7 @@ function sourcePathForAnchor(db: Database, sourceId: string): string | null {
 }
 
 function uriForSource(kind: string, sourcePath: string): string {
-  const uriKind = kind === 'markdown' ? 'note' : kind;
-  return `hl://${uriKind}/${encodePath(sourcePath)}`;
+  return sourcePath;
 }
 
 function renderContextMarkdown(input: {
@@ -135,8 +134,4 @@ function renderContextMarkdown(input: {
   }
   lines.push('');
   return lines.join('\n');
-}
-
-function encodePath(path: string): string {
-  return path.split('/').map(segment => encodeURIComponent(segment)).join('/');
 }
