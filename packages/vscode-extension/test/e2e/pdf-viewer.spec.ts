@@ -74,6 +74,49 @@ test('pdf viewer keeps canvas and overlay geometry aligned to exact scaled size'
   expect(Math.abs(geometry.bitmapHeight - Math.round(geometry.cssHeight * geometry.dpr))).toBeLessThanOrEqual(1);
 });
 
+test('pdf viewer can switch from continuous scroll to page-turning mode', async ({ page }) => {
+  await page.goto('http://localhost:8979/pdf-viewer.html?fixture=two-page');
+  await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 2/, { timeout: 10_000 });
+  await expect(page.locator('.page-wrapper')).toHaveCount(2);
+
+  await page.locator('#toggle-continuous').click();
+  await expect(page.locator('#page-container')).toHaveClass(/paginated/);
+
+  const firstVisible = await visiblePageIds(page);
+  expect(firstVisible).toEqual(['page-1']);
+
+  await page.locator('#next').click();
+  await expect(page.locator('#page-info')).toHaveText(/Page 2 \/ 2/);
+  const secondVisible = await visiblePageIds(page);
+  expect(secondVisible).toEqual(['page-2']);
+});
+
+test('pdf viewer can switch to two-page double-column layout', async ({ page }) => {
+  await page.goto('http://localhost:8979/pdf-viewer.html?fixture=two-page');
+  await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 2/, { timeout: 10_000 });
+
+  await page.locator('#toggle-spread').click();
+  await expect(page.locator('#page-container')).toHaveClass(/two-page/);
+
+  const layout = await page.locator('#page-container').evaluate((container: HTMLElement) => {
+    const styles = window.getComputedStyle(container);
+    const wrappers = Array.from(container.querySelectorAll<HTMLElement>('.page-wrapper'));
+    return {
+      display: styles.display,
+      columns: styles.gridTemplateColumns.split(' ').filter(Boolean).length,
+      firstTop: Math.round(wrappers[0].getBoundingClientRect().top),
+      secondTop: Math.round(wrappers[1].getBoundingClientRect().top),
+      firstLeft: Math.round(wrappers[0].getBoundingClientRect().left),
+      secondLeft: Math.round(wrappers[1].getBoundingClientRect().left),
+    };
+  });
+
+  expect(layout.display).toBe('grid');
+  expect(layout.columns).toBe(2);
+  expect(layout.firstTop).toBe(layout.secondTop);
+  expect(layout.secondLeft).toBeGreaterThan(layout.firstLeft);
+});
+
 test('pdf viewer renders reference overlays and opens markdown reference popovers', async ({ page }) => {
   await page.goto('http://localhost:8979/pdf-viewer.html');
   await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 1/, { timeout: 10_000 });
@@ -245,3 +288,11 @@ test('pdf viewer keeps the selectable text layer visually hidden', async ({ page
   expect(styles.spanColor).toBe('rgba(0, 0, 0, 0)');
   expect(styles.spanTextFill).toBe('rgba(0, 0, 0, 0)');
 });
+
+async function visiblePageIds(page) {
+  return page.locator('.page-wrapper').evaluateAll((wrappers: HTMLElement[]) =>
+    wrappers
+      .filter(wrapper => window.getComputedStyle(wrapper).display !== 'none')
+      .map(wrapper => wrapper.id),
+  );
+}

@@ -399,8 +399,11 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
     html, body { height: 100%; margin: 0; padding: 0; background: var(--vscode-editor-background); color: var(--vscode-editor-foreground); overflow: hidden; }
     #toolbar { height: 34px; display: flex; gap: 6px; align-items: center; padding: 0 8px; border-bottom: 1px solid var(--vscode-panel-border); background: var(--vscode-sideBar-background); }
     #toolbar button { height: 24px; border: 1px solid var(--vscode-button-border, transparent); background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); border-radius: 4px; cursor: pointer; }
+    #toolbar button[aria-pressed="true"] { background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
     #viewer-container { height: calc(100% - 35px); overflow: auto; }
     #page-container { display: flex; flex-direction: column; align-items: center; gap: 18px; padding: 18px; }
+    #page-container.two-page { display: grid; grid-template-columns: repeat(2, max-content); align-items: start; justify-content: center; }
+    #page-container.paginated { min-height: calc(100% - 36px); justify-content: center; align-content: center; }
     .page-wrapper { position: relative; background: white; box-shadow: 0 2px 12px rgba(0,0,0,.35); }
     .pdf-canvas, .text-layer, .highlight-layer { position: absolute; left: 0; top: 0; }
     .text-layer {
@@ -446,6 +449,8 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
     <button id="zoom-out">-</button>
     <button id="zoom-in">+</button>
     <button id="fit">Fit</button>
+    <button id="toggle-continuous" aria-pressed="true" title="Switch to page-turning mode">Continuous</button>
+    <button id="toggle-spread" aria-pressed="false" title="Switch to two-page view">One Page</button>
     <span id="page-info"></span>
   </div>
   <div id="viewer-container"><div id="page-container"></div></div>

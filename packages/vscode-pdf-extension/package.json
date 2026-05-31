@@ -59,6 +59,16 @@
         "command": "human-learning.pdfFitWidth",
         "title": "Human Learning: Fit Width",
         "icon": "$(screen-normal)"
+      },
+      {
+        "command": "human-learning.pdfToggleContinuousScroll",
+        "title": "Human Learning: Toggle PDF Continuous Scroll",
+        "icon": "$(list-tree)"
+      },
+      {
+        "command": "human-learning.pdfToggleTwoPageView",
+        "title": "Human Learning: Toggle PDF Two-Page View",
+        "icon": "$(split-horizontal)"
       }
     ],
     "menus": {
@@ -87,6 +97,16 @@
           "command": "human-learning.pdfFitWidth",
           "when": "humanLearningPdfOpen",
           "group": "navigation@5"
+        },
+        {
+          "command": "human-learning.pdfToggleContinuousScroll",
+          "when": "humanLearningPdfOpen",
+          "group": "navigation@6"
+        },
+        {
+          "command": "human-learning.pdfToggleTwoPageView",
+          "when": "humanLearningPdfOpen",
+          "group": "navigation@7"
         }
       ]
     },

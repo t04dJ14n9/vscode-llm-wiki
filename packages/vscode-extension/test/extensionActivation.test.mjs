@@ -592,6 +592,86 @@ test('activation registers a Vim mode toggle command for the markdown custom edi
   assert.deepEqual(informationMessages.at(-1), 'Human Learning Vim mode enabled');
 });
 
+test('activation registers PDF view mode toggle commands', async () => {
+  const pdfMessages = [];
+  const vscode = createVscodeMock({
+    executeCommandCalls: [],
+    activeDocumentUri: undefined,
+  });
+  const mocks = createActivationMocks({ vscode });
+  mocks['./pdfEditorProvider'] = {
+    PdfEditorProvider: class {
+      static viewType = 'human-learning.pdfViewer';
+      constructor() {}
+      getActiveWebview() {
+        return {
+          postMessage: message => {
+            pdfMessages.push(message);
+            return true;
+          },
+        };
+      }
+    },
+  };
+
+  const { activate } = loadTsModule('src/extension.ts', mocks);
+
+  activate({ subscriptions: [] });
+  await vscode.__registeredCommands['human-learning.pdfToggleContinuousScroll']();
+  await vscode.__registeredCommands['human-learning.pdfToggleTwoPageView']();
+
+  assert.deepEqual(pdfMessages, [
+    { type: 'toggleContinuousScroll' },
+    { type: 'toggleTwoPageView' },
+  ]);
+});
+
+test('openPdfMarkdownColumns command opens the active PDF beside an available markdown note', async () => {
+  const executeCommandCalls = [];
+  const pdfUri = { fsPath: '/vault/raw/pdf/ddia.pdf', scheme: 'file' };
+  const markdownUri = { fsPath: '/vault/notes/Concepts/FlashAttention.md', scheme: 'file' };
+  const vscode = createVscodeMock({
+    executeCommandCalls,
+    activeDocumentUri: undefined,
+    visibleTextEditors: [{
+      document: {
+        uri: markdownUri,
+        languageId: 'markdown',
+      },
+    }],
+  });
+  const mocks = createActivationMocks({ vscode });
+  mocks['./pdfEditorProvider'] = {
+    PdfEditorProvider: class {
+      static viewType = 'human-learning.pdfViewer';
+      constructor() {}
+      getActiveWebview() {
+        return { pdfUri };
+      }
+    },
+  };
+
+  const { activate } = loadTsModule('src/extension.ts', mocks);
+
+  activate({ subscriptions: [] });
+  await vscode.__registeredCommands['human-learning.openPdfMarkdownColumns']();
+
+  assert.deepEqual(executeCommandCalls.filter(([command]) => command === 'vscode.openWith'), [
+    [
+      'vscode.openWith',
+      pdfUri,
+      'human-learning.pdfViewer',
+      vscode.ViewColumn.One,
+    ],
+    [
+      'vscode.openWith',
+      markdownUri,
+      'human-learning.markdownEditor',
+      vscode.ViewColumn.Beside,
+    ],
+  ]);
+});
+
 test('activation routes markdown link targets through the Human Learning dispatcher', async () => {
   const executeCommandCalls = [];
   const openExternalCalls = [];
@@ -1056,6 +1136,10 @@ function createVscodeMock({
         openExternalCalls.push(args);
         return true;
       },
+    },
+    ViewColumn: {
+      One: 1,
+      Beside: -2,
     },
     Uri: {
       parse: value => ({ toString: () => value }),

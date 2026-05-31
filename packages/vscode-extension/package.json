@@ -69,6 +69,11 @@
         "title": "Human Learning: Open In Markdown Editor"
       },
       {
+        "command": "human-learning.openWebBrowser",
+        "title": "Human Learning: Open Web Browser",
+        "icon": "$(globe)"
+      },
+      {
         "command": "human-learning.toggleVimMode",
         "title": "Human Learning: Toggle Vim Mode"
       },
@@ -96,6 +101,21 @@
         "command": "human-learning.pdfFitWidth",
         "title": "Human Learning: Fit Width",
         "icon": "$(screen-normal)"
+      },
+      {
+        "command": "human-learning.pdfToggleContinuousScroll",
+        "title": "Human Learning: Toggle PDF Continuous Scroll",
+        "icon": "$(list-tree)"
+      },
+      {
+        "command": "human-learning.pdfToggleTwoPageView",
+        "title": "Human Learning: Toggle PDF Two-Page View",
+        "icon": "$(split-horizontal)"
+      },
+      {
+        "command": "human-learning.openPdfMarkdownColumns",
+        "title": "Human Learning: Open PDF and Markdown Columns",
+        "icon": "$(layout-sidebar-right)"
       }
     ],
     "menus": {
@@ -124,6 +144,21 @@
           "command": "human-learning.pdfFitWidth",
           "when": "humanLearningPdfOpen",
           "group": "navigation@5"
+        },
+        {
+          "command": "human-learning.pdfToggleContinuousScroll",
+          "when": "humanLearningPdfOpen",
+          "group": "navigation@6"
+        },
+        {
+          "command": "human-learning.pdfToggleTwoPageView",
+          "when": "humanLearningPdfOpen",
+          "group": "navigation@7"
+        },
+        {
+          "command": "human-learning.openPdfMarkdownColumns",
+          "when": "humanLearningPdfOpen",
+          "group": "navigation@8"
         }
       ]
     },

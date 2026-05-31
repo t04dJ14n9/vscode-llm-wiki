@@ -49,6 +49,9 @@ class PdfViewer {
   private readonly pages = new Map<number, PageState>();
   private scale = 1.35;
   private currentPage = 1;
+  private continuousScroll = true;
+  private twoPageView = false;
+  private intersectionObserver: IntersectionObserver | null = null;
   private pendingAnchor: PdfAnchor | null = null;
   private highlights: HighlightSpec[] = [];
   private pendingPopoverAnchor: PdfAnchor | null = null;
@@ -77,13 +80,19 @@ class PdfViewer {
           void this.goToAnchor(message.anchor);
           break;
         case 'navigate':
-          this.goToPage(this.currentPage + (message.direction === 'prev' ? -1 : 1));
+          void this.navigate(message.direction === 'prev' ? -1 : 1);
           break;
         case 'zoom':
           this.zoom(Number(message.delta ?? 0));
           break;
         case 'fitWidth':
           this.fitWidth();
+          break;
+        case 'toggleContinuousScroll':
+          void this.toggleContinuousScroll();
+          break;
+        case 'toggleTwoPageView':
+          void this.toggleTwoPageView();
           break;
         case 'setHighlights':
           this.highlights = [
@@ -100,11 +109,14 @@ class PdfViewer {
   }
 
   private setupToolbar(): void {
-    document.getElementById('prev')?.addEventListener('click', () => this.goToPage(this.currentPage - 1));
-    document.getElementById('next')?.addEventListener('click', () => this.goToPage(this.currentPage + 1));
+    document.getElementById('prev')?.addEventListener('click', () => void this.navigate(-1));
+    document.getElementById('next')?.addEventListener('click', () => void this.navigate(1));
     document.getElementById('zoom-in')?.addEventListener('click', () => this.zoom(0.15));
     document.getElementById('zoom-out')?.addEventListener('click', () => this.zoom(-0.15));
     document.getElementById('fit')?.addEventListener('click', () => this.fitWidth());
+    document.getElementById('toggle-continuous')?.addEventListener('click', () => void this.toggleContinuousScroll());
+    document.getElementById('toggle-spread')?.addEventListener('click', () => void this.toggleTwoPageView());
+    this.updateToolbarState();
   }
 
   private async loadPdf(base64Data: string): Promise<void> {
@@ -120,7 +132,7 @@ class PdfViewer {
         .toPromise();
 
       await this.layoutPages();
-      await this.renderPage(1);
+      await this.renderVisiblePages();
       this.updatePageInfo();
       this.loaded = true;
 
@@ -140,6 +152,8 @@ class PdfViewer {
   private async layoutPages(): Promise<void> {
     this.pageContainer.innerHTML = '';
     this.pages.clear();
+    this.intersectionObserver?.disconnect();
+    this.intersectionObserver = null;
     const pageCount = pdfDoc?.pageCount ?? 0;
 
     for (let index = 0; index < pageCount; index++) {
@@ -172,7 +186,9 @@ class PdfViewer {
       this.applyPageLayout(this.pages.get(pageNum)!);
     }
 
-    const observer = new IntersectionObserver(entries => {
+    this.applyViewMode();
+
+    this.intersectionObserver = new IntersectionObserver(entries => {
       for (const entry of entries) {
         if (!entry.isIntersecting) continue;
         const page = Number((entry.target as HTMLElement).id.replace('page-', ''));
@@ -180,7 +196,7 @@ class PdfViewer {
       }
     }, { root: this.container, rootMargin: '300px' });
 
-    for (const page of this.pages.values()) observer.observe(page.wrapper);
+    for (const page of this.pages.values()) this.intersectionObserver.observe(page.wrapper);
   }
 
   private async renderPage(pageNum: number): Promise<void> {
@@ -347,9 +363,10 @@ class PdfViewer {
       this.pendingAnchor = anchor;
       return;
     }
-    await this.renderPage(anchor.page);
-    page.wrapper.scrollIntoView({ behavior: 'smooth', block: 'center' });
     this.currentPage = anchor.page;
+    this.applyViewMode();
+    await this.renderVisiblePages();
+    page.wrapper.scrollIntoView({ behavior: 'smooth', block: 'center' });
     this.updatePageInfo();
     this.flashAnchor(anchor);
   }
@@ -534,10 +551,20 @@ class PdfViewer {
     this.popoverCleanup = null;
   }
 
-  private goToPage(page: number): void {
+  private async navigate(direction: -1 | 1): Promise<void> {
+    const step = !this.continuousScroll && this.twoPageView ? 2 : 1;
+    const origin = !this.continuousScroll && this.twoPageView
+      ? this.spreadStartFor(this.currentPage)
+      : this.currentPage;
+    await this.goToPage(origin + direction * step);
+  }
+
+  private async goToPage(page: number): Promise<void> {
     if (!pdfDoc) return;
     const target = Math.max(1, Math.min(pdfDoc.pageCount, page));
     this.currentPage = target;
+    this.applyViewMode();
+    await this.renderVisiblePages();
     this.pages.get(target)?.wrapper.scrollIntoView({ behavior: 'smooth', block: 'center' });
     this.updatePageInfo();
   }
@@ -550,7 +577,9 @@ class PdfViewer {
   private fitWidth(): void {
     const first = this.pages.get(1);
     if (!first) return;
-    this.scale = Math.max(0.5, (this.container.clientWidth - 48) / first.pageObj.size.width);
+    const pagesPerRow = this.twoPageView ? 2 : 1;
+    const spreadGap = this.twoPageView ? 18 : 0;
+    this.scale = Math.max(0.5, (this.container.clientWidth - 48 - spreadGap) / (first.pageObj.size.width * pagesPerRow));
     void this.rerender();
   }
 
@@ -561,7 +590,8 @@ class PdfViewer {
       page.textLayer.innerHTML = '';
       page.highlightLayer.innerHTML = '';
     }
-    await this.renderPage(this.currentPage);
+    this.applyViewMode();
+    await this.renderVisiblePages();
     this.redrawAllHighlights();
     this.updatePageInfo();
   }
@@ -570,6 +600,69 @@ class PdfViewer {
     const total = pdfDoc?.pageCount ?? 0;
     this.pageInfo.textContent = total ? `Page ${this.currentPage} / ${total}  ${Math.round(this.scale * 100)}%` : '';
     vscode.postMessage({ type: 'pageChanged', page: this.currentPage, totalPages: total });
+  }
+
+  private async toggleContinuousScroll(): Promise<void> {
+    this.continuousScroll = !this.continuousScroll;
+    this.applyViewMode();
+    await this.renderVisiblePages();
+    this.pages.get(this.currentPage)?.wrapper.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    this.updatePageInfo();
+  }
+
+  private async toggleTwoPageView(): Promise<void> {
+    this.twoPageView = !this.twoPageView;
+    this.applyViewMode();
+    await this.renderVisiblePages();
+    this.pages.get(this.currentPage)?.wrapper.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    this.updatePageInfo();
+  }
+
+  private async renderVisiblePages(): Promise<void> {
+    const pagesToRender = this.continuousScroll
+      ? [this.currentPage]
+      : this.visiblePageNumbers();
+    for (const pageNum of pagesToRender) {
+      await this.renderPage(pageNum);
+    }
+  }
+
+  private visiblePageNumbers(): number[] {
+    if (!pdfDoc) return [];
+    if (this.continuousScroll) return Array.from(this.pages.keys());
+    if (!this.twoPageView) return [this.currentPage];
+    const start = this.spreadStartFor(this.currentPage);
+    return [start, start + 1].filter(page => page <= pdfDoc.pageCount);
+  }
+
+  private spreadStartFor(page: number): number {
+    return Math.max(1, page % 2 === 0 ? page - 1 : page);
+  }
+
+  private applyViewMode(): void {
+    this.pageContainer.classList.toggle('paginated', !this.continuousScroll);
+    this.pageContainer.classList.toggle('two-page', this.twoPageView);
+    const visible = new Set(this.visiblePageNumbers());
+    for (const page of this.pages.values()) {
+      page.wrapper.style.display = this.continuousScroll || visible.has(page.pageNum) ? '' : 'none';
+    }
+    this.updateToolbarState();
+  }
+
+  private updateToolbarState(): void {
+    const continuousButton = document.getElementById('toggle-continuous') as HTMLButtonElement | null;
+    if (continuousButton) {
+      continuousButton.setAttribute('aria-pressed', String(this.continuousScroll));
+      continuousButton.textContent = this.continuousScroll ? 'Continuous' : 'Paged';
+      continuousButton.title = this.continuousScroll ? 'Switch to page-turning mode' : 'Switch to continuous scroll';
+    }
+
+    const spreadButton = document.getElementById('toggle-spread') as HTMLButtonElement | null;
+    if (spreadButton) {
+      spreadButton.setAttribute('aria-pressed', String(this.twoPageView));
+      spreadButton.textContent = this.twoPageView ? 'Two Page' : 'One Page';
+      spreadButton.title = this.twoPageView ? 'Switch to one-page view' : 'Switch to two-page view';
+    }
   }
 
   private applyPageLayout(state: PageState, rawDpr = window.devicePixelRatio || 1): PdfPageLayout {

@@ -19,6 +19,7 @@ import { PdfEditorProvider } from './pdfEditorProvider';
 import { MarkdownEditorProvider } from './markdownEditorProvider';
 import { notePathToUri } from './wikiLinks';
 import { MarkdownOutlineTreeProvider, registerMarkdownOutlineProvider, registerMarkdownOutlineTreeProvider } from './markdownSymbols';
+import { WebBrowserProvider } from './webBrowserProvider';
 
 let backlinksProvider: BacklinksProvider;
 let forwardLinksProvider: BacklinksProvider;
@@ -27,6 +28,7 @@ let problemsProvider: BacklinksProvider;
 let pdfEditorProvider: PdfEditorProvider;
 let markdownEditorProvider: MarkdownEditorProvider;
 let markdownOutlineProvider: MarkdownOutlineTreeProvider;
+let webBrowserProvider: WebBrowserProvider;
 
 export function activate(context: vscode.ExtensionContext) {
   const vaultRoot = detectVaultRoot(vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd());
@@ -45,6 +47,7 @@ export function activate(context: vscode.ExtensionContext) {
 
   markdownEditorProvider = new MarkdownEditorProvider(context);
   pdfEditorProvider = new PdfEditorProvider(context, vaultRoot, markdownEditorProvider);
+  webBrowserProvider = new WebBrowserProvider(context, vaultRoot, markdownEditorProvider);
   context.subscriptions.push(
     vscode.window.registerCustomEditorProvider(PdfEditorProvider.viewType, pdfEditorProvider, {
       webviewOptions: { retainContextWhenHidden: true },
@@ -109,6 +112,15 @@ export function activate(context: vscode.ExtensionContext) {
       await vscode.commands.executeCommand('vscode.openWith', uri, MarkdownEditorProvider.viewType);
     }),
 
+    vscode.commands.registerCommand('human-learning.openWebBrowser', async (uri?: string) => {
+      const url = uri || await vscode.window.showInputBox({
+        prompt: 'Enter a web URL to browse and persist',
+        value: 'https://example.com',
+      });
+      if (!url) return;
+      webBrowserProvider.open(url);
+    }),
+
     vscode.commands.registerCommand('human-learning.toggleVimMode', async () => {
       const enabled = await markdownEditorProvider.toggleVimMode();
       vscode.window.showInformationMessage(`Human Learning Vim mode ${enabled ? 'enabled' : 'disabled'}`);
@@ -143,6 +155,31 @@ export function activate(context: vscode.ExtensionContext) {
 
     vscode.commands.registerCommand('human-learning.pdfFitWidth', () => {
       pdfEditorProvider.getActiveWebview()?.postMessage({ type: 'fitWidth' });
+    }),
+
+    vscode.commands.registerCommand('human-learning.pdfToggleContinuousScroll', () => {
+      pdfEditorProvider.getActiveWebview()?.postMessage({ type: 'toggleContinuousScroll' });
+    }),
+
+    vscode.commands.registerCommand('human-learning.pdfToggleTwoPageView', () => {
+      pdfEditorProvider.getActiveWebview()?.postMessage({ type: 'toggleTwoPageView' });
+    }),
+
+    vscode.commands.registerCommand('human-learning.openPdfMarkdownColumns', async () => {
+      const pdfUri = getActivePdfUri();
+      if (!pdfUri) {
+        vscode.window.showWarningMessage('Open a PDF first to use PDF/markdown columns.');
+        return;
+      }
+
+      const markdownUri = getActiveMarkdownUri();
+      if (!markdownUri) {
+        vscode.window.showWarningMessage('Open a markdown note before using PDF/markdown columns.');
+        return;
+      }
+
+      await vscode.commands.executeCommand('vscode.openWith', pdfUri, PdfEditorProvider.viewType, vscode.ViewColumn.One);
+      await vscode.commands.executeCommand('vscode.openWith', markdownUri, MarkdownEditorProvider.viewType, vscode.ViewColumn.Beside);
     }),
 
     vscode.commands.registerCommand('human-learning.ingestCurrentFile', async () => {
@@ -241,11 +278,50 @@ function getActiveMarkdownUri(): vscode.Uri | undefined {
 
   const tabInput = vscode.window.tabGroups.activeTabGroup.activeTab?.input as { uri?: vscode.Uri } | undefined;
   if (tabInput?.uri && isMarkdownUri(tabInput.uri)) return tabInput.uri;
+
+  const visibleEditor = vscode.window.visibleTextEditors.find(editor => isMarkdownUri(editor.document.uri));
+  if (visibleEditor) return visibleEditor.document.uri;
+
+  for (const tabUri of openTabUris()) {
+    if (isMarkdownUri(tabUri)) return tabUri;
+  }
+
+  const openDocument = (vscode.workspace.textDocuments ?? []).find(document => isMarkdownUri(document.uri));
+  if (openDocument) return openDocument.uri;
+
   return undefined;
 }
 
 function isMarkdownUri(uri: vscode.Uri): boolean {
   return uri.scheme === 'file' && uri.fsPath.toLowerCase().endsWith('.md');
+}
+
+function getActivePdfUri(): vscode.Uri | undefined {
+  const activePdf = pdfEditorProvider.getActiveWebview()?.pdfUri;
+  if (activePdf) return activePdf;
+
+  const activeEditorUri = vscode.window.activeTextEditor?.document.uri;
+  if (activeEditorUri && isPdfUri(activeEditorUri)) return activeEditorUri;
+
+  const tabInput = vscode.window.tabGroups.activeTabGroup.activeTab?.input as { uri?: vscode.Uri } | undefined;
+  if (tabInput?.uri && isPdfUri(tabInput.uri)) return tabInput.uri;
+
+  return undefined;
+}
+
+function isPdfUri(uri: vscode.Uri): boolean {
+  return uri.scheme === 'file' && uri.fsPath.toLowerCase().endsWith('.pdf');
+}
+
+function openTabUris(): vscode.Uri[] {
+  const uris: vscode.Uri[] = [];
+  for (const group of vscode.window.tabGroups.all ?? []) {
+    for (const tab of group.tabs) {
+      const uri = (tab.input as { uri?: vscode.Uri } | undefined)?.uri;
+      if (uri) uris.push(uri);
+    }
+  }
+  return uris;
 }
 
 function monitorStartupCustomEditors(context: vscode.ExtensionContext): void {

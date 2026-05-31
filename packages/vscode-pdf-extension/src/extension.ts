@@ -54,6 +54,12 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand('human-learning.pdfFitWidth', () => {
       pdfEditorProvider.getActiveWebview()?.postMessage({ type: 'fitWidth' });
     }),
+    vscode.commands.registerCommand('human-learning.pdfToggleContinuousScroll', () => {
+      pdfEditorProvider.getActiveWebview()?.postMessage({ type: 'toggleContinuousScroll' });
+    }),
+    vscode.commands.registerCommand('human-learning.pdfToggleTwoPageView', () => {
+      pdfEditorProvider.getActiveWebview()?.postMessage({ type: 'toggleTwoPageView' });
+    }),
   );
 
   vscode.window.showInformationMessage(`Human Learning PDF ready - vault at ${vaultRoot}`);

@@ -35,8 +35,14 @@
     border-radius: 4px;
     cursor: pointer;
   }
+  #toolbar button[aria-pressed="true"] {
+    background: var(--vscode-button-background);
+    color: var(--vscode-button-foreground);
+  }
   #viewer-container { height: calc(100% - 35px); overflow: auto; }
   #page-container { display: flex; flex-direction: column; align-items: center; gap: 18px; padding: 18px; }
+  #page-container.two-page { display: grid; grid-template-columns: repeat(2, max-content); align-items: start; justify-content: center; }
+  #page-container.paginated { min-height: calc(100% - 36px); justify-content: center; align-content: center; }
   .page-wrapper { position: relative; background: white; box-shadow: 0 2px 12px rgba(0,0,0,.35); }
   .pdf-canvas, .text-layer, .highlight-layer { position: absolute; left: 0; top: 0; }
   .text-layer {
@@ -65,6 +71,8 @@
     <button id="zoom-out">-</button>
     <button id="zoom-in">+</button>
     <button id="fit">Fit</button>
+    <button id="toggle-continuous" aria-pressed="true" title="Switch to page-turning mode">Continuous</button>
+    <button id="toggle-spread" aria-pressed="false" title="Switch to two-page view">One Page</button>
     <span id="page-info"></span>
   </div>
   <div id="viewer-container"><div id="page-container"></div></div>
@@ -77,7 +85,8 @@
         window.__mockMessages.push(message);
         if (message.type !== 'ready') return;
 
-        const response = await fetch('/fixtures/flash-attention.pdf');
+        const fixture = new URLSearchParams(window.location.search).get('fixture') || 'flash-attention';
+        const response = await fetch(`/fixtures/${fixture}.pdf`);
         if (!response.ok) throw new Error(`Failed to load fixture PDF: ${response.status}`);
         const bytes = new Uint8Array(await response.arrayBuffer());
         let binary = '';
