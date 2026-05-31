@@ -1,5 +1,10 @@
 Below is the updated implementation plan and design philosophy for the **PDF viewer** and **markdown system** in Human Learning.
 
+> Current status: this document predates the native reference-model update in a
+> few examples. The current generated link format is native Markdown/Obsidian,
+> not `hl://`. See [reference model.md](reference%20model.md) and
+> [implementation detail.md](implementation%20detail.md) for current behavior.
+
 The core direction is:
 
 ```text

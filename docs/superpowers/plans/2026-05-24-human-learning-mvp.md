@@ -1,5 +1,9 @@
 # Human Learning MVP Implementation Plan
 
+> Historical note: this plan was written before the native reference-model
+> change. The current implementation uses Obsidian/native markdown-compatible
+> links instead of generated `hl://` links.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build a working Human Learning MVP with CLI, PDFium PDF editor, CodeMirror 6 markdown editor, embeddings, anchors, and bidirectional links.

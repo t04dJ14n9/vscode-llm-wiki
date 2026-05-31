@@ -1,5 +1,10 @@
 # Human Learning — Implementation Timeline
 
+> Current status: this is a historical roadmap. It still mentions planned
+> `hl://` work because that was the earlier design. The implemented MVP now uses
+> native Markdown/Obsidian-compatible links. See
+> [reference model.md](reference%20model.md) for current link formats.
+
 ## Assumptions
 
 - **Solo developer** working full-time (~40h/week)

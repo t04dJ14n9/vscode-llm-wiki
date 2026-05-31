@@ -6,6 +6,28 @@
 
 Obsidian and Zotero are excellent at parts of this workflow, but modern technical study increasingly crosses papers, code, web docs, and agent-generated context. **Human Learning** uses VS Code as the host because it already contains code navigation, Git, terminals, extensions, and Claude Code / Codex-style agents. Its goal is not just to help LLMs get work done, but to help humans learn with machines: trace claims to sources, connect concepts across media, preserve study history, and turn raw material into durable understanding.
 
+## Current Implementation Update
+
+The MVP reference model now uses native Markdown and Obsidian-compatible links
+as the user-facing persisted format. Human Learning does not generate `hl://`
+links for notes, code, PDFs, or web targets. Current examples are:
+
+```md
+[[Online Softmax#Why This Matters]]
+[kernel](raw/code/attention.cu#L42-L57)
+[paper p7](raw/pdf/flash-attention.pdf#page=7)
+[quote](raw/pdf/flash-attention.pdf#page=7&chunk=chk_pdf_abc123)
+[selection](raw/pdf/flash-attention.pdf#page=7&anchor=anc_pdf_abc123)
+[quote](https://example.com/article#:~:text=selected%20text)
+[DOM block](https://example.com/article#hl-web=web_abc123)
+```
+
+PDF chunks and PDF anchors coexist: chunks are retrieval units returned by
+search, while anchors are sparse durable records for arbitrary selections.
+Chrome is the default web-open target, with VS Code's external URL opener as the
+current fallback. See [reference model.md](reference%20model.md) for the current
+authoritative link and locator model.
+
 ---
 
 ## 1. Introduction
@@ -95,7 +117,7 @@ Human Learning addresses these problems by making sources, anchors, links, notes
    The markdown editor should support source mode, reading mode, and hybrid live preview where the active line remains raw markdown and inactive lines render visually.
 
 5. **Portable markdown**
-   Notes should remain useful outside Human Learning. Canonical persisted links should prefer standard Markdown links such as `[label](hl://...)` or `[label](../raw/file.pdf)` with sidecar anchor metadata, while Obsidian-style `[[...]]` syntax can be supported as authoring sugar.
+   Notes should remain useful outside Human Learning. Canonical persisted links should prefer Obsidian wikilinks, relative markdown links to vault files, normal web URLs, and native URL fragments. `hl://` is not generated for MVP note content.
 
 6. **Local-first and open-source**
    Raw sources and notes remain local files by default. Indexes, embeddings, activity logs, and metadata are inspectable and rebuildable.
@@ -253,13 +275,13 @@ Cmd-click / Ctrl-click link navigation
 Canonical persisted links should be valid markdown links:
 
 ```md
-[FlashAttention tiling explanation](hl://pdf/raw/pdf/flash-attention.pdf?page=3&rect=120,240,530,310)
+[FlashAttention tiling explanation](raw/pdf/flash-attention.pdf#page=3&chunk=chk_pdf_abc123)
 
-[CUDA kernel](hl://code/src/attention/kernel.cu?lines=80-145)
+[CUDA kernel](raw/code/attention.cu#L80-L145)
 
-[Triton docs paragraph](hl://web/raw/web/triton.html?selector=main%20article%20p%3Anth-of-type%2812%29)
+[Triton docs paragraph](https://triton-lang.org/main/getting-started/tutorials/06-fused-attention.html#:~:text=FlashAttention)
 
-[Online Softmax](hl://note/notes/Online%20Softmax.md#online-softmax)
+[[Online Softmax#Why This Matters]]
 ```
 
 Human Learning can still support Obsidian-style authoring syntax:
@@ -362,7 +384,7 @@ Export selected code with related notes and sources
 Example:
 
 ```md
-[FlashAttention CUDA kernel](hl://code/src/attention/kernel.cu?lines=80-145)
+[FlashAttention CUDA kernel](raw/code/attention.cu#L80-L145)
 ```
 
 ### 7.9 Bidirectional Link Graph
@@ -633,7 +655,7 @@ Standard markdown links where possible
 Transparent SQLite index
 Rebuildable embeddings
 Provider-agnostic model APIs
-Documented hl:// URI scheme
+Documented native reference model
 Composable hl CLI
 Optional MCP server
 Minimal lock-in

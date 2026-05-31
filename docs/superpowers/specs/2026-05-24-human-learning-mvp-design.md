@@ -1,5 +1,9 @@
 # Human Learning MVP Design
 
+> Historical note: this spec captured the initial MVP design. The current
+> implementation no longer generates `hl://` links for user-facing notes; see
+> `docs/reference model.md` for the current native reference model.
+
 ## Goal
 
 Ship a local-first MVP that turns this repository into a usable Human Learning vault tool on a local MacBook: a working `hl` CLI, a VS Code PDF viewer backed by PDFium/EmbedPDF, a CodeMirror 6 markdown editor, deterministic local embedding search, and bidirectional links/backlinks over canonical `hl://` links.

@@ -1,5 +1,11 @@
 # Human Learning PRD
 
+> Current status: this PRD is an older planning document. The MVP reference
+> model has moved from generated `hl://` links to native Markdown and
+> Obsidian-compatible links. See [reference model.md](reference%20model.md),
+> [feature list.md](feature%20list.md), and
+> [implementation detail.md](implementation%20detail.md) for current behavior.
+
 ## 1. Introduction
 
 **Human Learning (`hl`)** is an open-source, local-first VS Code workspace for **Karpathy Wiki–style agentic learning**. Users collect raw learning materials—PDF papers, web snapshots, source code, images, text, and handwritten captures—and use AI agents to help transform them into a durable, source-grounded markdown knowledge base.
