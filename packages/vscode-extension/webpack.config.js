@@ -9,6 +9,23 @@ const tsRule = (configFile = 'tsconfig.json') => ({
   use: [{ loader: 'ts-loader', options: { configFile } }],
 });
 
+const resolveFromPackage = (anchorPackage, request = anchorPackage) => (
+  require.resolve(request, {
+    paths: [path.dirname(require.resolve(anchorPackage, { paths: [__dirname] }))],
+  })
+);
+
+const markdownEditorAliases = {
+  '@codemirror/commands$': resolveFromPackage('@codemirror/commands'),
+  '@codemirror/language$': resolveFromPackage('@codemirror/language'),
+  '@codemirror/state$': resolveFromPackage('@codemirror/state'),
+  '@codemirror/view$': resolveFromPackage('@codemirror/view'),
+  '@lezer/common$': resolveFromPackage('@codemirror/language', '@lezer/common'),
+  '@lezer/highlight$': resolveFromPackage('@codemirror/language', '@lezer/highlight'),
+  '@lezer/lr$': resolveFromPackage('@codemirror/language', '@lezer/lr'),
+  '@lezer/markdown$': resolveFromPackage('@codemirror/lang-markdown', '@lezer/markdown'),
+};
+
 module.exports = [
   {
     name: 'extension',
@@ -88,6 +105,7 @@ module.exports = [
     },
     resolve: {
       extensions: ['.ts', '.js'],
+      alias: markdownEditorAliases,
     },
     module: {
       rules: [tsRule()],

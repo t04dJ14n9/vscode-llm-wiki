@@ -2430,6 +2430,36 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
     expect(await page.evaluate(() => window.__cmView.state.doc.toString())).toBe('at');
   });
 
+  test('Vim ex commands save and close through VS Code host messages', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+
+    await page.evaluate(() => {
+      window.postMessage({ type: 'setVimMode', enabled: true }, '*');
+      window.postMessage({ type: 'setText', text: '# Note\n\nBody' }, '*');
+    });
+
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+
+    const expectVimCommandMessages = async (command: string, expectedTypes: string[]) => {
+      await page.evaluate(() => {
+        window.__mockMessages = [];
+      });
+      await page.click('.cm-content');
+      await page.keyboard.press('Escape');
+      await page.keyboard.type(command);
+      await page.keyboard.press('Enter');
+      await expect.poll(() => page.evaluate(() =>
+        window.__mockMessages
+          .map(message => message.type)
+          .filter(type => type === 'save' || type === 'close' || type === 'saveAndClose'),
+      )).toEqual(expectedTypes);
+    };
+
+    await expectVimCommandMessages(':w', ['save']);
+    await expectVimCommandMessages(':q', ['close']);
+    await expectVimCommandMessages(':wq', ['saveAndClose']);
+  });
+
   test('Vim normal mode can move into fenced code blocks and edit code lines', async ({ page }) => {
     await page.goto('http://localhost:8979/test.html');
 
@@ -2473,6 +2503,47 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
       .toBe('value = 1  # edited');
     expect(await page.evaluate(() => window.__mockMessages?.filter(message => message.type === 'error') ?? []))
       .toEqual([]);
+  });
+
+  test('active fenced code opening and closing lines reveal raw fence markers', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+
+    const doc = [
+      'Intro',
+      '',
+      '```python',
+      'value = 1',
+      '```',
+      '',
+      'Outro',
+    ].join('\n');
+
+    await page.evaluate((text) => {
+      window.postMessage({ type: 'setText', text }, '*');
+    }, doc);
+
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+    await expect(page.locator('.cm-hybrid-codeblock')).toBeVisible();
+
+    const visibleFenceLines = () => page.evaluate(() => {
+      return Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+        .map(line => line.textContent ?? '')
+        .filter(text => text.includes('```'));
+    });
+
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      view.dispatch({ selection: { anchor: view.state.doc.line(3).from } });
+    });
+
+    await expect.poll(visibleFenceLines).toEqual(['```python']);
+
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      view.dispatch({ selection: { anchor: view.state.doc.line(5).from } });
+    });
+
+    await expect.poll(visibleFenceLines).toEqual(['```']);
   });
 
   test('Vim normal mode moves into rendered display math instead of skipping it', async ({ page }) => {

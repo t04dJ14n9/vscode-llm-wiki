@@ -1307,7 +1307,7 @@ function buildSpecialBlockDecorations(state: EditorState): DecorationSet {
           }).range(block.from, block.to));
         }
       } else {
-        addCodeBlockDecorations(state, block, decorations);
+        addCodeBlockDecorations(state, block, decorations, active);
         addCodeSyntaxDecorations(state, block, decorations);
       }
     } else {

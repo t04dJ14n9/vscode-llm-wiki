@@ -218,6 +218,15 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
           clearAutoSave();
           await document.save();
           break;
+        case 'close':
+          clearAutoSave();
+          webviewPanel.dispose();
+          break;
+        case 'saveAndClose':
+          clearAutoSave();
+          await document.save();
+          webviewPanel.dispose();
+          break;
         case 'openUri':
           if (typeof message.uri === 'string') {
             await vscode.commands.executeCommand('human-learning.openLinkTarget', message.uri);
