@@ -182,20 +182,25 @@ export function addCodeBlockDecorations(
   state: EditorState,
   block: CodeBlockPreview,
   decorations: Range<Decoration>[],
+  activeLines: Set<number> = new Set(),
 ): void {
   const openingLine = state.doc.line(block.startLine);
   const closingLine = state.doc.line(block.endLine);
-  decorations.push(Decoration.replace({
-    widget: new CodeBlockHeaderWidget(block.language ?? '', block.content, block.from, block.to),
-  }).range(openingLine.from, openingLine.to));
+  if (!activeLines.has(block.startLine)) {
+    decorations.push(Decoration.replace({
+      widget: new CodeBlockHeaderWidget(block.language ?? '', block.content, block.from, block.to),
+    }).range(openingLine.from, openingLine.to));
+  }
 
   for (let lineNumber = block.startLine + 1; lineNumber < block.endLine; lineNumber++) {
     decorations.push(codeBlockContentLineDeco.range(state.doc.line(lineNumber).from));
   }
 
-  decorations.push(Decoration.replace({
-    widget: new CodeBlockFooterWidget(),
-  }).range(closingLine.from, closingLine.to));
+  if (!activeLines.has(block.endLine)) {
+    decorations.push(Decoration.replace({
+      widget: new CodeBlockFooterWidget(),
+    }).range(closingLine.from, closingLine.to));
+  }
 }
 
 export function addCodeSyntaxDecorations(

@@ -495,6 +495,48 @@ test('markdown editor provider writes webview copyText messages to the host clip
   ]);
 });
 
+test('markdown editor provider closes the custom editor on webview close messages', async () => {
+  const messages = [];
+  const disposeCalls = [];
+  const vscode = createVscodeMock();
+  const { MarkdownEditorProvider } = loadTsModule('src/markdownEditorProvider.ts', { vscode });
+  const provider = new MarkdownEditorProvider({
+    extensionUri: { scheme: 'file', path: '/extension' },
+    workspaceState: createStorageMock(),
+  });
+  const panel = createPanelMock(messages, { disposeCalls });
+
+  await provider.resolveCustomTextEditor(createDocumentMock(), panel, {});
+  await panel.fireMessage({ type: 'close' });
+
+  assert.equal(disposeCalls.length, 1);
+});
+
+test('markdown editor provider saves before closing on webview saveAndClose messages', async () => {
+  const messages = [];
+  const saveCalls = [];
+  const disposeCalls = [];
+  const vscode = createVscodeMock();
+  const { MarkdownEditorProvider } = loadTsModule('src/markdownEditorProvider.ts', { vscode });
+  const provider = new MarkdownEditorProvider({
+    extensionUri: { scheme: 'file', path: '/extension' },
+    workspaceState: createStorageMock(),
+  });
+  const panel = createPanelMock(messages, { disposeCalls });
+  const document = createDocumentMock({
+    save: async () => {
+      saveCalls.push('save');
+      return true;
+    },
+  });
+
+  await provider.resolveCustomTextEditor(document, panel, {});
+  await panel.fireMessage({ type: 'saveAndClose' });
+
+  assert.deepEqual(saveCalls, ['save']);
+  assert.equal(disposeCalls.length, 1);
+});
+
 test('pdf insert action targets the active custom markdown editor before native editors', async () => {
   const insertedMarkdown = [];
   const clipboardWrites = [];
@@ -727,6 +769,9 @@ function createPanelMock(messages, options = {}) {
     },
     onDidDispose: () => ({ dispose() {} }),
     onDidChangeViewState: () => ({ dispose() {} }),
+    dispose: () => {
+      options.disposeCalls?.push(undefined);
+    },
     fireMessage: message => receiveMessageHandler(message),
   };
 }

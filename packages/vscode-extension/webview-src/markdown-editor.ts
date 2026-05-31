@@ -118,6 +118,7 @@ let vimModeEnabled = false;
 let currentNotePath: string | undefined;
 let knownNotePaths: string[] = [];
 let humanLearningVimMotionsInstalled = false;
+let humanLearningVimExCommandsInstalled = false;
 
 type EditorCommand = (view: EditorView) => boolean;
 type EditorPresentationSettings = Partial<Record<'fontFamily' | 'fontSize' | 'fontWeight' | 'lineHeight' | 'letterSpacing', string>>;
@@ -175,6 +176,7 @@ const obsidianLikeCommands: Record<string, EditorCommand> = {
 };
 
 installHumanLearningVimMotions();
+installHumanLearningVimExCommands();
 
 function installHumanLearningVimMotions(): void {
   if (humanLearningVimMotionsInstalled) return;
@@ -184,6 +186,24 @@ function installHumanLearningVimMotions(): void {
   // source lines, so document-line movement is the behavior we need here.
   Vim.defineMotion('moveByLines', moveByDocumentLines);
   humanLearningVimMotionsInstalled = true;
+}
+
+function installHumanLearningVimExCommands(): void {
+  if (humanLearningVimExCommandsInstalled) return;
+
+  Vim.defineEx('write', 'w', () => {
+    vscode.postMessage({ type: 'save' });
+  });
+  Vim.defineEx('quit', 'q', () => {
+    vscode.postMessage({ type: 'close' });
+  });
+  Vim.defineEx('wq', 'wq', () => {
+    vscode.postMessage({ type: 'saveAndClose' });
+  });
+  Vim.defineEx('x', 'x', () => {
+    vscode.postMessage({ type: 'saveAndClose' });
+  });
+  humanLearningVimExCommandsInstalled = true;
 }
 
 function moveByDocumentLines(
