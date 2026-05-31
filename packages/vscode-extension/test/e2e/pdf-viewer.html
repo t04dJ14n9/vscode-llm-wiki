@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Human Learning PDF Viewer Fixture</title>
+<style>
+  :root {
+    --vscode-editor-background: #1e1e1e;
+    --vscode-editor-foreground: #d4d4d4;
+    --vscode-sideBar-background: #252526;
+    --vscode-panel-border: #3e3e3e;
+    --vscode-button-secondaryBackground: #3a3d41;
+    --vscode-button-secondaryForeground: #cccccc;
+    --vscode-button-background: #007acc;
+    --vscode-button-foreground: #ffffff;
+    --vscode-errorForeground: #f48771;
+  }
+  html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; }
+  body { background: var(--vscode-editor-background); color: var(--vscode-editor-foreground); }
+  #toolbar {
+    height: 34px;
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    padding: 0 8px;
+    border-bottom: 1px solid var(--vscode-panel-border);
+    background: var(--vscode-sideBar-background);
+  }
+  #toolbar button {
+    height: 24px;
+    border: 1px solid transparent;
+    background: var(--vscode-button-secondaryBackground);
+    color: var(--vscode-button-secondaryForeground);
+    border-radius: 4px;
+    cursor: pointer;
+  }
+  #viewer-container { height: calc(100% - 35px); overflow: auto; }
+  #page-container { display: flex; flex-direction: column; align-items: center; gap: 18px; padding: 18px; }
+  .page-wrapper { position: relative; background: white; box-shadow: 0 2px 12px rgba(0,0,0,.35); }
+  .pdf-canvas, .text-layer, .highlight-layer { position: absolute; left: 0; top: 0; }
+  .text-layer {
+    right: 0;
+    bottom: 0;
+    user-select: text;
+    color: transparent;
+    forced-color-adjust: none;
+  }
+  .text-layer span {
+    position: absolute;
+    color: transparent;
+    -webkit-text-fill-color: transparent;
+    white-space: pre;
+    cursor: text;
+    forced-color-adjust: none;
+  }
+  .highlight-layer { right: 0; bottom: 0; pointer-events: none; }
+  .annotation-highlight { pointer-events: auto; }
+</style>
+</head>
+<body>
+  <div id="toolbar">
+    <button id="prev">Prev</button>
+    <button id="next">Next</button>
+    <button id="zoom-out">-</button>
+    <button id="zoom-in">+</button>
+    <button id="fit">Fit</button>
+    <span id="page-info"></span>
+  </div>
+  <div id="viewer-container"><div id="page-container"></div></div>
+
+  <script>
+    window.__mockMessages = [];
+    window.__pdfiumWasmUrl = '/dist/pdfium.wasm';
+    window.acquireVsCodeApi = () => ({
+      postMessage: async (message) => {
+        window.__mockMessages.push(message);
+        if (message.type !== 'ready') return;
+
+        const response = await fetch('/fixtures/flash-attention.pdf');
+        if (!response.ok) throw new Error(`Failed to load fixture PDF: ${response.status}`);
+        const bytes = new Uint8Array(await response.arrayBuffer());
+        let binary = '';
+        for (const byte of bytes) binary += String.fromCharCode(byte);
+        window.postMessage({ type: 'loadPdf', data: btoa(binary) }, '*');
+      },
+      getState: () => ({}),
+      setState: () => {},
+    });
+  </script>
+  <script src="/dist/pdf-viewer.js"></script>
+</body>
+</html>

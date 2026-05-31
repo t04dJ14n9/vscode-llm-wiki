@@ -1,0 +1,322 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import Module from 'node:module';
+import { readFileSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import ts from 'typescript';
+
+const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+
+function loadTsModule(relativePath, mocks = {}) {
+  const filename = join(packageRoot, relativePath);
+  const source = readFileSync(filename, 'utf8');
+  const { outputText } = ts.transpileModule(source, {
+    compilerOptions: {
+      module: ts.ModuleKind.CommonJS,
+      target: ts.ScriptTarget.ES2022,
+      esModuleInterop: true,
+    },
+    fileName: filename,
+  });
+  const mod = new Module(filename);
+  mod.filename = filename;
+  mod.paths = Module._nodeModulePaths(dirname(filename));
+  const originalLoad = Module._load;
+  Module._load = function patchedLoad(request, parent, isMain) {
+    if (Object.prototype.hasOwnProperty.call(mocks, request)) {
+      return mocks[request];
+    }
+    if (request === './markdownHeadingSyntax') {
+      return loadTsModule('src/markdownHeadingSyntax.ts', mocks);
+    }
+    return originalLoad.call(this, request, parent, isMain);
+  };
+  try {
+    mod._compile(outputText, filename);
+    return mod.exports;
+  } finally {
+    Module._load = originalLoad;
+  }
+}
+
+test('markdown outline provider returns nested headings and ignores fenced code headings', () => {
+  const vscode = createVscodeMock();
+  const { MarkdownOutlineProvider } = loadTsModule('src/markdownSymbols.ts', { vscode });
+  const provider = new MarkdownOutlineProvider();
+  const document = {
+    getText: () => [
+      '# Online Softmax',
+      '',
+      '## Standard Softmax',
+      'Body',
+      '```python',
+      '# not an outline heading',
+      '```',
+      '### Numerical Stability',
+      '',
+      '## Online Version',
+    ].join('\n'),
+    lineAt: (line) => ({
+      text: [
+        '# Online Softmax',
+        '',
+        '## Standard Softmax',
+        'Body',
+        '```python',
+        '# not an outline heading',
+        '```',
+        '### Numerical Stability',
+        '',
+        '## Online Version',
+      ][line],
+    }),
+    lineCount: 10,
+  };
+
+  const symbols = provider.provideDocumentSymbols(document);
+
+  assert.equal(symbols.length, 1);
+  assert.equal(symbols[0].name, 'Online Softmax');
+  assert.deepEqual(
+    symbols[0].children.map(child => ({
+      name: child.name,
+      children: child.children.map(grandchild => grandchild.name),
+    })),
+    [
+      { name: 'Standard Softmax', children: ['Numerical Stability'] },
+      { name: 'Online Version', children: [] },
+    ],
+  );
+  assert.equal(symbols[0].range.start.line, 0);
+  assert.equal(symbols[0].range.end.line, 9);
+  assert.equal(symbols[0].children[0].selectionRange.start.character, 3);
+});
+
+test('markdown outline provider includes Setext headings like Obsidian', () => {
+  const vscode = createVscodeMock();
+  const { MarkdownOutlineProvider } = loadTsModule('src/markdownSymbols.ts', { vscode });
+  const provider = new MarkdownOutlineProvider();
+  const lines = [
+    'Online Softmax',
+    '==============',
+    '',
+    'Intro body',
+    '```',
+    'Not a heading',
+    '-------------',
+    '```',
+    '',
+    'Standard Softmax',
+    '----------------',
+    'Body',
+    '### Numerical Stability',
+  ];
+  const document = {
+    getText: () => lines.join('\n'),
+    lineAt: line => ({ text: lines[line] }),
+    lineCount: lines.length,
+  };
+
+  const symbols = provider.provideDocumentSymbols(document);
+
+  assert.equal(symbols.length, 1);
+  assert.equal(symbols[0].name, 'Online Softmax');
+  assert.equal(symbols[0].detail, 'H1');
+  assert.equal(symbols[0].selectionRange.start.line, 0);
+  assert.equal(symbols[0].selectionRange.start.character, 0);
+  assert.equal(symbols[0].selectionRange.end.character, 'Online Softmax'.length);
+  assert.deepEqual(
+    symbols[0].children.map(child => ({
+      name: child.name,
+      detail: child.detail,
+      children: child.children.map(grandchild => grandchild.name),
+    })),
+    [
+      { name: 'Standard Softmax', detail: 'H2', children: ['Numerical Stability'] },
+    ],
+  );
+});
+
+test('registerMarkdownOutlineProvider contributes a markdown document-symbol provider', () => {
+  const registrations = [];
+  const vscode = createVscodeMock({ registrations });
+  const { registerMarkdownOutlineProvider } = loadTsModule('src/markdownSymbols.ts', { vscode });
+  const context = { subscriptions: [] };
+
+  registerMarkdownOutlineProvider(context);
+
+  assert.equal(registrations.length, 1);
+  assert.deepEqual(registrations[0].selector, { language: 'markdown', scheme: 'file' });
+  assert.equal(typeof registrations[0].provider.provideDocumentSymbols, 'function');
+  assert.equal(context.subscriptions.length, 1);
+});
+
+test('markdown outline tree provider reads the active custom markdown tab and reveals headings', async () => {
+  const uri = {
+    scheme: 'file',
+    fsPath: '/vault/notes/Concepts/Online Softmax.md',
+    toString: () => 'file:///vault/notes/Concepts/Online%20Softmax.md',
+  };
+  const revealCommands = [];
+  const vscode = createVscodeMock({
+    activeTabUri: uri,
+    openDocument: {
+      uri,
+      getText: () => '# Online Softmax\n\n## Standard Softmax\n\n## Online Version\n',
+      offsetAt: position => position.line * 100 + position.character,
+    },
+    executeCommandCalls: revealCommands,
+  });
+  const { MarkdownOutlineTreeProvider } = loadTsModule('src/markdownSymbols.ts', { vscode });
+  const provider = new MarkdownOutlineTreeProvider();
+
+  const roots = await provider.getChildren();
+
+  assert.equal(roots.length, 1);
+  assert.equal(roots[0].label, 'Online Softmax');
+  assert.equal(roots[0].description, undefined);
+  assert.equal(roots[0].iconPath.id, 'blank');
+  assert.equal(roots[0].children.length, 2);
+  assert.deepEqual(roots[0].children.map(child => child.label), ['Standard Softmax', 'Online Version']);
+  assert.deepEqual(roots[0].children.map(child => child.description), [undefined, undefined]);
+  assert.deepEqual(roots[0].children.map(child => child.iconPath.id), ['blank', 'blank']);
+
+  await vscode.commands.executeCommand(
+    roots[0].children[1].command.command,
+    ...roots[0].children[1].command.arguments,
+  );
+
+  assert.deepEqual(revealCommands, [
+    [
+      'human-learning.revealInMarkdownEditor',
+      {
+        uri,
+        selection: { from: 403, to: 403 },
+      },
+    ],
+  ]);
+});
+
+test('markdown outline tree provider refreshes when the active custom editor tab changes', () => {
+  const tabChangeListeners = [];
+  const vscode = createVscodeMock({ tabChangeListeners });
+  const { registerMarkdownOutlineTreeProvider } = loadTsModule('src/markdownSymbols.ts', { vscode });
+  const context = { subscriptions: [] };
+  const provider = registerMarkdownOutlineTreeProvider(context);
+  let refreshCount = 0;
+  provider.onDidChangeTreeData(() => {
+    refreshCount += 1;
+  });
+
+  for (const listener of tabChangeListeners) {
+    listener({ changed: [], opened: [], closed: [] });
+  }
+
+  assert.equal(refreshCount, 1);
+});
+
+function createVscodeMock({
+  registrations = [],
+  activeTabUri,
+  openDocument,
+  executeCommandCalls = [],
+  tabChangeListeners = [],
+} = {}) {
+  const textDocumentChangeListeners = [];
+  const activeEditorChangeListeners = [];
+  return {
+    SymbolKind: {
+      String: 15,
+    },
+    ThemeIcon: class ThemeIcon {
+      constructor(id) {
+        this.id = id;
+      }
+    },
+    TreeItem: class TreeItem {
+      constructor(label, collapsibleState) {
+        this.label = label;
+        this.collapsibleState = collapsibleState;
+      }
+    },
+    TreeItemCollapsibleState: {
+      None: 0,
+      Collapsed: 1,
+      Expanded: 2,
+    },
+    EventEmitter: class EventEmitter {
+      constructor() {
+        this.listeners = [];
+        this.event = listener => {
+          this.listeners.push(listener);
+          return { dispose() {} };
+        };
+      }
+      fire(event) {
+        for (const listener of this.listeners) listener(event);
+      }
+    },
+    Position: class Position {
+      constructor(line, character) {
+        this.line = line;
+        this.character = character;
+      }
+    },
+    Range: class Range {
+      constructor(startLine, startCharacter, endLine, endCharacter) {
+        this.start = { line: startLine, character: startCharacter };
+        this.end = { line: endLine, character: endCharacter };
+      }
+    },
+    DocumentSymbol: class DocumentSymbol {
+      constructor(name, detail, kind, range, selectionRange) {
+        this.name = name;
+        this.detail = detail;
+        this.kind = kind;
+        this.range = range;
+        this.selectionRange = selectionRange;
+        this.children = [];
+      }
+    },
+    workspace: {
+      openTextDocument: async uri => {
+        assert.equal(uri, activeTabUri);
+        return openDocument;
+      },
+      onDidChangeTextDocument: listener => {
+        textDocumentChangeListeners.push(listener);
+        return { dispose() {} };
+      },
+    },
+    window: {
+      activeTextEditor: undefined,
+      registerTreeDataProvider: () => ({ dispose() {} }),
+      onDidChangeActiveTextEditor: listener => {
+        activeEditorChangeListeners.push(listener);
+        return { dispose() {} };
+      },
+      tabGroups: {
+        onDidChangeTabs: listener => {
+          tabChangeListeners.push(listener);
+          return { dispose() {} };
+        },
+        activeTabGroup: {
+          activeTab: activeTabUri ? { input: { uri: activeTabUri } } : undefined,
+        },
+      },
+    },
+    commands: {
+      executeCommand: async (...args) => {
+        executeCommandCalls.push(args);
+      },
+    },
+    languages: {
+      registerDocumentSymbolProvider: (selector, provider) => {
+        const disposable = { dispose() {} };
+        registrations.push({ selector, provider });
+        return disposable;
+      },
+    },
+  };
+}
