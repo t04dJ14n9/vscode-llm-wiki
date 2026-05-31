@@ -1,0 +1,219 @@
+{
+  "name": "human-learning-vscode",
+  "displayName": "Human Learning",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Human Learning — a local-first VS Code vault for agentic study",
+  "publisher": "human-learning",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished",
+    "onCustomEditor:human-learning.pdfViewer",
+    "onCustomEditor:human-learning.markdownEditor",
+    "workspaceContains:**/*.md",
+    "workspaceContains:**/*.pdf"
+  ],
+  "main": "dist/extension.js",
+  "contributes": {
+    "customEditors": [
+      {
+        "viewType": "human-learning.pdfViewer",
+        "displayName": "Human Learning PDF Viewer",
+        "selector": [
+          {
+            "filenamePattern": "*.pdf"
+          }
+        ],
+        "priority": "default"
+      },
+      {
+        "viewType": "human-learning.markdownEditor",
+        "displayName": "Human Learning Markdown Editor",
+        "selector": [
+          {
+            "filenamePattern": "*.md"
+          }
+        ],
+        "priority": "default"
+      }
+    ],
+    "commands": [
+      {
+        "command": "human-learning.addSelectionToContext",
+        "title": "Human Learning: Add Selection to Agent Context"
+      },
+      {
+        "command": "human-learning.openAnchor",
+        "title": "Human Learning: Open Anchor"
+      },
+      {
+        "command": "human-learning.ingestCurrentFile",
+        "title": "Human Learning: Ingest Current File"
+      },
+      {
+        "command": "human-learning.refreshLinks",
+        "title": "Human Learning: Refresh Links"
+      },
+      {
+        "command": "human-learning.showBacklinks",
+        "title": "Human Learning: Show Backlinks for Current File"
+      },
+      {
+        "command": "human-learning.openInMarkdownEditor",
+        "title": "Human Learning: Open In Markdown Editor"
+      },
+      {
+        "command": "human-learning.toggleVimMode",
+        "title": "Human Learning: Toggle Vim Mode"
+      },
+      {
+        "command": "human-learning.pdfPrevPage",
+        "title": "Human Learning: Previous PDF Page",
+        "icon": "$(arrow-left)"
+      },
+      {
+        "command": "human-learning.pdfNextPage",
+        "title": "Human Learning: Next PDF Page",
+        "icon": "$(arrow-right)"
+      },
+      {
+        "command": "human-learning.pdfZoomIn",
+        "title": "Human Learning: Zoom In",
+        "icon": "$(zoom-in)"
+      },
+      {
+        "command": "human-learning.pdfZoomOut",
+        "title": "Human Learning: Zoom Out",
+        "icon": "$(zoom-out)"
+      },
+      {
+        "command": "human-learning.pdfFitWidth",
+        "title": "Human Learning: Fit Width",
+        "icon": "$(screen-normal)"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "human-learning.pdfPrevPage",
+          "when": "humanLearningPdfOpen",
+          "group": "navigation@1"
+        },
+        {
+          "command": "human-learning.pdfNextPage",
+          "when": "humanLearningPdfOpen",
+          "group": "navigation@2"
+        },
+        {
+          "command": "human-learning.pdfZoomOut",
+          "when": "humanLearningPdfOpen",
+          "group": "navigation@3"
+        },
+        {
+          "command": "human-learning.pdfZoomIn",
+          "when": "humanLearningPdfOpen",
+          "group": "navigation@4"
+        },
+        {
+          "command": "human-learning.pdfFitWidth",
+          "when": "humanLearningPdfOpen",
+          "group": "navigation@5"
+        }
+      ]
+    },
+    "views": {
+      "human-learning": [
+        {
+          "id": "hl-backlinks",
+          "name": "Backlinks",
+          "type": "tree"
+        },
+        {
+          "id": "hl-forward-links",
+          "name": "Forward Links",
+          "type": "tree"
+        },
+        {
+          "id": "hl-outline",
+          "name": "Outline",
+          "type": "tree"
+        },
+        {
+          "id": "hl-agent-context",
+          "name": "Agent Context",
+          "type": "tree"
+        },
+        {
+          "id": "hl-problems",
+          "name": "Problems",
+          "type": "tree"
+        }
+      ]
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "human-learning",
+          "title": "Human Learning",
+          "icon": "$(book)"
+        }
+      ]
+    },
+    "configurationDefaults": {
+      "workbench.editorAssociations": {
+        "*.pdf": "human-learning.pdfViewer",
+        "*.md": "human-learning.markdownEditor"
+      }
+    }
+  },
+  "scripts": {
+    "build": "rm -rf dist && webpack --mode production",
+    "watch": "webpack --mode development --watch",
+    "clean": "rm -rf dist",
+    "test": "pnpm build && node --test test/*.test.mjs",
+    "test:e2e": "node test/e2e/pure-e2e.mjs",
+    "test:playwright": "playwright test --config ../../playwright.config.ts",
+    "test:vscode-e2e": "playwright test --config test/vscode-e2e/playwright.config.mjs"
+  },
+  "dependencies": {
+    "@codemirror/autocomplete": "^6.20.2",
+    "@codemirror/commands": "^6.10.3",
+    "@codemirror/lang-markdown": "^6.5.0",
+    "@codemirror/language": "^6.12.3",
+    "@codemirror/language-data": "^6.5.2",
+    "@codemirror/lint": "^6.9.6",
+    "@codemirror/search": "^6.7.0",
+    "@codemirror/state": "^6.6.0",
+    "@codemirror/view": "^6.43.0",
+    "@embedpdf/engines": "^2.14.3",
+    "@embedpdf/models": "^2.14.3",
+    "@embedpdf/pdfium": "^2.14.3",
+    "@human-learning/core": "workspace:*",
+    "@lezer/highlight": "^1.2.3",
+    "@mathjax/src": "^4.1.2",
+    "@replit/codemirror-vim": "^6.3.0",
+    "dompurify": "^3.4.7",
+    "mermaid": "11.4.1",
+    "prismjs": "1.29.0",
+    "sql.js": "^1.10.0",
+    "turndown": "^7.2.4",
+    "yaml": "2.7.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/prismjs": "1.26.5",
+    "@types/turndown": "^5.0.6",
+    "@types/vscode": "^1.85.0",
+    "copy-webpack-plugin": "^12.0.0",
+    "ts-loader": "^9.5.0",
+    "typescript": "^5.4.0",
+    "webpack": "^5.90.0",
+    "webpack-cli": "^5.1.0"
+  }
+}

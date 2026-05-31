@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Human Learning — E2E Test Fixture</title>
+<style>
+  :root {
+    --vscode-editor-background: #1e1e1e;
+    --vscode-editor-foreground: #d4d4d4;
+    --vscode-sideBar-background: #252526;
+    --vscode-panel-border: #3e3e3e;
+    --vscode-button-background: #007acc;
+    --vscode-button-foreground: #ffffff;
+    --vscode-button-secondaryBackground: #3a3d41;
+    --vscode-button-secondaryForeground: #cccccc;
+    --vscode-editorWidget-background: #252526;
+    --vscode-textLink-foreground: #3794ff;
+    --vscode-editorGutter-background: #1e1e1e;
+    --vscode-editorGutter-foreground: #858585;
+    --vscode-editorCursor-foreground: #aeafad;
+    --vscode-errorForeground: #f48771;
+    --vscode-editor-font-size: 14px;
+    --vscode-editor-font-family: ui-monospace, Menlo, monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: #1e1e1e; color: #d4d4d4;
+    display: flex; flex-direction: column; height: 100vh;
+  }
+  header {
+    padding: 8px 16px; background: #252526; border-bottom: 1px solid #3e3e3e;
+    display: flex; gap: 8px; align-items: center;
+  }
+  header button {
+    padding: 4px 12px; border: 1px solid #3e3e3e; border-radius: 4px;
+    background: #3a3d41; color: #ccc; cursor: pointer;
+  }
+  header button.active { background: #007acc; color: white; }
+  #app { flex: 1; overflow: hidden; }
+  #editor-panel, #viewer-panel { height: 100%; display: none; }
+  #editor-panel.active, #viewer-panel.active { display: block; }
+  #editor { height: 100%; }
+  #log { padding: 4px 12px; font-size: 11px; color: #888; border-top: 1px solid #3e3e3e; max-height: 100px; overflow-y: auto; }
+</style>
+</head>
+<body>
+
+<header>
+  <button id="tab-editor" class="active">Markdown Editor</button>
+  <span id="status"></span>
+</header>
+
+<div id="app">
+  <div id="editor-panel" class="active">
+    <div id="editor"></div>
+  </div>
+</div>
+
+<div id="log"></div>
+
+<script>
+  const logEl = document.getElementById('log');
+  window.__testLog = [];
+  function log(msg) {
+    window.__testLog.push(msg);
+    const div = document.createElement('div');
+    div.textContent = `[${new Date().toISOString().slice(11, 23)}] ${msg}`;
+    logEl.appendChild(div);
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+
+  // Mock VS Code API
+  window.__mockMessages = [];
+  window.acquireVsCodeApi = () => ({
+    postMessage: (msg) => {
+      window.__mockMessages.push(msg);
+      log(`postMessage: ${JSON.stringify(msg)}`);
+    },
+    getState: () => ({}),
+    setState: () => {},
+  });
+
+  log('Test fixture ready');
+  document.getElementById('status').textContent = 'Mock VS Code API loaded';
+</script>
+
+<script src="/dist/markdown-editor.js"></script>
+
+</body>
+</html>

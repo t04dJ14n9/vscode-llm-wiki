@@ -1,0 +1,30 @@
+{
+  "name": "human-learning",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Human Learning — a local-first VS Code vault for agentic study",
+  "scripts": {
+    "build": "pnpm -r build",
+    "build:core": "pnpm --filter @human-learning/core build",
+    "build:cli": "pnpm --filter @human-learning/cli build",
+    "build:extension": "pnpm --filter human-learning-vscode build",
+    "watch": "pnpm -r watch",
+    "test": "pnpm -r test",
+    "lint": "eslint packages --ext .ts",
+    "clean": "pnpm -r clean"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "pnpm": ">=8.0.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": []
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.60.0",
+    "@types/node": "^20.19.41",
+    "@vscode/test-cli": "^0.0.12",
+    "@vscode/test-electron": "^2.5.2",
+    "playwright": "^1.60.0"
+  }
+}
