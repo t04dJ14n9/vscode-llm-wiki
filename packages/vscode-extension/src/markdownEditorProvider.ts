@@ -303,6 +303,7 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
 
   private getEditorPresentationSettings(): EditorPresentationSettings {
     const config = vscode.workspace.getConfiguration('editor');
+    const fontFamily = normalizeNonEmptyString(config.get<string>('fontFamily'));
     const fontSize = normalizePixelValue(config.get<number>('fontSize'), 14);
     const fontWeight = normalizeFontWeight(config.get<string | number>('fontWeight'));
     const configuredLineHeight = normalizeNumber(config.get<number>('lineHeight'), 0);
@@ -312,6 +313,7 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
     const letterSpacing = normalizeNumber(config.get<number>('letterSpacing'), 0);
 
     return {
+      ...(fontFamily ? { fontFamily } : {}),
       fontSize: `${fontSize}px`,
       ...(fontWeight ? { fontWeight } : {}),
       lineHeight: `${lineHeight}px`,

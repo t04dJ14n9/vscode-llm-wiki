@@ -75,7 +75,7 @@ test('markdown editor provider can insert text into the active custom editor web
   });
 });
 
-test('markdown editor provider posts normalized editor metrics without forcing the code editor font', async () => {
+test('markdown editor provider posts normalized editor typography settings', async () => {
   const messages = [];
   const vscode = createVscodeMock({
     editorConfig: {
@@ -95,6 +95,7 @@ test('markdown editor provider posts normalized editor metrics without forcing t
   assert.deepEqual(messages.find(message => message.type === 'updateSettings'), {
     type: 'updateSettings',
     settings: {
+      fontFamily: 'Fira Code',
       fontSize: '17px',
       fontWeight: '500',
       lineHeight: '29px',
