@@ -5428,6 +5428,85 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
     expect(metrics.labelHeight).toBeGreaterThan(8);
   });
 
+  test('hybrid rendering lets Mermaid diagrams zoom without activating source editing', async ({ page }) => {
+    await page.setViewportSize({ width: 900, height: 700 });
+    await page.goto('http://localhost:8979/test.html');
+
+    const mermaidSource = [
+      '```mermaid',
+      'graph TD',
+      '  A[Markdown note] --> B[Rendered diagram]',
+      '  B --> C[Zoom controls]',
+      '```',
+    ].join('\n');
+    const doc = [
+      '# Mermaid Preview',
+      '',
+      mermaidSource,
+      '',
+      'Tail line',
+    ].join('\n');
+
+    await page.evaluate((text) => {
+      window.postMessage({ type: 'setText', text }, '*');
+    }, doc);
+
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      view.dispatch({ selection: { anchor: view.state.doc.length } });
+    });
+
+    await expect(page.locator('.cm-hybrid-mermaid-block svg')).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByLabel('Zoom in Mermaid diagram')).toBeVisible();
+    await expect(page.getByLabel('Zoom out Mermaid diagram')).toBeVisible();
+
+    const metrics = async () => page.evaluate(() => {
+      const block = document.querySelector<HTMLElement>('.cm-hybrid-mermaid-block');
+      const svg = block?.querySelector<SVGSVGElement>('svg');
+      const label = block?.querySelector<HTMLElement>('.cm-hybrid-mermaid-zoom-level');
+      if (!block || !svg || !label) throw new Error('Missing Mermaid zoom controls');
+      return {
+        svgWidth: svg.getBoundingClientRect().width,
+        zoomLabel: label.textContent?.trim(),
+        blockCount: document.querySelectorAll('.cm-hybrid-mermaid-block').length,
+        sourceFenceLines: Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+          .filter(line => line.textContent?.includes('```mermaid')).length,
+      };
+    });
+
+    const initial = await metrics();
+    expect(initial.zoomLabel).toBe('100%');
+
+    await page.getByLabel('Zoom in Mermaid diagram').click();
+    await expect.poll(metrics).toMatchObject({
+      zoomLabel: '125%',
+      blockCount: 1,
+      sourceFenceLines: 0,
+    });
+    const zoomedIn = await metrics();
+    expect(zoomedIn.svgWidth).toBeGreaterThan(initial.svgWidth * 1.2);
+
+    await page.getByLabel('Zoom out Mermaid diagram').click();
+    await expect.poll(metrics).toMatchObject({
+      zoomLabel: '100%',
+      blockCount: 1,
+      sourceFenceLines: 0,
+    });
+    const zoomedBack = await metrics();
+    expect(zoomedBack.svgWidth).toBeLessThan(zoomedIn.svgWidth);
+    expect(zoomedBack.svgWidth).toBeGreaterThan(initial.svgWidth * 0.95);
+
+    await page.getByLabel('Zoom out Mermaid diagram').click();
+    await expect.poll(metrics).toMatchObject({
+      zoomLabel: '75%',
+      blockCount: 1,
+      sourceFenceLines: 0,
+    });
+    const zoomedOut = await metrics();
+    expect(zoomedOut.svgWidth).toBeLessThan(initial.svgWidth * 0.8);
+  });
+
   test('hybrid rendering displays fenced code language names like Obsidian', async ({ page }) => {
     await page.goto('http://localhost:8979/test.html');
 

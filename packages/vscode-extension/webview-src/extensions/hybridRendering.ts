@@ -58,6 +58,9 @@ mermaid.initialize({
   },
 });
 let mermaidRenderSequence = 0;
+const mermaidZoomMin = 0.5;
+const mermaidZoomMax = 3;
+const mermaidZoomStep = 0.25;
 
 class EmptyWidget extends WidgetType {
   override toDOM(): HTMLElement {
@@ -914,11 +917,14 @@ class MermaidBlockWidget extends WidgetType {
     wrapper.className = 'cm-hybrid-mermaid-block';
     wrapper.dataset.sourceFrom = String(this.blockFrom);
     wrapper.dataset.sourceTo = String(this.blockTo);
+    wrapper.dataset.zoomScale = '1';
+
+    const toolbar = mermaidZoomToolbar(wrapper);
 
     const inner = document.createElement('div');
     inner.className = 'cm-hybrid-mermaid-block-inner';
     inner.textContent = 'Rendering Mermaid diagram...';
-    wrapper.appendChild(inner);
+    wrapper.append(toolbar, inner);
 
     void renderMermaidInto(inner, this.source, `cm-hybrid-mermaid-${++mermaidRenderSequence}`, wrapper);
 
@@ -952,6 +958,50 @@ class MermaidBlockWidget extends WidgetType {
   }
 }
 
+function mermaidZoomToolbar(root: HTMLElement): HTMLElement {
+  const toolbar = document.createElement('div');
+  toolbar.className = 'cm-hybrid-mermaid-toolbar';
+  toolbar.addEventListener('mousedown', stopMermaidToolbarEvent);
+  toolbar.addEventListener('click', stopMermaidToolbarEvent);
+
+  const zoomOut = mermaidZoomButton('-', 'Zoom out Mermaid diagram', root, -mermaidZoomStep);
+  const zoomLevel = document.createElement('span');
+  zoomLevel.className = 'cm-hybrid-mermaid-zoom-level';
+  zoomLevel.setAttribute('aria-label', 'Mermaid diagram zoom level');
+  zoomLevel.textContent = '100%';
+  const zoomIn = mermaidZoomButton('+', 'Zoom in Mermaid diagram', root, mermaidZoomStep);
+
+  toolbar.append(zoomOut, zoomLevel, zoomIn);
+  updateMermaidZoom(root);
+  return toolbar;
+}
+
+function mermaidZoomButton(
+  label: string,
+  ariaLabel: string,
+  root: HTMLElement,
+  delta: number,
+): HTMLButtonElement {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'cm-hybrid-mermaid-zoom-button';
+  button.textContent = label;
+  button.ariaLabel = ariaLabel;
+  button.title = ariaLabel;
+  button.dataset.zoomDelta = String(delta);
+  button.addEventListener('mousedown', stopMermaidToolbarEvent);
+  button.addEventListener('click', event => {
+    stopMermaidToolbarEvent(event);
+    updateMermaidZoom(root, delta);
+  });
+  return button;
+}
+
+function stopMermaidToolbarEvent(event: Event): void {
+  event.preventDefault();
+  event.stopPropagation();
+}
+
 async function renderMermaidInto(
   container: HTMLElement,
   source: string,
@@ -962,7 +1012,7 @@ async function renderMermaidInto(
     const { svg, bindFunctions } = await mermaid.render(id, source);
     if (!root.isConnected) return;
     container.innerHTML = svg;
-    normalizeMermaidSvg(container);
+    normalizeMermaidSvg(container, root);
     bindFunctions?.(container);
   } catch (error) {
     if (!root.isConnected) return;
@@ -974,15 +1024,48 @@ async function renderMermaidInto(
   }
 }
 
-function normalizeMermaidSvg(container: HTMLElement): void {
+function normalizeMermaidSvg(container: HTMLElement, root: HTMLElement): void {
   const svg = container.querySelector<SVGSVGElement>('svg');
   if (!svg) return;
 
   const naturalWidth = readSvgNaturalWidth(svg);
   svg.classList.add('cm-hybrid-mermaid-svg');
+  svg.dataset.naturalWidth = String(Math.ceil(naturalWidth));
   svg.style.maxWidth = 'none';
-  svg.style.width = `${Math.ceil(naturalWidth)}px`;
   svg.style.height = 'auto';
+  updateMermaidZoom(root);
+}
+
+function updateMermaidZoom(root: HTMLElement, delta = 0): void {
+  const nextScale = clampMermaidZoom(readMermaidZoom(root) + delta);
+  root.dataset.zoomScale = nextScale.toFixed(2);
+
+  const label = root.querySelector<HTMLElement>('.cm-hybrid-mermaid-zoom-level');
+  if (label) {
+    label.textContent = `${Math.round(nextScale * 100)}%`;
+  }
+
+  for (const button of Array.from(root.querySelectorAll<HTMLButtonElement>('.cm-hybrid-mermaid-zoom-button'))) {
+    const buttonDelta = Number(button.dataset.zoomDelta ?? 0);
+    button.disabled = (buttonDelta < 0 && nextScale <= mermaidZoomMin)
+      || (buttonDelta > 0 && nextScale >= mermaidZoomMax);
+  }
+
+  const svg = root.querySelector<SVGSVGElement>('.cm-hybrid-mermaid-svg');
+  if (!svg) return;
+
+  const naturalWidth = Number(svg.dataset.naturalWidth) || readSvgNaturalWidth(svg);
+  svg.dataset.naturalWidth = String(Math.ceil(naturalWidth));
+  svg.style.width = `${Math.ceil(naturalWidth * nextScale)}px`;
+}
+
+function readMermaidZoom(root: HTMLElement): number {
+  const scale = Number(root.dataset.zoomScale ?? 1);
+  return Number.isFinite(scale) ? scale : 1;
+}
+
+function clampMermaidZoom(scale: number): number {
+  return Math.max(mermaidZoomMin, Math.min(mermaidZoomMax, scale));
 }
 
 function readSvgNaturalWidth(svg: SVGSVGElement): number {
