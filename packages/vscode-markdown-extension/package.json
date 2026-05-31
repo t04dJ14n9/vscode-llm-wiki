@@ -1,9 +1,8 @@
 {
-  "name": "human-learning-vscode",
-  "displayName": "Human Learning",
+  "name": "human-learning-markdown",
+  "displayName": "Human Learning Markdown",
   "version": "0.1.0",
-  "private": true,
-  "description": "Human Learning — a local-first VS Code vault for agentic study",
+  "description": "Human Learning markdown editor and knowledge graph panels",
   "publisher": "human-learning",
   "license": "MIT",
   "engines": {
@@ -14,24 +13,12 @@
   ],
   "activationEvents": [
     "onStartupFinished",
-    "onCustomEditor:human-learning.pdfViewer",
     "onCustomEditor:human-learning.markdownEditor",
-    "workspaceContains:**/*.md",
-    "workspaceContains:**/*.pdf"
+    "workspaceContains:**/*.md"
   ],
   "main": "dist/extension.js",
   "contributes": {
     "customEditors": [
-      {
-        "viewType": "human-learning.pdfViewer",
-        "displayName": "Human Learning PDF Viewer",
-        "selector": [
-          {
-            "filenamePattern": "*.pdf"
-          }
-        ],
-        "priority": "default"
-      },
       {
         "viewType": "human-learning.markdownEditor",
         "displayName": "Human Learning Markdown Editor",
@@ -71,62 +58,8 @@
       {
         "command": "human-learning.toggleVimMode",
         "title": "Human Learning: Toggle Vim Mode"
-      },
-      {
-        "command": "human-learning.pdfPrevPage",
-        "title": "Human Learning: Previous PDF Page",
-        "icon": "$(arrow-left)"
-      },
-      {
-        "command": "human-learning.pdfNextPage",
-        "title": "Human Learning: Next PDF Page",
-        "icon": "$(arrow-right)"
-      },
-      {
-        "command": "human-learning.pdfZoomIn",
-        "title": "Human Learning: Zoom In",
-        "icon": "$(zoom-in)"
-      },
-      {
-        "command": "human-learning.pdfZoomOut",
-        "title": "Human Learning: Zoom Out",
-        "icon": "$(zoom-out)"
-      },
-      {
-        "command": "human-learning.pdfFitWidth",
-        "title": "Human Learning: Fit Width",
-        "icon": "$(screen-normal)"
       }
     ],
-    "menus": {
-      "editor/title": [
-        {
-          "command": "human-learning.pdfPrevPage",
-          "when": "humanLearningPdfOpen",
-          "group": "navigation@1"
-        },
-        {
-          "command": "human-learning.pdfNextPage",
-          "when": "humanLearningPdfOpen",
-          "group": "navigation@2"
-        },
-        {
-          "command": "human-learning.pdfZoomOut",
-          "when": "humanLearningPdfOpen",
-          "group": "navigation@3"
-        },
-        {
-          "command": "human-learning.pdfZoomIn",
-          "when": "humanLearningPdfOpen",
-          "group": "navigation@4"
-        },
-        {
-          "command": "human-learning.pdfFitWidth",
-          "when": "humanLearningPdfOpen",
-          "group": "navigation@5"
-        }
-      ]
-    },
     "views": {
       "human-learning": [
         {
@@ -167,21 +100,14 @@
     },
     "configurationDefaults": {
       "workbench.editorAssociations": {
-        "*.pdf": "human-learning.pdfViewer",
         "*.md": "human-learning.markdownEditor"
       }
     }
   },
   "scripts": {
     "build": "rm -rf dist && webpack --mode production",
-    "build:split": "pnpm --filter human-learning-markdown build && pnpm --filter human-learning-pdf build && pnpm prepare:split",
-    "prepare:split": "node scripts/prepare-split-packages.mjs",
     "watch": "webpack --mode development --watch",
-    "clean": "rm -rf dist",
-    "test": "pnpm build && pnpm --filter human-learning-markdown build && pnpm --filter human-learning-pdf build && node --test test/*.test.mjs",
-    "test:e2e": "node test/e2e/pure-e2e.mjs",
-    "test:playwright": "playwright test --config ../../playwright.config.ts",
-    "test:vscode-e2e": "playwright test --config test/vscode-e2e/playwright.config.mjs"
+    "clean": "rm -rf dist"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.2",
@@ -193,9 +119,6 @@
     "@codemirror/search": "^6.7.0",
     "@codemirror/state": "^6.6.0",
     "@codemirror/view": "^6.43.0",
-    "@embedpdf/engines": "^2.14.3",
-    "@embedpdf/models": "^2.14.3",
-    "@embedpdf/pdfium": "^2.14.3",
     "@human-learning/core": "workspace:*",
     "@lezer/highlight": "^1.2.3",
     "@mathjax/src": "^4.1.2",
@@ -212,7 +135,6 @@
     "@types/prismjs": "1.26.5",
     "@types/turndown": "^5.0.6",
     "@types/vscode": "^1.85.0",
-    "copy-webpack-plugin": "^12.0.0",
     "ts-loader": "^9.5.0",
     "typescript": "^5.4.0",
     "webpack": "^5.90.0",

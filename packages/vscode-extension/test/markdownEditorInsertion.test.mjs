@@ -318,6 +318,71 @@ test('markdown editor provider autosaves webview edits like Obsidian live editin
   assert.equal(saveCalls.length, 1);
 });
 
+test('markdown editor provider does not replay stale text while webview edits are pending', async () => {
+  const messages = [];
+  const pendingEdits = [];
+  const documentChangeListeners = [];
+  const document = createDocumentMock({ text: '# Note\n\nBody a' });
+  const vscode = createVscodeMock({
+    applyEdit: edit => {
+      const replacement = edit.replacements.at(-1);
+      let resolveEdit;
+      const editApplied = new Promise(resolve => {
+        resolveEdit = resolve;
+      });
+      pendingEdits.push({
+        text: replacement.text,
+        complete: () => {
+          document.setText(replacement.text);
+          for (const listener of documentChangeListeners) {
+            listener({ document });
+          }
+          for (const listener of documentChangeListeners) {
+            listener({ document });
+          }
+          resolveEdit(true);
+        },
+      });
+      return editApplied;
+    },
+    onDidChangeTextDocument: listener => {
+      documentChangeListeners.push(listener);
+      return { dispose() {} };
+    },
+  });
+  const { MarkdownEditorProvider } = loadTsModule('src/markdownEditorProvider.ts', { vscode });
+  const provider = new MarkdownEditorProvider({ extensionUri: { scheme: 'file', path: '/extension' } });
+  const panel = createPanelMock(messages);
+
+  await provider.resolveCustomTextEditor(document, panel, {});
+  messages.length = 0;
+
+  const edits = [
+    panel.fireMessage({ type: 'edit', text: '# Note\n\nBody ab' }),
+    panel.fireMessage({ type: 'edit', text: '# Note\n\nBody' }),
+  ];
+
+  while (pendingEdits.length > 0) {
+    const pendingEdit = pendingEdits.shift();
+    pendingEdit.complete();
+    await new Promise(resolve => setImmediate(resolve));
+  }
+  await Promise.all(edits);
+  while (pendingEdits.length > 0) {
+    const pendingEdit = pendingEdits.shift();
+    pendingEdit.complete();
+    await new Promise(resolve => setImmediate(resolve));
+  }
+  await new Promise(resolve => setImmediate(resolve));
+
+  assert.deepEqual(
+    messages.filter(message => message.type === 'setText').map(message => message.text),
+    [],
+    'webview-originated edits should not be echoed back as host setText messages',
+  );
+  assert.equal(document.getText(), '# Note\n\nBody');
+});
+
 test('markdown editor provider persists Vim mode and notifies markdown webviews when toggled', async () => {
   const messages = [];
   const workspaceState = createStorageMock();
@@ -496,6 +561,29 @@ test('markdown editor provider writes webview copyText messages to the host clip
   ]);
 });
 
+test('markdown editor provider opens macOS Dictionary for webview lookup requests', async () => {
+  const messages = [];
+  const openExternalCalls = [];
+  const informationMessages = [];
+  const vscode = createVscodeMock({ openExternalCalls, informationMessages });
+  const { MarkdownEditorProvider } = loadTsModule('src/markdownEditorProvider.ts', { vscode });
+  const provider = new MarkdownEditorProvider({
+    extensionUri: { scheme: 'file', path: '/extension' },
+    workspaceState: createStorageMock(),
+  });
+  const panel = createPanelMock(messages);
+
+  await provider.resolveCustomTextEditor(createDocumentMock(), panel, {});
+  await panel.fireMessage({
+    type: 'lookupSelection',
+    text: 'bounded context',
+  });
+
+  assert.equal(openExternalCalls.length, 1);
+  assert.equal(openExternalCalls[0][0].toString(), 'dict://bounded%20context');
+  assert.deepEqual(informationMessages, ['Looking up "bounded context" in Dictionary']);
+});
+
 test('markdown editor provider closes the custom editor on webview close messages', async () => {
   const messages = [];
   const disposeCalls = [];
@@ -589,10 +677,58 @@ test('pdf insert action targets the active custom markdown editor before native 
   );
 
   assert.deepEqual(insertedMarkdown, [
-    '[FlashAttention uses tiling](hl://pdf/raw/pdf/flash-attention.pdf?anchor=anc_test)',
+    '[flash-attention.pdf p.1](hl://pdf/raw/pdf/flash-attention.pdf?anchor=anc_test)',
   ]);
   assert.deepEqual(clipboardWrites, []);
   assert.deepEqual(informationMessages, ['Human Learning PDF link inserted']);
+});
+
+test('pdf quote link format keeps the quote separate from a stable source label', async () => {
+  const clipboardWrites = [];
+  const informationMessages = [];
+  const vscode = createVscodeMock();
+  vscode.env = {
+    clipboard: {
+      writeText: async text => clipboardWrites.push(text),
+    },
+  };
+  vscode.workspace.asRelativePath = () => 'raw/pdf/flash-attention.pdf';
+  vscode.window.showInformationMessage = message => informationMessages.push(message);
+
+  const core = {
+    closeDatabase: () => undefined,
+    createPdfAnchorFromSelection: () => ({
+      uri: 'hl://pdf/raw/pdf/flash-attention.pdf?anchor=anc_test',
+    }),
+    openDatabase: async () => ({}),
+    resolveAnchor: () => undefined,
+    runMigrations: () => undefined,
+  };
+  const { PdfEditorProvider } = loadTsModule('src/pdfEditorProvider.ts', {
+    vscode,
+    '@human-learning/core': core,
+  });
+  const provider = new PdfEditorProvider(
+    { extensionUri: { scheme: 'file', path: '/extension' } },
+    '/vault',
+  );
+
+  await provider.handleSelectionAction(
+    { toString: () => 'file:///vault/raw/pdf/flash-attention.pdf' },
+    'copyQuoteAndLink',
+    {
+      page: 1,
+      textItemIndex: 0,
+      charOffset: 0,
+      length: 23,
+      snippet: 'FlashAttention uses tiling',
+    },
+  );
+
+  assert.deepEqual(clipboardWrites, [
+    '> FlashAttention uses tiling\n>\n> [flash-attention.pdf p.1](hl://pdf/raw/pdf/flash-attention.pdf?anchor=anc_test)',
+  ]);
+  assert.deepEqual(informationMessages, ['Human Learning PDF quote copied']);
 });
 
 test('pdf reference jumps reopen markdown notes in the custom editor and reveal the target line', async () => {
@@ -636,10 +772,16 @@ function createVscodeMock(options = {}) {
     letterSpacing: options.editorConfig?.letterSpacing ?? 0,
   };
   class WorkspaceEdit {
-    replace() {}
+    constructor() {
+      this.replacements = [];
+    }
+    replace(uri, range, text) {
+      this.replacements.push({ uri, range, text });
+    }
   }
   return {
     Uri: {
+      parse: value => ({ toString: () => value }),
       file: fsPath => createUri(fsPath),
       joinPath: (base, ...segments) => createUri([base.fsPath ?? base.path ?? '', ...segments].join('/').replace(/\/+/g, '/')),
     },
@@ -649,7 +791,12 @@ function createVscodeMock(options = {}) {
           options.renameCalls?.push(args);
         },
       },
-      onDidChangeTextDocument: () => ({ dispose() {} }),
+      onDidChangeTextDocument: callback => {
+        if (options.onDidChangeTextDocument) {
+          return options.onDidChangeTextDocument(callback);
+        }
+        return { dispose() {} };
+      },
       onDidChangeConfiguration: () => ({ dispose() {} }),
       getConfiguration: section => ({
         get: (key, fallback) => {
@@ -659,7 +806,7 @@ function createVscodeMock(options = {}) {
           return fallback;
         },
       }),
-      applyEdit: async () => true,
+      applyEdit: options.applyEdit ?? (async () => true),
       openTextDocument: async (...args) => {
         options.openTextDocumentCalls?.push(args);
         return options.document ?? createOpenDocumentMock(args[0]);
@@ -676,8 +823,21 @@ function createVscodeMock(options = {}) {
         return undefined;
       },
     },
+    env: {
+      openExternal: async (...args) => {
+        options.openExternalCalls?.push(args);
+        return true;
+      },
+      clipboard: {
+        writeText: async text => options.clipboardWrites?.push(text),
+      },
+    },
     window: {
       showErrorMessage: () => undefined,
+      showInformationMessage: message => {
+        options.informationMessages?.push(message);
+        return undefined;
+      },
       showTextDocument: async () => ({
         selection: null,
         revealRange() {},
@@ -717,7 +877,7 @@ function createUri(fsPath, query = '') {
 
 function createDocumentMock(options = {}) {
   const uri = options.uri ?? 'file:///vault/notes/Concepts/Note.md';
-  const text = options.text ?? '# Note\n';
+  let text = options.text ?? '# Note\n';
   const uriObject = typeof uri === 'string'
     ? {
         scheme: 'file',
@@ -730,7 +890,12 @@ function createDocumentMock(options = {}) {
     uri: uriObject,
     isClosed: false,
     getText: () => text,
-    lineCount: text.split('\n').length,
+    setText: nextText => {
+      text = nextText;
+    },
+    get lineCount() {
+      return text.split('\n').length;
+    },
     lineAt: () => ({ text: text.replace(/\n$/, '') }),
     positionAt: offset => {
       const before = text.slice(0, offset).split('\n');

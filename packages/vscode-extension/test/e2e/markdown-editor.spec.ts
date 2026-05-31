@@ -5571,6 +5571,32 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
     expect(toggledDoc).toContain('- [ ] reviewed task');
   });
 
+  test('hybrid rendering treats non-space task markers as checked like Obsidian', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+
+    await page.evaluate((text) => {
+      window.postMessage({ type: 'setText', text }, '*');
+    }, ['- [1] benchmark kernel', '- [ ] next task', ''].join('\n'));
+
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      view.dispatch({ selection: { anchor: view.state.doc.length } });
+      view.focus();
+    });
+
+    await expect(page.locator('.cm-hybrid-task-checkbox')).toHaveCount(2);
+    const checkedStates = await page.locator('.cm-hybrid-task-checkbox').evaluateAll(inputs =>
+      inputs.map(input => (input as HTMLInputElement).checked),
+    );
+    expect(checkedStates).toEqual([true, false]);
+    await expect(page.locator('.cm-content')).not.toContainText('[1]');
+
+    await page.locator('.cm-hybrid-task-checkbox').first().click();
+    await expect.poll(() => page.evaluate(() => window.__cmView.state.doc.line(1).text))
+      .toBe('- [ ] benchmark kernel');
+  });
+
   test('hybrid rendering renders list and task markers inside blockquotes like Obsidian', async ({ page }) => {
     await page.goto('http://localhost:8979/test.html');
 
@@ -6062,6 +6088,39 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
       .toBe('> - [x] Update denominator');
   });
 
+  test('hybrid rendering treats non-space callout task markers as checked like Obsidian', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+
+    const testDoc = [
+      '> [!todo] Streaming checklist',
+      '> - [1] Update denominator',
+      '> - [ ] Keep running max',
+      '',
+      'tail',
+    ].join('\n');
+
+    await page.evaluate((text) => {
+      window.postMessage({ type: 'setText', text }, '*');
+    }, testDoc);
+
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      view.dispatch({ selection: { anchor: view.state.doc.length } });
+    });
+
+    await expect(page.locator('.cm-hybrid-callout-task-checkbox')).toHaveCount(2);
+    await expect(page.locator('.cm-hybrid-callout-task-checkbox').nth(0)).toBeChecked();
+    await expect(page.locator('.cm-hybrid-callout-task-checkbox').nth(1)).not.toBeChecked();
+
+    const calloutText = await page.locator('.cm-hybrid-callout').innerText();
+    expect(calloutText).not.toContain('- [1]');
+
+    await page.locator('.cm-hybrid-callout-task-checkbox').nth(0).click();
+    await expect.poll(() => page.evaluate(() => window.__cmView.state.doc.line(2).text))
+      .toBe('> - [ ] Update denominator');
+  });
+
   test('hybrid rendering renders images inside Obsidian callouts', async ({ page }) => {
     await page.goto('http://localhost:8979/test.html');
 
@@ -6543,6 +6602,107 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
     });
     await expect.poll(() => page.evaluate(() => window.__cmView.state.doc.toString()))
       .toBe('alpha beta gamma');
+  });
+
+  test('right-clicking selected markdown opens a formatting panel and applies inline style commands', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+
+    await page.evaluate(() => {
+      window.postMessage({ type: 'setText', text: 'alpha beta gamma' }, '*');
+      window.__mockMessages = [];
+    });
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      const from = view.state.doc.toString().indexOf('beta');
+      view.dispatch({ selection: { anchor: from, head: from + 'beta'.length } });
+      view.focus();
+      const line = document.querySelector('.cm-line');
+      const rect = line.getBoundingClientRect();
+      line.dispatchEvent(new MouseEvent('contextmenu', {
+        bubbles: true,
+        cancelable: true,
+        clientX: rect.left + 80,
+        clientY: rect.top + 8,
+      }));
+    });
+
+    await expect(page.locator('#selection-toolbar')).toBeVisible();
+    await expect(page.locator('#selection-toolbar')).toContainText('Look Up');
+    await expect(page.locator('#selection-toolbar')).toContainText('Heading');
+
+    await page.locator('#selection-toolbar button[aria-label="Bold"]').click();
+    await expect.poll(() => page.evaluate(() => window.__cmView.state.doc.toString()))
+      .toBe('alpha **beta** gamma');
+  });
+
+  test('markdown selection panel applies heading levels to selected lines', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+
+    await page.evaluate(() => {
+      window.postMessage({ type: 'setText', text: ['Intro', 'Selected heading', 'Tail'].join('\n') }, '*');
+      window.__mockMessages = [];
+    });
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      const line = view.state.doc.line(2);
+      view.dispatch({ selection: { anchor: line.from, head: line.to } });
+      view.focus();
+      const secondLine = document.querySelectorAll('.cm-line')[1];
+      const rect = secondLine.getBoundingClientRect();
+      secondLine.dispatchEvent(new MouseEvent('contextmenu', {
+        bubbles: true,
+        cancelable: true,
+        clientX: rect.left + 40,
+        clientY: rect.top + 8,
+      }));
+    });
+
+    await page.locator('#selection-toolbar button', { hasText: 'Heading' }).click();
+    await expect(page.locator('#selection-toolbar .menu.open')).toBeVisible();
+    await page.locator('#selection-toolbar button', { hasText: 'H2' }).click();
+
+    await expect.poll(() => page.evaluate(() => window.__cmView.state.doc.toString()))
+      .toBe(['Intro', '## Selected heading', 'Tail'].join('\n'));
+  });
+
+  test('force-clicking selected markdown asks the host to look it up', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+
+    await page.evaluate(() => {
+      window.postMessage({ type: 'setText', text: 'alpha beta gamma' }, '*');
+      window.__mockMessages = [];
+    });
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      const from = view.state.doc.toString().indexOf('beta');
+      view.dispatch({ selection: { anchor: from, head: from + 'beta'.length } });
+      view.focus();
+      const line = document.querySelector('.cm-line');
+      const rect = line.getBoundingClientRect();
+      line.dispatchEvent(new MouseEvent('webkitmouseforcedown', {
+        bubbles: true,
+        cancelable: true,
+        clientX: rect.left + 80,
+        clientY: rect.top + 8,
+      }));
+    });
+
+    await expect.poll(() => page.evaluate(() =>
+      window.__mockMessages.filter(message => message.type === 'lookupSelection')
+    )).toEqual([
+      {
+        type: 'lookupSelection',
+        text: 'beta',
+        from: 6,
+        to: 10,
+      },
+    ]);
   });
 
   test('Obsidian-like math block command wraps and unwraps display math blocks', async ({ page }) => {

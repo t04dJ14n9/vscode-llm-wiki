@@ -1,10 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
+import { readdir, rm } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { join, resolve } from 'node:path';
 
 const extensionRoot = resolve(import.meta.dirname, '..');
+const repoRoot = resolve(extensionRoot, '../..');
+const markdownExtensionRoot = join(repoRoot, 'packages', 'vscode-markdown-extension');
+const pdfExtensionRoot = join(repoRoot, 'packages', 'vscode-pdf-extension');
 const dist = join(extensionRoot, 'dist');
 const manifest = JSON.parse(readFileSync(join(extensionRoot, 'package.json'), 'utf8'));
 const require = createRequire(import.meta.url);
@@ -17,6 +22,64 @@ test('build emits all VS Code extension and webview runtime artifacts', () => {
       `missing dist artifact: ${file}`,
     );
   }
+});
+
+test('separate markdown and PDF extension manifests can be shipped independently', () => {
+  const markdownManifest = JSON.parse(readFileSync(join(markdownExtensionRoot, 'package.json'), 'utf8'));
+  const pdfManifest = JSON.parse(readFileSync(join(pdfExtensionRoot, 'package.json'), 'utf8'));
+
+  assert.equal(markdownManifest.name, 'human-learning-markdown');
+  assert.equal(markdownManifest.private, undefined);
+  assert.equal(markdownManifest.main, 'dist/extension.js');
+  assert.deepEqual(
+    markdownManifest.contributes.customEditors.map(editor => editor.viewType),
+    ['human-learning.markdownEditor'],
+  );
+  assert.equal(
+    markdownManifest.contributes.configurationDefaults['workbench.editorAssociations']['*.md'],
+    'human-learning.markdownEditor',
+  );
+  assert.equal(markdownManifest.contributes.configurationDefaults['workbench.editorAssociations']['*.pdf'], undefined);
+
+  assert.equal(pdfManifest.name, 'human-learning-pdf');
+  assert.equal(pdfManifest.private, undefined);
+  assert.equal(pdfManifest.main, 'dist/extension.js');
+  assert.deepEqual(
+    pdfManifest.contributes.customEditors.map(editor => editor.viewType),
+    ['human-learning.pdfViewer'],
+  );
+  assert.equal(
+    pdfManifest.contributes.configurationDefaults['workbench.editorAssociations']['*.pdf'],
+    'human-learning.pdfViewer',
+  );
+  assert.equal(pdfManifest.contributes.configurationDefaults['workbench.editorAssociations']['*.md'], undefined);
+});
+
+test('split package preparation materializes isolated markdown and PDF package roots', async () => {
+  await rm(join(extensionRoot, 'dist-split'), { recursive: true, force: true });
+  execFileSync(process.execPath, ['scripts/prepare-split-packages.mjs'], {
+    cwd: extensionRoot,
+    stdio: 'pipe',
+  });
+
+  const markdownDist = await readdir(join(extensionRoot, 'dist-split', 'markdown', 'dist'));
+  const pdfDist = await readdir(join(extensionRoot, 'dist-split', 'pdf', 'dist'));
+  const markdownManifest = JSON.parse(readFileSync(join(extensionRoot, 'dist-split', 'markdown', 'package.json'), 'utf8'));
+  const pdfManifest = JSON.parse(readFileSync(join(extensionRoot, 'dist-split', 'pdf', 'package.json'), 'utf8'));
+
+  assert.equal(markdownManifest.main, 'dist/extension.js');
+  assert.ok(markdownDist.includes('extension.js'));
+  assert.ok(markdownDist.includes('markdown-editor.js'));
+  assert.equal(markdownDist.includes('pdf-extension.js'), false);
+  assert.equal(markdownDist.includes('pdf-viewer.js'), false);
+  assert.equal(markdownDist.includes('pdfium.wasm'), false);
+
+  assert.equal(pdfManifest.main, 'dist/extension.js');
+  assert.ok(pdfDist.includes('extension.js'));
+  assert.ok(pdfDist.includes('pdf-viewer.js'));
+  assert.ok(pdfDist.includes('pdfium.wasm'));
+  assert.equal(pdfDist.includes('markdown-extension.js'), false);
+  assert.equal(pdfDist.includes('markdown-editor.js'), false);
 });
 
 test('extension host keeps sql.js external for VS Code runtime loading', () => {

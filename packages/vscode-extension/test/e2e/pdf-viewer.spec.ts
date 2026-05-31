@@ -33,6 +33,47 @@ test('pdf viewer renders the demo PDF into a visible canvas', async ({ page }) =
   expect(pixelStats.nonWhite, errors.join('\n')).toBeGreaterThan(0);
 });
 
+test('pdf viewer keeps canvas and overlay geometry aligned to exact scaled size', async ({ page }) => {
+  await page.goto('http://localhost:8979/pdf-viewer.html');
+  await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 1/, { timeout: 10_000 });
+  await expect(page.locator('canvas.pdf-canvas')).toBeVisible();
+
+  const geometry = await page.evaluate(() => {
+    const wrapper = document.querySelector('.page-wrapper') as HTMLElement;
+    const canvas = document.querySelector('canvas.pdf-canvas') as HTMLCanvasElement;
+    const textLayer = document.querySelector('.text-layer') as HTMLElement;
+    const highlightLayer = document.querySelector('.highlight-layer') as HTMLElement;
+    const cssWidth = Number.parseFloat(canvas.style.width);
+    const cssHeight = Number.parseFloat(canvas.style.height);
+    return {
+      wrapperWidth: wrapper.style.width,
+      wrapperHeight: wrapper.style.height,
+      canvasWidth: canvas.style.width,
+      canvasHeight: canvas.style.height,
+      textLayerWidth: textLayer.style.width,
+      textLayerHeight: textLayer.style.height,
+      highlightLayerWidth: highlightLayer.style.width,
+      highlightLayerHeight: highlightLayer.style.height,
+      cssWidth,
+      cssHeight,
+      bitmapWidth: canvas.width,
+      bitmapHeight: canvas.height,
+      dpr: window.devicePixelRatio || 1,
+    };
+  });
+
+  expect(Number.isInteger(geometry.cssWidth)).toBe(false);
+  expect(Number.isInteger(geometry.cssHeight)).toBe(false);
+  expect(geometry.wrapperWidth).toBe(geometry.canvasWidth);
+  expect(geometry.wrapperHeight).toBe(geometry.canvasHeight);
+  expect(geometry.textLayerWidth).toBe(geometry.canvasWidth);
+  expect(geometry.textLayerHeight).toBe(geometry.canvasHeight);
+  expect(geometry.highlightLayerWidth).toBe(geometry.canvasWidth);
+  expect(geometry.highlightLayerHeight).toBe(geometry.canvasHeight);
+  expect(Math.abs(geometry.bitmapWidth - Math.round(geometry.cssWidth * geometry.dpr))).toBeLessThanOrEqual(1);
+  expect(Math.abs(geometry.bitmapHeight - Math.round(geometry.cssHeight * geometry.dpr))).toBeLessThanOrEqual(1);
+});
+
 test('pdf viewer renders reference overlays and opens markdown reference popovers', async ({ page }) => {
   await page.goto('http://localhost:8979/pdf-viewer.html');
   await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 1/, { timeout: 10_000 });

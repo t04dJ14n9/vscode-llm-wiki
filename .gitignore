@@ -7,6 +7,8 @@ node_modules/
 
 dist/
 **/dist/
+dist-split/
+**/dist-split/
 build/
 **/build/
 *.tsbuildinfo

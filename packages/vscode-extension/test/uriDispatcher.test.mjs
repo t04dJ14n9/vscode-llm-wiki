@@ -230,11 +230,65 @@ test('dispatchUri waits for resolved anchor URIs to finish dispatching', async (
   ]);
 });
 
+test('markdown-only dispatchUri opens PDFs with the default VS Code editor when PDF plugin command is missing', async () => {
+  const executeCommandCalls = [];
+  const vscode = createVscodeMock({
+    executeCommandCalls,
+    openTextDocumentCalls: [],
+    showTextDocumentCalls: [],
+    document: {
+      uri: { fsPath: '/vault/raw/pdf/paper.pdf' },
+      getText: () => '',
+      positionAt: () => ({ line: 0, character: 0 }),
+    },
+    executeCommand: async (...args) => {
+      executeCommandCalls.push(args);
+      if (args[0] === 'human-learning.openPdfAtAnchor') {
+        throw new Error("command 'human-learning.openPdfAtAnchor' not found");
+      }
+    },
+  });
+  const { dispatchUri } = loadTsModule('../vscode-markdown-extension/src/uriDispatcher.ts', {
+    vscode,
+    '@human-learning/core': {
+      classifyReferenceTarget: () => ({
+        kind: 'pdf',
+        path: 'raw/pdf/paper.pdf',
+        anchorId: 'anc_pdf_123',
+        page: 7,
+      }),
+      openDatabase: async () => ({}),
+      closeDatabase: () => undefined,
+      runMigrations: () => undefined,
+      resolveWebTarget: () => undefined,
+    },
+    fs: { existsSync: () => true },
+  });
+
+  await dispatchUri('/vault', 'raw/pdf/paper.pdf#page=7&anchor=anc_pdf_123');
+
+  assert.deepEqual(executeCommandCalls, [
+    [
+      'human-learning.openPdfAtAnchor',
+      {
+        pdfPath: 'raw/pdf/paper.pdf',
+        anchorId: 'anc_pdf_123',
+        page: 7,
+      },
+    ],
+    [
+      'vscode.open',
+      { fsPath: '/vault/raw/pdf/paper.pdf' },
+    ],
+  ]);
+});
+
 function createVscodeMock({
   executeCommandCalls,
   openTextDocumentCalls,
   showTextDocumentCalls,
   document,
+  executeCommand,
 }) {
   return {
     Uri: {
@@ -257,11 +311,11 @@ function createVscodeMock({
       showErrorMessage: () => undefined,
     },
     commands: {
-      executeCommand: async (...args) => {
+      executeCommand: executeCommand ?? (async (...args) => {
         await new Promise(resolve => setTimeout(resolve, 0));
         executeCommandCalls.push(args);
         return undefined;
-      },
+      }),
     },
     Range: class Range {
       constructor() {}

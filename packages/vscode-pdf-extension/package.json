@@ -1,0 +1,120 @@
+{
+  "name": "human-learning-pdf",
+  "displayName": "Human Learning PDF",
+  "version": "0.1.0",
+  "description": "Human Learning PDF viewer and source anchor tools",
+  "publisher": "human-learning",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished",
+    "onCustomEditor:human-learning.pdfViewer",
+    "workspaceContains:**/*.pdf"
+  ],
+  "main": "dist/extension.js",
+  "contributes": {
+    "customEditors": [
+      {
+        "viewType": "human-learning.pdfViewer",
+        "displayName": "Human Learning PDF Viewer",
+        "selector": [
+          {
+            "filenamePattern": "*.pdf"
+          }
+        ],
+        "priority": "default"
+      }
+    ],
+    "commands": [
+      {
+        "command": "human-learning.openAnchor",
+        "title": "Human Learning: Open Anchor"
+      },
+      {
+        "command": "human-learning.pdfPrevPage",
+        "title": "Human Learning: Previous PDF Page",
+        "icon": "$(arrow-left)"
+      },
+      {
+        "command": "human-learning.pdfNextPage",
+        "title": "Human Learning: Next PDF Page",
+        "icon": "$(arrow-right)"
+      },
+      {
+        "command": "human-learning.pdfZoomIn",
+        "title": "Human Learning: Zoom In",
+        "icon": "$(zoom-in)"
+      },
+      {
+        "command": "human-learning.pdfZoomOut",
+        "title": "Human Learning: Zoom Out",
+        "icon": "$(zoom-out)"
+      },
+      {
+        "command": "human-learning.pdfFitWidth",
+        "title": "Human Learning: Fit Width",
+        "icon": "$(screen-normal)"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "human-learning.pdfPrevPage",
+          "when": "humanLearningPdfOpen",
+          "group": "navigation@1"
+        },
+        {
+          "command": "human-learning.pdfNextPage",
+          "when": "humanLearningPdfOpen",
+          "group": "navigation@2"
+        },
+        {
+          "command": "human-learning.pdfZoomOut",
+          "when": "humanLearningPdfOpen",
+          "group": "navigation@3"
+        },
+        {
+          "command": "human-learning.pdfZoomIn",
+          "when": "humanLearningPdfOpen",
+          "group": "navigation@4"
+        },
+        {
+          "command": "human-learning.pdfFitWidth",
+          "when": "humanLearningPdfOpen",
+          "group": "navigation@5"
+        }
+      ]
+    },
+    "configurationDefaults": {
+      "workbench.editorAssociations": {
+        "*.pdf": "human-learning.pdfViewer"
+      }
+    }
+  },
+  "scripts": {
+    "build": "rm -rf dist && webpack --mode production",
+    "watch": "webpack --mode development --watch",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@embedpdf/engines": "^2.14.3",
+    "@embedpdf/models": "^2.14.3",
+    "@embedpdf/pdfium": "^2.14.3",
+    "@human-learning/core": "workspace:*",
+    "sql.js": "^1.10.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
+    "copy-webpack-plugin": "^12.0.0",
+    "ts-loader": "^9.5.0",
+    "typescript": "^5.4.0",
+    "webpack": "^5.90.0",
+    "webpack-cli": "^5.1.0"
+  }
+}
