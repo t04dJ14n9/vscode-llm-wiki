@@ -5560,6 +5560,7 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
     await expect(page.locator('.cm-hybrid-inline-code')).toBeVisible();
     await expect(page.locator('.cm-hybrid-blockquote-line')).toBeVisible();
     await expect(page.locator('.cm-hybrid-task-checkbox')).toBeVisible();
+    await expect(page.locator('.cm-hybrid-bullet')).toHaveText('•');
     await expect(page.locator('.cm-hybrid-table-widget')).toBeVisible();
     await expect(page.locator('.cm-hybrid-table')).toContainText('vkid.official_account');
     await expect(page.locator('.cm-hl-link')).toHaveCount(2);

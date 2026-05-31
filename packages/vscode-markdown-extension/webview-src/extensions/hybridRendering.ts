@@ -247,7 +247,7 @@ class BulletWidget extends WidgetType {
   override toDOM(): HTMLElement {
     const element = document.createElement('span');
     element.className = 'cm-hybrid-bullet';
-    element.textContent = '-';
+    element.textContent = '•';
     return element;
   }
 }
