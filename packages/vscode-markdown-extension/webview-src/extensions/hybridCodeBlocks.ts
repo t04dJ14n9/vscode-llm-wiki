@@ -152,6 +152,14 @@ const codeBlockContentLineDeco = Decoration.line({
   class: 'cm-hybrid-codeblock-content-line',
 });
 
+const activeCodeBlockOpeningLineDeco = Decoration.line({
+  class: 'cm-hybrid-codeblock-active-opening-line',
+});
+
+const activeCodeBlockClosingLineDeco = Decoration.line({
+  class: 'cm-hybrid-codeblock-active-closing-line',
+});
+
 const prismLanguageAliases: Record<string, string> = {
   bash: 'bash',
   css: 'css',
@@ -186,7 +194,9 @@ export function addCodeBlockDecorations(
 ): void {
   const openingLine = state.doc.line(block.startLine);
   const closingLine = state.doc.line(block.endLine);
-  if (!activeLines.has(block.startLine)) {
+  if (activeLines.has(block.startLine)) {
+    decorations.push(activeCodeBlockOpeningLineDeco.range(openingLine.from));
+  } else {
     decorations.push(Decoration.replace({
       widget: new CodeBlockHeaderWidget(block.language ?? '', block.content, block.from, block.to),
     }).range(openingLine.from, openingLine.to));
@@ -196,7 +206,9 @@ export function addCodeBlockDecorations(
     decorations.push(codeBlockContentLineDeco.range(state.doc.line(lineNumber).from));
   }
 
-  if (!activeLines.has(block.endLine)) {
+  if (activeLines.has(block.endLine)) {
+    decorations.push(activeCodeBlockClosingLineDeco.range(closingLine.from));
+  } else {
     decorations.push(Decoration.replace({
       widget: new CodeBlockFooterWidget(),
     }).range(closingLine.from, closingLine.to));

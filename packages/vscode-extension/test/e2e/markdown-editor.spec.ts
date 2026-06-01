@@ -4312,6 +4312,7 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
       const style = getComputedStyle(element);
       return {
         backgroundColor: style.backgroundColor,
+        borderTopColor: style.borderTopColor,
         borderTopStyle: style.borderTopStyle,
         borderTopWidth: style.borderTopWidth,
         paddingTop: style.paddingTop,
@@ -4320,10 +4321,25 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
     });
 
     expect(mathSurface.backgroundColor).toBe('rgba(0, 0, 0, 0)');
-    expect(mathSurface.borderTopStyle).toBe('none');
-    expect(mathSurface.borderTopWidth).toBe('0px');
+    expect(mathSurface.borderTopStyle).toBe('solid');
+    expect(mathSurface.borderTopWidth).toBe('1px');
+    expect(mathSurface.borderTopColor).toBe('rgba(0, 0, 0, 0)');
     expect(mathSurface.paddingTop).toBe('0px');
     expect(mathSurface.textAlign).toBe('center');
+
+    await page.locator('.cm-hybrid-math-block-inner').hover();
+    await expect.poll(() => page.locator('.cm-hybrid-math-block-inner').evaluate((element) => {
+      const style = getComputedStyle(element);
+      return {
+        borderTopColor: style.borderTopColor,
+        borderTopStyle: style.borderTopStyle,
+        borderTopWidth: style.borderTopWidth,
+      };
+    })).toEqual({
+      borderTopColor: 'rgb(62, 62, 62)',
+      borderTopStyle: 'solid',
+      borderTopWidth: '1px',
+    });
 
     const renderedText = await page.locator('.cm-content').textContent();
     expect(renderedText).not.toContain('$e^{i\\pi} + 1 = 0$');
@@ -4891,12 +4907,48 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
     const codeSurface = await page.locator('.cm-hybrid-codeblock-inner').evaluate((element) => {
       const style = getComputedStyle(element);
       return {
+        borderLeftStyle: style.borderLeftStyle,
+        borderLeftWidth: style.borderLeftWidth,
+        borderTopColor: style.borderTopColor,
         borderTopStyle: style.borderTopStyle,
         borderTopWidth: style.borderTopWidth,
       };
     });
-    expect(codeSurface.borderTopStyle).toBe('none');
-    expect(codeSurface.borderTopWidth).toBe('0px');
+    expect(codeSurface.borderTopStyle).toBe('solid');
+    expect(codeSurface.borderTopWidth).toBe('1px');
+    expect(codeSurface.borderLeftStyle).toBe('solid');
+    expect(codeSurface.borderLeftWidth).toBe('1px');
+    expect(codeSurface.borderTopColor).toBe('rgba(127, 127, 127, 0.22)');
+
+    const codeFrameGeometry = await page.evaluate(() => {
+      const elements = [
+        document.querySelector<HTMLElement>('.cm-hybrid-codeblock-inner'),
+        ...Array.from(document.querySelectorAll<HTMLElement>('.cm-hybrid-codeblock-content-line')),
+        document.querySelector<HTMLElement>('.cm-hybrid-codeblock-footer'),
+      ].filter((element): element is HTMLElement => Boolean(element));
+      const rects = elements.map((element) => {
+        const rect = element.getBoundingClientRect();
+        const style = getComputedStyle(element);
+        return {
+          className: element.className,
+          left: rect.left,
+          right: rect.right,
+          borderLeftColor: style.borderLeftColor,
+          borderRightColor: style.borderRightColor,
+          borderTopColor: style.borderTopColor,
+          borderBottomColor: style.borderBottomColor,
+        };
+      });
+      const lefts = rects.map(rect => rect.left);
+      const rights = rects.map(rect => rect.right);
+      return {
+        rects,
+        maxLeftDelta: Math.max(...lefts) - Math.min(...lefts),
+        maxRightDelta: Math.max(...rights) - Math.min(...rights),
+      };
+    });
+    expect(codeFrameGeometry.maxLeftDelta).toBeLessThanOrEqual(1);
+    expect(codeFrameGeometry.maxRightDelta).toBeLessThanOrEqual(1);
 
     await page.evaluate(() => {
       window.__copiedText = null;
@@ -4995,6 +5047,109 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
       'console.log(greet("world_name"));',
       '```',
     ]);
+  });
+
+  test('active opening fenced code line keeps a complete Obsidian-like frame', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+    await expect(page.getByText('Test fixture ready')).toBeVisible();
+
+    const doc = [
+      'Prelude line',
+      '',
+      '```ts',
+      'const greet = (user_name: string) => `hi ${user_name}`;',
+      'console.log(greet("world_name"));',
+      '```',
+      '',
+      'Tail line',
+    ].join('\n');
+
+    await page.evaluate((text) => {
+      window.postMessage({ type: 'setText', text }, '*');
+    }, doc);
+
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      const openingLine = view.state.doc.line(3);
+      view.dispatch({ selection: { anchor: openingLine.from + 1 }, scrollIntoView: true });
+      view.focus();
+    });
+
+    await expect(page.locator('.cm-line').filter({ hasText: '```ts' })).toBeVisible();
+    await expect(page.locator('.cm-hybrid-codeblock-content-line').filter({ hasText: 'const greet' })).toBeVisible();
+
+    const activeFrame = await page.evaluate(() => {
+      const openingLine = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+        .find(line => line.textContent?.includes('```ts'));
+      const contentLines = Array.from(document.querySelectorAll<HTMLElement>('.cm-hybrid-codeblock-content-line'));
+      const footer = document.querySelector<HTMLElement>('.cm-hybrid-codeblock-footer');
+      const elements = [
+        openingLine,
+        ...contentLines,
+        footer,
+      ].filter((element): element is HTMLElement => Boolean(element));
+      const rects = elements.map((element) => {
+        const rect = element.getBoundingClientRect();
+        const style = getComputedStyle(element);
+        return {
+          className: element.className,
+          text: element.textContent ?? '',
+          left: rect.left,
+          right: rect.right,
+          borderLeftColor: style.borderLeftColor,
+          borderLeftStyle: style.borderLeftStyle,
+          borderLeftWidth: style.borderLeftWidth,
+          borderRightColor: style.borderRightColor,
+          borderTopColor: style.borderTopColor,
+          borderTopStyle: style.borderTopStyle,
+          borderTopWidth: style.borderTopWidth,
+          backgroundColor: style.backgroundColor,
+        };
+      });
+      const lefts = rects.map(rect => rect.left);
+      const rights = rects.map(rect => rect.right);
+      return {
+        rects,
+        opening: rects[0],
+        maxLeftDelta: Math.max(...lefts) - Math.min(...lefts),
+        maxRightDelta: Math.max(...rights) - Math.min(...rights),
+      };
+    });
+
+    expect(activeFrame.opening.text).toContain('```ts');
+    expect(activeFrame.opening.borderTopStyle).toBe('solid');
+    expect(activeFrame.opening.borderTopWidth).toBe('1px');
+    expect(activeFrame.opening.borderTopColor).toBe('rgba(127, 127, 127, 0.22)');
+    expect(activeFrame.opening.borderLeftStyle).toBe('solid');
+    expect(activeFrame.opening.borderLeftWidth).toBe('1px');
+    expect(activeFrame.opening.borderLeftColor).toBe('rgba(127, 127, 127, 0.22)');
+    expect(activeFrame.maxLeftDelta).toBeLessThanOrEqual(1);
+    expect(activeFrame.maxRightDelta).toBeLessThanOrEqual(1);
+
+    const contentTopsWithOpeningActive = await page.evaluate(() => Array.from(
+      document.querySelectorAll<HTMLElement>('.cm-hybrid-codeblock-content-line'),
+      line => ({ text: line.textContent ?? '', top: line.getBoundingClientRect().top }),
+    ));
+
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      const firstContentLine = view.state.doc.line(4);
+      view.dispatch({ selection: { anchor: firstContentLine.from + 1 } });
+    });
+    await expect(page.locator('.cm-hybrid-codeblock')).toBeVisible();
+
+    const contentTopsWithFirstContentActive = await page.evaluate(() => Array.from(
+      document.querySelectorAll<HTMLElement>('.cm-hybrid-codeblock-content-line'),
+      line => ({ text: line.textContent ?? '', top: line.getBoundingClientRect().top }),
+    ));
+
+    expect(contentTopsWithFirstContentActive).toHaveLength(contentTopsWithOpeningActive.length);
+    for (const before of contentTopsWithOpeningActive) {
+      const after = contentTopsWithFirstContentActive.find(line => line.text === before.text);
+      expect(after?.top).toBeDefined();
+      expect(Math.abs((after?.top ?? 0) - before.top)).toBeLessThanOrEqual(0.5);
+    }
   });
 
   test('hybrid rendering keeps fenced Python code highlighted and aligned while the cursor is inside it', async ({ page }) => {
