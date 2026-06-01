@@ -73,19 +73,10 @@ class CodeBlockHeaderWidget extends WidgetType {
       event.preventDefault();
       event.stopPropagation();
       view.focus();
-      view.dispatch({ selection: { anchor: this.editableAnchor(view) } });
+      view.dispatch({ selection: { anchor: this.blockFrom } });
     });
 
     return wrapper;
-  }
-
-  private editableAnchor(view: EditorView): number {
-    const openingLine = view.state.doc.lineAt(this.blockFrom);
-    const closingLine = view.state.doc.lineAt(this.blockTo);
-    if (openingLine.number + 1 < closingLine.number) {
-      return view.state.doc.line(openingLine.number + 1).from;
-    }
-    return this.blockFrom;
   }
 
   override eq(other: CodeBlockHeaderWidget): boolean {
@@ -132,15 +123,26 @@ function formatCodeBlockLanguage(language: string): string {
 }
 
 class CodeBlockFooterWidget extends WidgetType {
-  override toDOM(): HTMLElement {
+  constructor(private readonly closingLineFrom: number) {
+    super();
+  }
+
+  override toDOM(view: EditorView): HTMLElement {
     const footer = document.createElement('div');
     footer.className = 'cm-hybrid-codeblock-footer';
+    footer.dataset.sourceFrom = String(this.closingLineFrom);
     footer.textContent = '\u200B';
+    footer.addEventListener('mousedown', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      view.focus();
+      view.dispatch({ selection: { anchor: this.closingLineFrom } });
+    });
     return footer;
   }
 
-  override eq(): boolean {
-    return true;
+  override eq(other: CodeBlockFooterWidget): boolean {
+    return this.closingLineFrom === other.closingLineFrom;
   }
 
   override ignoreEvent(): boolean {
@@ -210,7 +212,7 @@ export function addCodeBlockDecorations(
     decorations.push(activeCodeBlockClosingLineDeco.range(closingLine.from));
   } else {
     decorations.push(Decoration.replace({
-      widget: new CodeBlockFooterWidget(),
+      widget: new CodeBlockFooterWidget(closingLine.from),
     }).range(closingLine.from, closingLine.to));
   }
 }

@@ -2746,7 +2746,7 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
       .toEqual([]);
   });
 
-  test('Vim mode enters editable code when clicking the rendered fenced code block surface', async ({ page }) => {
+  test('Vim mode selects the opening fence when clicking the rendered fenced code block header', async ({ page }) => {
     await page.goto('http://localhost:8979/test.html');
 
     const doc = [
@@ -2771,15 +2771,15 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
 
     await expect.poll(() => page.evaluate(() => {
       const view = window.__cmView;
-      return view.state.doc.lineAt(view.state.selection.main.head).number;
-    })).toBe(4);
-
-    await page.keyboard.press('Escape');
-    await page.keyboard.press('A');
-    await page.keyboard.type('  # header-clicked');
-
-    await expect.poll(() => page.evaluate(() => window.__cmView.state.doc.line(4).text))
-      .toBe('value = 1  # header-clicked');
+      const selectedLine = view.state.doc.lineAt(view.state.selection.main.head);
+      return {
+        number: selectedLine.number,
+        text: selectedLine.text,
+      };
+    })).toEqual({
+      number: 3,
+      text: '```python',
+    });
     expect(await page.evaluate(() => window.__mockMessages?.filter(message => message.type === 'error') ?? []))
       .toEqual([]);
   });
@@ -5198,6 +5198,7 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
         selectedLine: view.state.doc.lineAt(view.state.selection.main.head).number,
         normal: measure(lines.find(element => element.textContent?.includes('Normal before')) ?? null),
         headerLine: measure(document.querySelector('.cm-line:has(.cm-hybrid-codeblock)')),
+        codeContentLine: measure(lines.find(element => element.textContent?.includes('m = -inf')) ?? null),
         openingLine: measure(lines.find(element => element.textContent?.includes('```python')) ?? null),
         footerLine: measure(document.querySelector('.cm-line:has(.cm-hybrid-codeblock-footer)')),
         closingLine: measure(lines.find(element => element.textContent === '```') ?? null),
@@ -5207,9 +5208,10 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
     const inactiveRows = await measureRows(1);
     const activeOpeningRows = await measureRows(3);
     const activeClosingRows = await measureRows(6);
-    const normalHeight = inactiveRows.normal?.height ?? 0;
+    const codeContentHeight = inactiveRows.codeContentLine?.height ?? 0;
 
     expect(inactiveRows.headerLine?.height).toBeDefined();
+    expect(inactiveRows.codeContentLine?.height).toBeDefined();
     expect(inactiveRows.footerLine?.height).toBeDefined();
     expect(activeOpeningRows.openingLine?.height).toBeDefined();
     expect(activeClosingRows.closingLine?.height).toBeDefined();
@@ -5220,8 +5222,264 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
       activeOpeningRows.openingLine,
       activeClosingRows.closingLine,
     ]) {
-      expect(Math.abs((row?.height ?? 0) - normalHeight)).toBeLessThanOrEqual(0.5);
+      expect(Math.abs((row?.height ?? 0) - codeContentHeight)).toBeLessThanOrEqual(0.5);
     }
+  });
+
+  test('cursor reveal keeps Online Softmax inline math and code fence rows height-stable', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+    await waitForEditorBootstrap(page);
+
+    const doc = [
+      '# Online Softmax',
+      '',
+      "Online softmax is the numerical trick that makes FlashAttention's tiling strategy work.",
+      '',
+      '## Standard Softmax',
+      '',
+      'For a vector $x = [x_1, ..., x_n]$:',
+      '',
+      '$$softmax(x_i) = \\frac{exp(x_i)}  {sum(exp(x_j))}$$',
+      '',
+      'This requires **two passes** over the data: one to find the max (for numerical stability), and one to compute the sum and normalize.',
+      '',
+      '## Online Version',
+      '',
+      'The online algorithm maintains running statistics:',
+      '',
+      '```python',
+      'm = -inf  # running max',
+      'd = 0     # running sum (scaled)',
+      'for x_i in tiles:',
+      '    m_new = max(m, max(x_i))',
+      '    d = d * exp(m - m_new) + sum(exp(x_i - m_new))',
+      '    m = m_new',
+      '```',
+      '',
+      'For details see [[FlashAttention]] and the original paper.',
+    ].join('\n');
+
+    await page.evaluate((text) => {
+      window.postMessage({ type: 'setText', text, title: 'Online Softmax' }, '*');
+    }, doc);
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+    await page.evaluate(() => {
+      window.postMessage({
+        type: 'updateSettings',
+        settings: {
+          fontSize: '14px',
+          lineHeight: '22px',
+        },
+      }, '*');
+    });
+    await page.waitForFunction(() => {
+      const content = document.querySelector('.cm-content');
+      return content ? getComputedStyle(content).lineHeight === '22px' : false;
+    }, { timeout: 5_000 });
+    await expect(page.locator('.cm-hybrid-inline-math')).toBeVisible();
+    await expect(page.locator('.cm-hybrid-codeblock')).toBeVisible();
+
+    const measurements = await page.evaluate(async () => {
+      const view = window.__cmView;
+      const frame = () => new Promise<void>(resolve => window.requestAnimationFrame(() => resolve()));
+      const selectLine = async (lineNumber: number) => {
+        const line = view.state.doc.line(lineNumber);
+        view.dispatch({ selection: { anchor: line.from + Math.min(1, line.length) } });
+        view.focus();
+        await frame();
+      };
+      const measure = (element: Element | null) => {
+        if (!(element instanceof HTMLElement)) return null;
+        const rect = element.getBoundingClientRect();
+        const style = getComputedStyle(element);
+        return {
+          className: element.className,
+          text: element.textContent ?? '',
+          height: rect.height,
+          fontSize: style.fontSize,
+          lineHeight: style.lineHeight,
+        };
+      };
+      const lineContaining = (text: string) => Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+        .find(line => line.textContent?.includes(text)) ?? null;
+
+      await selectLine(1);
+      const inactiveInlineMath = measure(lineContaining('For a vector'));
+      const inactiveCodeFence = measure(document.querySelector('.cm-line:has(.cm-hybrid-codeblock)'));
+      const inactiveClosingFence = measure(document.querySelector('.cm-line:has(.cm-hybrid-codeblock-footer)'));
+      const codeContentLine = measure(lineContaining('m = -inf'));
+
+      await selectLine(7);
+      const activeInlineMath = measure(lineContaining('For a vector'));
+
+      await selectLine(1);
+      await selectLine(17);
+      const activeOpeningFence = measure(
+        document.querySelector('.cm-hybrid-codeblock-active-opening-line')
+          ?? lineContaining('```python'),
+      );
+
+      await selectLine(1);
+      await selectLine(24);
+      const activeClosingFence = measure(
+        document.querySelector('.cm-hybrid-codeblock-active-closing-line')
+          ?? lineContaining('```'),
+      );
+
+      return {
+        inactiveInlineMath,
+        activeInlineMath,
+        inactiveCodeFence,
+        inactiveClosingFence,
+        codeContentLine,
+        activeOpeningFence,
+        activeClosingFence,
+      };
+    });
+
+    expect(measurements.inactiveInlineMath).not.toBeNull();
+    expect(measurements.activeInlineMath).not.toBeNull();
+    expect(measurements.inactiveCodeFence).not.toBeNull();
+    expect(measurements.inactiveClosingFence).not.toBeNull();
+    expect(measurements.codeContentLine).not.toBeNull();
+    expect(measurements.activeOpeningFence).not.toBeNull();
+    expect(measurements.activeClosingFence).not.toBeNull();
+
+    expect(Math.abs(
+      measurements.activeInlineMath!.height - measurements.inactiveInlineMath!.height,
+    )).toBeLessThanOrEqual(0.25);
+    for (const row of [
+      measurements.inactiveCodeFence,
+      measurements.inactiveClosingFence,
+      measurements.activeOpeningFence,
+      measurements.activeClosingFence,
+    ]) {
+      expect(Math.abs(
+        row!.height - measurements.codeContentLine!.height,
+      )).toBeLessThanOrEqual(0.25);
+    }
+    expect(measurements.activeOpeningFence!.fontSize).toBe(measurements.codeContentLine!.fontSize);
+    expect(measurements.activeOpeningFence!.lineHeight).toBe(measurements.codeContentLine!.lineHeight);
+    expect(measurements.activeClosingFence!.fontSize).toBe(measurements.codeContentLine!.fontSize);
+    expect(measurements.activeClosingFence!.lineHeight).toBe(measurements.codeContentLine!.lineHeight);
+  });
+
+  test('mouse click can select the Online Softmax opening code fence line', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+    await waitForEditorBootstrap(page);
+
+    const doc = [
+      '# Online Softmax',
+      '',
+      "Online softmax is the numerical trick that makes FlashAttention's tiling strategy work.",
+      '',
+      '## Standard Softmax',
+      '',
+      'For a vector $x = [x_1, ..., x_n]$:',
+      '',
+      '$$softmax(x_i) = \\frac{exp(x_i)}  {sum(exp(x_j))}$$',
+      '',
+      'This requires **two passes** over the data: one to find the max (for numerical stability), and one to compute the sum and normalize.',
+      '',
+      '## Online Version',
+      '',
+      'The online algorithm maintains running statistics:',
+      '',
+      '```python',
+      'm = -inf  # running max',
+      'd = 0     # running sum (scaled)',
+      'for x_i in tiles:',
+      '    m_new = max(m, max(x_i))',
+      '    d = d * exp(m - m_new) + sum(exp(x_i - m_new))',
+      '    m = m_new',
+      '```',
+      '',
+      'For details see [[FlashAttention]] and the original paper.',
+    ].join('\n');
+
+    await page.evaluate((text) => {
+      window.postMessage({ type: 'setText', text, title: 'Online Softmax' }, '*');
+    }, doc);
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+    await expect(page.locator('.cm-hybrid-codeblock')).toBeVisible();
+
+    await page.locator('.cm-hybrid-codeblock-header').click();
+
+    await expect.poll(() => page.evaluate(() => {
+      const view = window.__cmView;
+      const selectedLine = view.state.doc.lineAt(view.state.selection.main.head);
+      return {
+        number: selectedLine.number,
+        text: selectedLine.text,
+      };
+    })).toEqual({
+      number: 17,
+      text: '```python',
+    });
+  });
+
+  test('mouse click can select the Online Softmax closing code fence line', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+    await waitForEditorBootstrap(page);
+
+    const doc = [
+      '# Online Softmax',
+      '',
+      "Online softmax is the numerical trick that makes FlashAttention's tiling strategy work.",
+      '',
+      '## Standard Softmax',
+      '',
+      'For a vector $x = [x_1, ..., x_n]$:',
+      '',
+      '$$softmax(x_i) = \\frac{exp(x_i)}  {sum(exp(x_j))}$$',
+      '',
+      'This requires **two passes** over the data: one to find the max (for numerical stability), and one to compute the sum and normalize.',
+      '',
+      '## Online Version',
+      '',
+      'The online algorithm maintains running statistics:',
+      '',
+      '```python',
+      'm = -inf  # running max',
+      'd = 0     # running sum (scaled)',
+      'for x_i in tiles:',
+      '    m_new = max(m, max(x_i))',
+      '    d = d * exp(m - m_new) + sum(exp(x_i - m_new))',
+      '    m = m_new',
+      '```',
+      '',
+      'For details see [[FlashAttention]] and the original paper.',
+    ].join('\n');
+
+    await page.evaluate((text) => {
+      window.postMessage({ type: 'setText', text, title: 'Online Softmax' }, '*');
+    }, doc);
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+    await expect(page.locator('.cm-hybrid-codeblock-footer')).toBeVisible();
+
+    await page.locator('.cm-hybrid-codeblock-footer').scrollIntoViewIfNeeded();
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      view.dispatch({ selection: { anchor: 0 } });
+    });
+    const footerBox = await page.locator('.cm-hybrid-codeblock-footer').boundingBox();
+    expect(footerBox).not.toBeNull();
+    await page.mouse.click(
+      footerBox!.x + footerBox!.width / 2,
+      footerBox!.y + footerBox!.height / 2,
+    );
+
+    await expect.poll(() => page.evaluate(() => {
+      const view = window.__cmView;
+      const selectedLine = view.state.doc.lineAt(view.state.selection.main.head);
+      return {
+        number: selectedLine.number,
+        text: selectedLine.text,
+      };
+    })).toEqual({
+      number: 24,
+      text: '```',
+    });
   });
 
   test('hybrid rendering keeps fenced Python code highlighted and aligned while the cursor is inside it', async ({ page }) => {
