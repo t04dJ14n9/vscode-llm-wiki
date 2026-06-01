@@ -403,8 +403,18 @@ export function hybridStyles() {
     '.cm-hybrid-mermaid-block': {
       display: 'block',
       boxSizing: 'border-box',
+      outlineStyle: 'solid',
+      outlineWidth: '1px',
+      outlineColor: 'rgba(0, 0, 0, 0)',
+      outlineOffset: '-1px',
       padding: '0.65em 0',
       color: 'var(--vscode-editor-foreground)',
+      boxShadow: '0 0 0 1px transparent, 0 0 0 transparent',
+      transition: 'outline-color 120ms ease, box-shadow 120ms ease',
+    },
+    '.cm-hybrid-mermaid-block:hover': {
+      outlineColor: 'rgba(142, 120, 255, 0.65)',
+      boxShadow: '0 0 0 1px rgba(142, 120, 255, 0.16), 0 0 10px rgba(142, 120, 255, 0.22)',
     },
     '.cm-hybrid-mermaid-toolbar': {
       display: 'flex',
