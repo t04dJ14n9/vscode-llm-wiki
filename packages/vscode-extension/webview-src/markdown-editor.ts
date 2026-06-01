@@ -6,7 +6,7 @@ import { languages } from '@codemirror/language-data';
 import { bracketMatching, defaultHighlightStyle, syntaxHighlighting } from '@codemirror/language';
 import { Compartment, EditorSelection, EditorState, Prec } from '@codemirror/state';
 import type { Range, Text } from '@codemirror/state';
-import { searchKeymap } from '@codemirror/search';
+import { search, searchKeymap } from '@codemirror/search';
 import { vim, Vim } from '@replit/codemirror-vim';
 import type { CodeMirrorV, InputStateInterface, MotionArgs, Pos, vimState } from '@replit/codemirror-vim';
 import {
@@ -271,6 +271,7 @@ function createView(text: string, title?: string): EditorView {
         markdown({ codeLanguages: languages }),
         syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
         bracketMatching(),
+        search({ top: true }),
         hybridRendering(),
         hlLinkRendering,
         Prec.highest(keymap.of([
@@ -372,6 +373,141 @@ function createView(text: string, title?: string): EditorView {
           },
           '.cm-cursor, .cm-dropCursor': {
             borderLeftColor: 'var(--vscode-editorCursor-foreground, currentColor)',
+          },
+          '.cm-panels.cm-panels-top:has(.cm-search)': {
+            position: 'absolute',
+            top: '0',
+            left: '0',
+            right: '0',
+            zIndex: '50',
+            borderBottom: '0',
+            backgroundColor: 'transparent',
+            pointerEvents: 'none',
+          },
+          '.cm-panel.cm-search': {
+            pointerEvents: 'auto',
+            boxSizing: 'border-box',
+            display: 'grid',
+            gridTemplateColumns: 'minmax(128px, 1fr) repeat(7, 24px)',
+            alignItems: 'center',
+            gap: '2px',
+            width: 'min(420px, calc(100% - 16px))',
+            minHeight: '34px',
+            margin: '8px 8px 0 auto',
+            padding: '4px',
+            border: '1px solid var(--vscode-widget-border, var(--vscode-panel-border, #454545))',
+            borderRadius: '3px',
+            backgroundColor: 'var(--vscode-editorWidget-background, var(--vscode-sideBar-background, #252526))',
+            boxShadow: '0 2px 8px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.36))',
+            color: 'var(--vscode-editorWidget-foreground, var(--vscode-foreground, var(--vscode-editor-foreground, inherit)))',
+            fontFamily: 'var(--vscode-font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif)',
+            fontSize: '12px',
+          },
+          '.cm-panel.cm-search input.cm-textfield[name="search"]': {
+            boxSizing: 'border-box',
+            width: '100%',
+            height: '26px',
+            minWidth: '0',
+            margin: '0',
+            padding: '2px 6px',
+            border: '1px solid var(--vscode-input-border, transparent)',
+            borderRadius: '2px',
+            outline: '0',
+            backgroundColor: 'var(--vscode-input-background, var(--vscode-editor-background))',
+            color: 'var(--vscode-input-foreground, var(--vscode-editor-foreground))',
+            font: 'inherit',
+          },
+          '.cm-panel.cm-search input.cm-textfield[name="search"]:focus': {
+            borderColor: 'var(--vscode-focusBorder, var(--vscode-inputOption-activeBorder, #007fd4))',
+          },
+          '.cm-panel.cm-search input.cm-textfield[name="replace"], .cm-panel.cm-search button[name="replace"], .cm-panel.cm-search button[name="replaceAll"], .cm-panel.cm-search br': {
+            display: 'none',
+          },
+          '.cm-panel.cm-search button, .cm-panel.cm-search label': {
+            boxSizing: 'border-box',
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: '24px',
+            height: '24px',
+            minWidth: '24px',
+            margin: '0',
+            padding: '0',
+            border: '1px solid transparent',
+            borderRadius: '3px',
+            appearance: 'none',
+            WebkitAppearance: 'none',
+            background: 'transparent',
+            backgroundColor: 'transparent',
+            backgroundImage: 'none',
+            boxShadow: 'none',
+            color: 'var(--vscode-icon-foreground, var(--vscode-foreground, var(--vscode-editor-foreground, inherit)))',
+            font: 'inherit',
+            lineHeight: '1',
+            whiteSpace: 'nowrap',
+            cursor: 'pointer',
+          },
+          '.cm-panel.cm-search button': {
+            fontSize: '0',
+          },
+          '.cm-panel.cm-search button:hover, .cm-panel.cm-search label:hover': {
+            backgroundColor: 'var(--vscode-toolbar-hoverBackground, rgba(90, 93, 94, 0.31))',
+          },
+          '.cm-panel.cm-search button:focus-visible, .cm-panel.cm-search label:focus-within': {
+            outline: '1px solid var(--vscode-focusBorder, #007fd4)',
+            outlineOffset: '-1px',
+          },
+          '.cm-panel.cm-search button::before': {
+            fontSize: '13px',
+            lineHeight: '1',
+          },
+          '.cm-panel.cm-search button[name="prev"]::before': {
+            content: '"↑"',
+          },
+          '.cm-panel.cm-search button[name="next"]::before': {
+            content: '"↓"',
+          },
+          '.cm-panel.cm-search button[name="select"]::before': {
+            content: '"≡"',
+          },
+          '.cm-panel.cm-search button[name="close"]': {
+            position: 'static',
+            inset: 'auto',
+            border: '1px solid transparent',
+            backgroundColor: 'transparent',
+            fontSize: '13px',
+          },
+          '.cm-panel.cm-search label': {
+            position: 'relative',
+            overflow: 'hidden',
+            fontSize: '0',
+          },
+          '.cm-panel.cm-search label input[type="checkbox"]': {
+            position: 'absolute',
+            width: '1px',
+            height: '1px',
+            opacity: '0',
+            pointerEvents: 'none',
+          },
+          '.cm-panel.cm-search label::after': {
+            fontSize: '10px',
+            fontWeight: '600',
+            letterSpacing: '0',
+            lineHeight: '1',
+          },
+          '.cm-panel.cm-search label:has(input[name="case"])::after': {
+            content: '"Aa"',
+          },
+          '.cm-panel.cm-search label:has(input[name="re"])::after': {
+            content: '".*"',
+          },
+          '.cm-panel.cm-search label:has(input[name="word"])::after': {
+            content: '"ab"',
+          },
+          '.cm-panel.cm-search label:has(input[type="checkbox"]:checked)': {
+            borderColor: 'var(--vscode-inputOption-activeBorder, var(--vscode-focusBorder, #007fd4))',
+            backgroundColor: 'var(--vscode-inputOption-activeBackground, rgba(0, 127, 212, 0.18))',
+            color: 'var(--vscode-inputOption-activeForeground, var(--vscode-foreground, inherit))',
           },
           '.cm-hl-link': {
             display: 'inline',

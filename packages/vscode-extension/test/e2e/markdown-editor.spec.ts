@@ -160,6 +160,67 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
     expect(styles.letterSpacing).toBe('1.25px');
   });
 
+  test('markdown editor search panel uses compact VS Code find-widget layout', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 720 });
+    await page.goto('http://localhost:8979/test.html');
+    await waitForEditorBootstrap(page);
+
+    await page.evaluate((text) => {
+      window.postMessage({ type: 'setText', text }, '*');
+    }, [
+      '# Search Layout',
+      '',
+      'The search panel should feel like the native VS Code find widget.',
+      'Search should stay compact and avoid stretching across the editor.',
+      'Another search target keeps next and previous active.',
+    ].join('\n'));
+
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+    await page.click('.cm-content');
+    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+F' : 'Control+F');
+
+    const searchPanel = page.locator('.cm-search');
+    await expect(searchPanel).toBeVisible();
+
+    const metrics = await page.evaluate(() => {
+      const editor = document.querySelector<HTMLElement>('.cm-editor');
+      const panel = document.querySelector<HTMLElement>('.cm-panel.cm-search');
+      const input = panel?.querySelector<HTMLInputElement>('input[name="search"]');
+      const buttons = Array.from(panel?.querySelectorAll<HTMLButtonElement>('button') ?? []);
+      if (!editor || !panel || !input) {
+        return null;
+      }
+      const editorRect = editor.getBoundingClientRect();
+      const panelRect = panel.getBoundingClientRect();
+      const inputRect = input.getBoundingClientRect();
+      return {
+        editorWidth: Math.round(editorRect.width),
+        panelWidth: Math.round(panelRect.width),
+        panelTopGap: Math.round(panelRect.top - editorRect.top),
+        panelRightGap: Math.round(editorRect.right - panelRect.right),
+        inputHeight: Math.round(inputRect.height),
+        buttonWidths: buttons.map(button => Math.round(button.getBoundingClientRect().width)),
+        buttonBackgroundImages: buttons.map(button => getComputedStyle(button).backgroundImage),
+        buttonColors: buttons.map(button => getComputedStyle(button).color),
+        buttonLabels: buttons.map(button => button.textContent?.trim() ?? ''),
+      };
+    });
+
+    expect(metrics).not.toBeNull();
+    expect(metrics!.editorWidth).toBeGreaterThan(900);
+    expect(metrics!.panelWidth).toBeLessThanOrEqual(420);
+    expect(metrics!.panelTopGap).toBeGreaterThanOrEqual(6);
+    expect(metrics!.panelTopGap).toBeLessThanOrEqual(12);
+    expect(metrics!.panelRightGap).toBeGreaterThanOrEqual(6);
+    expect(metrics!.panelRightGap).toBeLessThanOrEqual(12);
+    expect(metrics!.inputHeight).toBeGreaterThanOrEqual(24);
+    expect(metrics!.inputHeight).toBeLessThanOrEqual(28);
+    expect(metrics!.buttonWidths.every(width => width <= 28)).toBe(true);
+    expect(metrics!.buttonBackgroundImages.every(image => image === 'none')).toBe(true);
+    expect(metrics!.buttonColors.every(color => color !== 'rgb(0, 0, 0)')).toBe(true);
+    expect(metrics!.buttonLabels).toContain('×');
+  });
+
   test('markdown editor uses an Obsidian-like readable content measure', async ({ page }) => {
     await page.setViewportSize({ width: 1600, height: 900 });
     await page.goto('http://localhost:8979/test.html');
