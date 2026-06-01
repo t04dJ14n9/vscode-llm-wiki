@@ -5371,6 +5371,72 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
     expect(metrics.labelHeight).toBeLessThan(20);
   });
 
+  test('hybrid rendering shows a solid glowing Obsidian-like frame when hovering Mermaid diagrams', async ({ page }) => {
+    await page.setViewportSize({ width: 900, height: 700 });
+    await page.goto('http://localhost:8979/test.html');
+
+    const mermaidSource = [
+      '```mermaid',
+      'sequenceDiagram',
+      '  participant User',
+      '  participant Agent',
+      '  User->>Agent: Reference a PDF paragraph',
+      '```',
+    ].join('\n');
+    const doc = [
+      '# Mermaid Hover',
+      '',
+      mermaidSource,
+      '',
+      'Tail line',
+    ].join('\n');
+
+    await page.evaluate((text) => {
+      window.postMessage({ type: 'setText', text }, '*');
+    }, doc);
+
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      view.dispatch({ selection: { anchor: view.state.doc.length } });
+    });
+
+    const mermaidBlock = page.locator('.cm-hybrid-mermaid-block');
+    await expect(mermaidBlock.locator('svg')).toBeVisible({ timeout: 10_000 });
+
+    const boundary = async () => mermaidBlock.evaluate((element) => {
+      const style = getComputedStyle(element);
+      return {
+        boxShadow: style.boxShadow,
+        outlineColor: style.outlineColor,
+        outlineOffset: style.outlineOffset,
+        outlineStyle: style.outlineStyle,
+        outlineWidth: style.outlineWidth,
+      };
+    });
+
+    await page.mouse.move(8, 8);
+    await expect.poll(boundary).toMatchObject({
+      outlineColor: 'rgba(0, 0, 0, 0)',
+      outlineStyle: 'solid',
+      outlineWidth: '1px',
+    });
+    const beforeHover = await boundary();
+    expect(beforeHover.boxShadow).toMatch(/none|rgba\(0,\s*0,\s*0,\s*0\)/);
+
+    await mermaidBlock.hover();
+
+    await expect.poll(boundary).toMatchObject({
+      outlineColor: 'rgba(142, 120, 255, 0.65)',
+      outlineOffset: '-1px',
+      outlineStyle: 'solid',
+      outlineWidth: '1px',
+    });
+    const afterHover = await boundary();
+    expect(afterHover.boxShadow).not.toBe('none');
+    expect(afterHover.boxShadow).toContain('rgba(142, 120, 255');
+  });
+
   test('hybrid rendering keeps wide Mermaid diagrams readable by scrolling instead of shrinking', async ({ page }) => {
     await page.setViewportSize({ width: 900, height: 700 });
     await page.goto('http://localhost:8979/test.html');
