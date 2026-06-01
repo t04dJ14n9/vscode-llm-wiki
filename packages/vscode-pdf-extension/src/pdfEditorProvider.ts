@@ -473,7 +473,7 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
   </div>
   <div id="viewer-container"><div id="page-container"></div></div>
   <script nonce="${nonce}">window.__pdfiumWasmUrl = "${wasmUri}";</script>
-  <script nonce="${nonce}" src="${scriptUri}"></script>
+  <script nonce="${nonce}" src="${scriptUri}?v=${nonce}"></script>
 </body>
 </html>`;
   }

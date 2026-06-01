@@ -173,6 +173,26 @@ test('pdf viewer search bar finds text and uses compact VS Code find-widget layo
   expect(metrics!.buttonColors.every(color => color !== 'rgb(0, 0, 0)')).toBe(true);
 });
 
+test('pdf viewer search finds phrases split across PDF text rects', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await page.goto('http://localhost:8979/pdf-viewer.html?fixture=split-search');
+  await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 1/, { timeout: 10_000 });
+
+  const textItems = await page.locator('.text-layer span[data-item-index]').evaluateAll(spans =>
+    spans.map(span => span.textContent ?? '')
+  );
+  expect(textItems.length).toBeGreaterThanOrEqual(2);
+  expect(textItems.some(text => text.startsWith('Page'))).toBe(true);
+  expect(textItems.some(text => text.startsWith('Two'))).toBe(true);
+  expect(textItems.some(text => text.includes('Page Two'))).toBe(false);
+
+  await page.locator('#search-open').click();
+  await page.locator('#pdf-search-input').pressSequentially('Page Two');
+
+  await expect(page.locator('#pdf-search-count')).toHaveText('1 / 1');
+  await expect(page.locator('.pdf-search-match.selected')).toHaveCount(2);
+});
+
 test('pdf viewer renders reference overlays and opens markdown reference popovers', async ({ page }) => {
   await page.goto('http://localhost:8979/pdf-viewer.html');
   await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 1/, { timeout: 10_000 });

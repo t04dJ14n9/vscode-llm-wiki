@@ -30,9 +30,19 @@ interface ReferenceListItem {
 
 interface PdfSearchMatch {
   page: number;
+  segments: PdfSearchSegment[];
+}
+
+interface PdfSearchSegment {
   textItemIndex: number;
   from: number;
   to: number;
+}
+
+interface PdfSearchIndexChar {
+  value: string;
+  textItemIndex?: number;
+  offset?: number;
 }
 
 interface PageState {
@@ -223,20 +233,36 @@ class PdfViewer {
   }
 
   private collectSearchMatches(query: string): PdfSearchMatch[] {
-    const needle = query.toLocaleLowerCase();
+    const needle = normalizeSearchText(query);
+    if (!needle) return [];
+    const allowLenientAsciiSearch = isAsciiSearchQuery(needle);
     const matches: PdfSearchMatch[] = [];
+    const seen = new Set<string>();
     for (const page of this.pages.values()) {
-      for (let itemIndex = 0; itemIndex < page.textRects.length; itemIndex++) {
-        const content = String(page.textRects[itemIndex]?.content ?? '');
-        const haystack = content.toLocaleLowerCase();
+      const indexes = [
+        buildPdfSearchIndex(page.textRects, true, false),
+        buildPdfSearchIndex(page.textRects, false, false),
+      ];
+      if (allowLenientAsciiSearch) {
+        indexes.push(
+          buildPdfSearchIndex(page.textRects, true, true),
+          buildPdfSearchIndex(page.textRects, false, true)
+        );
+      }
+      for (const index of indexes) {
+        const haystack = index.map(char => char.value).join('');
         let from = haystack.indexOf(needle);
         while (from >= 0) {
-          matches.push({
-            page: page.pageNum,
-            textItemIndex: itemIndex,
-            from,
-            to: from + query.length,
-          });
+          const segments = segmentsForSearchRange(index, from, from + needle.length);
+          if (segments.length) {
+            const key = `${page.pageNum}:${segments
+              .map(segment => `${segment.textItemIndex}:${segment.from}:${segment.to}`)
+              .join('|')}`;
+            if (!seen.has(key)) {
+              seen.add(key);
+              matches.push({ page: page.pageNum, segments });
+            }
+          }
           from = haystack.indexOf(needle, from + Math.max(1, needle.length));
         }
       }
@@ -628,26 +654,28 @@ class PdfViewer {
 
     this.searchMatches.forEach((match, searchIndex) => {
       if (match.page !== pageNum) return;
-      const item = page.textRects[match.textItemIndex];
-      if (!item?.content) return;
-      const contentLength = item.content.length;
-      const itemStart = Math.max(0, Math.min(match.from, contentLength));
-      const itemEnd = Math.max(itemStart, Math.min(match.to, contentLength));
-      if (itemEnd <= itemStart) return;
+      for (const segment of match.segments) {
+        const item = page.textRects[segment.textItemIndex];
+        if (!item?.content) continue;
+        const contentLength = item.content.length;
+        const itemStart = Math.max(0, Math.min(segment.from, contentLength));
+        const itemEnd = Math.max(itemStart, Math.min(segment.to, contentLength));
+        if (itemEnd <= itemStart) continue;
 
-      const fullLeft = item.rect.origin.x * this.scale;
-      const fullTop = item.rect.origin.y * this.scale;
-      const fullWidth = item.rect.size.width * this.scale;
-      const fullHeight = item.rect.size.height * this.scale;
-      const perChar = fullWidth / contentLength;
-      const element = document.createElement('div');
-      element.className = `pdf-search-match${searchIndex === this.selectedSearchIndex ? ' selected' : ''}`;
-      element.dataset.searchIndex = String(searchIndex);
-      element.style.left = `${fullLeft + perChar * itemStart}px`;
-      element.style.top = `${fullTop}px`;
-      element.style.width = `${Math.max(4, perChar * (itemEnd - itemStart))}px`;
-      element.style.height = `${fullHeight}px`;
-      page.highlightLayer.appendChild(element);
+        const fullLeft = item.rect.origin.x * this.scale;
+        const fullTop = item.rect.origin.y * this.scale;
+        const fullWidth = item.rect.size.width * this.scale;
+        const fullHeight = item.rect.size.height * this.scale;
+        const perChar = fullWidth / contentLength;
+        const element = document.createElement('div');
+        element.className = `pdf-search-match${searchIndex === this.selectedSearchIndex ? ' selected' : ''}`;
+        element.dataset.searchIndex = String(searchIndex);
+        element.style.left = `${fullLeft + perChar * itemStart}px`;
+        element.style.top = `${fullTop}px`;
+        element.style.width = `${Math.max(4, perChar * (itemEnd - itemStart))}px`;
+        element.style.height = `${fullHeight}px`;
+        page.highlightLayer.appendChild(element);
+      }
     });
   }
 
@@ -884,6 +912,106 @@ function textOffset(node: Node, offset: number, span: HTMLElement): number {
   if (node.nodeType === Node.TEXT_NODE) return Math.min(offset, node.textContent?.length ?? 0);
   if (node === span) return offset === 0 ? 0 : (span.textContent?.length ?? 0);
   return Math.min(offset, span.textContent?.length ?? 0);
+}
+
+function buildPdfSearchIndex(
+  textRects: any[],
+  insertItemGaps: boolean,
+  skipNonAsciiArtifacts: boolean
+): PdfSearchIndexChar[] {
+  const index: PdfSearchIndexChar[] = [];
+  for (let itemIndex = 0; itemIndex < textRects.length; itemIndex++) {
+    const content = String(textRects[itemIndex]?.content ?? '');
+    if (!content) continue;
+    const firstValue = firstSearchValue(content, skipNonAsciiArtifacts);
+    if (!firstValue) continue;
+    if (insertItemGaps && shouldInsertSearchGap(index, firstValue)) {
+      index.push({ value: ' ' });
+    }
+    for (let offset = 0; offset < content.length; offset++) {
+      appendSearchChar(index, content.charAt(offset), itemIndex, offset, skipNonAsciiArtifacts);
+    }
+  }
+  while (index.length) {
+    const last = index[index.length - 1];
+    if (!last || last.value !== ' ') break;
+    index.pop();
+  }
+  return index;
+}
+
+function firstSearchValue(content: string, skipNonAsciiArtifacts: boolean): string | undefined {
+  for (let offset = 0; offset < content.length; offset++) {
+    const value = searchCharValue(content.charAt(offset), skipNonAsciiArtifacts);
+    if (value) return value;
+  }
+  return undefined;
+}
+
+function shouldInsertSearchGap(index: PdfSearchIndexChar[], nextValue: string): boolean {
+  if (!index.length) return false;
+  const last = index[index.length - 1];
+  if (!last || last.value === ' ') return false;
+  return nextValue !== ' ';
+}
+
+function appendSearchChar(
+  index: PdfSearchIndexChar[],
+  char: string,
+  textItemIndex: number,
+  offset: number,
+  skipNonAsciiArtifacts: boolean
+): void {
+  const value = searchCharValue(char, skipNonAsciiArtifacts);
+  if (!value) return;
+  const last = index[index.length - 1];
+  if (value === ' ' && (!last || last.value === ' ')) return;
+  index.push({ value, textItemIndex, offset });
+}
+
+function searchCharValue(char: string, skipNonAsciiArtifacts: boolean): string | undefined {
+  if (isSearchWhitespace(char)) return ' ';
+  const codePoint = char.codePointAt(0);
+  if (typeof codePoint !== 'number') return undefined;
+  if (isPdfExtractionArtifact(codePoint, skipNonAsciiArtifacts)) return undefined;
+  return char.toLocaleLowerCase();
+}
+
+function isPdfExtractionArtifact(codePoint: number, skipNonAsciiArtifacts: boolean): boolean {
+  if (codePoint <= 0x1f || (codePoint >= 0x7f && codePoint <= 0x9f)) return true;
+  if (codePoint >= 0xe000 && codePoint <= 0xf8ff) return true;
+  return skipNonAsciiArtifacts && codePoint > 0x7f;
+}
+
+function segmentsForSearchRange(index: PdfSearchIndexChar[], from: number, to: number): PdfSearchSegment[] {
+  const segments: PdfSearchSegment[] = [];
+  for (let cursor = from; cursor < to; cursor++) {
+    const char = index[cursor];
+    if (typeof char?.textItemIndex !== 'number' || typeof char.offset !== 'number') continue;
+    const last = segments[segments.length - 1];
+    if (last && last.textItemIndex === char.textItemIndex && last.to === char.offset) {
+      last.to = char.offset + 1;
+    } else {
+      segments.push({
+        textItemIndex: char.textItemIndex,
+        from: char.offset,
+        to: char.offset + 1,
+      });
+    }
+  }
+  return segments;
+}
+
+function normalizeSearchText(text: string): string {
+  return text.replace(/\s+/g, ' ').trim().toLocaleLowerCase();
+}
+
+function isAsciiSearchQuery(text: string): boolean {
+  return /^[\x00-\x7f]*$/.test(text);
+}
+
+function isSearchWhitespace(char: string): boolean {
+  return /\s/.test(char);
 }
 
 function anchorKey(anchor: PdfAnchor): string {

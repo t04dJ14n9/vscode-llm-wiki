@@ -190,6 +190,10 @@
       setState: () => {},
     });
   </script>
-  <script src="/dist/pdf-viewer.js"></script>
+  <script>
+    const viewerScript = document.createElement('script');
+    viewerScript.src = `/dist/pdf-viewer.js?v=${Date.now()}`;
+    document.body.appendChild(viewerScript);
+  </script>
 </body>
 </html>
