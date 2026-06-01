@@ -117,6 +117,62 @@ test('pdf viewer can switch to two-page double-column layout', async ({ page }) 
   expect(layout.secondLeft).toBeGreaterThan(layout.firstLeft);
 });
 
+test('pdf viewer search bar finds text and uses compact VS Code find-widget layout', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await page.goto('http://localhost:8979/pdf-viewer.html?fixture=two-page');
+  await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 2/, { timeout: 10_000 });
+
+  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+F' : 'Control+F');
+  const searchPanel = page.locator('#pdf-search');
+  await expect(searchPanel).toBeVisible();
+
+  await page.locator('#pdf-search-input').fill('Page Two');
+  await expect(page.locator('.pdf-search-match')).toHaveCount(1);
+  await expect(page.locator('.pdf-search-match.selected')).toHaveCount(1);
+  await expect(page.locator('#pdf-search-count')).toHaveText('1 / 1');
+  await expect(page.locator('#page-info')).toHaveText(/Page 2 \/ 2/);
+
+  const metrics = await page.evaluate(() => {
+    const panel = document.querySelector<HTMLElement>('#pdf-search');
+    const viewer = document.querySelector<HTMLElement>('#viewer-container');
+    const input = document.querySelector<HTMLInputElement>('#pdf-search-input');
+    const buttons = Array.from(panel?.querySelectorAll<HTMLButtonElement>('button') ?? []);
+    if (!panel || !viewer || !input) return null;
+    const panelRect = panel.getBoundingClientRect();
+    const viewerRect = viewer.getBoundingClientRect();
+    const inputRect = input.getBoundingClientRect();
+    const selected = document.querySelector<HTMLElement>('.pdf-search-match.selected');
+    const selectedRect = selected?.getBoundingClientRect();
+    return {
+      panelWidth: Math.round(panelRect.width),
+      panelTopGap: Math.round(panelRect.top - viewerRect.top),
+      panelRightGap: Math.round(viewerRect.right - panelRect.right),
+      inputHeight: Math.round(inputRect.height),
+      selectedTop: Math.round(selectedRect?.top ?? 0),
+      selectedBottom: Math.round(selectedRect?.bottom ?? 0),
+      viewerTop: Math.round(viewerRect.top),
+      viewerBottom: Math.round(viewerRect.bottom),
+      buttonWidths: buttons.map(button => Math.round(button.getBoundingClientRect().width)),
+      buttonBackgroundImages: buttons.map(button => getComputedStyle(button).backgroundImage),
+      buttonColors: buttons.map(button => getComputedStyle(button).color),
+    };
+  });
+
+  expect(metrics).not.toBeNull();
+  expect(metrics!.panelWidth).toBeLessThanOrEqual(420);
+  expect(metrics!.panelTopGap).toBeGreaterThanOrEqual(6);
+  expect(metrics!.panelTopGap).toBeLessThanOrEqual(12);
+  expect(metrics!.panelRightGap).toBeGreaterThanOrEqual(6);
+  expect(metrics!.panelRightGap).toBeLessThanOrEqual(12);
+  expect(metrics!.inputHeight).toBeGreaterThanOrEqual(24);
+  expect(metrics!.inputHeight).toBeLessThanOrEqual(28);
+  expect(metrics!.selectedTop).toBeGreaterThan(metrics!.viewerTop);
+  expect(metrics!.selectedBottom).toBeLessThan(metrics!.viewerBottom);
+  expect(metrics!.buttonWidths.every(width => width <= 28)).toBe(true);
+  expect(metrics!.buttonBackgroundImages.every(image => image === 'none')).toBe(true);
+  expect(metrics!.buttonColors.every(color => color !== 'rgb(0, 0, 0)')).toBe(true);
+});
+
 test('pdf viewer renders reference overlays and opens markdown reference popovers', async ({ page }) => {
   await page.goto('http://localhost:8979/pdf-viewer.html');
   await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 1/, { timeout: 10_000 });

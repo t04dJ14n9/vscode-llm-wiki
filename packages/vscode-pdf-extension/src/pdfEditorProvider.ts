@@ -400,6 +400,14 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
     #toolbar { height: 34px; display: flex; gap: 6px; align-items: center; padding: 0 8px; border-bottom: 1px solid var(--vscode-panel-border); background: var(--vscode-sideBar-background); }
     #toolbar button { height: 24px; border: 1px solid var(--vscode-button-border, transparent); background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); border-radius: 4px; cursor: pointer; }
     #toolbar button[aria-pressed="true"] { background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
+    .pdf-search { position: fixed; top: 42px; right: 8px; z-index: 40; box-sizing: border-box; display: grid; grid-template-columns: minmax(128px, 1fr) 24px 24px minmax(44px, max-content) 24px; align-items: center; gap: 2px; width: min(420px, calc(100% - 16px)); min-height: 34px; padding: 4px; border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border, #454545)); border-radius: 3px; background: var(--vscode-editorWidget-background, var(--vscode-sideBar-background, #252526)); color: var(--vscode-editorWidget-foreground, var(--vscode-foreground, var(--vscode-editor-foreground, inherit))); box-shadow: 0 2px 8px var(--vscode-widget-shadow, rgba(0,0,0,.36)); font-family: var(--vscode-font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif); font-size: 12px; }
+    .pdf-search.hidden { display: none; }
+    .pdf-search input { box-sizing: border-box; width: 100%; height: 26px; min-width: 0; margin: 0; padding: 2px 6px; border: 1px solid var(--vscode-input-border, transparent); border-radius: 2px; outline: 0; background: var(--vscode-input-background, var(--vscode-editor-background)); color: var(--vscode-input-foreground, var(--vscode-editor-foreground)); font: inherit; }
+    .pdf-search input:focus { border-color: var(--vscode-focusBorder, var(--vscode-inputOption-activeBorder, #007fd4)); }
+    .pdf-search button { box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; min-width: 24px; margin: 0; padding: 0; border: 1px solid transparent; border-radius: 3px; appearance: none; -webkit-appearance: none; background: transparent; background-image: none; box-shadow: none; color: var(--vscode-icon-foreground, var(--vscode-foreground, var(--vscode-editor-foreground, inherit))); font: inherit; line-height: 1; white-space: nowrap; cursor: pointer; }
+    .pdf-search button:hover { background-color: var(--vscode-toolbar-hoverBackground, rgba(90,93,94,.31)); }
+    .pdf-search button:focus-visible { outline: 1px solid var(--vscode-focusBorder, #007fd4); outline-offset: -1px; }
+    .pdf-search .count { min-width: 44px; padding: 0 4px; color: var(--vscode-descriptionForeground, var(--vscode-editor-foreground)); text-align: center; white-space: nowrap; }
     #viewer-container { height: calc(100% - 35px); overflow: auto; }
     #page-container { display: flex; flex-direction: column; align-items: center; gap: 18px; padding: 18px; }
     #page-container.two-page { display: grid; grid-template-columns: repeat(2, max-content); align-items: start; justify-content: center; }
@@ -427,6 +435,8 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
     .annotation-highlight.annotated { background: rgba(255, 218, 80, .38); }
     .annotation-highlight.hover-active { filter: brightness(1.25) saturate(1.2); }
     .anchor-highlight { position: absolute; background: rgba(0, 150, 255, .35); border-radius: 2px; pointer-events: none; }
+    .pdf-search-match { position: absolute; border-radius: 2px; background: rgba(255, 214, 10, .40); outline: 1px solid rgba(255, 214, 10, .55); pointer-events: none; }
+    .pdf-search-match.selected { background: rgba(255, 140, 0, .45); outline-color: rgba(255, 140, 0, .85); }
     .selection-toolbar { position: absolute; transform: translateX(-50%); z-index: 20; display: flex; gap: 4px; padding: 4px; border: 1px solid var(--vscode-panel-border); border-radius: 6px; background: var(--vscode-editorWidget-background); box-shadow: 0 4px 16px rgba(0,0,0,.3); }
     .selection-toolbar button { border: 0; border-radius: 4px; padding: 4px 8px; background: var(--vscode-button-background); color: var(--vscode-button-foreground); cursor: pointer; }
     .selection-toolbar .secondary { background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); }
@@ -449,9 +459,17 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
     <button id="zoom-out">-</button>
     <button id="zoom-in">+</button>
     <button id="fit">Fit</button>
+    <button id="search-open" title="Find in PDF">Search</button>
     <button id="toggle-continuous" aria-pressed="true" title="Switch to page-turning mode">Continuous</button>
     <button id="toggle-spread" aria-pressed="false" title="Switch to two-page view">One Page</button>
     <span id="page-info"></span>
+  </div>
+  <div id="pdf-search" class="pdf-search hidden" role="search" aria-label="Find in PDF">
+    <input id="pdf-search-input" type="search" placeholder="Find" aria-label="Find in PDF" autocomplete="off">
+    <button id="pdf-search-prev" type="button" title="Previous match" aria-label="Previous match">↑</button>
+    <button id="pdf-search-next" type="button" title="Next match" aria-label="Next match">↓</button>
+    <span id="pdf-search-count" class="count" aria-live="polite"></span>
+    <button id="pdf-search-close" type="button" title="Close search" aria-label="Close search">×</button>
   </div>
   <div id="viewer-container"><div id="page-container"></div></div>
   <script nonce="${nonce}">window.__pdfiumWasmUrl = "${wasmUri}";</script>

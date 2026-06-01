@@ -28,6 +28,13 @@ interface ReferenceListItem {
   contextLine?: string;
 }
 
+interface PdfSearchMatch {
+  page: number;
+  textItemIndex: number;
+  from: number;
+  to: number;
+}
+
 interface PageState {
   pageNum: number;
   pageObj: any;
@@ -46,6 +53,9 @@ class PdfViewer {
   private readonly container = document.getElementById('viewer-container')!;
   private readonly pageContainer = document.getElementById('page-container')!;
   private readonly pageInfo = document.getElementById('page-info')!;
+  private readonly searchPanel = document.getElementById('pdf-search') as HTMLDivElement;
+  private readonly searchInput = document.getElementById('pdf-search-input') as HTMLInputElement;
+  private readonly searchCount = document.getElementById('pdf-search-count')!;
   private readonly pages = new Map<number, PageState>();
   private scale = 1.35;
   private currentPage = 1;
@@ -59,10 +69,15 @@ class PdfViewer {
   private popoverCleanup: (() => void) | null = null;
   private loading = false;
   private loaded = false;
+  private searchQuery = '';
+  private searchMatches: PdfSearchMatch[] = [];
+  private selectedSearchIndex = -1;
+  private searchRunId = 0;
 
   constructor() {
     this.setupMessages();
     this.setupToolbar();
+    this.setupSearch();
     this.pageContainer.addEventListener('mouseup', () => {
       setTimeout(() => this.handleSelection(), 40);
     });
@@ -114,9 +129,143 @@ class PdfViewer {
     document.getElementById('zoom-in')?.addEventListener('click', () => this.zoom(0.15));
     document.getElementById('zoom-out')?.addEventListener('click', () => this.zoom(-0.15));
     document.getElementById('fit')?.addEventListener('click', () => this.fitWidth());
+    document.getElementById('search-open')?.addEventListener('click', () => this.openSearch());
     document.getElementById('toggle-continuous')?.addEventListener('click', () => void this.toggleContinuousScroll());
     document.getElementById('toggle-spread')?.addEventListener('click', () => void this.toggleTwoPageView());
     this.updateToolbarState();
+  }
+
+  private setupSearch(): void {
+    this.searchInput.addEventListener('input', () => {
+      void this.updateSearch(this.searchInput.value);
+    });
+    this.searchInput.addEventListener('keydown', event => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        void this.stepSearch(event.shiftKey ? -1 : 1);
+      } else if (event.key === 'Escape') {
+        event.preventDefault();
+        this.closeSearch();
+      }
+    });
+    document.getElementById('pdf-search-prev')?.addEventListener('click', () => void this.stepSearch(-1));
+    document.getElementById('pdf-search-next')?.addEventListener('click', () => void this.stepSearch(1));
+    document.getElementById('pdf-search-close')?.addEventListener('click', () => this.closeSearch());
+    document.addEventListener('keydown', event => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'f') {
+        event.preventDefault();
+        this.openSearch();
+      } else if (event.key === 'Escape' && !this.searchPanel.classList.contains('hidden')) {
+        this.closeSearch();
+      }
+    });
+  }
+
+  private openSearch(): void {
+    this.searchPanel.classList.remove('hidden');
+    requestAnimationFrame(() => {
+      this.searchInput.focus();
+      this.searchInput.select();
+    });
+    if (this.searchInput.value.trim()) {
+      void this.updateSearch(this.searchInput.value);
+    }
+  }
+
+  private closeSearch(): void {
+    this.searchPanel.classList.add('hidden');
+    this.searchMatches = [];
+    this.selectedSearchIndex = -1;
+    this.searchRunId++;
+    this.updateSearchCount();
+    this.redrawAllSearchHighlights();
+  }
+
+  private async updateSearch(rawQuery: string): Promise<void> {
+    const runId = ++this.searchRunId;
+    const query = rawQuery.trim();
+    this.searchQuery = query;
+    if (!query) {
+      this.searchMatches = [];
+      this.selectedSearchIndex = -1;
+      this.updateSearchCount();
+      this.redrawAllSearchHighlights();
+      return;
+    }
+
+    await this.renderAllPagesForSearch();
+    if (runId !== this.searchRunId) return;
+
+    this.searchMatches = this.collectSearchMatches(query);
+    this.selectedSearchIndex = this.searchMatches.length > 0 ? 0 : -1;
+    this.redrawAllSearchHighlights();
+    if (this.selectedSearchIndex >= 0) {
+      await this.revealSearchMatch(this.selectedSearchIndex);
+    } else {
+      this.updateSearchCount();
+    }
+  }
+
+  private async stepSearch(direction: -1 | 1): Promise<void> {
+    if (!this.searchMatches.length && this.searchInput.value.trim()) {
+      await this.updateSearch(this.searchInput.value);
+      return;
+    }
+    if (!this.searchMatches.length) return;
+    const next = (this.selectedSearchIndex + direction + this.searchMatches.length) % this.searchMatches.length;
+    await this.revealSearchMatch(next);
+  }
+
+  private async renderAllPagesForSearch(): Promise<void> {
+    for (const pageNum of this.pages.keys()) {
+      await this.renderPage(pageNum);
+    }
+  }
+
+  private collectSearchMatches(query: string): PdfSearchMatch[] {
+    const needle = query.toLocaleLowerCase();
+    const matches: PdfSearchMatch[] = [];
+    for (const page of this.pages.values()) {
+      for (let itemIndex = 0; itemIndex < page.textRects.length; itemIndex++) {
+        const content = String(page.textRects[itemIndex]?.content ?? '');
+        const haystack = content.toLocaleLowerCase();
+        let from = haystack.indexOf(needle);
+        while (from >= 0) {
+          matches.push({
+            page: page.pageNum,
+            textItemIndex: itemIndex,
+            from,
+            to: from + query.length,
+          });
+          from = haystack.indexOf(needle, from + Math.max(1, needle.length));
+        }
+      }
+    }
+    return matches;
+  }
+
+  private async revealSearchMatch(index: number): Promise<void> {
+    const match = this.searchMatches[index];
+    if (!match) return;
+    this.selectedSearchIndex = index;
+    this.currentPage = match.page;
+    this.applyViewMode();
+    await this.renderPage(match.page);
+    this.redrawAllSearchHighlights();
+    this.updatePageInfo();
+    this.updateSearchCount();
+    const element = this.pageContainer.querySelector<HTMLElement>(`[data-search-index="${index}"]`);
+    element?.scrollIntoView({ behavior: 'auto', block: 'center', inline: 'center' });
+  }
+
+  private updateSearchCount(): void {
+    if (!this.searchQuery) {
+      this.searchCount.textContent = '';
+    } else if (!this.searchMatches.length) {
+      this.searchCount.textContent = 'No results';
+    } else {
+      this.searchCount.textContent = `${this.selectedSearchIndex + 1} / ${this.searchMatches.length}`;
+    }
   }
 
   private async loadPdf(base64Data: string): Promise<void> {
@@ -242,6 +391,7 @@ class PdfViewer {
         state.textLayer.appendChild(span);
       });
       this.drawHighlightsForPage(pageNum);
+      this.drawSearchHighlightsForPage(pageNum);
     } catch (error) {
       console.error(`Failed to render page ${pageNum}`, error);
       state.rendered = false;
@@ -471,6 +621,42 @@ class PdfViewer {
     }
   }
 
+  private drawSearchHighlightsForPage(pageNum: number): void {
+    const page = this.pages.get(pageNum);
+    if (!page?.textRects.length) return;
+    page.highlightLayer.querySelectorAll('.pdf-search-match').forEach(element => element.remove());
+
+    this.searchMatches.forEach((match, searchIndex) => {
+      if (match.page !== pageNum) return;
+      const item = page.textRects[match.textItemIndex];
+      if (!item?.content) return;
+      const contentLength = item.content.length;
+      const itemStart = Math.max(0, Math.min(match.from, contentLength));
+      const itemEnd = Math.max(itemStart, Math.min(match.to, contentLength));
+      if (itemEnd <= itemStart) return;
+
+      const fullLeft = item.rect.origin.x * this.scale;
+      const fullTop = item.rect.origin.y * this.scale;
+      const fullWidth = item.rect.size.width * this.scale;
+      const fullHeight = item.rect.size.height * this.scale;
+      const perChar = fullWidth / contentLength;
+      const element = document.createElement('div');
+      element.className = `pdf-search-match${searchIndex === this.selectedSearchIndex ? ' selected' : ''}`;
+      element.dataset.searchIndex = String(searchIndex);
+      element.style.left = `${fullLeft + perChar * itemStart}px`;
+      element.style.top = `${fullTop}px`;
+      element.style.width = `${Math.max(4, perChar * (itemEnd - itemStart))}px`;
+      element.style.height = `${fullHeight}px`;
+      page.highlightLayer.appendChild(element);
+    });
+  }
+
+  private redrawAllSearchHighlights(): void {
+    for (const [pageNum, page] of this.pages) {
+      if (page.rendered) this.drawSearchHighlightsForPage(pageNum);
+    }
+  }
+
   private showReferencePopover(anchor: PdfAnchor, items: ReferenceListItem[]): void {
     this.dismissPopover();
     if (!this.pendingPopoverAnchor || !this.pendingPopoverElement) return;
@@ -593,6 +779,7 @@ class PdfViewer {
     this.applyViewMode();
     await this.renderVisiblePages();
     this.redrawAllHighlights();
+    this.redrawAllSearchHighlights();
     this.updatePageInfo();
   }
 
