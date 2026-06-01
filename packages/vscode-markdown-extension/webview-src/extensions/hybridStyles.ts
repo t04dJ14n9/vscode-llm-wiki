@@ -487,9 +487,9 @@ export function hybridStyles() {
       boxSizing: 'border-box',
       borderTopLeftRadius: '4px',
       borderTopRightRadius: '4px',
-      borderTop: '1px solid rgba(127,127,127,.22)',
       borderLeft: '1px solid rgba(127,127,127,.22)',
       borderRight: '1px solid rgba(127,127,127,.22)',
+      boxShadow: 'inset 0 1px rgba(127,127,127,.22)',
       backgroundColor: 'var(--vscode-textCodeBlock-background, rgba(127,127,127,.12))',
       overflow: 'hidden',
     },
@@ -553,14 +553,14 @@ export function hybridStyles() {
       color: 'var(--vscode-textPreformat-foreground, var(--vscode-editor-foreground))',
     },
     '.cm-hybrid-codeblock-active-opening-line': {
-      borderTop: '1px solid rgba(127,127,127,.22)',
       borderTopLeftRadius: '4px',
       borderTopRightRadius: '4px',
+      boxShadow: 'inset 0 1px rgba(127,127,127,.22)',
     },
     '.cm-hybrid-codeblock-active-closing-line': {
-      borderBottom: '1px solid rgba(127,127,127,.22)',
       borderBottomLeftRadius: '4px',
       borderBottomRightRadius: '4px',
+      boxShadow: 'inset 0 -1px rgba(127,127,127,.22)',
     },
     '.cm-hybrid-prism-token.token.comment, .cm-hybrid-prism-token.token.prolog, .cm-hybrid-prism-token.token.doctype, .cm-hybrid-prism-token.token.cdata': {
       color: 'var(--vscode-symbolIcon-colorForeground, #6a9955)',
@@ -598,7 +598,7 @@ export function hybridStyles() {
       borderBottomRightRadius: '4px',
       borderLeft: '1px solid rgba(127,127,127,.22)',
       borderRight: '1px solid rgba(127,127,127,.22)',
-      borderBottom: '1px solid rgba(127,127,127,.22)',
+      boxShadow: 'inset 0 -1px rgba(127,127,127,.22)',
       backgroundColor: 'var(--vscode-textCodeBlock-background, rgba(127,127,127,.12))',
     },
     '.cm-hybrid-footnote-ref': {

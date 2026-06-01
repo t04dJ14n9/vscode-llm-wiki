@@ -4912,13 +4912,14 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
         borderTopColor: style.borderTopColor,
         borderTopStyle: style.borderTopStyle,
         borderTopWidth: style.borderTopWidth,
+        boxShadow: style.boxShadow,
       };
     });
-    expect(codeSurface.borderTopStyle).toBe('solid');
-    expect(codeSurface.borderTopWidth).toBe('1px');
+    expect(codeSurface.borderTopWidth).toBe('0px');
     expect(codeSurface.borderLeftStyle).toBe('solid');
     expect(codeSurface.borderLeftWidth).toBe('1px');
-    expect(codeSurface.borderTopColor).toBe('rgba(127, 127, 127, 0.22)');
+    expect(codeSurface.boxShadow).toContain('rgba(127, 127, 127, 0.22)');
+    expect(codeSurface.boxShadow).toContain('inset');
 
     const codeFrameGeometry = await page.evaluate(() => {
       const elements = [
@@ -5104,6 +5105,7 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
           borderTopColor: style.borderTopColor,
           borderTopStyle: style.borderTopStyle,
           borderTopWidth: style.borderTopWidth,
+          boxShadow: style.boxShadow,
           backgroundColor: style.backgroundColor,
         };
       });
@@ -5118,9 +5120,9 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
     });
 
     expect(activeFrame.opening.text).toContain('```ts');
-    expect(activeFrame.opening.borderTopStyle).toBe('solid');
-    expect(activeFrame.opening.borderTopWidth).toBe('1px');
-    expect(activeFrame.opening.borderTopColor).toBe('rgba(127, 127, 127, 0.22)');
+    expect(activeFrame.opening.borderTopWidth).toBe('0px');
+    expect(activeFrame.opening.boxShadow).toContain('rgba(127, 127, 127, 0.22)');
+    expect(activeFrame.opening.boxShadow).toContain('inset');
     expect(activeFrame.opening.borderLeftStyle).toBe('solid');
     expect(activeFrame.opening.borderLeftWidth).toBe('1px');
     expect(activeFrame.opening.borderLeftColor).toBe('rgba(127, 127, 127, 0.22)');
@@ -5149,6 +5151,76 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
       const after = contentTopsWithFirstContentActive.find(line => line.text === before.text);
       expect(after?.top).toBeDefined();
       expect(Math.abs((after?.top ?? 0) - before.top)).toBeLessThanOrEqual(0.5);
+    }
+  });
+
+  test('code block frame strokes do not add vertical height to rendered or active fence rows', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+    await expect(page.getByText('Test fixture ready')).toBeVisible();
+
+    const doc = [
+      'Normal before',
+      '',
+      '```python',
+      'm = -inf',
+      'd = 0',
+      '```',
+      '',
+      'Normal after',
+    ].join('\n');
+
+    await page.evaluate((text) => {
+      window.postMessage({ type: 'setText', text }, '*');
+    }, doc);
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+
+    const measureRows = async (lineNumber: number) => page.evaluate((lineNumber) => {
+      const view = window.__cmView;
+      const line = view.state.doc.line(lineNumber);
+      view.dispatch({ selection: { anchor: line.from + Math.min(1, line.length) } });
+      view.focus();
+
+      const measure = (element: Element | null) => {
+        if (!(element instanceof HTMLElement)) return null;
+        const rect = element.getBoundingClientRect();
+        const style = getComputedStyle(element);
+        return {
+          className: element.className,
+          text: element.textContent ?? '',
+          height: rect.height,
+          borderTopWidth: style.borderTopWidth,
+          borderBottomWidth: style.borderBottomWidth,
+          boxShadow: style.boxShadow,
+        };
+      };
+      const lines = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'));
+      return {
+        selectedLine: view.state.doc.lineAt(view.state.selection.main.head).number,
+        normal: measure(lines.find(element => element.textContent?.includes('Normal before')) ?? null),
+        headerLine: measure(document.querySelector('.cm-line:has(.cm-hybrid-codeblock)')),
+        openingLine: measure(lines.find(element => element.textContent?.includes('```python')) ?? null),
+        footerLine: measure(document.querySelector('.cm-line:has(.cm-hybrid-codeblock-footer)')),
+        closingLine: measure(lines.find(element => element.textContent === '```') ?? null),
+      };
+    }, lineNumber);
+
+    const inactiveRows = await measureRows(1);
+    const activeOpeningRows = await measureRows(3);
+    const activeClosingRows = await measureRows(6);
+    const normalHeight = inactiveRows.normal?.height ?? 0;
+
+    expect(inactiveRows.headerLine?.height).toBeDefined();
+    expect(inactiveRows.footerLine?.height).toBeDefined();
+    expect(activeOpeningRows.openingLine?.height).toBeDefined();
+    expect(activeClosingRows.closingLine?.height).toBeDefined();
+
+    for (const row of [
+      inactiveRows.headerLine,
+      inactiveRows.footerLine,
+      activeOpeningRows.openingLine,
+      activeClosingRows.closingLine,
+    ]) {
+      expect(Math.abs((row?.height ?? 0) - normalHeight)).toBeLessThanOrEqual(0.5);
     }
   });
 
