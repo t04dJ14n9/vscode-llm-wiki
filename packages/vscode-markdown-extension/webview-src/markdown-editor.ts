@@ -1,5 +1,7 @@
 /// <reference path="./vscode.d.ts" />
 
+import { acceptCompletion, autocompletion, startCompletion } from '@codemirror/autocomplete';
+import type { Completion, CompletionContext, CompletionResult } from '@codemirror/autocomplete';
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
 import { markdown } from '@codemirror/lang-markdown';
 import { languages } from '@codemirror/language-data';
@@ -7,7 +9,7 @@ import { bracketMatching, defaultHighlightStyle, syntaxHighlighting } from '@cod
 import { Compartment, EditorSelection, EditorState, Prec } from '@codemirror/state';
 import type { Range, Text } from '@codemirror/state';
 import { search, searchKeymap } from '@codemirror/search';
-import { vim, Vim } from '@replit/codemirror-vim';
+import { getCM, vim, Vim } from '@replit/codemirror-vim';
 import type { CodeMirrorV, InputStateInterface, MotionArgs, Pos, vimState } from '@replit/codemirror-vim';
 import {
   Decoration,
@@ -91,6 +93,26 @@ class HlLinkWidget extends WidgetType {
   }
 }
 
+class TextReplacementWidget extends WidgetType {
+  constructor(readonly text: string) {
+    super();
+  }
+
+  override toDOM(): HTMLElement {
+    const span = document.createElement('span');
+    span.textContent = this.text;
+    return span;
+  }
+
+  override eq(other: TextReplacementWidget): boolean {
+    return this.text === other.text;
+  }
+
+  override ignoreEvent(): boolean {
+    return true;
+  }
+}
+
 const hlLinkRendering = ViewPlugin.fromClass(class {
   decorations: DecorationSet;
 
@@ -119,6 +141,8 @@ let currentNotePath: string | undefined;
 let knownNotePaths: string[] = [];
 let humanLearningVimMotionsInstalled = false;
 let humanLearningVimExCommandsInstalled = false;
+let humanLearningVimMarkdownKeysInstalled = false;
+let wikiLinkCompletionPending = false;
 
 type EditorCommand = (view: EditorView) => boolean;
 type EditorPresentationSettings = Partial<Record<'fontFamily' | 'fontSize' | 'fontWeight' | 'lineHeight' | 'letterSpacing', string>>;
@@ -178,6 +202,7 @@ const obsidianLikeCommands: Record<string, EditorCommand> = {
 
 installHumanLearningVimMotions();
 installHumanLearningVimExCommands();
+installHumanLearningVimMarkdownKeys();
 
 function installHumanLearningVimMotions(): void {
   if (humanLearningVimMotionsInstalled) return;
@@ -205,6 +230,20 @@ function installHumanLearningVimExCommands(): void {
     vscode.postMessage({ type: 'saveAndClose' });
   });
   humanLearningVimExCommandsInstalled = true;
+}
+
+function installHumanLearningVimMarkdownKeys(): void {
+  if (humanLearningVimMarkdownKeysInstalled) return;
+
+  Vim.defineAction('humanLearningInsertOpenBracket', cm => {
+    insertMarkdownPunctuationFromVimAction(cm, '[');
+  });
+  Vim.defineAction('humanLearningInsertDash', cm => {
+    insertMarkdownPunctuationFromVimAction(cm, '-');
+  });
+  Vim.mapCommand('[', 'action', 'humanLearningInsertOpenBracket', {}, { context: 'normal', isEdit: true });
+  Vim.mapCommand('-', 'action', 'humanLearningInsertDash', {}, { context: 'normal', isEdit: true });
+  humanLearningVimMarkdownKeysInstalled = true;
 }
 
 function moveByDocumentLines(
@@ -272,10 +311,18 @@ function createView(text: string, title?: string): EditorView {
         syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
         bracketMatching(),
         search({ top: true }),
+        autocompletion({
+          activateOnTyping: true,
+          icons: false,
+          interactionDelay: 0,
+          override: [wikiLinkCompletionSource],
+        }),
         hybridRendering(),
         hlLinkRendering,
         Prec.highest(keymap.of([
-          { key: 'Enter', run: handleObsidianEnter, preventDefault: true },
+          { key: 'Ctrl-o', run: handleControlO, preventDefault: true },
+          { key: 'Ctrl-O', run: handleControlO, preventDefault: true },
+          { key: 'Enter', run: editorView => acceptCompletion(editorView) || handleObsidianEnter(editorView), preventDefault: true },
           { key: 'Backspace', run: handleObsidianListBackspace, preventDefault: true },
         ])),
         EditorView.domEventHandlers({
@@ -299,6 +346,9 @@ function createView(text: string, title?: string): EditorView {
           }
           if (update.docChanged || update.selectionSet) {
             postSelection(update.view);
+          }
+          if (update.docChanged && !applyingHostUpdate) {
+            scheduleWikiLinkCompletion(update.view);
           }
         }),
         Prec.high(keymap.of([
@@ -509,6 +559,28 @@ function createView(text: string, title?: string): EditorView {
             backgroundColor: 'var(--vscode-inputOption-activeBackground, rgba(0, 127, 212, 0.18))',
             color: 'var(--vscode-inputOption-activeForeground, var(--vscode-foreground, inherit))',
           },
+          '.cm-tooltip-autocomplete': {
+            overflow: 'hidden',
+            border: '1px solid var(--vscode-widget-border, var(--vscode-panel-border, #454545))',
+            borderRadius: '4px',
+            backgroundColor: 'var(--vscode-editorWidget-background, var(--vscode-sideBar-background, #252526))',
+            boxShadow: '0 2px 8px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.36))',
+            color: 'var(--vscode-editorWidget-foreground, var(--vscode-editor-foreground, inherit))',
+            fontFamily: 'var(--vscode-font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif)',
+            fontSize: '12px',
+          },
+          '.cm-tooltip-autocomplete > ul': {
+            maxHeight: '14rem',
+            minWidth: '14rem',
+          },
+          '.cm-tooltip-autocomplete ul li[role="option"]': {
+            padding: '3px 8px',
+            lineHeight: '1.45',
+          },
+          '.cm-tooltip-autocomplete ul li[aria-selected]': {
+            backgroundColor: 'var(--vscode-list-activeSelectionBackground, var(--vscode-list-hoverBackground, rgba(90, 93, 94, 0.31)))',
+            color: 'var(--vscode-list-activeSelectionForeground, var(--vscode-editor-foreground, inherit))',
+          },
           '.cm-hl-link': {
             display: 'inline',
             maxWidth: '32rem',
@@ -548,6 +620,11 @@ function createView(text: string, title?: string): EditorView {
             textDecoration: 'underline',
             textDecorationThickness: '1.5px',
             textUnderlineOffset: '2px',
+          },
+          '.cm-active-link-label.cm-active-link-label *': {
+            color: 'inherit',
+            opacity: '1',
+            fontWeight: 'inherit',
           },
           '.cm-active-external-link::after': {
             content: '"↗"',
@@ -628,6 +705,7 @@ function createView(text: string, title?: string): EditorView {
   (window as MarkdownEditorTestWindow).__cmView = editorView;
   postSelection(editorView);
   queueInitialFocus(editorView, { retries: typeof title !== 'string' });
+  ensureVimInsertMode(editorView);
   return editorView;
 }
 
@@ -1486,6 +1564,107 @@ function followLinkAtCursor(editorView: EditorView): boolean {
   return followLinkAtPosition(editorView, cursor);
 }
 
+function insertMarkdownPunctuationFromVimAction(cm: CodeMirrorV, text: '[' | '-'): void {
+  const editorView = cm.cm6;
+  editorView.dispatch(editorView.state.changeByRange(range => ({
+    changes: { from: range.from, to: range.to, insert: text },
+    range: EditorSelection.cursor(range.from + text.length),
+  })), { scrollIntoView: true });
+  enterVimInsertMode(cm);
+  scheduleWikiLinkCompletion(editorView);
+}
+
+function handleControlO(editorView: EditorView): boolean {
+  editorView.focus();
+  return true;
+}
+
+function ensureVimInsertMode(editorView: EditorView): void {
+  if (!vimModeEnabled) return;
+  if (enterVimInsertModeForView(editorView)) return;
+
+  queueMicrotask(() => {
+    if (vimModeEnabled) enterVimInsertModeForView(editorView);
+  });
+}
+
+function enterVimInsertModeForView(editorView: EditorView): boolean {
+  const cm = getCM(editorView) as CodeMirrorV | null;
+  if (!cm?.state.vim) return false;
+  editorView.focus();
+  enterVimInsertMode(cm);
+  return true;
+}
+
+function enterVimInsertMode(cm: CodeMirrorV): void {
+  if (cm.state.vim.insertMode) return;
+  Vim.handleKey(cm, 'i', 'keyboard');
+}
+
+function wikiLinkCompletionSource(context: CompletionContext): CompletionResult | null {
+  const openWikiLink = openWikiLinkBeforePosition(context.state, context.pos);
+  if (!openWikiLink) return null;
+
+  const options = wikiLinkCompletionOptions();
+  if (options.length === 0) return null;
+
+  return {
+    from: openWikiLink.from,
+    to: context.pos,
+    options,
+    validFor: /^[^\]\|\n]*$/,
+  };
+}
+
+function openWikiLinkBeforePosition(state: EditorState, position: number): { from: number } | null {
+  const line = state.doc.lineAt(position);
+  const beforeCursor = line.text.slice(0, position - line.from);
+  const openerIndex = beforeCursor.lastIndexOf('[[');
+  if (openerIndex < 0) return null;
+  if (openerIndex > 0 && beforeCursor[openerIndex - 1] === '!') return null;
+
+  const query = beforeCursor.slice(openerIndex + 2);
+  if (query.includes(']') || query.includes('|') || query.includes('\n')) return null;
+
+  return { from: line.from + openerIndex + 2 };
+}
+
+function scheduleWikiLinkCompletion(editorView: EditorView): void {
+  if (wikiLinkCompletionPending) return;
+  wikiLinkCompletionPending = true;
+  queueMicrotask(() => {
+    wikiLinkCompletionPending = false;
+    if (!openWikiLinkBeforePosition(editorView.state, editorView.state.selection.main.head)) return;
+    if (wikiLinkCompletionOptions().length === 0) return;
+    startCompletion(editorView);
+  });
+}
+
+function wikiLinkCompletionOptions(): Completion[] {
+  const labels = new Set<string>();
+  for (const notePath of knownNotePaths) {
+    const label = wikiNoteLabelFromTarget(notePath);
+    if (label.length === 0) continue;
+    labels.add(label);
+  }
+
+  return [...labels]
+    .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
+    .map(label => ({
+      label,
+      type: 'text',
+      apply: (editorView: EditorView, _completion: Completion, from: number, to: number) => {
+        const closingAlreadyPresent = editorView.state.doc.sliceString(to, Math.min(to + 2, editorView.state.doc.length)) === ']]';
+        const insert = closingAlreadyPresent ? label : `${label}]]`;
+        editorView.dispatch({
+          changes: { from, to, insert },
+          selection: EditorSelection.cursor(from + label.length + 2),
+          scrollIntoView: true,
+        });
+      },
+    }));
+}
+
 function followLinkAtPosition(editorView: EditorView, position: number): boolean {
   const line = editorView.state.doc.lineAt(position);
   const offset = position - line.from;
@@ -1572,8 +1751,10 @@ window.addEventListener('message', event => {
         return;
       }
       applyingHostUpdate = true;
+      const selection = preserveSelectionByLineAndColumn(view.state, message.text);
       view.dispatch({
         changes: { from: 0, to: current.length, insert: message.text },
+        selection,
         effects: documentTitle === undefined ? undefined : setDocumentTitle.of(documentTitle),
       });
       applyingHostUpdate = false;
@@ -1628,6 +1809,7 @@ window.addEventListener('message', event => {
         scrollIntoView: true,
       });
       view.focus();
+      ensureVimInsertMode(view);
       break;
   }
 });
@@ -1653,12 +1835,77 @@ function applyEditorPresentationSettings(settings: unknown): void {
   }
 }
 
+interface LineColumn {
+  line: number;
+  column: number;
+}
+
+interface SelectionLineColumnRange {
+  anchor: LineColumn;
+  head: LineColumn;
+}
+
+function preserveSelectionByLineAndColumn(state: EditorState, nextText: string): EditorSelection {
+  const ranges = state.selection.ranges.map(range => ({
+    anchor: documentPositionToLineColumn(state.doc, range.anchor),
+    head: documentPositionToLineColumn(state.doc, range.head),
+  }));
+  return restoreSelectionByLineAndColumn(nextText, ranges, state.selection.mainIndex);
+}
+
+function documentPositionToLineColumn(doc: Text, position: number): LineColumn {
+  const line = doc.lineAt(position);
+  return {
+    line: line.number,
+    column: position - line.from,
+  };
+}
+
+function restoreSelectionByLineAndColumn(
+  text: string,
+  ranges: SelectionLineColumnRange[],
+  mainIndex: number,
+): EditorSelection {
+  const lineStarts = lineStartOffsets(text);
+  const selectionRanges = ranges.length > 0
+    ? ranges.map(range => EditorSelection.range(
+      lineColumnToDocumentPosition(text, lineStarts, range.anchor),
+      lineColumnToDocumentPosition(text, lineStarts, range.head),
+    ))
+    : [EditorSelection.cursor(0)];
+  return EditorSelection.create(
+    selectionRanges,
+    Math.min(Math.max(0, mainIndex), selectionRanges.length - 1),
+  );
+}
+
+function lineStartOffsets(text: string): number[] {
+  const starts = [0];
+  for (let index = 0; index < text.length; index++) {
+    if (text[index] === '\n') starts.push(index + 1);
+  }
+  return starts;
+}
+
+function lineColumnToDocumentPosition(
+  text: string,
+  lineStarts: number[],
+  location: LineColumn,
+): number {
+  const lineIndex = Math.min(Math.max(1, location.line), lineStarts.length) - 1;
+  const lineStart = lineStarts[lineIndex] ?? 0;
+  const nextLineStart = lineStarts[lineIndex + 1];
+  const lineEnd = nextLineStart === undefined ? text.length : nextLineStart - 1;
+  return lineStart + Math.min(Math.max(0, location.column), Math.max(0, lineEnd - lineStart));
+}
+
 function applyVimMode(editorView: EditorView, enabled: boolean): void {
   vimModeEnabled = enabled;
   editorView.dispatch({
     effects: vimModeCompartment.reconfigure(enabled ? [vim()] : []),
   });
   editorView.focus();
+  ensureVimInsertMode(editorView);
 }
 
 function buildDecorations(view: EditorView): DecorationSet {
@@ -1666,6 +1913,7 @@ function buildDecorations(view: EditorView): DecorationSet {
 
   const decorations: Range<Decoration>[] = [];
   const activeLines = getActiveLines(view);
+  const activeSelectionRanges = getActiveSelectionRanges(view);
   const referenceDefinitions = markdownReferenceDefinitions(view.state.doc.toString());
 
   for (const { from, to } of view.visibleRanges) {
@@ -1677,7 +1925,7 @@ function buildDecorations(view: EditorView): DecorationSet {
         continue;
       }
       if (activeLines.has(line.number)) {
-        collectActiveLineDecorations(line.from, line.text, referenceDefinitions, decorations);
+        collectActiveLineDecorations(line.from, line.text, referenceDefinitions, activeSelectionRanges, decorations);
       } else {
         collectLineDecorations(line.from, line.text, referenceDefinitions, decorations);
       }
@@ -1786,6 +2034,7 @@ function collectActiveLineDecorations(
   lineFrom: number,
   text: string,
   referenceDefinitions: ReturnType<typeof markdownReferenceDefinitions>,
+  activeSelectionRanges: { from: number; to: number }[],
   decorations: Range<Decoration>[],
 ): void {
   const reserved: { from: number; to: number }[] = [];
@@ -1822,16 +2071,21 @@ function collectActiveLineDecorations(
 
   for (const match of text.matchAll(/\[\[([^\]]+)\]\]/g)) {
     if (isEscapedAt(text, match.index ?? 0)) continue;
-    const target = match[1] ?? '';
-    if (target.trim().length === 0) continue;
+    const rawTarget = match[1] ?? '';
+    if (rawTarget.trim().length === 0) continue;
     const sourceFrom = lineFrom + (match.index ?? 0);
     const sourceTo = sourceFrom + match[0].length;
     if (inlineCodeSpans.some(span => sourceFrom < span.to && sourceTo > span.from)) continue;
     if ((match.index ?? 0) > 0 && text[(match.index ?? 0) - 1] === '!') continue;
-    const from = lineFrom + (match.index ?? 0) + 2;
-    const to = from + target.length;
-    decorations.push(activeLinkLabelMark.range(from, to));
-    reserved.push({ from, to });
+    const target = parseWikiLinkTarget(rawTarget, currentNotePath, knownNotePaths);
+    if (!target) continue;
+    if (selectionTouchesSource(activeSelectionRanges, sourceFrom, sourceTo)) {
+      decorations.push(activeLinkLabelMark.range(sourceFrom, sourceTo));
+      reserved.push({ from: sourceFrom, to: sourceTo });
+      rawLinkSourceSpans.push({ from: sourceFrom, to: sourceTo });
+      continue;
+    }
+    addActiveWikiLinkDecorations(rawTarget, target.label, sourceFrom, sourceTo, decorations, reserved);
     rawLinkSourceSpans.push({ from: sourceFrom, to: sourceTo });
   }
 
@@ -1847,6 +2101,125 @@ function collectActiveLineDecorations(
   addActiveDelimitedMarks(lineFrom, text, /(?<![A-Za-z0-9_])_(?=\S)(.+?\S)_(?![A-Za-z0-9_])/g, 1, [activeItalicMark], decorations, reserved);
   addActiveDelimitedMarks(lineFrom, text, /~~(?=\S)(.+?\S)~~/g, 2, [activeStrikeMark], decorations, reserved);
   addActiveDelimitedMarks(lineFrom, text, /==(?=\S)(.+?\S)==/g, 2, [activeHighlightMark], decorations, reserved);
+}
+
+interface ActiveWikiLinkDisplayPlan {
+  labelRanges: { from: number; to: number }[];
+  replacements: { from: number; to: number; text?: string }[];
+}
+
+function addActiveWikiLinkDecorations(
+  rawTarget: string,
+  label: string,
+  sourceFrom: number,
+  sourceTo: number,
+  decorations: Range<Decoration>[],
+  reserved: { from: number; to: number }[],
+): void {
+  const plan = activeWikiLinkDisplayPlan(rawTarget, label, sourceFrom, sourceTo);
+  for (const replacement of plan.replacements) {
+    if (replacement.from >= replacement.to) continue;
+    decorations.push(Decoration.replace({
+      widget: replacement.text == null ? undefined : new TextReplacementWidget(replacement.text),
+    }).range(replacement.from, replacement.to));
+    reserved.push({ from: replacement.from, to: replacement.to });
+  }
+  for (const range of plan.labelRanges) {
+    if (range.from >= range.to) continue;
+    decorations.push(activeLinkLabelMark.range(range.from, range.to));
+    reserved.push(range);
+  }
+}
+
+function activeWikiLinkDisplayPlan(
+  rawTarget: string,
+  label: string,
+  sourceFrom: number,
+  sourceTo: number,
+): ActiveWikiLinkDisplayPlan {
+  const innerFrom = sourceFrom + 2;
+  const innerTo = sourceTo - 2;
+  const aliasSeparator = rawTarget.indexOf('|');
+  if (aliasSeparator >= 0) {
+    const alias = rawTarget.slice(aliasSeparator + 1);
+    const labelIndex = Math.max(0, alias.indexOf(label));
+    const labelFrom = innerFrom + aliasSeparator + 1 + labelIndex;
+    const labelTo = labelFrom + label.length;
+    return {
+      labelRanges: [{ from: labelFrom, to: labelTo }],
+      replacements: [
+        { from: sourceFrom, to: labelFrom },
+        { from: labelTo, to: sourceTo },
+      ],
+    };
+  }
+
+  const [noteTarget, headingTarget] = splitOnce(rawTarget, '#');
+  const noteLabel = noteTarget.trim().length > 0 ? wikiNoteLabelFromTarget(noteTarget) : undefined;
+  const headingLabel = headingTarget?.trim();
+
+  if (noteLabel && headingLabel) {
+    const noteStart = rawTarget.lastIndexOf(noteLabel, noteTarget.length);
+    const hashIndex = rawTarget.indexOf('#', noteTarget.length);
+    const headingStart = rawTarget.indexOf(headingLabel, hashIndex + 1);
+    if (noteStart >= 0 && hashIndex >= 0 && headingStart >= 0) {
+      const noteFrom = innerFrom + noteStart;
+      const noteTo = noteFrom + noteLabel.length;
+      const hashFrom = innerFrom + hashIndex;
+      const headingFrom = innerFrom + headingStart;
+      const headingTo = headingFrom + headingLabel.length;
+      return {
+        labelRanges: [
+          { from: noteFrom, to: noteTo },
+          { from: headingFrom, to: headingTo },
+        ],
+        replacements: [
+          { from: sourceFrom, to: noteFrom },
+          { from: noteTo, to: hashFrom },
+          { from: hashFrom, to: hashFrom + 1, text: ' > ' },
+          { from: headingTo, to: sourceTo },
+        ],
+      };
+    }
+  }
+
+  const visibleLabel = headingLabel && !noteLabel ? headingLabel : noteLabel ?? label;
+  const labelStart = rawTarget.lastIndexOf(visibleLabel);
+  if (labelStart >= 0) {
+    const labelFrom = innerFrom + labelStart;
+    const labelTo = labelFrom + visibleLabel.length;
+    return {
+      labelRanges: [{ from: labelFrom, to: labelTo }],
+      replacements: [
+        { from: sourceFrom, to: labelFrom },
+        { from: labelTo, to: sourceTo },
+      ],
+    };
+  }
+
+  return {
+    labelRanges: [{ from: innerFrom, to: innerTo }],
+    replacements: [
+      { from: sourceFrom, to: innerFrom },
+      { from: innerTo, to: sourceTo },
+    ],
+  };
+}
+
+function wikiNoteLabelFromTarget(noteTarget: string): string {
+  const segments = noteTarget
+    .replace(/\\/g, '/')
+    .split('/')
+    .map(segment => segment.trim())
+    .filter(Boolean);
+  const fileName = segments.at(-1) ?? noteTarget.trim();
+  return fileName.replace(/\.md$/i, '');
+}
+
+function splitOnce(input: string, separator: string): [string, string | undefined] {
+  const index = input.indexOf(separator);
+  if (index < 0) return [input, undefined];
+  return [input.slice(0, index), input.slice(index + separator.length)];
 }
 
 function addActiveDisplayMathMarks(
@@ -2021,6 +2394,23 @@ function getActiveLines(view: EditorView): Set<number> {
     for (let line = start; line <= end; line++) active.add(line);
   }
   return active;
+}
+
+function getActiveSelectionRanges(view: EditorView): { from: number; to: number }[] {
+  return view.state.selection.ranges.map(range => ({ from: range.from, to: range.to }));
+}
+
+function selectionTouchesSource(
+  ranges: { from: number; to: number }[],
+  sourceFrom: number,
+  sourceTo: number,
+): boolean {
+  return ranges.some(range => {
+    if (range.from === range.to) {
+      return range.from >= sourceFrom && range.from <= sourceTo;
+    }
+    return range.from < sourceTo && range.to > sourceFrom;
+  });
 }
 
 function isExternalUri(uri: string): boolean {

@@ -173,9 +173,10 @@ class PdfViewer {
 
   private openSearch(): void {
     this.searchPanel.classList.remove('hidden');
+    const valueBeforeFocus = this.searchInput.value;
     requestAnimationFrame(() => {
       this.searchInput.focus();
-      this.searchInput.select();
+      if (this.searchInput.value === valueBeforeFocus) this.searchInput.select();
     });
     if (this.searchInput.value.trim()) {
       void this.updateSearch(this.searchInput.value);
@@ -184,6 +185,7 @@ class PdfViewer {
 
   private closeSearch(): void {
     this.searchPanel.classList.add('hidden');
+    this.searchQuery = '';
     this.searchMatches = [];
     this.selectedSearchIndex = -1;
     this.searchRunId++;
@@ -793,7 +795,8 @@ class PdfViewer {
     if (!first) return;
     const pagesPerRow = this.twoPageView ? 2 : 1;
     const spreadGap = this.twoPageView ? 18 : 0;
-    this.scale = Math.max(0.5, (this.container.clientWidth - 48 - spreadGap) / (first.pageObj.size.width * pagesPerRow));
+    const fittedScale = (this.container.clientWidth - 48 - spreadGap) / (first.pageObj.size.width * pagesPerRow);
+    this.scale = Math.max(0.5, Math.min(3.5, fittedScale));
     void this.rerender();
   }
 
