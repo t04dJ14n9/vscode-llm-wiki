@@ -58,6 +58,8 @@ class TableWidget extends WidgetType {
       const tr = document.createElement('tr');
       for (const [cellIndex, cell] of row.entries()) {
         const element = document.createElement(rowIndex === 0 ? 'th' : 'td');
+        element.dataset.sourceFrom = String(cell.from);
+        element.dataset.sourceTo = String(cell.to);
         applyTableCellAlignment(element, this.alignments[cellIndex]);
         this.renderCellInlineMarkdown(element, cell.text, 'cm-hybrid-table', cell.from, view);
         tr.appendChild(element);
@@ -72,7 +74,12 @@ class TableWidget extends WidgetType {
     wrapper.addEventListener('mousedown', event => {
       event.preventDefault();
       event.stopPropagation();
-      view.dispatch({ selection: { anchor: this.blockFrom } });
+      const cell = event.target instanceof Element
+        ? event.target.closest<HTMLElement>('th,td')
+        : null;
+      const sourceFrom = cell?.dataset.sourceFrom ? Number(cell.dataset.sourceFrom) : this.blockFrom;
+      const anchor = Number.isFinite(sourceFrom) ? sourceFrom : this.blockFrom;
+      view.dispatch({ selection: { anchor } });
       view.focus();
     });
 

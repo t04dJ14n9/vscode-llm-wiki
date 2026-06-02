@@ -788,4 +788,172 @@ test.describe('Human Learning — VS Code Extension E2E', () => {
     expect(humanLearningErrors).toHaveLength(0);
     expect(errorMessages.filter(m => m.includes("Cannot read properties of undefined"))).toHaveLength(0);
   });
+
+  test('Vim normal mode inserts on the current VS Code webview line after pressing i', async ({ vsCodePage: page }) => {
+    await openQuickFile(page, 'notes/Concepts/Math and Code.md', 4000);
+
+    const editorArea = page.locator('iframe.webview:visible').first();
+    await editorArea.click();
+    await page.waitForTimeout(500);
+
+    await evaluateHumanLearningWebview('Math and Code Rendering Test', `
+      win.postMessage({ type: 'setVimMode', enabled: true }, '*');
+      const targetLineNumber = 8;
+      const line = view.state.doc.line(targetLineNumber);
+      view.dispatch({ selection: { anchor: line.to } });
+      view.focus();
+      return {
+        lineNumber: targetLineNumber,
+        lineText: line.text,
+        head: view.state.selection.main.head,
+      };
+    `);
+
+    await page.keyboard.press('Escape');
+    await page.keyboard.press('i');
+    await page.keyboard.type('whoami');
+    await page.waitForTimeout(1500);
+
+    const state = await evaluateHumanLearningWebview<{
+      lineNumber: number;
+      lineText: string;
+      column: number;
+      cursorTop: number | null;
+      cursorBottom: number | null;
+      activeLineTop: number | null;
+      activeLineBottom: number | null;
+    }>('Math and Code Rendering Test', `
+      const head = view.state.selection.main.head;
+      const line = view.state.doc.lineAt(head);
+      const cursor = doc.querySelector('.cm-cursor');
+      const activeLine = [...doc.querySelectorAll('.cm-line')]
+        .find(element => element.textContent?.includes('whoami'));
+      const cursorRect = cursor?.getBoundingClientRect();
+      const activeLineRect = activeLine?.getBoundingClientRect();
+      return {
+        lineNumber: line.number,
+        lineText: line.text,
+        column: head - line.from,
+        cursorTop: cursorRect?.top ?? null,
+        cursorBottom: cursorRect?.bottom ?? null,
+        activeLineTop: activeLineRect?.top ?? null,
+        activeLineBottom: activeLineRect?.bottom ?? null,
+      };
+    `);
+
+    expect(state.lineNumber).toBe(8);
+    expect(state.lineText).toContain('whoami');
+    expect(state.cursorTop).not.toBeNull();
+    expect(state.activeLineTop).not.toBeNull();
+    expect(state.cursorTop!).toBeGreaterThanOrEqual(state.activeLineTop! - 1);
+    expect(state.cursorBottom!).toBeLessThanOrEqual(state.activeLineBottom! + 1);
+  });
+
+  test('VS Code webview keeps Ctrl+O stable and opens rendered table cells on their source row', async ({ vsCodePage: page }) => {
+    await openQuickFile(page, 'notes/Concepts/Math and Code.md', 4000);
+
+    const editorArea = page.locator('iframe.webview:visible').first();
+    await editorArea.click();
+    await page.waitForTimeout(500);
+
+    const scratchDoc = [
+      '# VS Code Scratch',
+      '',
+      'Alpha beta',
+      '',
+      '| Left | Right |',
+      '| --- | --- |',
+      '| Row zero | Cell target |',
+      '',
+      'Tail line',
+    ].join('\n');
+
+    await evaluateHumanLearningWebview('Math and Code Rendering Test', `
+      const scratchDoc = ${JSON.stringify(scratchDoc)};
+      win.postMessage({ type: 'setVimMode', enabled: false }, '*');
+      win.postMessage({
+        type: 'setText',
+        text: scratchDoc,
+        currentNotePath: 'notes/Scratch Production Note.md',
+        notePaths: ['notes/Concepts/FlashAttention.md'],
+      }, '*');
+      await new Promise(resolve => setTimeout(resolve, 250));
+      const targetLine = view.state.doc.line(3);
+      view.dispatch({ selection: { anchor: targetLine.to } });
+      view.focus();
+      return view.state.doc.toString();
+    `);
+
+    await page.keyboard.press('Control+O');
+    await page.keyboard.press('i');
+    await page.keyboard.press('o');
+    await page.waitForTimeout(250);
+    const ctrlODoc = scratchDoc.replace('Alpha beta', 'Alpha betaio');
+
+    const ctrlOState = await evaluateHumanLearningWebview<{
+      text: string;
+      lineNumber: number;
+      lineText: string;
+      column: number;
+    }>('Alpha beta', `
+      const head = view.state.selection.main.head;
+      const line = view.state.doc.lineAt(head);
+      return {
+        text: view.state.doc.toString(),
+        lineNumber: line.number,
+        lineText: line.text,
+        column: head - line.from,
+      };
+    `);
+
+    expect(ctrlOState.text).toBe(ctrlODoc);
+    expect(ctrlOState.lineNumber).toBe(3);
+    expect(ctrlOState.lineText).toBe('Alpha betaio');
+    expect(ctrlOState.column).toBe('Alpha betaio'.length);
+
+    const tableClickState = await evaluateHumanLearningWebview<{
+      lineNumber: number;
+      lineText: string;
+      column: number;
+      tableWidgetCount: number;
+      clicked: boolean;
+    }>('Alpha beta', `
+      const tailLine = view.state.doc.line(view.state.doc.lines);
+      view.dispatch({ selection: { anchor: tailLine.from } });
+      view.focus();
+      await new Promise(resolve => requestAnimationFrame(() => resolve(undefined)));
+      const cell = [...doc.querySelectorAll('.cm-hybrid-table td')]
+        .find(element => element.textContent?.includes('Cell target'));
+      if (!cell) {
+        return {
+          lineNumber: -1,
+          lineText: '',
+          column: -1,
+          tableWidgetCount: doc.querySelectorAll('.cm-hybrid-table-widget').length,
+          clicked: false,
+        };
+      }
+      cell.dispatchEvent(new MouseEvent('mousedown', {
+        bubbles: true,
+        cancelable: true,
+        view: win,
+      }));
+      await new Promise(resolve => setTimeout(resolve, 100));
+      const head = view.state.selection.main.head;
+      const line = view.state.doc.lineAt(head);
+      return {
+        lineNumber: line.number,
+        lineText: line.text,
+        column: head - line.from,
+        tableWidgetCount: doc.querySelectorAll('.cm-hybrid-table-widget').length,
+        clicked: true,
+      };
+    `);
+
+    expect(tableClickState.clicked).toBe(true);
+    expect(tableClickState.lineNumber).toBe(7);
+    expect(tableClickState.lineText).toBe('| Row zero | Cell target |');
+    expect(tableClickState.column).toBe(tableClickState.lineText.indexOf('Cell target'));
+    expect(tableClickState.tableWidgetCount).toBe(0);
+  });
 });
