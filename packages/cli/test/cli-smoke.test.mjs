@@ -105,6 +105,9 @@ test('hl smoke flow initializes, ingests, embeds, searches, links, anchors, and 
   assert.equal(context.status, 'ok');
   assert.equal(context.context.source, 'notes/Concepts/FlashAttention.md');
   assert.ok(readFileSync(join(root, '.hl', 'agent', 'context.md'), 'utf8').includes('FlashAttention'));
+
+  const today = run(['today', '--json'], root);
+  assert.ok(today.counts.activity_events >= 1, `Expected activity_events >= 1, got ${today.counts.activity_events}`);
 });
 
 test('hl serializes concurrent writes to the vault database', async () => {
@@ -132,4 +135,34 @@ test('hl serializes concurrent writes to the vault database', async () => {
   const status = run(['status'], root);
   assert.equal(status.counts.sources, 80);
   assert.equal(status.counts.chunks, 80);
+});
+
+test('hl mcp stdio responds to initialize', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'hl-mcp-smoke-'));
+  run(['init', '.', '--name', 'MCP Smoke'], root);
+
+  const child = spawn(process.execPath, [cli, 'mcp', 'stdio'], {
+    cwd: root,
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+
+  const response = await new Promise((resolve, reject) => {
+    let buffer = '';
+    child.stdout.on('data', (chunk) => {
+      buffer += chunk.toString();
+      const newline = buffer.indexOf('\n');
+      if (newline !== -1) {
+        try { resolve(JSON.parse(buffer.slice(0, newline))); }
+        catch (e) { reject(e); }
+      }
+    });
+    child.on('error', reject);
+    child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} }) + '\n');
+  });
+
+  child.kill();
+
+  assert.equal(response.jsonrpc, '2.0');
+  assert.equal(response.id, 1);
+  assert.ok(response.result.serverInfo.name);
 });

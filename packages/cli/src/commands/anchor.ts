@@ -6,6 +6,7 @@ import {
   runMigrations,
   createPdfAnchorFromQuote,
   resolveAnchor,
+  recordActivity,
 } from '@human-learning/core';
 
 export function anchorCommand(): Command {
@@ -35,6 +36,13 @@ export function anchorCommand(): Command {
         page: options.page ? Number(options.page) : undefined,
         createdBy: 'user',
       });
+      if (anchor.status === 'resolved') {
+        recordActivity(db, {
+          event_type: 'create_anchor',
+          anchor_id: anchor.id,
+          metadata: { source: sourcePath },
+        });
+      }
       closeDatabase(db);
 
       console.log(JSON.stringify({

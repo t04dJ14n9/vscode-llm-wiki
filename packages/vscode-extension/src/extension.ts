@@ -10,6 +10,7 @@ import {
   rebuildLinksForNote,
   registerSource,
   runMigrations,
+  recordActivity,
 } from '@human-learning/core';
 import { registerLinkProvider } from './linkProvider';
 import { BacklinksProvider } from './backlinksProvider';
@@ -83,6 +84,10 @@ export function activate(context: vscode.ExtensionContext) {
       });
       if (exported) {
         agentContextProvider?.refresh();
+        const db = await openDatabase(vaultRoot);
+        runMigrations(db);
+        recordActivity(db, { event_type: 'export_context' });
+        closeDatabase(db);
       }
     }),
 
@@ -191,6 +196,7 @@ export function activate(context: vscode.ExtensionContext) {
       const relPath = vscode.workspace.asRelativePath(uri);
       const source = registerSource(db, vaultRoot, relPath);
       await ingestFile(db, vaultRoot, relPath, source.id);
+      recordActivity(db, { event_type: 'open_note', source_id: source.id, metadata: { path: relPath } });
       closeDatabase(db);
       vscode.window.showInformationMessage(`Ingested: ${relPath}`);
     }),
@@ -211,6 +217,7 @@ export function activate(context: vscode.ExtensionContext) {
       const db = await openDatabase(vaultRoot);
       runMigrations(db);
       const backlinks = getBacklinks(db, notePathToUri(relPath));
+      recordActivity(db, { event_type: 'view_section', metadata: { path: relPath } });
       closeDatabase(db);
 
       if (backlinks.length === 0) {
@@ -246,6 +253,7 @@ export function activate(context: vscode.ExtensionContext) {
 
     const source = registerSource(db, vaultRoot, relPath);
     await ingestFile(db, vaultRoot, relPath, source.id);
+    recordActivity(db, { event_type: 'open_note', source_id: source.id, metadata: { path: relPath } });
     closeDatabase(db);
   });
   context.subscriptions.push(watcher);

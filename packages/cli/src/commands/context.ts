@@ -5,6 +5,7 @@ import {
   closeDatabase,
   runMigrations,
   exportSourceContext,
+  recordActivity,
 } from '@human-learning/core';
 
 export function contextCommand(): Command {
@@ -35,6 +36,10 @@ export function contextCommand(): Command {
       const context = exportSourceContext(db, vaultRoot, {
         sourcePath: options.source,
         anchorId: options.anchor,
+      });
+      recordActivity(db, {
+        event_type: 'export_context',
+        metadata: { source: options.source, anchor: options.anchor },
       });
       closeDatabase(db);
 

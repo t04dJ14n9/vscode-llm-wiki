@@ -12,6 +12,8 @@ import { contextCommand } from './commands/context';
 import { skillsCommand } from './commands/skills';
 import { hooksCommand } from './commands/hooks';
 import { todayCommand } from './commands/today';
+import { mcpCommand } from './commands/mcp';
+import { reviewCommand } from './commands/review';
 
 const program = new Command();
 
@@ -32,5 +34,7 @@ program.addCommand(contextCommand());
 program.addCommand(skillsCommand());
 program.addCommand(hooksCommand());
 program.addCommand(todayCommand());
+program.addCommand(mcpCommand());
+program.addCommand(reviewCommand());
 
 program.parse(process.argv);

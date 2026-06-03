@@ -4,7 +4,7 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
-pnpmfileChecksum: sha256-yXbHd7H0ao04ULyvFQagnNerrUyTrWsoxunBKaEnptE=
+pnpmfileChecksum: ffi6jgsv6hdo5lm45mnrdg5tzi
 
 importers:
 
@@ -63,6 +63,19 @@ importers:
       '@types/sql.js':
         specifier: ^1.4.0
         version: 1.4.11
+      typescript:
+        specifier: ^5.4.0
+        version: 5.9.3
+
+  packages/mcp-server:
+    dependencies:
+      '@human-learning/core':
+        specifier: workspace:*
+        version: link:../core
+    devDependencies:
+      '@types/node':
+        specifier: ^20.0.0
+        version: 20.19.41
       typescript:
         specifier: ^5.4.0
         version: 5.9.3
@@ -150,10 +163,10 @@ importers:
         version: 1.120.0
       copy-webpack-plugin:
         specifier: ^12.0.0
-        version: 12.0.2(webpack@5.107.1)
+        version: 12.0.2(webpack@5.107.1(webpack-cli@5.1.4))
       ts-loader:
         specifier: ^9.5.0
-        version: 9.5.7(typescript@5.9.3)(webpack@5.107.1)
+        version: 9.5.7(typescript@5.9.3)(webpack@5.107.1(webpack-cli@5.1.4))
       typescript:
         specifier: ^5.4.0
         version: 5.9.3
@@ -238,7 +251,7 @@ importers:
         version: 1.120.0
       ts-loader:
         specifier: ^9.5.0
-        version: 9.5.7(typescript@5.9.3)(webpack@5.107.1)
+        version: 9.5.7(typescript@5.9.3)(webpack@5.107.1(webpack-cli@5.1.4))
       typescript:
         specifier: ^5.4.0
         version: 5.9.3
@@ -275,10 +288,10 @@ importers:
         version: 1.120.0
       copy-webpack-plugin:
         specifier: ^12.0.0
-        version: 12.0.2(webpack@5.107.1)
+        version: 12.0.2(webpack@5.107.1(webpack-cli@5.1.4))
       ts-loader:
         specifier: ^9.5.0
-        version: 9.5.7(typescript@5.9.3)(webpack@5.107.1)
+        version: 9.5.7(typescript@5.9.3)(webpack@5.107.1(webpack-cli@5.1.4))
       typescript:
         specifier: ^5.4.0
         version: 5.9.3
@@ -3235,17 +3248,17 @@ snapshots:
       '@webassemblyjs/ast': 1.14.1
       '@xtuc/long': 4.2.2
 
-  '@webpack-cli/configtest@2.1.1(webpack-cli@5.1.4)(webpack@5.107.1)':
+  '@webpack-cli/configtest@2.1.1(webpack-cli@5.1.4(webpack@5.107.1))(webpack@5.107.1(webpack-cli@5.1.4))':
     dependencies:
       webpack: 5.107.1(webpack-cli@5.1.4)
       webpack-cli: 5.1.4(webpack@5.107.1)
 
-  '@webpack-cli/info@2.0.2(webpack-cli@5.1.4)(webpack@5.107.1)':
+  '@webpack-cli/info@2.0.2(webpack-cli@5.1.4(webpack@5.107.1))(webpack@5.107.1(webpack-cli@5.1.4))':
     dependencies:
       webpack: 5.107.1(webpack-cli@5.1.4)
       webpack-cli: 5.1.4(webpack@5.107.1)
 
-  '@webpack-cli/serve@2.0.5(webpack-cli@5.1.4)(webpack@5.107.1)':
+  '@webpack-cli/serve@2.0.5(webpack-cli@5.1.4(webpack@5.107.1))(webpack@5.107.1(webpack-cli@5.1.4))':
     dependencies:
       webpack: 5.107.1(webpack-cli@5.1.4)
       webpack-cli: 5.1.4(webpack@5.107.1)
@@ -3436,7 +3449,7 @@ snapshots:
 
   convert-source-map@2.0.0: {}
 
-  copy-webpack-plugin@12.0.2(webpack@5.107.1):
+  copy-webpack-plugin@12.0.2(webpack@5.107.1(webpack-cli@5.1.4)):
     dependencies:
       fast-glob: 3.3.3
       glob-parent: 6.0.2
@@ -4427,7 +4440,7 @@ snapshots:
 
   tapable@2.3.3: {}
 
-  terser-webpack-plugin@5.6.0(webpack@5.107.1):
+  terser-webpack-plugin@5.6.0(webpack@5.107.1(webpack-cli@5.1.4)):
     dependencies:
       '@jridgewell/trace-mapping': 0.3.31
       jest-worker: 27.5.1
@@ -4456,7 +4469,7 @@ snapshots:
 
   ts-dedent@2.2.0: {}
 
-  ts-loader@9.5.7(typescript@5.9.3)(webpack@5.107.1):
+  ts-loader@9.5.7(typescript@5.9.3)(webpack@5.107.1(webpack-cli@5.1.4)):
     dependencies:
       chalk: 4.1.2
       enhanced-resolve: 5.22.0
@@ -4531,9 +4544,9 @@ snapshots:
   webpack-cli@5.1.4(webpack@5.107.1):
     dependencies:
       '@discoveryjs/json-ext': 0.5.7
-      '@webpack-cli/configtest': 2.1.1(webpack-cli@5.1.4)(webpack@5.107.1)
-      '@webpack-cli/info': 2.0.2(webpack-cli@5.1.4)(webpack@5.107.1)
-      '@webpack-cli/serve': 2.0.5(webpack-cli@5.1.4)(webpack@5.107.1)
+      '@webpack-cli/configtest': 2.1.1(webpack-cli@5.1.4(webpack@5.107.1))(webpack@5.107.1(webpack-cli@5.1.4))
+      '@webpack-cli/info': 2.0.2(webpack-cli@5.1.4(webpack@5.107.1))(webpack@5.107.1(webpack-cli@5.1.4))
+      '@webpack-cli/serve': 2.0.5(webpack-cli@5.1.4(webpack@5.107.1))(webpack@5.107.1(webpack-cli@5.1.4))
       colorette: 2.0.20
       commander: 10.0.1
       cross-spawn: 7.0.6
@@ -4575,7 +4588,7 @@ snapshots:
       neo-async: 2.6.2
       schema-utils: 4.3.3
       tapable: 2.3.3
-      terser-webpack-plugin: 5.6.0(webpack@5.107.1)
+      terser-webpack-plugin: 5.6.0(webpack@5.107.1(webpack-cli@5.1.4))
       watchpack: 2.5.1
       webpack-sources: 3.5.0
     optionalDependencies:

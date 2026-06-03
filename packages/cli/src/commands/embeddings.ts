@@ -6,6 +6,7 @@ import {
   runMigrations,
   refreshEmbeddings,
   getEmbeddingStatus,
+  readConfig,
 } from '@human-learning/core';
 
 export function embeddingsCommand(): Command {
@@ -25,7 +26,8 @@ export function embeddingsCommand(): Command {
 
       const db = await openDatabase(vaultRoot);
       runMigrations(db);
-      const result = refreshEmbeddings(db, { changedOnly: options.changed });
+      const config = readConfig(vaultRoot);
+      const result = await refreshEmbeddings(db, { changedOnly: options.changed, config });
       closeDatabase(db);
 
       console.log(JSON.stringify({
