@@ -141,6 +141,32 @@ test('round-trips internal lifecycle ownership and promotion-attempt state', () 
   assert.deepEqual(PdfDiscussionAnnotationV1Schema.parse(annotation), annotation);
 });
 
+test('round-trips optional Codex model provenance without changing version 1', () => {
+  const annotation = makeAnnotation({
+    messages: [{
+      id: 'message-1',
+      role: 'assistant',
+      markdown: 'Model-specific answer.',
+      createdAt: NOW,
+      codexTurnId: 'turn-1',
+      codexModel: 'gpt-5.4',
+    }],
+    lastTurn: {
+      status: 'idle',
+      questionMessageId: 'message-1',
+      model: 'gpt-5.4',
+    },
+  });
+
+  assert.deepEqual(PdfDiscussionAnnotationV1Schema.parse(annotation), annotation);
+  assert.throws(
+    () => PdfDiscussionAnnotationV1Schema.parse({
+      ...annotation,
+      lastTurn: { ...annotation.lastTurn, model: '' },
+    }),
+  );
+});
+
 test('computes the full PDF hash and routes missing documents for both layouts', () => {
   const root = mkdtempSync(join(tmpdir(), 'hl-pdf-discussions-'));
   const vaultRoot = join(root, 'vault');

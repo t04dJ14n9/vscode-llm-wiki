@@ -50,11 +50,13 @@ export const PdfDiscussionMessageV1Schema = z.object({
   markdown: z.string(),
   createdAt: NonEmptyStringSchema,
   codexTurnId: NonEmptyStringSchema.optional(),
+  codexModel: NonEmptyStringSchema.optional(),
 });
 
 export const PdfDiscussionLastTurnV1Schema = z.object({
   status: z.enum(['idle', 'running', 'failed', 'cancelled']),
   questionMessageId: NonEmptyStringSchema.optional(),
+  model: NonEmptyStringSchema.optional(),
   error: NonEmptyStringSchema.optional(),
   ownerId: NonEmptyStringSchema.optional(),
   ownerPid: z.number().int().positive().optional(),
