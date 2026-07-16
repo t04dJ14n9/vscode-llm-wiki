@@ -22,6 +22,7 @@ output/
 
 .codegraph/
 .code-review-graph/
+.superpowers/
 .cursor/
 .omc/
 .paperlink/
