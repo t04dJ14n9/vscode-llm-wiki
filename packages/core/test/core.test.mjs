@@ -28,8 +28,11 @@ const {
   resolveAnchor,
   exportSourceContext,
   classifyReferenceTarget,
+  pdfHref,
   generateAgentInstructions,
   upsertWebTarget,
+  persistWebPageSnapshot,
+  webTargetHref,
 } = core;
 
 function makeVault() {
@@ -60,7 +63,7 @@ test('ingests markdown links and returns backlinks', async () => {
   );
   writeFileSync(
     join(root, 'notes', 'Concepts', 'FlashAttention.md'),
-    '# FlashAttention\n\nUses [[Online Softmax]] and cites [the paper](raw/pdf/fa.txt#page=1&anchor=anc_missing).\n',
+    '# FlashAttention\n\nUses [[Online Softmax]] and cites [the paper](raw/pdf/fa.txt#page=1:~:text=FlashAttention%20uses%20tiling).\n',
   );
 
   await withDb(root, async (db) => {
@@ -81,7 +84,7 @@ test('ingests markdown links and returns backlinks', async () => {
 
     const issues = checkLinks(db);
     assert.ok(issues.length >= 1);
-    assert.ok(issues.some(issue => /anchor|source|Target/i.test(issue.message)));
+    assert.ok(issues.some(issue => /source|Target/i.test(issue.message)));
   });
 });
 
@@ -306,7 +309,8 @@ test('creates a quote-based PDF anchor and exports source context files', async 
     });
     assert.match(anchor.id, /^anc_pdf_/);
     assert.equal(anchor.status, 'resolved');
-    assert.match(anchor.uri, /^raw\/pdf\/fa.txt#page=\d+&anchor=anc_pdf_/);
+    assert.equal(anchor.uri, 'raw/pdf/fa.txt#page=1:~:text=FlashAttention%20uses%20tiling');
+    assert.equal(anchor.uri.includes(anchor.id), false);
 
     const resolved = resolveAnchor(db, anchor.id);
     assert.equal(resolved?.text_quote, 'FlashAttention uses tiling');
@@ -336,12 +340,19 @@ test('creates resolved PDF anchors from trusted webview selections', async () =>
       charOffset: 4,
       endTextItemIndex: 14,
       endCharOffset: 9,
+      prefix: 'Transformers say',
+      suffix: 'in the paper',
+      highlightColor: 'purple',
       createdBy: 'user',
     });
 
     assert.equal(anchor.status, 'resolved');
     assert.equal(anchor.confidence, 1);
-    assert.match(anchor.uri, /^raw\/pdf\/paper.pdf#page=3&anchor=anc_pdf_/);
+    assert.equal(
+      anchor.uri,
+      'raw/pdf/paper.pdf#page=3:~:text=Transformers%20say-,Attention%20is%20all%20you%20need,-in%20the%20paper',
+    );
+    assert.equal(anchor.uri.includes(anchor.id), false);
 
     const locator = JSON.parse(anchor.locator_json);
     assert.equal(locator.strategy, 'webview-selection');
@@ -350,9 +361,109 @@ test('creates resolved PDF anchors from trusted webview selections', async () =>
     assert.equal(locator.charOffset, 4);
     assert.equal(locator.endTextItemIndex, 14);
     assert.equal(locator.endCharOffset, 9);
+    assert.equal(locator.prefix, 'Transformers say');
+    assert.equal(locator.suffix, 'in the paper');
+    assert.equal(locator.highlightColor, 'purple');
     assert.equal(locator.quote_length, 'Attention is all you need'.length);
     assert.equal(locator.quote_offset, null);
   });
+});
+
+test('serializes PDF hrefs with protocol-safe text-fragment terms', () => {
+  assert.equal(
+    pdfHref('raw/pdf/paper.pdf', {
+      page: 7,
+      textFragment: { textStart: 'selected text' },
+    }),
+    'raw/pdf/paper.pdf#page=7:~:text=selected%20text',
+  );
+
+  assert.equal(
+    pdfHref('raw/pdf/paper.pdf', {
+      page: 7,
+      textFragment: {
+        prefix: 'prefix-, & context',
+        textStart: 'selected-, & text',
+        textEnd: 'through-, & end',
+        suffix: 'suffix-, & context',
+      },
+    }),
+    'raw/pdf/paper.pdf#page=7:~:text=prefix%2D%2C%20%26%20context-,selected%2D%2C%20%26%20text,through%2D%2C%20%26%20end,-suffix%2D%2C%20%26%20context',
+  );
+
+  assert.equal(
+    pdfHref('raw/pdf/paper.pdf', { textFragment: { textStart: 'standalone' } }),
+    'raw/pdf/paper.pdf#:~:text=standalone',
+  );
+  assert.equal(pdfHref('raw/pdf/paper.pdf', { page: 7 }), 'raw/pdf/paper.pdf#page=7');
+  assert.equal(
+    pdfHref('/Users/reader/Outside Workspace/paper.pdf', {
+      page: 7,
+      textFragment: { textStart: 'standalone selection' },
+    }),
+    '/Users/reader/Outside Workspace/paper.pdf#page=7:~:text=standalone%20selection',
+  );
+  assert.deepEqual(
+    classifyReferenceTarget(
+      '</Users/reader/Outside Workspace/paper.pdf#page=7:~:text=standalone%20selection>',
+    ),
+    {
+      kind: 'pdf',
+      uri: '/Users/reader/Outside Workspace/paper.pdf#page=7:~:text=standalone%20selection',
+      path: '/Users/reader/Outside Workspace/paper.pdf',
+      page: 7,
+      textFragment: { textStart: 'standalone selection' },
+    },
+  );
+});
+
+test('parses page-scoped Chrome range selectors and reserved characters', () => {
+  const uri = 'raw/pdf/paper.pdf#page=7:~:text=prefix%2D%2C%20%26%20context-,selected%2D%2C%20%26%20text,through%2D%2C%20%26%20end,-suffix%2D%2C%20%26%20context';
+  assert.deepEqual(classifyReferenceTarget(uri), {
+    kind: 'pdf',
+    uri,
+    path: 'raw/pdf/paper.pdf',
+    page: 7,
+    textFragment: {
+      prefix: 'prefix-, & context',
+      textStart: 'selected-, & text',
+      textEnd: 'through-, & end',
+      suffix: 'suffix-, & context',
+    },
+  });
+});
+
+test('uses the first valid text directive and ignores malformed selectors', () => {
+  const firstValid = 'raw/pdf/paper.pdf#page=9:~:text=bad-term&unknown=value&text=left-,first,last,-right&text=ignored';
+  assert.deepEqual(classifyReferenceTarget(firstValid), {
+    kind: 'pdf',
+    uri: firstValid,
+    path: 'raw/pdf/paper.pdf',
+    page: 9,
+    textFragment: {
+      prefix: 'left',
+      textStart: 'first',
+      textEnd: 'last',
+      suffix: 'right',
+    },
+  });
+
+  for (const directive of [
+    'text=',
+    'text=one,two,three,four,five',
+    'text=%E0%A4%A',
+    'text=unencoded-hyphen',
+    'text=-,start',
+    'text=start,-',
+  ]) {
+    const uri = `raw/pdf/paper.pdf#page=4:~:${directive}`;
+    assert.deepEqual(classifyReferenceTarget(uri), {
+      kind: 'pdf',
+      uri,
+      path: 'raw/pdf/paper.pdf',
+      page: 4,
+    });
+  }
 });
 
 test('parses native markdown reference targets without generating hl URIs', () => {
@@ -361,8 +472,7 @@ test('parses native markdown reference targets without generating hl URIs', () =
       'See [[Online Softmax#Why This Matters]].',
       '[kernel](raw/code/attention.cu#L42-L57)',
       '[paper p7](raw/pdf/flash-attention.pdf#page=7)',
-      '[chunk](raw/pdf/flash-attention.pdf#page=7&chunk=chk_pdf_abc123)',
-      '[selection](raw/pdf/flash-attention.pdf#page=7&anchor=anc_pdf_abc123)',
+      '[selection](raw/pdf/flash-attention.pdf#page=7:~:text=before-,selected%20text,-after)',
       '[section](https://example.com/article#results)',
       '[quote](https://example.com/article#:~:text=selected%20text)',
       '[DOM block](https://example.com/article#hl-web=web_abc123)',
@@ -377,8 +487,7 @@ test('parses native markdown reference targets without generating hl URIs', () =
       'notes/Concepts/Online Softmax.md#Why This Matters',
       'raw/code/attention.cu#L42-L57',
       'raw/pdf/flash-attention.pdf#page=7',
-      'raw/pdf/flash-attention.pdf#page=7&chunk=chk_pdf_abc123',
-      'raw/pdf/flash-attention.pdf#page=7&anchor=anc_pdf_abc123',
+      'raw/pdf/flash-attention.pdf#page=7:~:text=before-,selected%20text,-after',
       'https://example.com/article#results',
       'https://example.com/article#:~:text=selected%20text',
       'https://example.com/article#hl-web=web_abc123',
@@ -392,12 +501,17 @@ test('parses native markdown reference targets without generating hl URIs', () =
     path: 'raw/code/attention.cu',
     lines: { start: 42, end: 57 },
   });
-  assert.deepEqual(classifyReferenceTarget('raw/pdf/flash-attention.pdf#page=7&chunk=chk_pdf_abc123'), {
+  const selectionUri = 'raw/pdf/flash-attention.pdf#page=7:~:text=before-,selected%20text,-after';
+  assert.deepEqual(classifyReferenceTarget(selectionUri), {
     kind: 'pdf',
-    uri: 'raw/pdf/flash-attention.pdf#page=7&chunk=chk_pdf_abc123',
+    uri: selectionUri,
     path: 'raw/pdf/flash-attention.pdf',
     page: 7,
-    chunkId: 'chk_pdf_abc123',
+    textFragment: {
+      prefix: 'before',
+      textStart: 'selected text',
+      suffix: 'after',
+    },
   });
   assert.deepEqual(classifyReferenceTarget('https://example.com/article#hl-web=web_abc123'), {
     kind: 'web',
@@ -407,46 +521,69 @@ test('parses native markdown reference targets without generating hl URIs', () =
   });
 });
 
-test('PDF chunk links validate through chunks without requiring anchors', async () => {
+test('parses angle-wrapped portable PDF destinations with spaces', async () => {
   const root = makeVault();
-  writeFileSync(join(root, 'raw', 'pdf', 'flash-attention.pdf'), 'PDF bytes');
+  const pdfPath = 'raw/pdf/Round Trip Live.pdf';
+  const notePath = 'notes/Concepts/Round Trip.md';
+  const uri = `${pdfPath}#page=1:~:text=before-,Round%20trip%20anchor%20text,-after`;
+  writeFileSync(join(root, pdfPath), 'PDF bytes');
   writeFileSync(
-    join(root, 'notes', 'Concepts', 'Chunk Link.md'),
-    '# Chunk Link\n\n[quote](raw/pdf/flash-attention.pdf#page=7&chunk=chk_pdf_test)\n[selection](raw/pdf/flash-attention.pdf#page=7&anchor=anc_missing)\n',
+    join(root, notePath),
+    `# Round Trip\n\n[Round Trip Live.pdf p.1](<${uri}>)\n`,
   );
 
+  assert.deepEqual(classifyReferenceTarget(`<${uri}>`), {
+    kind: 'pdf',
+    uri,
+    path: pdfPath,
+    page: 1,
+    textFragment: {
+      prefix: 'before',
+      textStart: 'Round trip anchor text',
+      suffix: 'after',
+    },
+  });
+
   await withDb(root, async (db) => {
-    const pdf = registerSource(db, root, 'raw/pdf/flash-attention.pdf', 'pdf');
-    db.prepare(`
-      INSERT INTO chunks (id, source_id, text, title, token_count, content_hash, metadata_json)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      'chk_pdf_test',
-      pdf.id,
-      'FlashAttention avoids materializing attention.',
-      'flash-attention p7',
-      4,
-      'hash',
-      JSON.stringify({ page_start: 7, page_end: 7, source_path: 'raw/pdf/flash-attention.pdf' }),
-    );
-    const note = registerSource(db, root, 'notes/Concepts/Chunk Link.md');
-    ingestFile(db, root, 'notes/Concepts/Chunk Link.md', note.id);
+    registerSource(db, root, pdfPath, 'pdf');
+    const note = registerSource(db, root, notePath);
+    ingestFile(db, root, notePath, note.id);
 
     rebuildAllLinks(db, root);
 
-    const forward = getForwardLinks(db, 'notes/Concepts/Chunk Link.md');
-    assert.equal(forward.length, 2);
-    assert.equal(forward[0].to_uri, 'raw/pdf/flash-attention.pdf#page=7&chunk=chk_pdf_test');
+    const forward = getForwardLinks(db, notePath);
+    assert.equal(forward.length, 1);
+    assert.equal(forward[0].to_uri, uri);
     assert.equal(forward[0].to_anchor_id, null);
-    assert.equal(forward[1].to_anchor_id, 'anc_missing');
-
-    const issues = checkLinks(db);
-    assert.equal(issues.length, 1);
-    assert.match(issues[0].message, /Target anchor not found: anc_missing/);
+    assert.equal(checkLinks(db).length, 0);
   });
 });
 
-test('PDF search results emit chunk links with page locators', async () => {
+test('portable PDF text-fragment links validate without anchor or chunk rows', async () => {
+  const root = makeVault();
+  writeFileSync(join(root, 'raw', 'pdf', 'flash-attention.pdf'), 'PDF bytes');
+  const uri = 'raw/pdf/flash-attention.pdf#page=7:~:text=FlashAttention%20avoids%20materializing%20attention';
+  writeFileSync(
+    join(root, 'notes', 'Concepts', 'Portable Link.md'),
+    `# Portable Link\n\n[quote](${uri})\n`,
+  );
+
+  await withDb(root, async (db) => {
+    registerSource(db, root, 'raw/pdf/flash-attention.pdf', 'pdf');
+    const note = registerSource(db, root, 'notes/Concepts/Portable Link.md');
+    ingestFile(db, root, 'notes/Concepts/Portable Link.md', note.id);
+
+    rebuildAllLinks(db, root);
+
+    const forward = getForwardLinks(db, 'notes/Concepts/Portable Link.md');
+    assert.equal(forward.length, 1);
+    assert.equal(forward[0].to_uri, uri);
+    assert.equal(forward[0].to_anchor_id, null);
+    assert.equal(checkLinks(db).length, 0);
+  });
+});
+
+test('PDF search results emit portable page links without chunk IDs', async () => {
   const root = makeVault();
   writeFileSync(join(root, 'raw', 'pdf', 'paper.pdf'), 'PDF bytes');
 
@@ -467,7 +604,7 @@ test('PDF search results emit chunk links with page locators', async () => {
     refreshEmbeddings(db, { changedOnly: true });
 
     const result = searchSemantic(db, 'memory traffic', 1)[0];
-    assert.equal(result.anchor_uri, 'raw/pdf/paper.pdf#page=7&chunk=chk_pdf_semantic');
+    assert.equal(result.anchor_uri, 'raw/pdf/paper.pdf#page=7');
   });
 });
 
@@ -499,6 +636,68 @@ test('web fallback links validate against durable web target records', async () 
   });
 });
 
+test('web target hrefs combine Human Learning anchors with Chrome text fragments', () => {
+  const href = webTargetHref({
+    id: 'web_props',
+    url: 'https://vuejs.org/guide/components/props.html',
+    text_fragment: 'https://vuejs.org/guide/components/props.html#:~:text=Props%20declaration%20paragraph',
+  });
+
+  assert.equal(
+    href,
+    'https://vuejs.org/guide/components/props.html#hl-web=web_props:~:text=Props%20declaration%20paragraph',
+  );
+  assert.deepEqual(classifyReferenceTarget(href), {
+    kind: 'web',
+    uri: href,
+    url: href,
+    webTargetId: 'web_props',
+  });
+});
+
+test('persisting a web page snapshot creates a durable web target and DOM anchor', async () => {
+  const root = makeVault();
+
+  await withDb(root, async (db) => {
+    const result = persistWebPageSnapshot(db, root, {
+      url: 'https://example.com/articles/online-softmax?ref=hl',
+      title: 'Online Softmax Notes',
+      html: '<!doctype html><html><head><title>Online Softmax Notes</title></head><body><article><p>Streaming softmax keeps a running maximum.</p></article></body></html>',
+      selectedText: 'Streaming softmax keeps a running maximum.',
+      textFragment: 'https://example.com/articles/online-softmax#:~:text=Streaming%20softmax',
+      cssSelector: 'article > p:nth-of-type(1)',
+      xpath: '/html/body/article/p[1]',
+    });
+
+    assert.equal(result.status, 'ok');
+    assert.match(result.persistedPath, /^raw\/web\/online-softmax-notes-[a-f0-9]{12}\.html$/);
+    assert.ok(readFileSync(join(root, result.persistedPath), 'utf8').includes('Streaming softmax'));
+    assert.equal(result.target.id.startsWith('web_'), true);
+    assert.equal(result.anchor.id.startsWith('anc_web_'), true);
+    assert.equal(result.anchor.kind, 'dom_range');
+    assert.equal(result.anchor.uri, result.href);
+    assert.equal(result.anchor.text_quote, 'Streaming softmax keeps a running maximum.');
+    assert.match(result.href, /^https:\/\/example\.com\/articles\/online-softmax\?ref=hl#hl-web=web_/);
+    assert.equal(
+      result.markdownLink,
+      `[Online Softmax Notes](${result.href})`,
+    );
+    assert.equal(
+      result.quoteMarkdown,
+      `> Streaming softmax keeps a running maximum.\n>\n> [Online Softmax Notes](${result.href})`,
+    );
+
+    writeFileSync(
+      join(root, 'notes', 'Concepts', 'Web.md'),
+      `# Web\n\n${result.markdownLink}\n`,
+    );
+    const note = registerSource(db, root, 'notes/Concepts/Web.md');
+    ingestFile(db, root, 'notes/Concepts/Web.md', note.id);
+    rebuildAllLinks(db, root);
+    assert.equal(checkLinks(db).length, 0);
+  });
+});
+
 test('generated agent instructions prefer qmd and native markdown links', () => {
   const root = makeVault();
   generateAgentInstructions(root);
@@ -508,6 +707,11 @@ test('generated agent instructions prefer qmd and native markdown links', () => 
   assert.match(agents, /native Markdown\/Obsidian links/);
   assert.match(skill, /qmd/);
   assert.match(skill, /Qwen/);
-  assert.doesNotMatch(agents, /hl:\/\//);
-  assert.doesNotMatch(skill, /hl:\/\//);
+  for (const generated of [agents, skill]) {
+    assert.match(generated, /#page=N:~:text=/);
+    assert.match(generated, /#page=N/);
+    assert.doesNotMatch(generated, /[?&](?:anchor|chunk)=/);
+    assert.doesNotMatch(generated, /PDF chunks|chunk link/i);
+    assert.doesNotMatch(generated, /hl:\/\//);
+  }
 });

@@ -168,8 +168,8 @@ function hideSourceLine(
 
 export function renderMathInto(container: HTMLElement, expression: string, displayMode: boolean): void {
   const rendered = renderMathJax(expression, displayMode);
-  if (rendered) {
-    container.innerHTML = rendered;
+  if (rendered.ok) {
+    container.innerHTML = rendered.html;
     const mathContainer = container.querySelector<HTMLElement>('mjx-container');
     if (mathContainer) {
       mathContainer.dataset.tex = expression;
@@ -180,19 +180,73 @@ export function renderMathInto(container: HTMLElement, expression: string, displ
     return;
   }
 
-  const fallback = displayMode ? document.createElement('pre') : document.createElement('span');
-  fallback.textContent = expression;
-  container.replaceChildren(fallback);
+  container.replaceChildren(createMathErrorElement(expression, rendered.error, displayMode));
 }
 
-function renderMathJax(expression: string, displayMode: boolean): string | null {
+function renderMathJax(
+  expression: string,
+  displayMode: boolean,
+): { ok: true; html: string } | { ok: false; error: string } {
   try {
     const node = mathJaxDocument.convert(expression, {
       ...mathJaxRenderOptions,
       display: displayMode,
     });
-    return mathJaxAdaptor.outerHTML(node as HTMLElement);
-  } catch {
-    return null;
+    const html = mathJaxAdaptor.outerHTML(node as HTMLElement);
+    const error = mathJaxErrorFromHtml(html);
+    if (error) return { ok: false, error };
+    return { ok: true, html };
+  } catch (error) {
+    return { ok: false, error: mathErrorMessage(error) };
   }
+}
+
+function mathJaxErrorFromHtml(html: string): string | null {
+  const match = html.match(/\sdata-mjx-error="([^"]+)"/);
+  if (!match) return null;
+  return decodeHtmlEntities(match[1] ?? '').trim() || 'MathJax could not parse this expression.';
+}
+
+function decodeHtmlEntities(text: string): string {
+  const textarea = document.createElement('textarea');
+  textarea.innerHTML = text;
+  return textarea.value;
+}
+
+function createMathErrorElement(
+  expression: string,
+  message: string,
+  displayMode: boolean,
+): HTMLElement {
+  const wrapper = document.createElement(displayMode ? 'div' : 'span');
+  wrapper.className = [
+    'cm-hybrid-math-error',
+    displayMode ? 'cm-hybrid-math-error-display' : 'cm-hybrid-math-error-inline',
+  ].join(' ');
+  wrapper.title = message;
+
+  const title = document.createElement('span');
+  title.className = 'cm-hybrid-math-error-title';
+  title.textContent = 'Invalid TeX';
+  wrapper.appendChild(title);
+
+  const details = document.createElement('span');
+  details.className = 'cm-hybrid-math-error-message';
+  details.textContent = message;
+  wrapper.appendChild(details);
+
+  const source = document.createElement('code');
+  source.className = 'cm-hybrid-math-error-source';
+  source.textContent = expression;
+  wrapper.appendChild(source);
+
+  return wrapper;
+}
+
+function mathErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.message.trim()) {
+    return error.message.trim();
+  }
+  const message = String(error).trim();
+  return message || 'MathJax could not parse this expression.';
 }

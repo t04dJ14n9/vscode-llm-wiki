@@ -13,10 +13,9 @@ export function generateAgentInstructions(vaultRoot: string): string[] {
 - Prefer updating existing notes over creating duplicates.
 - Use native Markdown/Obsidian links in notes: wikilinks for notes, relative markdown links for code/PDF, and normal URLs for web references.
 - Read \`.hl/agent/selection.md\` when the user refers to "the current selection."
-- Do not invent PDF rectangle coordinates, chunk IDs, anchor IDs, or web target IDs.
-- Search results may cite PDF chunks directly with \`raw/pdf/file.pdf#page=N&chunk=...\`.
-- Create PDF anchors only for arbitrary selections that are not already covered by a stable chunk.
-- To cite PDFs by arbitrary quote, use \`hl search\` first, then \`hl anchor create-pdf --quote\` only when a chunk link is insufficient.
+- Cite exact PDF text with \`raw/pdf/file.pdf#page=N:~:text=selected%20text\`; use \`raw/pdf/file.pdf#page=N\` when exact text is unavailable.
+- Never put internal anchor or chunk row IDs in a PDF URL.
+- Use \`hl anchor create-pdf --quote\` only to create a persisted annotation; its database ID remains internal and its URI remains portable.
 - If \`hl anchor create-pdf\` returns ambiguous or not_found, do not fabricate a citation.
 - After note edits, run \`hl links check --fix\`.
 - If embeddings are enabled, run \`hl embeddings refresh --changed\`.
@@ -65,11 +64,11 @@ Source-grounded reading, annotation, and knowledge-graph management inside a Hum
 ## Rules
 - Do not edit \`raw/\` unless explicitly asked.
 - Prefer updating existing notes over creating duplicates.
-- Use native Markdown/Obsidian links in notes: \`[[Note#Heading]]\`, \`[code](raw/code/file.ts#L1-L5)\`, \`[paper](raw/pdf/file.pdf#page=7&chunk=...)\`, and normal web URLs.
+- Use native Markdown/Obsidian links in notes: \`[[Note#Heading]]\`, \`[code](raw/code/file.ts#L1-L5)\`, \`[quote](raw/pdf/file.pdf#page=N:~:text=selected%20text)\`, \`[page](raw/pdf/file.pdf#page=N)\`, and normal web URLs.
 - Read \`.hl/agent/selection.md\` when the user refers to "the current selection."
-- Do not invent PDF rectangle coordinates, chunk IDs, anchor IDs, or web target IDs.
-- Search results may cite PDF chunks directly; anchors are only for durable arbitrary selections.
-- To cite PDFs by arbitrary quote, use \`hl search\` first, then \`hl anchor create-pdf --quote\` only when a chunk link is insufficient.
+- Never put internal anchor or chunk row IDs in a PDF URL.
+- Cite the portable PDF URI returned by search. Use a text-fragment URI when exact text is available and a page-only URI otherwise.
+- Use \`hl anchor create-pdf --quote\` only for a persisted annotation; its database ID remains internal.
 - If \`hl anchor create-pdf\` returns ambiguous or not_found, do not fabricate a citation.
 - After note edits, run \`hl links check --fix\`.
 
@@ -77,7 +76,7 @@ Source-grounded reading, annotation, and knowledge-graph management inside a Hum
 - Prefer \`qmd\` for local hybrid retrieval/reranking when it is installed in the Human Learning skill environment.
 - Do not build custom qmd wheels; use the local \`tobi/qmd\` setup directly.
 - Prefer a Qwen embedding GGUF model for bilingual English/Chinese notes when qmd is configured for local embeddings.
-- Human Learning owns citation link generation and locator metadata for PDF chunks, PDF anchors, and web targets.
+- Human Learning owns citation link generation and locator metadata for portable PDF references, persisted PDF annotations, and web targets.
 
 ## Available CLI commands
 - \`hl search "<query>"\` — Search vault

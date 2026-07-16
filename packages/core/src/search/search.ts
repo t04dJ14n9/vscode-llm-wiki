@@ -60,7 +60,7 @@ export function searchLexical(
     source_path: r.source_path,
     source_kind: r.source_kind,
     rank: -r.matched_tokens,
-    anchor_uri: hrefForChunk(r.source_kind, r.source_path, r.chunk_id, r.metadata_json),
+    anchor_uri: hrefForChunk(r.source_kind, r.source_path, r.metadata_json),
   }));
 }
 
@@ -105,7 +105,7 @@ export function searchSemantic(
         source_path: row.source_path,
         source_kind: row.source_kind,
         rank: score,
-        anchor_uri: hrefForChunk(row.source_kind, row.source_path, row.chunk_id, row.metadata_json),
+        anchor_uri: hrefForChunk(row.source_kind, row.source_path, row.metadata_json),
       };
     })
     .filter(result => result.rank > 0)
@@ -188,7 +188,7 @@ export function searchNotes(
     source_path: r.source_path,
     source_kind: r.source_kind,
     rank: -r.matched_tokens,
-    anchor_uri: hrefForChunk(r.source_kind, r.source_path, r.chunk_id, r.metadata_json),
+    anchor_uri: hrefForChunk(r.source_kind, r.source_path, r.metadata_json),
   }));
 }
 
@@ -204,14 +204,12 @@ function parseVector(raw: string): number[] {
 function hrefForChunk(
   sourceKind: string,
   sourcePath: string,
-  chunkId: string,
   metadataJson: string | undefined,
 ): string {
   const metadata = parseMetadata(metadataJson);
   if (sourceKind === 'pdf') {
     return pdfHref(sourcePath, {
       page: firstNumber(metadata.page_start, metadata.page, metadata.pageStart),
-      chunkId,
     });
   }
   if (sourceKind === 'code') {

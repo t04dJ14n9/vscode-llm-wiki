@@ -56,8 +56,7 @@ targets. User-facing links are Obsidian/native markdown-compatible.
 | Note | `[[Online Softmax#Why This Matters]]` |
 | Code line range | `[kernel](raw/code/attention.cu#L42-L57)` |
 | PDF page | `[paper p7](raw/pdf/flash-attention.pdf#page=7)` |
-| PDF chunk | `[quote](raw/pdf/flash-attention.pdf#page=7&chunk=chk_pdf_abc123)` |
-| PDF arbitrary selection | `[selection](raw/pdf/flash-attention.pdf#page=7&anchor=anc_pdf_abc123)` |
+| PDF text selection | `[selected text](raw/pdf/flash-attention.pdf#page=7:~:text=selected%20text)` |
 | Web native section | `[section](https://example.com/article#results)` |
 | Web text fragment | `[quote](https://example.com/article#:~:text=selected%20text)` |
 | Web DOM fallback | `[DOM block](https://example.com/article#hl-web=web_abc123)` |
@@ -135,21 +134,22 @@ Each chunk stores locator metadata in `chunks.metadata_json`, including:
 }
 ```
 
-Search results emit chunk links such as:
+Search results emit portable links such as:
 
 ```md
-[quote](raw/pdf/flash-attention.pdf#page=7&chunk=chk_pdf_abc123)
+[selected text](raw/pdf/flash-attention.pdf#page=7:~:text=selected%20text)
 ```
 
 Anchors are sparse. They are created only when the user or agent needs a durable
-selection that is not already represented by a stable chunk:
+annotation for a selection that is not already represented by a stable chunk.
+Their stored URI uses the same portable format:
 
 ```md
-[selection](raw/pdf/flash-attention.pdf#page=7&anchor=anc_pdf_abc123)
+[selected text](raw/pdf/flash-attention.pdf#page=7:~:text=selected%20text)
 ```
 
-Anchor records remain in SQLite and are also appended to `.hl/anchors/` sidecar
-state by the anchor store.
+Internal anchor IDs remain in SQLite and `.hl/anchors/` sidecar state; they are
+not exposed in Markdown destinations.
 
 ## 6. Web References
 
@@ -224,18 +224,13 @@ Implemented editor behavior includes:
 
 The bundled extension uses EmbedPDF/PDFium for the current custom PDF viewer.
 The viewer can open local PDFs, render pages, expose text selection actions,
-insert markdown links into the active markdown editor, and resolve page, chunk,
-and anchor targets.
+insert markdown links into the active markdown editor, and resolve page and
+text-fragment targets.
 
 The current dispatcher sends PDF targets to:
 
 ```ts
-human-learning.openPdfAtAnchor({
-  pdfPath,
-  page,
-  chunkId,
-  anchorId
-})
+human-learning.openPdfTarget({pdfPath,page,textFragment})
 ```
 
 If the custom PDF command is unavailable, it falls back to VS Code's default file

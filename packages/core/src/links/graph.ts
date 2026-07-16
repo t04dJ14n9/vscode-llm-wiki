@@ -46,8 +46,7 @@ export function rebuildLinksForNote(
     const linkId = 'lnk_' + createHash('sha256')
       .update(`${notePath}:${link.line}:${link.uri}`)
       .digest('hex').substring(0, 12);
-    const anchorId = link.target.anchorId ?? null;
-    insertLink.run(linkId, notePath, link.line, link.uri, anchorId, link.label);
+    insertLink.run(linkId, notePath, link.line, link.uri, null, link.label);
     inserted++;
   }
   return { deleted, inserted };
@@ -161,18 +160,7 @@ export function checkLinks(
       });
     }
 
-    if (target.chunkId) {
-      const chunk = db.prepare('SELECT id FROM chunks WHERE id = ? AND active = 1').get(target.chunkId);
-      if (!chunk) {
-        linkIssues.push({
-          link_id: link.id,
-          status: 'broken',
-          message: `Target chunk not found: ${target.chunkId}`,
-        });
-      }
-    }
-
-    const anchorId = link.to_anchor_id ?? target.anchorId;
+    const anchorId = link.to_anchor_id;
     if (anchorId) {
       const anchor = db.prepare('SELECT id FROM anchors WHERE id = ?').get(anchorId);
       if (!anchor) {

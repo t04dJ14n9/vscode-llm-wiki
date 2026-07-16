@@ -10,7 +10,7 @@ import { notePathToUri } from './wikiLinks';
 export { generateInstructions as generateAgentInstructions };
 
 export interface AddSelectionToContextOptions {
-  getActiveSelectionContext?: () => SelectionContext | undefined;
+  getActiveSelectionContext?: () => SelectionContext | undefined | Promise<SelectionContext | undefined>;
 }
 
 export class AgentContextProvider implements vscode.TreeDataProvider<vscode.TreeItem> {
@@ -55,14 +55,18 @@ export async function addSelectionToContext(
   vaultRoot: string,
   options: AddSelectionToContextOptions = {},
 ): Promise<boolean> {
-  const activeSelection = options.getActiveSelectionContext?.() ?? getNativeSelectionContext();
+  const providedSelection = options.getActiveSelectionContext
+    ? await options.getActiveSelectionContext()
+    : undefined;
+  const activeSelection = providedSelection ?? getNativeSelectionContext();
   if (!activeSelection) {
     vscode.window.showErrorMessage('No active editor');
     return false;
   }
 
-  const { uri, text, startLine, endLine } = activeSelection;
-  const relPath = vscode.workspace.asRelativePath(uri);
+  const { uri, text, startLine, endLine, metadata } = activeSelection;
+  const relPath = activeSelection.sourceLabel ?? vscode.workspace.asRelativePath(uri);
+  const rangeLabel = activeSelection.rangeLabel ?? `lines ${startLine}–${endLine}`;
 
   if (!text.trim()) {
     vscode.window.showErrorMessage('No text selected');
@@ -73,10 +77,10 @@ export async function addSelectionToContext(
   if (!existsSync(agentDir)) mkdirSync(agentDir, { recursive: true });
 
   // Write selection.md
-  const anchorUri = `${notePathToUri(relPath)}#L${startLine}-L${endLine}`;
+  const anchorUri = activeSelection.anchorUri ?? `${notePathToUri(relPath)}#L${startLine}-L${endLine}`;
   const mdContent = `# Current Selection
 
-**Source**: ${relPath} (lines ${startLine}–${endLine})
+**Source**: ${relPath} (${rangeLabel})
 **Anchor**: ${anchorUri}
 
 \`\`\`
@@ -97,9 +101,11 @@ ${text}
     source: relPath,
     anchor_uri: anchorUri,
     lines: { start: startLine, end: endLine },
+    location: rangeLabel,
     text: text,
     text_hash: createHash('sha256').update(text).digest('hex'),
     exported_at: new Date().toISOString(),
+    ...(metadata ? { metadata } : {}),
     backlinks: backlinks.map(b => ({ from: b.from_note_path, line: b.from_line })),
     forward_links: forwardLinks.map(f => ({ to: f.to_uri, line: f.from_line })),
   };

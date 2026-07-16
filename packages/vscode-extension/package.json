@@ -45,10 +45,6 @@
     ],
     "commands": [
       {
-        "command": "human-learning.addSelectionToContext",
-        "title": "Human Learning: Add Selection to Agent Context"
-      },
-      {
         "command": "human-learning.openAnchor",
         "title": "Human Learning: Open Anchor"
       },
@@ -69,13 +65,36 @@
         "title": "Human Learning: Open In Markdown Editor"
       },
       {
+        "command": "human-learning.addSelectionToContext",
+        "title": "Human Learning: Add Selection to Agent Context",
+        "icon": "$(selection)"
+      },
+      {
+        "command": "human-learning.pdfAskSelection",
+        "title": "Human Learning: Ask PDF About Selection"
+      },
+      {
         "command": "human-learning.openWebBrowser",
         "title": "Human Learning: Open Web Browser",
         "icon": "$(globe)"
       },
       {
+        "command": "human-learning.jumpBack",
+        "title": "Human Learning: Jump Back",
+        "icon": "$(debug-reverse-continue)"
+      },
+      {
+        "command": "human-learning.clearJumpStack",
+        "title": "Human Learning: Clear Jump Stack",
+        "icon": "$(clear-all)"
+      },
+      {
         "command": "human-learning.toggleVimMode",
         "title": "Human Learning: Toggle Vim Mode"
+      },
+      {
+        "command": "human-learning.consumeVimHostShortcut",
+        "title": "Human Learning: Consume Vim Host Shortcut"
       },
       {
         "command": "human-learning.pdfPrevPage",
@@ -116,6 +135,104 @@
         "command": "human-learning.openPdfMarkdownColumns",
         "title": "Human Learning: Open PDF and Markdown Columns",
         "icon": "$(layout-sidebar-right)"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "human-learning.consumeVimHostShortcut",
+        "key": "ctrl+o",
+        "mac": "cmd+o",
+        "when": "activeCustomEditorId == 'human-learning.markdownEditor' && humanLearningMarkdownVimMode"
+      },
+      {
+        "command": "human-learning.consumeVimHostShortcut",
+        "key": "ctrl+b",
+        "mac": "cmd+b",
+        "when": "activeCustomEditorId == 'human-learning.markdownEditor' && humanLearningMarkdownVimMode"
+      },
+      {
+        "command": "human-learning.consumeVimHostShortcut",
+        "key": "ctrl+i",
+        "mac": "cmd+i",
+        "when": "activeCustomEditorId == 'human-learning.markdownEditor' && humanLearningMarkdownVimMode"
+      },
+      {
+        "command": "human-learning.consumeVimHostShortcut",
+        "key": "ctrl+shift+x",
+        "mac": "cmd+shift+x",
+        "when": "activeCustomEditorId == 'human-learning.markdownEditor' && humanLearningMarkdownVimMode"
+      },
+      {
+        "command": "human-learning.consumeVimHostShortcut",
+        "key": "ctrl+`",
+        "mac": "cmd+`",
+        "when": "activeCustomEditorId == 'human-learning.markdownEditor' && humanLearningMarkdownVimMode"
+      },
+      {
+        "command": "human-learning.consumeVimHostShortcut",
+        "key": "ctrl+k",
+        "mac": "cmd+k",
+        "when": "activeCustomEditorId == 'human-learning.markdownEditor' && humanLearningMarkdownVimMode"
+      },
+      {
+        "command": "human-learning.consumeVimHostShortcut",
+        "key": "ctrl+l",
+        "mac": "cmd+l",
+        "when": "activeCustomEditorId == 'human-learning.markdownEditor' && humanLearningMarkdownVimMode"
+      },
+      {
+        "command": "human-learning.consumeVimHostShortcut",
+        "key": "ctrl+alt+0",
+        "mac": "cmd+alt+0",
+        "when": "activeCustomEditorId == 'human-learning.markdownEditor' && humanLearningMarkdownVimMode"
+      },
+      {
+        "command": "human-learning.consumeVimHostShortcut",
+        "key": "ctrl+alt+1",
+        "mac": "cmd+alt+1",
+        "when": "activeCustomEditorId == 'human-learning.markdownEditor' && humanLearningMarkdownVimMode"
+      },
+      {
+        "command": "human-learning.consumeVimHostShortcut",
+        "key": "ctrl+alt+2",
+        "mac": "cmd+alt+2",
+        "when": "activeCustomEditorId == 'human-learning.markdownEditor' && humanLearningMarkdownVimMode"
+      },
+      {
+        "command": "human-learning.consumeVimHostShortcut",
+        "key": "ctrl+alt+3",
+        "mac": "cmd+alt+3",
+        "when": "activeCustomEditorId == 'human-learning.markdownEditor' && humanLearningMarkdownVimMode"
+      },
+      {
+        "command": "human-learning.consumeVimHostShortcut",
+        "key": "ctrl+alt+4",
+        "mac": "cmd+alt+4",
+        "when": "activeCustomEditorId == 'human-learning.markdownEditor' && humanLearningMarkdownVimMode"
+      },
+      {
+        "command": "human-learning.consumeVimHostShortcut",
+        "key": "ctrl+alt+5",
+        "mac": "cmd+alt+5",
+        "when": "activeCustomEditorId == 'human-learning.markdownEditor' && humanLearningMarkdownVimMode"
+      },
+      {
+        "command": "human-learning.consumeVimHostShortcut",
+        "key": "ctrl+alt+6",
+        "mac": "cmd+alt+6",
+        "when": "activeCustomEditorId == 'human-learning.markdownEditor' && humanLearningMarkdownVimMode"
+      },
+      {
+        "command": "human-learning.consumeVimHostShortcut",
+        "key": "ctrl+shift+t",
+        "mac": "cmd+shift+t",
+        "when": "activeCustomEditorId == 'human-learning.markdownEditor' && humanLearningMarkdownVimMode"
+      },
+      {
+        "command": "human-learning.consumeVimHostShortcut",
+        "key": "ctrl+shift+h",
+        "mac": "cmd+shift+h",
+        "when": "activeCustomEditorId == 'human-learning.markdownEditor' && humanLearningMarkdownVimMode"
       }
     ],
     "menus": {
@@ -159,6 +276,23 @@
           "command": "human-learning.openPdfMarkdownColumns",
           "when": "humanLearningPdfOpen",
           "group": "navigation@8"
+        },
+        {
+          "command": "human-learning.addSelectionToContext",
+          "when": "humanLearningPdfOpen && humanLearningPdfHasSelection",
+          "group": "navigation@9"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "human-learning.jumpBack",
+          "when": "view == hl-jump-stack",
+          "group": "navigation@1"
+        },
+        {
+          "command": "human-learning.clearJumpStack",
+          "when": "view == hl-jump-stack",
+          "group": "navigation@2"
         }
       ]
     },
@@ -180,13 +314,8 @@
           "type": "tree"
         },
         {
-          "id": "hl-agent-context",
-          "name": "Agent Context",
-          "type": "tree"
-        },
-        {
-          "id": "hl-problems",
-          "name": "Problems",
+          "id": "hl-jump-stack",
+          "name": "Jump Stack",
           "type": "tree"
         }
       ]
@@ -199,6 +328,16 @@
           "icon": "$(book)"
         }
       ]
+    },
+    "configuration": {
+      "title": "Human Learning PDF",
+      "properties": {
+        "humanLearning.pdf.codexCommand": {
+          "type": "string",
+          "default": "codex",
+          "description": "Command or absolute executable path used to start the Codex app-server for Ask PDF."
+        }
+      }
     },
     "configurationDefaults": {
       "workbench.editorAssociations": {
@@ -236,6 +375,7 @@
     "@mathjax/src": "^4.1.2",
     "@replit/codemirror-vim": "^6.3.0",
     "dompurify": "^3.4.7",
+    "marked": "^13.0.3",
     "mermaid": "11.4.1",
     "prismjs": "1.29.0",
     "sql.js": "^1.10.0",

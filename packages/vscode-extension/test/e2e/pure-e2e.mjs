@@ -108,7 +108,10 @@ test('E2E: full bidirectional link pipeline', async (t) => {
     '--json',
   ], root);
   assert.equal(anchor1.status, 'ok');
-  assert.match(anchor1.anchor.uri, /^raw\/pdf\/transformer-paper.txt#page=\d+&anchor=anc_pdf_/);
+  assert.match(
+    anchor1.anchor.uri,
+    /^raw\/pdf\/transformer-paper\.txt#page=\d+:~:text=attention%20mechanism$/,
+  );
 
   const anchor2 = runCli([
     'anchor', 'create-pdf',
@@ -281,13 +284,19 @@ test('E2E: PDF anchor → markdown link → anchor resolution round-trip', async
   ], root);
   assert.equal(anchor.status, 'ok');
 
-  // Verify the anchor URI follows the expected format
+  // Verify the persisted annotation URI follows the portable PDF format.
   const uri = anchor.anchor.uri;
-  assert.match(uri, /^raw\/pdf\/paper.txt#page=\d+&anchor=anc_pdf_/);
+  assert.match(
+    uri,
+    /^raw\/pdf\/paper\.txt#page=\d+:~:text=attention%20mechanisms%20improve%20NLP$/,
+  );
 
   // This URI can be embedded in markdown as [label](uri)
   const markdownLink = `[see paper](${uri})`;
-  assert.match(markdownLink, /\[see paper\]\(raw\/pdf\/paper.txt#page=\d+&anchor=anc_pdf_/);
+  assert.match(
+    markdownLink,
+    /\[see paper\]\(raw\/pdf\/paper\.txt#page=\d+:~:text=attention%20mechanisms%20improve%20NLP\)/,
+  );
 
   // Resolve anchor from URI
   const resolved = runCli(['anchor', 'resolve', uri, '--json'], root);

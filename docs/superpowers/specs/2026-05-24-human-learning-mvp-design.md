@@ -49,30 +49,30 @@ Existing tables remain and the MVP adds the minimum needed fields/tables:
 Canonical PDF links use:
 
 ```md
-[quoted source](hl://pdf/raw/pdf/example.pdf?anchor=anc_pdf_abcd1234)
+[selected text](raw/pdf/example.pdf#page=3:~:text=selected%20text)
 ```
 
 Page-only links are allowed as a fallback:
 
 ```md
-[page source](hl://pdf/raw/pdf/example.pdf?page=3)
+[page source](raw/pdf/example.pdf#page=3)
 ```
 
 ## PDF Flow
 
 1. The user opens `raw/pdf/*.pdf` in the custom PDF editor.
 2. The webview loads bundled `pdfium.wasm` through EmbedPDF and renders pages.
-3. A text selection creates a page/selection anchor in the webview.
-4. The extension sends the quote and locator to `core` to persist an anchor.
-5. The user inserts or copies a markdown link using the returned `hl://pdf/...` URI.
+3. A text selection captures its page, exact text, and adjacent context in the webview.
+4. The extension sends the selector to `core` to build a portable PDF target.
+5. The user inserts or copies the returned page/text-fragment Markdown link.
 6. `hl links rebuild` or the file watcher indexes the note.
-7. Clicking the markdown link dispatches to the PDF editor, opens the PDF, scrolls to the page, and highlights the anchor.
+7. Clicking the markdown link dispatches to the PDF editor, opens the PDF, scrolls to the page, and highlights the matching text.
 
 For the MVP, quote-based CLI anchors use page-text search plus page-level locator when exact geometry is not available headlessly. Interactive selections from the webview can store selection indices from EmbedPDF.
 
 ## Markdown Flow
 
-The CodeMirror document remains raw markdown. The editor sends full document edits back to VS Code's `TextDocument`, letting VS Code own dirty state, save, undo, and hot exit. Hybrid rendering is implemented with CodeMirror decorations/widgets on non-active lines; active lines remain raw markdown. `hl://` links and wikilinks can be clicked and dispatched through the extension.
+The CodeMirror document remains raw markdown. The editor sends full document edits back to VS Code's `TextDocument`, letting VS Code own dirty state, save, undo, and hot exit. Hybrid rendering is implemented with CodeMirror decorations/widgets on non-active lines; active lines remain raw markdown. Native Markdown links and wikilinks can be clicked and dispatched through the extension.
 
 ## Embeddings
 

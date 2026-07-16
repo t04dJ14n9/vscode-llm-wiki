@@ -196,7 +196,10 @@ export function addCodeBlockDecorations(
 ): void {
   const openingLine = state.doc.line(block.startLine);
   const closingLine = state.doc.line(block.endLine);
-  if (activeLines.has(block.startLine)) {
+  const blockHasSelection = [...activeLines].some(lineNumber => (
+    lineNumber >= block.startLine && lineNumber <= block.endLine
+  ));
+  if (blockHasSelection) {
     decorations.push(activeCodeBlockOpeningLineDeco.range(openingLine.from));
   } else {
     decorations.push(Decoration.replace({
@@ -208,7 +211,7 @@ export function addCodeBlockDecorations(
     decorations.push(codeBlockContentLineDeco.range(state.doc.line(lineNumber).from));
   }
 
-  if (activeLines.has(block.endLine)) {
+  if (blockHasSelection) {
     decorations.push(activeCodeBlockClosingLineDeco.range(closingLine.from));
   } else {
     decorations.push(Decoration.replace({

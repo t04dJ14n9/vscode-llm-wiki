@@ -5,4 +5,8 @@ export interface SelectionContext {
   text: string;
   startLine: number;
   endLine: number;
+  sourceLabel?: string;
+  rangeLabel?: string;
+  anchorUri?: string;
+  metadata?: Record<string, unknown>;
 }

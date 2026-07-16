@@ -14,6 +14,7 @@
   "activationEvents": [
     "onStartupFinished",
     "onCustomEditor:human-learning.pdfViewer",
+    "onCommand:human-learning.openPdfTarget",
     "workspaceContains:**/*.pdf"
   ],
   "main": "dist/extension.js",
@@ -34,6 +35,15 @@
       {
         "command": "human-learning.openAnchor",
         "title": "Human Learning: Open Anchor"
+      },
+      {
+        "command": "human-learning.addSelectionToContext",
+        "title": "Human Learning: Add PDF Selection to Agent Context",
+        "icon": "$(selection)"
+      },
+      {
+        "command": "human-learning.pdfAskSelection",
+        "title": "Human Learning: Ask PDF About Selection"
       },
       {
         "command": "human-learning.pdfPrevPage",
@@ -107,8 +117,23 @@
           "command": "human-learning.pdfToggleTwoPageView",
           "when": "humanLearningPdfOpen",
           "group": "navigation@7"
+        },
+        {
+          "command": "human-learning.addSelectionToContext",
+          "when": "humanLearningPdfOpen && humanLearningPdfHasSelection",
+          "group": "navigation@8"
         }
       ]
+    },
+    "configuration": {
+      "title": "Human Learning PDF",
+      "properties": {
+        "humanLearning.pdf.codexCommand": {
+          "type": "string",
+          "default": "codex",
+          "description": "Command or absolute executable path used to start the Codex app-server for Ask PDF."
+        }
+      }
     },
     "configurationDefaults": {
       "workbench.editorAssociations": {
@@ -126,6 +151,8 @@
     "@embedpdf/models": "^2.14.3",
     "@embedpdf/pdfium": "^2.14.3",
     "@human-learning/core": "workspace:*",
+    "dompurify": "^3.4.7",
+    "marked": "^13.0.3",
     "sql.js": "^1.10.0"
   },
   "devDependencies": {

@@ -95,6 +95,85 @@ test('addSelectionToContext exports a custom markdown editor selection when no n
   }
 });
 
+test('addSelectionToContext preserves explicit source labels and anchors for PDF selections', async () => {
+  const vaultRoot = mkdtempSync(join(tmpdir(), 'hl-agent-context-pdf-'));
+  const errors = [];
+  const informationMessages = [];
+  const vscode = {
+    workspace: {
+      asRelativePath: uri => uri.fsPath.replace(`${vaultRoot}/`, ''),
+    },
+    window: {
+      activeTextEditor: undefined,
+      showErrorMessage: message => errors.push(message),
+      showInformationMessage: message => informationMessages.push(message),
+    },
+  };
+  const { addSelectionToContext } = loadTsModule('src/agentContext.ts', {
+    vscode,
+    '@human-learning/core': {
+      openDatabase: async () => ({}),
+      closeDatabase: () => undefined,
+      getBacklinks: () => [{ from_note_path: 'notes/Paper Notes.md', from_line: 12 }],
+      getForwardLinks: () => [],
+      runMigrations: () => undefined,
+    },
+    './wikiLinks': {
+      notePathToUri: value => `hl://note/${value.split('/').map(encodeURIComponent).join('/')}`,
+    },
+  });
+
+  try {
+    const exported = await addSelectionToContext(vaultRoot, {
+      getActiveSelectionContext: async () => ({
+        uri: { fsPath: `${vaultRoot}/raw/papers/attention.pdf` },
+        text: 'FlashAttention uses tiling',
+        startLine: 2,
+        endLine: 2,
+        sourceLabel: 'raw/papers/attention.pdf',
+        rangeLabel: 'page 2',
+        anchorUri: 'raw/papers/attention.pdf#page=2:~:text=FlashAttention%20uses%20tiling',
+        metadata: {
+          kind: 'pdf',
+          page: 2,
+          anchorId: 'anc_pdf_context',
+        },
+      }),
+    });
+
+    const markdown = readFileSync(join(vaultRoot, '.hl', 'agent', 'selection.md'), 'utf8');
+    const json = JSON.parse(readFileSync(join(vaultRoot, '.hl', 'agent', 'selection.json'), 'utf8'));
+
+    assert.equal(errors.length, 0);
+    assert.equal(exported, true);
+    assert.match(markdown, /\*\*Source\*\*: raw\/papers\/attention\.pdf \(page 2\)/);
+    assert.match(
+      markdown,
+      /\*\*Anchor\*\*: raw\/papers\/attention\.pdf#page=2:~:text=FlashAttention%20uses%20tiling/,
+    );
+    assert.match(markdown, /FlashAttention uses tiling/);
+    assert.equal(json.source, 'raw/papers/attention.pdf');
+    assert.equal(
+      json.anchor_uri,
+      'raw/papers/attention.pdf#page=2:~:text=FlashAttention%20uses%20tiling',
+    );
+    assert.deepEqual(json.lines, { start: 2, end: 2 });
+    assert.equal(json.location, 'page 2');
+    assert.equal(json.text, 'FlashAttention uses tiling');
+    assert.deepEqual(json.metadata, {
+      kind: 'pdf',
+      page: 2,
+      anchorId: 'anc_pdf_context',
+    });
+    assert.deepEqual(json.backlinks, [{ from: 'notes/Paper Notes.md', line: 12 }]);
+    assert.deepEqual(informationMessages, [
+      'Selection exported to .hl/agent/selection.md + .hl/agent/selection.json',
+    ]);
+  } finally {
+    rmSync(vaultRoot, { recursive: true, force: true });
+  }
+});
+
 test('addSelectionToContext returns false and skips files when no exportable selection exists', async () => {
   const vaultRoot = mkdtempSync(join(tmpdir(), 'hl-agent-context-empty-'));
   const errors = [];

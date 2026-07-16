@@ -17,8 +17,7 @@ fallback targets. Markdown remains readable outside the extension.
 | Notes | `[[Online Softmax#Why This Matters]]` |
 | Code | `[kernel](raw/code/attention.cu#L42-L57)` |
 | PDF page | `[paper p7](raw/pdf/flash-attention.pdf#page=7)` |
-| PDF chunk | `[quote](raw/pdf/flash-attention.pdf#page=7&chunk=chk_pdf_abc123)` |
-| PDF arbitrary selection | `[selection](raw/pdf/flash-attention.pdf#page=7&anchor=anc_pdf_abc123)` |
+| PDF text selection | `[selected text](raw/pdf/flash-attention.pdf#page=7:~:text=selected%20text)` |
 | Web native section | `[section](https://example.com/article#results)` |
 | Web text fragment | `[quote](https://example.com/article#:~:text=selected%20text)` |
 | Web fallback target | `[DOM block](https://example.com/article#hl-web=web_abc123)` |
@@ -36,8 +35,7 @@ pdf:
   *.pdf
   raw/pdf/...
   #page=
-  #chunk=
-  #anchor=
+  :~:text=
 
 code:
   known code extension
@@ -79,8 +77,8 @@ Chunks are retrieval units. Anchors are durable arbitrary selections.
 
 ```text
 PDF ingestion -> chunks with metadata_json
-Search result -> #chunk= link
-Arbitrary selection -> anchor row + #anchor= link
+Search result -> portable page/text-fragment link
+Arbitrary selection -> portable link; highlight may also create an internal anchor row
 ```
 
 Chunk metadata includes page range, block type, reading order, text offsets,
@@ -88,6 +86,7 @@ future rectangles, source hash, and chunk hash.
 
 Anchor metadata includes page, rects, text item offsets when available, quote
 offset, quote length, text hash, source hash, confidence, and status.
+Internal chunk and anchor IDs never appear in user-facing PDF links.
 
 ## Web Locator Model
 

@@ -44,6 +44,10 @@ test('separate markdown and PDF extension manifests can be shipped independently
   assert.equal(pdfManifest.name, 'human-learning-pdf');
   assert.equal(pdfManifest.private, undefined);
   assert.equal(pdfManifest.main, 'dist/extension.js');
+  assert.ok(
+    pdfManifest.activationEvents.includes('onCommand:human-learning.openPdfTarget'),
+    'standalone PDF extension must activate when Markdown dispatches a portable PDF target',
+  );
   assert.deepEqual(
     pdfManifest.contributes.customEditors.map(editor => editor.viewType),
     ['human-learning.pdfViewer'],
@@ -103,6 +107,16 @@ test('webview bundles do not depend on webpack automatic publicPath detection', 
   }
 });
 
+test('combined and standalone PDF bundles include the Ask PDF panel protocol', () => {
+  for (const root of [extensionRoot, pdfExtensionRoot]) {
+    const bundle = readFileSync(join(root, 'dist', 'pdf-viewer.js'), 'utf8');
+    assert.match(bundle, /pdfDiscussionPrepare/);
+    assert.match(bundle, /pdfDiscussionLoadSnapshot/);
+    assert.match(bundle, /Ask PDF/);
+    assert.match(bundle, /Ask about selection/);
+  }
+});
+
 test('webview webpack entries use VS Code webview size budgets', () => {
   const configs = require('../webpack.config.js');
   const byName = new Map(configs.map(config => [config.name, config]));
@@ -147,4 +161,36 @@ test('manifest contributes a Human Learning outline view for custom markdown edi
   assert.ok(outlineView, 'missing Human Learning outline view contribution');
   assert.equal(outlineView.name, 'Outline');
   assert.equal(outlineView.type, 'tree');
+});
+
+test('manifests expose selection export command while omitting Agent Context and Problems UI', () => {
+  const markdownManifest = JSON.parse(readFileSync(join(markdownExtensionRoot, 'package.json'), 'utf8'));
+  const pdfManifest = JSON.parse(readFileSync(join(pdfExtensionRoot, 'package.json'), 'utf8'));
+  const viewIds = [
+    ...(manifest.contributes.views['human-learning'] ?? []),
+    ...(markdownManifest.contributes.views['human-learning'] ?? []),
+  ].map(view => view.id);
+  const commandIds = [
+    ...(manifest.contributes.commands ?? []),
+    ...(markdownManifest.contributes.commands ?? []),
+    ...(pdfManifest.contributes.commands ?? []),
+  ].map(command => command.command);
+
+  assert.equal(viewIds.includes('hl-agent-context'), false);
+  assert.equal(viewIds.includes('hl-problems'), false);
+  assert.equal(commandIds.includes('human-learning.addSelectionToContext'), true);
+});
+
+test('manifest contributes a Human Learning jump stack view and retract commands', () => {
+  const humanLearningViews = manifest.contributes.views['human-learning'] ?? [];
+  const jumpStackView = humanLearningViews.find(view => view.id === 'hl-jump-stack');
+  const commands = new Map(
+    (manifest.contributes.commands ?? []).map(command => [command.command, command]),
+  );
+
+  assert.ok(jumpStackView, 'missing Human Learning jump stack view contribution');
+  assert.equal(jumpStackView.name, 'Jump Stack');
+  assert.equal(jumpStackView.type, 'tree');
+  assert.equal(commands.get('human-learning.jumpBack')?.title, 'Human Learning: Jump Back');
+  assert.equal(commands.get('human-learning.clearJumpStack')?.title, 'Human Learning: Clear Jump Stack');
 });

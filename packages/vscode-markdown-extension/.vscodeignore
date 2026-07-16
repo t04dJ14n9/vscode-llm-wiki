@@ -1,0 +1,8 @@
+src/**
+webview-src/**
+tsconfig.json
+webpack.config.js
+*.vsix
+dist/**/*.map
+dist/src/**
+dist/webview-src/**

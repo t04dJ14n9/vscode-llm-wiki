@@ -66,8 +66,12 @@ interface ReferenceTarget {
   heading?: string;
   lines?: { start: number; end: number };
   page?: number;
-  chunkId?: string;
-  anchorId?: string;
+  textFragment?: {
+    textStart: string;
+    textEnd?: string;
+    prefix?: string;
+    suffix?: string;
+  };
   webTargetId?: string;
 }
 ```
@@ -76,7 +80,7 @@ Helpers:
 
 ```ts
 noteHref(path, heading?)
-pdfHref(path, { page?, chunkId?, anchorId? })
+pdfHref(path, { page?, textFragment? })
 codeHref(path, { start, end? }?)
 ```
 
@@ -86,8 +90,7 @@ Generated examples:
 [[Online Softmax#Why This Matters]]
 [kernel](raw/code/attention.cu#L42-L57)
 [paper p7](raw/pdf/flash-attention.pdf#page=7)
-[quote](raw/pdf/flash-attention.pdf#page=7&chunk=chk_pdf_abc123)
-[selection](raw/pdf/flash-attention.pdf#page=7&anchor=anc_pdf_abc123)
+[selected text](raw/pdf/flash-attention.pdf#page=7:~:text=selected%20text)
 [quote](https://example.com/article#:~:text=selected%20text)
 [DOM block](https://example.com/article#hl-web=web_abc123)
 ```
@@ -138,27 +141,29 @@ PDF chunk IDs use the `chk_pdf_` prefix and content hash. Chunk metadata stores
 page, offsets, reading order, block type, source hash, chunk hash, and future
 rectangle data.
 
-Search results for PDF chunks emit:
+Search results for PDF chunks currently emit portable page-only targets:
 
 ```md
-raw/pdf/file.pdf#page=N&chunk=chk_pdf_...
+raw/pdf/file.pdf#page=N
 ```
 
-This is intentionally different from anchors. Chunks are retrieval units; anchors
-are durable arbitrary selections.
+Chunks remain internal retrieval units. Their IDs are not exposed in the URL;
+the current search layer does not reconstruct a precise selector from a chunk.
+User-created selections and persisted annotations do include text fragments.
 
 ## 7. PDF Anchors
 
 `packages/core/src/anchors/pdf.ts` creates anchors from quote search or trusted
 webview selections.
 
-Anchor links use:
+Persisted annotation rows also store portable links:
 
 ```md
-raw/pdf/file.pdf#page=N&anchor=anc_pdf_...
+raw/pdf/file.pdf#page=N:~:text=exact%20selected%20text
 ```
 
-Quote-based anchors store:
+The annotation row ID remains internal database identity. Quote-based anchors
+store:
 
 - page
 - rects when available
@@ -207,7 +212,7 @@ skill environment.
 
 `SearchResult.anchor_uri` is a native link:
 
-- PDF: `pdfHref(sourcePath, { page, chunkId })`
+- PDF: `pdfHref(sourcePath, { page })`
 - code: `codeHref(sourcePath, { start, end })`
 - markdown/text: source path
 
@@ -219,13 +224,13 @@ skill environment.
 | --- | --- |
 | Note | `vscode.openWith(..., human-learning.markdownEditor)` and reveal heading/block/line |
 | Code | Open native VS Code text editor and reveal `#Lx-Ly` |
-| PDF | Execute `human-learning.openPdfAtAnchor` with page/chunk/anchor arguments |
+| PDF | Execute `human-learning.openPdfTarget({pdfPath,page,textFragment})` |
 | Web | Open Chrome first, then fall back to VS Code external opener |
 | Image/Text | Open local file |
 | Unknown | Show VS Code error |
 
-It still accepts raw anchor ids such as `anc_pdf_...` by resolving the anchor row
-and dispatching its stored native URI.
+It does not dispatch raw internal annotation IDs. Portable PDF targets are
+classified directly from the Markdown destination.
 
 ## 11. Markdown Editor
 
@@ -273,13 +278,11 @@ EmbedPDF/PDFium packages. The webview bundle copies `pdfium.wasm` and
 
 The PDF provider resolves:
 
-- `#page=`
-- `#chunk=`
-- `#anchor=`
+- `#page=N`
+- `#page=N:~:text=...`
 
-Chunk resolution loads locator metadata from `chunks`. Anchor resolution loads
-locator metadata from `anchors`. Both paths are surfaced to the webview for
-navigation/highlighting.
+The page and parsed text fragment are surfaced directly to the webview for
+page-scoped matching and transient highlighting, without a database lookup.
 
 ## 13. Generated Agent Files
 

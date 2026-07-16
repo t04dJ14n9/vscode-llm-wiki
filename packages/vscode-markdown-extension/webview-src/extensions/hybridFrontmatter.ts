@@ -37,9 +37,18 @@ export class FrontmatterPropertiesWidget extends WidgetType {
     const wrapper = document.createElement('div');
     wrapper.className = 'cm-hybrid-properties';
 
-    const heading = document.createElement('div');
+    const heading = document.createElement('button');
+    heading.type = 'button';
     heading.className = 'cm-hybrid-properties-heading';
-    heading.textContent = 'Properties';
+    heading.ariaLabel = 'Properties';
+    heading.setAttribute('aria-expanded', 'true');
+    const headingChevron = document.createElement('span');
+    headingChevron.className = 'cm-hybrid-properties-chevron';
+    headingChevron.setAttribute('aria-hidden', 'true');
+    headingChevron.textContent = '⌄';
+    const headingLabel = document.createElement('span');
+    headingLabel.textContent = 'Properties';
+    heading.append(headingChevron, headingLabel);
     wrapper.appendChild(heading);
 
     const rows = document.createElement('div');
@@ -49,25 +58,85 @@ export class FrontmatterPropertiesWidget extends WidgetType {
       row.className = 'cm-hybrid-property-row';
 
       const name = this.createPropertyNameInput(view, property, propertyIndex);
+      const nameCell = document.createElement('div');
+      nameCell.className = 'cm-hybrid-property-name-cell';
+      nameCell.append(createPropertyIcon(property.name), name);
 
       const value = document.createElement('span');
       value.className = 'cm-hybrid-property-value';
       if (property.chips.length > 0) {
-        for (const chipValue of property.chips) {
+        const display = document.createElement('div');
+        display.className = 'cm-hybrid-property-chip-display';
+        display.ariaLabel = `${property.name} property display`;
+        display.tabIndex = 0;
+        for (const [chipIndex, chipValue] of property.chips.entries()) {
           const chip = document.createElement('span');
-          chip.className = 'cm-hybrid-property-chip';
-          chip.textContent = chipValue;
-          value.appendChild(chip);
+          chip.className = 'cm-hybrid-property-chip-shell';
+          const label = document.createElement('span');
+          label.className = 'cm-hybrid-property-chip';
+          label.textContent = chipValue;
+          const remove = document.createElement('span');
+          remove.className = 'cm-hybrid-property-chip-remove';
+          remove.setAttribute('role', 'button');
+          remove.tabIndex = 0;
+          remove.ariaLabel = `Remove ${chipValue} from ${property.name}`;
+          remove.textContent = '×';
+          const removeChip = (event: Event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            const nextChips = property.chips.filter((_, index) => index !== chipIndex);
+            commitPropertyListValue(view, property, nextChips.join(', '), false);
+            requestAnimationFrame(() => view.focus());
+          };
+          remove.addEventListener('mousedown', event => {
+            event.preventDefault();
+            event.stopPropagation();
+          });
+          remove.addEventListener('click', removeChip);
+          remove.addEventListener('keydown', event => {
+            if (event.key === 'Enter' || event.key === ' ') removeChip(event);
+          });
+          chip.append(label, remove);
+          display.appendChild(chip);
         }
+        value.appendChild(display);
         const input = document.createElement('input');
         input.className = 'cm-hybrid-property-list-input';
         input.type = 'text';
         input.value = property.chips.join(', ');
         input.ariaLabel = `${property.name} property values`;
         input.spellcheck = false;
+        input.hidden = true;
         let lastCommittedValue = input.value;
         let skipBlurCommit = false;
         isolateFrontmatterInput(input);
+
+        const hideInput = () => {
+          input.hidden = true;
+          display.hidden = false;
+        };
+        const showInput = () => {
+          skipBlurCommit = false;
+          display.hidden = true;
+          input.hidden = false;
+          input.focus({ preventScroll: true });
+          input.select();
+        };
+        display.addEventListener('mousedown', event => {
+          event.preventDefault();
+          event.stopPropagation();
+        });
+        display.addEventListener('click', event => {
+          event.preventDefault();
+          event.stopPropagation();
+          showInput();
+        });
+        display.addEventListener('keydown', event => {
+          if (event.key !== 'Enter' && event.key !== ' ') return;
+          event.preventDefault();
+          event.stopPropagation();
+          showInput();
+        });
 
         const commitInputValue = () => {
           const nextValue = input.value;
@@ -90,12 +159,13 @@ export class FrontmatterPropertiesWidget extends WidgetType {
           }
           if (event.key === 'Enter') {
             event.preventDefault();
-            commitInputValue();
+            input.blur();
           }
           if (event.key === 'Escape') {
             event.preventDefault();
             skipBlurCommit = true;
             input.value = property.chips.join(', ');
+            hideInput();
             input.blur();
             view.focus();
           }
@@ -103,18 +173,46 @@ export class FrontmatterPropertiesWidget extends WidgetType {
         input.addEventListener('blur', () => {
           if (skipBlurCommit) return;
           commitInputValue();
+          hideInput();
         });
         value.appendChild(input);
       } else {
+        const display = document.createElement('button');
+        display.type = 'button';
+        display.className = 'cm-hybrid-property-scalar-display';
+        display.ariaLabel = `${property.name} property display`;
+        display.textContent = property.value;
         const input = document.createElement('input');
         input.className = 'cm-hybrid-property-value-input';
         input.type = 'text';
         input.value = property.value;
         input.ariaLabel = `${property.name} property value`;
         input.spellcheck = false;
+        input.hidden = true;
         let lastCommittedValue = property.value;
         let skipBlurCommit = false;
         isolateFrontmatterInput(input);
+
+        const hideInput = () => {
+          input.hidden = true;
+          display.hidden = false;
+        };
+        const showInput = () => {
+          skipBlurCommit = false;
+          display.hidden = true;
+          input.hidden = false;
+          input.focus({ preventScroll: true });
+          input.select();
+        };
+        display.addEventListener('mousedown', event => {
+          event.preventDefault();
+          event.stopPropagation();
+        });
+        display.addEventListener('click', event => {
+          event.preventDefault();
+          event.stopPropagation();
+          showInput();
+        });
 
         const commitInputValue = () => {
           const nextValue = input.value;
@@ -137,12 +235,13 @@ export class FrontmatterPropertiesWidget extends WidgetType {
           }
           if (event.key === 'Enter') {
             event.preventDefault();
-            commitInputValue();
+            input.blur();
           }
           if (event.key === 'Escape') {
             event.preventDefault();
             skipBlurCommit = true;
             input.value = property.value;
+            hideInput();
             input.blur();
             view.focus();
           }
@@ -150,11 +249,12 @@ export class FrontmatterPropertiesWidget extends WidgetType {
         input.addEventListener('blur', () => {
           if (skipBlurCommit) return;
           commitInputValue();
+          hideInput();
         });
-        value.appendChild(input);
+        value.append(display, input);
       }
 
-      row.append(name, value);
+      row.append(nameCell, value);
       rows.appendChild(row);
     }
 
@@ -173,6 +273,18 @@ export class FrontmatterPropertiesWidget extends WidgetType {
     });
     rows.appendChild(addProperty);
     wrapper.appendChild(rows);
+
+    heading.addEventListener('mousedown', event => {
+      event.preventDefault();
+      event.stopPropagation();
+    });
+    heading.addEventListener('click', event => {
+      event.preventDefault();
+      event.stopPropagation();
+      rows.hidden = !rows.hidden;
+      heading.setAttribute('aria-expanded', String(!rows.hidden));
+      headingChevron.textContent = rows.hidden ? '›' : '⌄';
+    });
 
     wrapper.addEventListener('mousedown', event => {
       event.preventDefault();
@@ -511,7 +623,12 @@ function commitPropertyName(view: EditorView, property: FrontmatterProperty, nex
   refocusPropertyNameInput(view, nextName);
 }
 
-function commitPropertyListValue(view: EditorView, property: FrontmatterProperty, nextValue: string): void {
+function commitPropertyListValue(
+  view: EditorView,
+  property: FrontmatterProperty,
+  nextValue: string,
+  refocus = true,
+): void {
   const serialized = property.yamlStyle === 'block-list'
     ? `${property.name}:${serializeFrontmatterBlockArray(nextValue)}`
     : `${property.name}: ${serializeFrontmatterArray(nextValue)}`;
@@ -519,13 +636,32 @@ function commitPropertyListValue(view: EditorView, property: FrontmatterProperty
     changes: { from: property.lineFrom, to: property.lineTo, insert: serialized },
   });
 
-  refocusPropertyListInput(view, property.name);
+  if (refocus) refocusPropertyListInput(view, property.name);
+}
+
+function createPropertyIcon(propertyName: string): HTMLSpanElement {
+  const icon = document.createElement('span');
+  icon.className = 'cm-hybrid-property-icon';
+  icon.setAttribute('aria-hidden', 'true');
+  const normalized = propertyName.trim().toLowerCase();
+  const kind = normalized === 'tags' || normalized === 'tag'
+    ? 'tags'
+    : normalized === 'aliases' || normalized === 'alias'
+      ? 'aliases'
+      : 'property';
+  icon.dataset.propertyIcon = kind;
+  icon.innerHTML = kind === 'tags'
+    ? '<svg viewBox="0 0 24 24"><path d="M20 13 13 20 4 11V4h7l9 9Z"/><circle cx="8.5" cy="8.5" r="1.25"/></svg>'
+    : kind === 'aliases'
+      ? '<svg viewBox="0 0 24 24"><path d="M4 12h14M13 7l5 5-5 5"/></svg>'
+      : '<svg viewBox="0 0 24 24"><circle cx="7" cy="7" r="1"/><circle cx="7" cy="12" r="1"/><circle cx="7" cy="17" r="1"/><path d="M11 7h8M11 12h8M11 17h8"/></svg>';
+  return icon;
 }
 
 function refocusPropertyInput(view: EditorView, propertyName: string): void {
   scheduleFrontmatterInputFocus(() => {
     const selector = `.cm-hybrid-property-value-input[aria-label="${cssEscape(`${propertyName} property value`)}"]`;
-    return view.dom.querySelector<HTMLInputElement>(selector);
+    return revealFrontmatterValueInput(view.dom.querySelector<HTMLInputElement>(selector));
   });
 }
 
@@ -545,8 +681,18 @@ function refocusPropertyNameInputAtIndex(view: EditorView, propertyIndex: number
 function refocusPropertyListInput(view: EditorView, propertyName: string): void {
   scheduleFrontmatterInputFocus(() => {
     const selector = `.cm-hybrid-property-list-input[aria-label="${cssEscape(`${propertyName} property values`)}"]`;
-    return view.dom.querySelector<HTMLInputElement>(selector);
+    return revealFrontmatterValueInput(view.dom.querySelector<HTMLInputElement>(selector));
   });
+}
+
+function revealFrontmatterValueInput(input: HTMLInputElement | null): HTMLInputElement | null {
+  if (!input) return null;
+  const display = input.parentElement?.querySelector<HTMLElement>(
+    '.cm-hybrid-property-chip-display, .cm-hybrid-property-scalar-display',
+  );
+  if (display) display.hidden = true;
+  input.hidden = false;
+  return input;
 }
 
 function yamlLineStartOffsets(source: string): number[] {

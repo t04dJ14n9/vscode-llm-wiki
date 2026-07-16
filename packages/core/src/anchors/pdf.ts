@@ -6,6 +6,15 @@ import { pdfHref } from '../links/reference-target';
 import { getSource, registerSource } from '../sources/registry';
 import { appendAnchorToFile } from './store';
 
+export type PdfHighlightColor = 'yellow' | 'red' | 'green' | 'purple';
+
+const PDF_HIGHLIGHT_COLORS = new Set<PdfHighlightColor>([
+  'yellow',
+  'red',
+  'green',
+  'purple',
+]);
+
 export interface AnchorRecord {
   id: string;
   source_id: string;
@@ -22,6 +31,8 @@ export interface AnchorRecord {
 export interface CreatePdfAnchorOptions {
   quote: string;
   page?: number;
+  prefix?: string;
+  suffix?: string;
   rects?: number[][];
   textItemIndex?: number;
   charOffset?: number;
@@ -55,6 +66,8 @@ export function createPdfAnchorFromQuote(
   const status = offset >= 0 ? 'resolved' : 'broken';
   const locator = {
     page: options.page ?? inferPage(text, quote),
+    prefix: options.prefix,
+    suffix: options.suffix,
     rects: options.rects ?? [],
     textItemIndex: options.textItemIndex,
     charOffset: options.charOffset,
@@ -68,7 +81,10 @@ export function createPdfAnchorFromQuote(
     .update(`${source.id}:${quote}:${locator.page}:${offset}`)
     .digest('hex')
     .substring(0, 12);
-  const uri = pdfHref(source.path, { page: locator.page, anchorId: id });
+  const uri = pdfHref(source.path, {
+    page: locator.page,
+    textFragment: { textStart: quote, prefix: locator.prefix, suffix: locator.suffix },
+  });
   const textHash = createHash('sha256').update(quote).digest('hex');
 
   db.prepare(`
@@ -104,7 +120,10 @@ export function createPdfAnchorFromSelection(
     charOffset?: number;
     endTextItemIndex?: number;
     endCharOffset?: number;
+    prefix?: string;
+    suffix?: string;
     rects?: number[][];
+    highlightColor?: PdfHighlightColor;
     createdBy?: 'user' | 'agent' | 'parser' | 'repair';
   },
 ): AnchorRecord {
@@ -121,30 +140,39 @@ export function createPdfAnchorFromSelection(
 
   const raw = readFileSync(fullPath);
   const sourceHash = createHash('sha256').update(raw).digest('hex');
+  const highlightColor = validateHighlightColor(selection.highlightColor);
   const locator = {
     page: selection.page,
+    prefix: selection.prefix,
+    suffix: selection.suffix,
     rects: selection.rects ?? [],
     textItemIndex: selection.textItemIndex,
     charOffset: selection.charOffset,
     endTextItemIndex: selection.endTextItemIndex,
     endCharOffset: selection.endCharOffset,
+    highlightColor,
     quote_offset: null,
     quote_length: quote.length,
     strategy: 'webview-selection',
   };
+  const identityParts = [
+    source.id,
+    quote,
+    selection.page,
+    selection.textItemIndex ?? '',
+    selection.charOffset ?? '',
+    selection.endTextItemIndex ?? '',
+    selection.endCharOffset ?? '',
+  ];
+  if (highlightColor) identityParts.push(highlightColor);
   const id = 'anc_pdf_' + createHash('sha256')
-    .update([
-      source.id,
-      quote,
-      selection.page,
-      selection.textItemIndex ?? '',
-      selection.charOffset ?? '',
-      selection.endTextItemIndex ?? '',
-      selection.endCharOffset ?? '',
-    ].join(':'))
+    .update(identityParts.join(':'))
     .digest('hex')
     .substring(0, 12);
-  const uri = pdfHref(source.path, { page: locator.page, anchorId: id });
+  const uri = pdfHref(source.path, {
+    page: locator.page,
+    textFragment: { textStart: quote, prefix: locator.prefix, suffix: locator.suffix },
+  });
   const textHash = createHash('sha256').update(quote).digest('hex');
 
   db.prepare(`
@@ -177,6 +205,14 @@ export function resolveAnchor(db: Database, idOrUri: string): AnchorRecord | nul
 
 function normalizeQuote(text: string): string {
   return text.replace(/\s+/g, ' ').trim();
+}
+
+function validateHighlightColor(value: unknown): PdfHighlightColor | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value === 'string' && PDF_HIGHLIGHT_COLORS.has(value as PdfHighlightColor)) {
+    return value as PdfHighlightColor;
+  }
+  throw new Error(`Unsupported PDF highlight color: ${String(value)}`);
 }
 
 function inferPage(text: string, quote: string): number {

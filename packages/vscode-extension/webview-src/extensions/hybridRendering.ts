@@ -58,9 +58,6 @@ mermaid.initialize({
   },
 });
 let mermaidRenderSequence = 0;
-const mermaidZoomMin = 0.5;
-const mermaidZoomMax = 3;
-const mermaidZoomStep = 0.25;
 
 class EmptyWidget extends WidgetType {
   override toDOM(): HTMLElement {
@@ -341,29 +338,32 @@ class CalloutWidget extends WidgetType {
 
     const title = document.createElement('div');
     title.className = 'cm-hybrid-callout-title';
+    title.appendChild(calloutIconElement(this.type));
     let body: HTMLDivElement | undefined;
+    let foldButton: HTMLButtonElement | undefined;
     const folded = this.foldMarker === '-';
     if (this.foldMarker && this.body.trim().length > 0) {
-      const foldButton = document.createElement('button');
-      foldButton.type = 'button';
-      foldButton.className = 'cm-hybrid-callout-fold';
-      foldButton.ariaLabel = folded ? 'Expand callout' : 'Collapse callout';
-      foldButton.textContent = folded ? '>' : 'v';
-      foldButton.addEventListener('mousedown', (event) => {
+      const button = document.createElement('button');
+      foldButton = button;
+      button.type = 'button';
+      button.className = 'cm-hybrid-callout-fold';
+      button.ariaLabel = folded ? 'Expand callout' : 'Collapse callout';
+      button.textContent = folded ? '›' : '⌄';
+      button.addEventListener('mousedown', (event) => {
         event.preventDefault();
         event.stopPropagation();
       });
-      foldButton.addEventListener('click', (event) => {
+      button.addEventListener('click', (event) => {
         event.preventDefault();
         event.stopPropagation();
         if (!body) return;
         body.hidden = !body.hidden;
-        foldButton.textContent = body.hidden ? '>' : 'v';
-        foldButton.ariaLabel = body.hidden ? 'Expand callout' : 'Collapse callout';
+        button.textContent = body.hidden ? '›' : '⌄';
+        button.ariaLabel = body.hidden ? 'Expand callout' : 'Collapse callout';
       });
-      title.appendChild(foldButton);
     }
     appendCalloutInlineMarkdownLine(title, this.title, calloutInlineContext(view, this.titleFrom));
+    if (foldButton) title.appendChild(foldButton);
     wrapper.appendChild(title);
 
     if (this.body.trim().length > 0) {
@@ -395,6 +395,58 @@ class CalloutWidget extends WidgetType {
   override ignoreEvent(): boolean {
     return false;
   }
+}
+
+const calloutIconAliases: Record<string, string> = {
+  note: 'pencil',
+  abstract: 'clipboard-list', summary: 'clipboard-list', tldr: 'clipboard-list',
+  info: 'info',
+  todo: 'circle-check', success: 'circle-check', check: 'circle-check', done: 'circle-check',
+  tip: 'flame', hint: 'flame', important: 'flame',
+  question: 'circle-help', help: 'circle-help', faq: 'circle-help',
+  warning: 'triangle-alert', caution: 'triangle-alert', attention: 'triangle-alert',
+  failure: 'circle-x', fail: 'circle-x', missing: 'circle-x',
+  danger: 'zap', error: 'zap',
+  bug: 'bug',
+  example: 'list',
+  quote: 'quote', cite: 'quote',
+};
+
+const calloutIconPaths: Record<string, string[]> = {
+  pencil: ['M12 20h9', 'M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z'],
+  'clipboard-list': ['M9 5H6a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-3', 'M9 3h6v4H9Z', 'M9 12h6', 'M9 16h6'],
+  info: ['M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z', 'M12 16v-4', 'M12 8h.01'],
+  'circle-check': ['M22 11.1V12a10 10 0 1 1-5.93-9.14', 'm9 11 3 3L22 4'],
+  flame: ['M12 22c4.42 0 8-3.58 8-8 0-3-1.5-5.5-4-7-.5 3-2 5-4 6-1-3-3-5-5-6 0 2-1 4-1 7 0 4.42 3.58 8 8 8Z'],
+  'circle-help': ['M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z', 'M9.1 9a3 3 0 1 1 5.83 1c0 2-3 2-3 4', 'M12 18h.01'],
+  'triangle-alert': ['M21.73 18 13.73 4a2 2 0 0 0-3.46 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z', 'M12 9v4', 'M12 17h.01'],
+  'circle-x': ['M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z', 'm15 9-6 6', 'm9 9 6 6'],
+  zap: ['M13 2 3 14h9l-1 8 9-12h-9Z'],
+  bug: ['M8 2l1.9 1.9', 'M14.1 3.9 16 2', 'M9 7h6a3 3 0 0 1 3 3v5a6 6 0 0 1-12 0v-5a3 3 0 0 1 3-3Z', 'M3 13h3', 'M18 13h3'],
+  list: ['M8 6h13', 'M8 12h13', 'M8 18h13', 'M3 6h.01', 'M3 12h.01', 'M3 18h.01'],
+  quote: ['M3 21c3 0 7-1 7-8V5a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h4', 'M15 21c3 0 7-1 7-8V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h4'],
+};
+
+function calloutIconElement(type: string): HTMLSpanElement {
+  const iconName = calloutIconAliases[type.toLowerCase()] ?? 'pencil';
+  const wrapper = document.createElement('span');
+  wrapper.className = 'cm-hybrid-callout-icon';
+  wrapper.dataset.calloutIcon = iconName;
+  wrapper.setAttribute('aria-hidden', 'true');
+
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('fill', 'none');
+  svg.setAttribute('stroke', 'currentColor');
+  svg.setAttribute('stroke-linecap', 'round');
+  svg.setAttribute('stroke-linejoin', 'round');
+  for (const pathData of calloutIconPaths[iconName] ?? calloutIconPaths.pencil!) {
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', pathData);
+    svg.appendChild(path);
+  }
+  wrapper.appendChild(svg);
+  return wrapper;
 }
 
 interface InlineTextMatch {
@@ -921,9 +973,11 @@ class MermaidBlockWidget extends WidgetType {
     wrapper.className = 'cm-hybrid-mermaid-block';
     wrapper.dataset.sourceFrom = String(this.blockFrom);
     wrapper.dataset.sourceTo = String(this.blockTo);
-    wrapper.dataset.zoomScale = '1';
+    wrapper.tabIndex = 0;
+    wrapper.setAttribute('aria-label', 'Mermaid diagram');
 
-    const toolbar = mermaidZoomToolbar(wrapper);
+    const toolbar = mermaidToolbar();
+    toolbar.appendChild(mermaidEditSourceButton(view, () => this.editableAnchor(view)));
 
     const inner = document.createElement('div');
     inner.className = 'cm-hybrid-mermaid-block-inner';
@@ -935,8 +989,7 @@ class MermaidBlockWidget extends WidgetType {
     wrapper.addEventListener('mousedown', (event) => {
       event.preventDefault();
       event.stopPropagation();
-      view.focus();
-      view.dispatch({ selection: { anchor: this.editableAnchor(view) } });
+      wrapper.focus({ preventScroll: true });
     });
 
     return wrapper;
@@ -962,41 +1015,29 @@ class MermaidBlockWidget extends WidgetType {
   }
 }
 
-function mermaidZoomToolbar(root: HTMLElement): HTMLElement {
+function mermaidToolbar(): HTMLElement {
   const toolbar = document.createElement('div');
   toolbar.className = 'cm-hybrid-mermaid-toolbar';
   toolbar.addEventListener('mousedown', stopMermaidToolbarEvent);
   toolbar.addEventListener('click', stopMermaidToolbarEvent);
-
-  const zoomOut = mermaidZoomButton('-', 'Zoom out Mermaid diagram', root, -mermaidZoomStep);
-  const zoomLevel = document.createElement('span');
-  zoomLevel.className = 'cm-hybrid-mermaid-zoom-level';
-  zoomLevel.setAttribute('aria-label', 'Mermaid diagram zoom level');
-  zoomLevel.textContent = '100%';
-  const zoomIn = mermaidZoomButton('+', 'Zoom in Mermaid diagram', root, mermaidZoomStep);
-
-  toolbar.append(zoomOut, zoomLevel, zoomIn);
-  updateMermaidZoom(root);
   return toolbar;
 }
 
-function mermaidZoomButton(
-  label: string,
-  ariaLabel: string,
-  root: HTMLElement,
-  delta: number,
+function mermaidEditSourceButton(
+  view: EditorView,
+  editableAnchor: () => number,
 ): HTMLButtonElement {
   const button = document.createElement('button');
   button.type = 'button';
-  button.className = 'cm-hybrid-mermaid-zoom-button';
-  button.textContent = label;
-  button.ariaLabel = ariaLabel;
-  button.title = ariaLabel;
-  button.dataset.zoomDelta = String(delta);
+  button.className = 'cm-hybrid-mermaid-edit-source';
+  button.textContent = '</>';
+  button.ariaLabel = 'Edit Mermaid source';
+  button.title = 'Edit Mermaid source';
   button.addEventListener('mousedown', stopMermaidToolbarEvent);
   button.addEventListener('click', event => {
     stopMermaidToolbarEvent(event);
-    updateMermaidZoom(root, delta);
+    view.dispatch({ selection: { anchor: editableAnchor() } });
+    view.focus();
   });
   return button;
 }
@@ -1016,7 +1057,7 @@ async function renderMermaidInto(
     const { svg, bindFunctions } = await mermaid.render(id, source);
     if (!root.isConnected) return;
     container.innerHTML = svg;
-    normalizeMermaidSvg(container, root);
+    normalizeMermaidSvg(container);
     bindFunctions?.(container);
   } catch (error) {
     if (!root.isConnected) return;
@@ -1028,7 +1069,7 @@ async function renderMermaidInto(
   }
 }
 
-function normalizeMermaidSvg(container: HTMLElement, root: HTMLElement): void {
+function normalizeMermaidSvg(container: HTMLElement): void {
   const svg = container.querySelector<SVGSVGElement>('svg');
   if (!svg) return;
 
@@ -1037,39 +1078,7 @@ function normalizeMermaidSvg(container: HTMLElement, root: HTMLElement): void {
   svg.dataset.naturalWidth = String(Math.ceil(naturalWidth));
   svg.style.maxWidth = 'none';
   svg.style.height = 'auto';
-  updateMermaidZoom(root);
-}
-
-function updateMermaidZoom(root: HTMLElement, delta = 0): void {
-  const nextScale = clampMermaidZoom(readMermaidZoom(root) + delta);
-  root.dataset.zoomScale = nextScale.toFixed(2);
-
-  const label = root.querySelector<HTMLElement>('.cm-hybrid-mermaid-zoom-level');
-  if (label) {
-    label.textContent = `${Math.round(nextScale * 100)}%`;
-  }
-
-  for (const button of Array.from(root.querySelectorAll<HTMLButtonElement>('.cm-hybrid-mermaid-zoom-button'))) {
-    const buttonDelta = Number(button.dataset.zoomDelta ?? 0);
-    button.disabled = (buttonDelta < 0 && nextScale <= mermaidZoomMin)
-      || (buttonDelta > 0 && nextScale >= mermaidZoomMax);
-  }
-
-  const svg = root.querySelector<SVGSVGElement>('.cm-hybrid-mermaid-svg');
-  if (!svg) return;
-
-  const naturalWidth = Number(svg.dataset.naturalWidth) || readSvgNaturalWidth(svg);
-  svg.dataset.naturalWidth = String(Math.ceil(naturalWidth));
-  svg.style.width = `${Math.ceil(naturalWidth * nextScale)}px`;
-}
-
-function readMermaidZoom(root: HTMLElement): number {
-  const scale = Number(root.dataset.zoomScale ?? 1);
-  return Number.isFinite(scale) ? scale : 1;
-}
-
-function clampMermaidZoom(scale: number): number {
-  return Math.max(mermaidZoomMin, Math.min(mermaidZoomMax, scale));
+  svg.style.width = `${Math.ceil(naturalWidth)}px`;
 }
 
 function readSvgNaturalWidth(svg: SVGSVGElement): number {
@@ -1284,12 +1293,143 @@ function buildHybridDecorations(state: EditorState): DecorationSet {
           decorations,
         );
       }
+    } else if (!activeLineKeepsBlockSource(
+      state.doc,
+      line.number,
+      line.text,
+      commentRanges,
+    )) {
+      const renderedLineDecorations: Range<Decoration>[] = [];
+      decorateRenderedLine(
+        line.from,
+        line.to,
+        line.text,
+        commentRanges,
+        referenceDefinitions,
+        referenceDefinitionSpans,
+        renderedLineDecorations,
+      );
+      const revealedSpans = activeInlineRevealSpans(
+        state,
+        line.from,
+        line.to,
+        line.text,
+        referenceDefinitions,
+      );
+      decorations.push(...renderedLineDecorations.filter(decoration => (
+        !rangeOverlapsAny(decoration.from, decoration.to, revealedSpans)
+      )));
     }
     lineNumber = line.number + 1;
   }
 
   decorations.sort((a, b) => a.from - b.from || a.to - b.to);
   return Decoration.set(decorations, true);
+}
+
+function activeLineKeepsBlockSource(
+  doc: EditorView['state']['doc'],
+  lineNumber: number,
+  text: string,
+  commentRanges: Span[],
+): boolean {
+  const line = doc.line(lineNumber);
+  const specialBlock = findSpecialBlock(doc, lineNumber);
+  return /^( {0,3})#{1,6}\s+/.test(text)
+    || setextHeadingLevelForLine(doc, lineNumber) != null
+    || isSetextHeadingUnderlineLine(doc, lineNumber)
+    || lineOverlapsSpan(line.from, line.to, commentRanges)
+    || /(?:^|\s)\^[A-Za-z0-9_-]+\s*$/.test(text)
+    || /\\[^A-Za-z0-9\s]/.test(text)
+    || /<\/?[A-Za-z][^>]*>/.test(text)
+    || /^\s*[-*_](?:\s*[-*_]){2,}\s*$/.test(text)
+    || specialBlock?.kind === 'math';
+}
+
+function activeInlineRevealSpans(
+  state: EditorState,
+  lineFrom: number,
+  lineTo: number,
+  text: string,
+  referenceDefinitions: ReturnType<typeof markdownReferenceDefinitions>,
+): Span[] {
+  const sourceSpans = inlineSourceSpans(lineFrom, text, referenceDefinitions);
+  const revealed: Span[] = [];
+  for (const range of state.selection.ranges) {
+    const selectionFrom = Math.max(lineFrom, Math.min(range.from, range.to));
+    const selectionTo = Math.min(lineTo, Math.max(range.from, range.to));
+    if (selectionTo < lineFrom || selectionFrom > lineTo) continue;
+    for (const span of sourceSpans) {
+      const containsCaret = range.empty
+        && range.head >= span.from
+        && range.head <= span.to;
+      const overlapsSelection = !range.empty
+        && selectionFrom < span.to
+        && selectionTo > span.from;
+      if (containsCaret || overlapsSelection) revealed.push(span);
+    }
+  }
+  return uniqueSpans(revealed);
+}
+
+function inlineSourceSpans(
+  lineFrom: number,
+  text: string,
+  referenceDefinitions: ReturnType<typeof markdownReferenceDefinitions>,
+): Span[] {
+  const spans: Span[] = [
+    ...inlineCodeSourceSpans(lineFrom, text).map(span => ({ from: span.from, to: span.to })),
+    ...markdownLinkSourceSpans(lineFrom, text).map(span => ({ from: span.from, to: span.to })),
+    ...markdownReferenceLinkSourceSpans(lineFrom, text, referenceDefinitions)
+      .map(span => ({ from: span.from, to: span.to })),
+    ...inlineMathSourceSpans(text).map(span => ({
+      from: lineFrom + span.from,
+      to: lineFrom + span.to,
+    })),
+  ];
+
+  for (const pattern of [
+    /!?\[\[[^\]\n]+\]\]/g,
+    /\*\*(?=\S)(.+?\S)\*\*/g,
+    /(?<![A-Za-z0-9_])__(?=\S)(.+?\S)__(?![A-Za-z0-9_])/g,
+    /(?<!\*)\*(?=\S)(.+?\S)\*(?!\*)/g,
+    /(?<![A-Za-z0-9_])_(?=\S)(.+?\S)_(?![A-Za-z0-9_])/g,
+    /~~(?=\S)(.+?\S)~~/g,
+    /==(?=\S)(.+?\S)==/g,
+    /\[\^[^\]\s]+\]/g,
+    /<([A-Za-z][A-Za-z0-9:-]*)(?:\s+[^<>]*?)?>.*?<\/\1>/g,
+  ]) {
+    for (const match of text.matchAll(pattern)) {
+      const from = match.index ?? 0;
+      if (isEscapedAt(text, from)) continue;
+      spans.push({
+        from: lineFrom + from,
+        to: lineFrom + from + match[0].length,
+      });
+    }
+  }
+
+  return uniqueSpans(spans);
+}
+
+function uniqueSpans(spans: Span[]): Span[] {
+  const seen = new Set<string>();
+  return spans
+    .filter(span => span.to > span.from)
+    .sort((first, second) => first.from - second.from || second.to - first.to)
+    .filter(span => {
+      const key = `${span.from}:${span.to}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+}
+
+function rangeOverlapsAny(from: number, to: number, spans: Span[]): boolean {
+  return spans.some(span => (
+    (from < span.to && to > span.from)
+    || (from === to && from > span.from && from < span.to)
+  ));
 }
 
 const hybridLineRendering = StateField.define<DecorationSet>({

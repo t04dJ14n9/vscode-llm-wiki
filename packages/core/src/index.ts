@@ -27,7 +27,7 @@ export {
   codeHref,
   normalizeRelativePath,
 } from './links/reference-target';
-export type { ReferenceTarget, ReferenceKind } from './links/reference-target';
+export type { ReferenceTarget, ReferenceKind, PdfTextFragment } from './links/reference-target';
 export { parseMarkdownLinks, hasLinks } from './links/link-parser';
 export type { ParsedLink } from './links/link-parser';
 export {
@@ -72,5 +72,52 @@ export type { ExportContextOptions, ExportedContext } from './context/export';
 export { generateAgentInstructions } from './context/agent-files';
 
 // Web targets
-export { upsertWebTarget, resolveWebTarget } from './web/targets';
-export type { WebTargetRecord, UpsertWebTargetInput } from './web/targets';
+export {
+  upsertWebTarget,
+  resolveWebTarget,
+  persistWebPageSnapshot,
+  webTargetHref,
+} from './web/targets';
+export type {
+  WebTargetRecord,
+  UpsertWebTargetInput,
+  PersistWebPageSnapshotInput,
+  PersistWebPageSnapshotResult,
+  WebAnchorRecord,
+} from './web/targets';
+
+// PDF discussions
+export {
+  PdfDiscussionAnnotationV1Schema,
+  PdfDiscussionDocumentV1Schema,
+} from './pdf-discussions/schema';
+export type {
+  PdfDiscussionAnchorV1,
+  PdfDiscussionAnnotationV1,
+  PdfDiscussionDocumentV1,
+  PdfDiscussionLastTurnV1,
+  PdfDiscussionMessageV1,
+  PdfDiscussionPromotionAttemptV1,
+  PdfDiscussionPromotionV1,
+  PdfDiscussionRectV1,
+  PdfDiscussionSnapshotV1,
+} from './pdf-discussions/schema';
+export {
+  computePdfSha256,
+  createPdfDiscussionSelectionKey,
+  ConflictingPdfDiscussionWriteError,
+  importGlobalPdfDiscussions,
+  InvalidPdfDiscussionSidecarError,
+  InvalidPdfDiscussionSnapshotError,
+  PDF_DISCUSSION_SNAPSHOT_MAX_BYTES,
+  PdfDiscussionLockError,
+  PdfDiscussionStore,
+} from './pdf-discussions/store';
+export type {
+  PdfDiscussionImportResult,
+  PdfDiscussionLayout,
+  PdfDiscussionSelectionKeyInput,
+  PdfDiscussionStoreOptions,
+  PdfDiscussionUpdate,
+  PdfPathLike,
+} from './pdf-discussions/store';

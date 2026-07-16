@@ -24,34 +24,66 @@
   html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; }
   body { background: var(--vscode-editor-background); color: var(--vscode-editor-foreground); }
   #toolbar {
-    height: 34px;
+    box-sizing: border-box;
+    height: 38px;
     display: flex;
-    gap: 6px;
+    gap: 4px;
     align-items: center;
-    padding: 0 8px;
+    padding: 0 6px;
     border-bottom: 1px solid var(--vscode-panel-border);
     background: var(--vscode-sideBar-background);
+    font: 12px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   }
   #toolbar button {
-    height: 24px;
+    box-sizing: border-box;
+    min-width: 26px;
+    height: 26px;
+    padding: 0 6px;
     border: 1px solid transparent;
-    background: var(--vscode-button-secondaryBackground);
+    background: transparent;
     color: var(--vscode-button-secondaryForeground);
-    border-radius: 4px;
+    border-radius: 3px;
     cursor: pointer;
   }
+  #toolbar button:hover { background: rgba(90,93,94,.31); }
   #toolbar button[aria-pressed="true"] {
     background: var(--vscode-button-background);
     color: var(--vscode-button-foreground);
   }
+  .toolbar-group { display: inline-flex; align-items: center; gap: 2px; }
+  .toolbar-spacer { flex: 1 1 auto; }
+  .toolbar-separator { width: 1px; height: 20px; margin: 0 3px; background: var(--vscode-panel-border); }
+  .toolbar-number { display: inline-flex; align-items: center; height: 26px; border: 1px solid var(--vscode-panel-border); border-radius: 3px; background: var(--vscode-input-background); }
+  .toolbar-number input { box-sizing: border-box; width: 44px; height: 24px; border: 0; outline: 0; padding: 0 3px; background: transparent; color: var(--vscode-input-foreground); font: inherit; text-align: right; -moz-appearance: textfield; }
+  .toolbar-number input::-webkit-inner-spin-button, .toolbar-number input::-webkit-outer-spin-button { appearance: none; margin: 0; }
+  .toolbar-number span { padding-right: 5px; color: var(--vscode-descriptionForeground); white-space: nowrap; }
+  #page-input { width: 36px; }
+  #page-total { min-width: 30px; }
+  .toolbar-color-dot { display: inline-block; width: 12px; height: 12px; border-radius: 50%; background: #ffd54f; box-shadow: 0 0 0 1px rgba(255,255,255,.35); }
+  .toolbar-palette { display: inline-flex; align-items: center; gap: 1px; }
+  #toolbar .toolbar-palette .palette-color { min-width: 22px; width: 22px; padding: 0; }
+  #toolbar .toolbar-palette .palette-color[aria-pressed="true"] { background: rgba(127,127,127,.24); box-shadow: inset 0 -2px 0 var(--vscode-focusBorder); }
+  .palette-color[data-palette-highlight-color="red"] .toolbar-color-dot { background: #ff6b6b; }
+  .palette-color[data-palette-highlight-color="green"] .toolbar-color-dot { background: #69db7c; }
+  .palette-color[data-palette-highlight-color="purple"] .toolbar-color-dot { background: #b197fc; }
+  .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; }
+  .toolbar-menu { position: fixed; top: 42px; z-index: 60; min-width: 210px; padding: 5px; border: 1px solid var(--vscode-panel-border); border-radius: 5px; background: var(--vscode-editorWidget-background); box-shadow: 0 6px 20px rgba(0,0,0,.4); font: 12px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+  #display-menu { left: 112px; }
+  #highlight-color-menu { right: 106px; }
+  #copy-link-format-menu { right: 54px; }
+  .toolbar-menu.hidden { display: none; }
+  .toolbar-menu .menu-section { padding: 4px 8px 2px; color: var(--vscode-descriptionForeground); font-size: 11px; }
+  .toolbar-menu button { display: flex; width: 100%; min-height: 26px; align-items: center; border: 0; border-radius: 3px; padding: 3px 8px 3px 24px; background: transparent; color: var(--vscode-editor-foreground); font: inherit; text-align: left; cursor: pointer; }
+  .toolbar-menu button:hover { background: rgba(90,93,94,.31); }
+  .toolbar-menu button[aria-checked="true"]::before { content: '✓'; position: absolute; margin-left: -17px; }
   .pdf-search {
     position: fixed;
-    top: 42px;
+    top: 44px;
     right: 8px;
     z-index: 40;
     box-sizing: border-box;
     display: grid;
-    grid-template-columns: minmax(128px, 1fr) 24px 24px minmax(44px, max-content) 24px;
+    grid-template-columns: minmax(128px, 1fr) 24px 24px 24px 24px minmax(44px, max-content) 24px;
     align-items: center;
     gap: 2px;
     width: min(420px, calc(100% - 16px));
@@ -113,9 +145,36 @@
     text-align: center;
     white-space: nowrap;
   }
-  #viewer-container { height: calc(100% - 35px); overflow: auto; }
+  .pdf-search-settings-menu { position: absolute; top: 34px; right: 48px; z-index: 45; display: flex; min-width: 168px; flex-direction: column; gap: 2px; padding: 5px; border: 1px solid var(--vscode-panel-border); border-radius: 4px; background: var(--vscode-editorWidget-background); box-shadow: 0 4px 14px rgba(0,0,0,.4); }
+  .pdf-search-settings-menu.hidden { display: none; }
+  .pdf-search-settings-menu label { display: flex; min-height: 24px; align-items: center; gap: 8px; padding: 2px 7px; border-radius: 3px; white-space: nowrap; cursor: pointer; }
+  .pdf-search-settings-menu label:hover { background: rgba(90,93,94,.31); }
+  .pdf-search .pdf-search-settings-menu input { width: 14px; min-width: 14px; height: 14px; margin: 0; padding: 0; border: 0; appearance: auto; accent-color: var(--vscode-focusBorder); }
+  #viewer-shell { display: flex; height: calc(100% - 38px); min-height: 0; }
+  #pdf-sidebar { box-sizing: border-box; flex: 0 0 184px; width: 184px; border-right: 1px solid var(--vscode-panel-border); background: var(--vscode-sideBar-background); color: var(--vscode-editor-foreground); }
+  #pdf-sidebar[hidden] { display: none; }
+  .pdf-sidebar-header { box-sizing: border-box; display: flex; height: 34px; align-items: center; justify-content: space-between; padding: 0 8px 0 12px; border-bottom: 1px solid var(--vscode-panel-border); }
+  .pdf-sidebar-header h2 { margin: 0; font: 600 12px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+  .pdf-sidebar-header button { width: 24px; height: 24px; border: 0; border-radius: 3px; background: transparent; color: inherit; cursor: pointer; }
+  #thumbnail-list { box-sizing: border-box; height: calc(100% - 34px); overflow: auto; padding: 10px 8px; }
+  .pdf-thumbnail { display: flex; width: 100%; flex-direction: column; align-items: center; gap: 5px; margin: 0 0 10px; border: 1px solid transparent; border-radius: 4px; padding: 6px; background: transparent; color: var(--vscode-editor-foreground); cursor: pointer; }
+  .pdf-thumbnail:hover { background: rgba(90,93,94,.22); }
+  .pdf-thumbnail[aria-current="page"] { border-color: var(--vscode-focusBorder); background: rgba(0,127,212,.16); }
+  .pdf-thumbnail canvas { display: block; width: 116px; max-height: 156px; background: white; box-shadow: 0 1px 5px rgba(0,0,0,.4); }
+  body.vscode-dark.pdf-adapt-theme .pdf-canvas,
+  body.vscode-dark.pdf-adapt-theme .pdf-thumbnail canvas,
+  body.vscode-high-contrast.pdf-adapt-theme .pdf-canvas,
+  body.vscode-high-contrast.pdf-adapt-theme .pdf-thumbnail canvas {
+    filter: invert(.9) hue-rotate(180deg);
+  }
+  .pdf-thumbnail span { font: 11px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+  #viewer-container { flex: 1 1 auto; min-width: 0; height: 100%; overflow: auto; }
   #page-container { display: flex; flex-direction: column; align-items: center; gap: 18px; padding: 18px; }
+  #page-container.scroll-horizontal { width: max-content; min-width: 100%; min-height: 100%; flex-direction: row; align-items: flex-start; }
+  #page-container.scroll-wrapped { min-height: 100%; flex-flow: row wrap; align-items: flex-start; justify-content: center; }
   #page-container.two-page { display: grid; grid-template-columns: repeat(2, max-content); align-items: start; justify-content: center; }
+  #page-container.two-page.scroll-horizontal { display: flex; flex-direction: row; justify-content: flex-start; }
+  #page-container.two-page.scroll-wrapped { display: flex; flex-flow: row wrap; justify-content: center; }
   #page-container.paginated { min-height: calc(100% - 36px); justify-content: center; align-content: center; }
   .page-wrapper { position: relative; background: white; box-shadow: 0 2px 12px rgba(0,0,0,.35); }
   .pdf-canvas, .text-layer, .highlight-layer { position: absolute; left: 0; top: 0; }
@@ -135,6 +194,9 @@
     forced-color-adjust: none;
   }
   .highlight-layer { right: 0; bottom: 0; pointer-events: none; }
+  #page-container.rectangle-mode .page-wrapper { cursor: crosshair; }
+  #page-container.rectangle-mode .text-layer { pointer-events: none; user-select: none; }
+  .rectangle-selection-overlay { position: absolute; z-index: 15; box-sizing: border-box; border: 1px dashed var(--vscode-focusBorder); background: rgba(0, 127, 212, .16); pointer-events: none; }
   .annotation-highlight { pointer-events: auto; }
   .pdf-search-match {
     position: absolute;
@@ -144,34 +206,94 @@
     pointer-events: none;
   }
   .pdf-search-match.selected {
-    background: rgba(255, 140, 0, .45);
-    outline-color: rgba(255, 140, 0, .85);
+    background: rgba(177, 151, 252, .48);
+    outline-color: rgba(177, 151, 252, .9);
   }
 </style>
 </head>
 <body>
-  <div id="toolbar">
-    <button id="prev">Prev</button>
-    <button id="next">Next</button>
-    <button id="zoom-out">-</button>
-    <button id="zoom-in">+</button>
-    <button id="fit">Fit</button>
-    <button id="search-open" title="Find in PDF">Search</button>
-    <button id="toggle-continuous" aria-pressed="true" title="Switch to page-turning mode">Continuous</button>
-    <button id="toggle-spread" aria-pressed="false" title="Switch to two-page view">One Page</button>
-    <span id="page-info"></span>
+  <div id="toolbar" role="toolbar" aria-label="PDF toolbar">
+    <button id="toggle-sidebar" type="button" aria-label="Toggle sidebar" aria-controls="pdf-sidebar" aria-expanded="false">▤</button>
+    <button id="search-open" type="button" aria-label="Search" title="Search">⌕</button>
+    <span class="toolbar-separator"></span>
+    <div class="toolbar-group" aria-label="Zoom controls">
+      <button id="zoom-out" type="button" aria-label="Zoom out">−</button>
+      <label class="toolbar-number"><input id="zoom-input" type="number" min="50" max="350" step="5" value="135" aria-label="Zoom"><span>%</span></label>
+      <button id="zoom-in" type="button" aria-label="Zoom in">+</button>
+      <button id="display-menu-button" type="button" aria-label="Display options" aria-controls="display-menu" aria-haspopup="menu" aria-expanded="false">⌄</button>
+    </div>
+    <span class="toolbar-separator"></span>
+    <div class="toolbar-group" aria-label="Page controls">
+      <button id="prev" type="button" aria-label="Previous page">‹</button>
+      <label class="toolbar-number"><input id="page-input" type="number" min="1" step="1" value="1" aria-label="Page"><span id="page-total">of 0</span></label>
+      <button id="next" type="button" aria-label="Next page">›</button>
+    </div>
+    <span class="toolbar-spacer"></span>
+    <div class="toolbar-palette" role="group" aria-label="Highlight palette">
+      <button class="palette-color" type="button" aria-label="Yellow highlight" aria-pressed="true" data-palette-highlight-color="yellow"><span class="toolbar-color-dot"></span></button>
+      <button class="palette-color" type="button" aria-label="Red highlight" aria-pressed="false" data-palette-highlight-color="red"><span class="toolbar-color-dot"></span></button>
+      <button class="palette-color" type="button" aria-label="Green highlight" aria-pressed="false" data-palette-highlight-color="green"><span class="toolbar-color-dot"></span></button>
+      <button class="palette-color" type="button" aria-label="Purple highlight" aria-pressed="false" data-palette-highlight-color="purple"><span class="toolbar-color-dot"></span></button>
+      <button id="highlight-color" type="button" aria-label="Highlight color" aria-controls="highlight-color-menu" aria-haspopup="menu" aria-expanded="false" data-highlight-color="yellow">⌄</button>
+    </div>
+    <button id="copy-link-format" type="button" aria-label="Copy link format" aria-controls="copy-link-format-menu" aria-haspopup="menu" aria-expanded="false" data-copy-link-format="link">🔗⌄</button>
+    <button id="rectangle-selection" type="button" aria-label="Copy embed link to rectangular selection" title="Copy embed link to rectangular selection" aria-pressed="false">▱</button>
+    <button id="direct-highlight" type="button" aria-label="Direct highlight" aria-pressed="false">✎</button>
+    <span id="page-info" class="sr-only" aria-live="polite"></span>
+  </div>
+  <div id="display-menu" class="toolbar-menu hidden" role="menu" aria-label="Display options">
+    <div class="menu-section">Fit</div>
+    <button type="button" role="menuitemradio" aria-checked="false" data-display-action="fit-width">Fit width</button>
+    <button type="button" role="menuitemradio" aria-checked="false" data-display-action="fit-height">Fit height</button>
+    <button type="button" role="menuitemradio" aria-checked="false" data-display-action="fit-page">Fit page</button>
+    <div class="menu-section">Scroll</div>
+    <button type="button" role="menuitemradio" aria-checked="true" data-display-action="scroll-vertical">Vertical scroll</button>
+    <button type="button" role="menuitemradio" aria-checked="false" data-display-action="scroll-horizontal">Horizontal scroll</button>
+    <button type="button" role="menuitemradio" aria-checked="false" data-display-action="scroll-in-page">In-page scroll</button>
+    <button type="button" role="menuitemradio" aria-checked="false" data-display-action="scroll-wrapped">Wrapped scroll</button>
+    <div class="menu-section">Pages</div>
+    <button type="button" role="menuitemradio" aria-checked="true" data-display-action="spread-single">Single page</button>
+    <button type="button" role="menuitemradio" aria-checked="false" data-display-action="spread-odd">Two pages (odd)</button>
+    <button type="button" role="menuitemradio" aria-checked="false" data-display-action="spread-even">Two pages (even)</button>
+    <div class="menu-section">Appearance</div>
+    <button type="button" role="menuitemcheckbox" aria-checked="false" data-display-action="adapt-theme">Adapt to theme</button>
+    <button type="button" role="menuitem" data-display-action="defaults">Defaults</button>
+  </div>
+  <div id="highlight-color-menu" class="toolbar-menu hidden" role="menu" aria-label="Highlight colors">
+    <button type="button" role="menuitemradio" aria-checked="true" data-highlight-color="yellow">Yellow</button>
+    <button type="button" role="menuitemradio" aria-checked="false" data-highlight-color="red">Red</button>
+    <button type="button" role="menuitemradio" aria-checked="false" data-highlight-color="green">Green</button>
+    <button type="button" role="menuitemradio" aria-checked="false" data-highlight-color="purple">Purple</button>
+  </div>
+  <div id="copy-link-format-menu" class="toolbar-menu hidden" role="menu" aria-label="Copy link format">
+    <button type="button" role="menuitemradio" aria-checked="true" data-copy-link-format="link">Link only</button>
+    <button type="button" role="menuitemradio" aria-checked="false" data-copy-link-format="quote">Quote and link</button>
   </div>
   <div id="pdf-search" class="pdf-search hidden" role="search" aria-label="Find in PDF">
     <input id="pdf-search-input" type="search" placeholder="Find" aria-label="Find in PDF" autocomplete="off">
+    <button id="pdf-search-case" type="button" title="Match case" aria-label="Match case" aria-pressed="false">Aa</button>
+    <button id="pdf-search-settings" type="button" title="Search settings" aria-label="Search settings" aria-controls="pdf-search-settings-menu" aria-haspopup="menu" aria-expanded="false">⋮</button>
     <button id="pdf-search-prev" type="button" title="Previous match" aria-label="Previous match">↑</button>
     <button id="pdf-search-next" type="button" title="Next match" aria-label="Next match">↓</button>
     <span id="pdf-search-count" class="count" aria-live="polite"></span>
     <button id="pdf-search-close" type="button" title="Close search" aria-label="Close search">×</button>
+    <div id="pdf-search-settings-menu" class="pdf-search-settings-menu hidden" role="menu" aria-label="Search settings">
+      <label><input type="checkbox" data-search-setting="highlight-all">Highlight all</label>
+      <label><input type="checkbox" data-search-setting="match-diacritics">Match diacritics</label>
+      <label><input type="checkbox" data-search-setting="whole-words">Whole words</label>
+    </div>
   </div>
-  <div id="viewer-container"><div id="page-container"></div></div>
+  <div id="viewer-shell">
+    <aside id="pdf-sidebar" aria-label="PDF sidebar" hidden>
+      <div class="pdf-sidebar-header"><h2>Thumbnails</h2><button id="close-sidebar" type="button" aria-label="Close sidebar">×</button></div>
+      <div id="thumbnail-list"></div>
+    </aside>
+    <div id="viewer-container"><div id="page-container"></div></div>
+  </div>
 
   <script>
     window.__mockMessages = [];
+    window.__mockState = {};
     window.__pdfiumWasmUrl = '/dist/pdfium.wasm';
     window.acquireVsCodeApi = () => ({
       postMessage: async (message) => {
@@ -186,8 +308,8 @@
         for (const byte of bytes) binary += String.fromCharCode(byte);
         window.postMessage({ type: 'loadPdf', data: btoa(binary) }, '*');
       },
-      getState: () => ({}),
-      setState: () => {},
+      getState: () => window.__mockState,
+      setState: (state) => { window.__mockState = state; },
     });
   </script>
   <script>

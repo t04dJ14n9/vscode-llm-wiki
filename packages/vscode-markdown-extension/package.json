@@ -1,7 +1,7 @@
 {
   "name": "human-learning-markdown",
   "displayName": "Human Learning Markdown",
-  "version": "0.1.0",
+  "version": "0.1.4",
   "description": "Human Learning markdown editor and knowledge graph panels",
   "publisher": "human-learning",
   "license": "MIT",
@@ -32,10 +32,6 @@
     ],
     "commands": [
       {
-        "command": "human-learning.addSelectionToContext",
-        "title": "Human Learning: Add Selection to Agent Context"
-      },
-      {
         "command": "human-learning.openAnchor",
         "title": "Human Learning: Open Anchor"
       },
@@ -56,8 +52,115 @@
         "title": "Human Learning: Open In Markdown Editor"
       },
       {
+        "command": "human-learning.addSelectionToContext",
+        "title": "Human Learning: Add Selection to Agent Context",
+        "icon": "$(selection)"
+      },
+      {
         "command": "human-learning.toggleVimMode",
         "title": "Human Learning: Toggle Vim Mode"
+      },
+      {
+        "command": "human-learning.consumeVimHostShortcut",
+        "title": "Human Learning: Consume Vim Host Shortcut"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "human-learning.consumeVimHostShortcut",
+        "key": "ctrl+o",
+        "mac": "cmd+o",
+        "when": "activeCustomEditorId == 'human-learning.markdownEditor' && humanLearningMarkdownVimMode"
+      },
+      {
+        "command": "human-learning.consumeVimHostShortcut",
+        "key": "ctrl+b",
+        "mac": "cmd+b",
+        "when": "activeCustomEditorId == 'human-learning.markdownEditor' && humanLearningMarkdownVimMode"
+      },
+      {
+        "command": "human-learning.consumeVimHostShortcut",
+        "key": "ctrl+i",
+        "mac": "cmd+i",
+        "when": "activeCustomEditorId == 'human-learning.markdownEditor' && humanLearningMarkdownVimMode"
+      },
+      {
+        "command": "human-learning.consumeVimHostShortcut",
+        "key": "ctrl+shift+x",
+        "mac": "cmd+shift+x",
+        "when": "activeCustomEditorId == 'human-learning.markdownEditor' && humanLearningMarkdownVimMode"
+      },
+      {
+        "command": "human-learning.consumeVimHostShortcut",
+        "key": "ctrl+`",
+        "mac": "cmd+`",
+        "when": "activeCustomEditorId == 'human-learning.markdownEditor' && humanLearningMarkdownVimMode"
+      },
+      {
+        "command": "human-learning.consumeVimHostShortcut",
+        "key": "ctrl+k",
+        "mac": "cmd+k",
+        "when": "activeCustomEditorId == 'human-learning.markdownEditor' && humanLearningMarkdownVimMode"
+      },
+      {
+        "command": "human-learning.consumeVimHostShortcut",
+        "key": "ctrl+l",
+        "mac": "cmd+l",
+        "when": "activeCustomEditorId == 'human-learning.markdownEditor' && humanLearningMarkdownVimMode"
+      },
+      {
+        "command": "human-learning.consumeVimHostShortcut",
+        "key": "ctrl+alt+0",
+        "mac": "cmd+alt+0",
+        "when": "activeCustomEditorId == 'human-learning.markdownEditor' && humanLearningMarkdownVimMode"
+      },
+      {
+        "command": "human-learning.consumeVimHostShortcut",
+        "key": "ctrl+alt+1",
+        "mac": "cmd+alt+1",
+        "when": "activeCustomEditorId == 'human-learning.markdownEditor' && humanLearningMarkdownVimMode"
+      },
+      {
+        "command": "human-learning.consumeVimHostShortcut",
+        "key": "ctrl+alt+2",
+        "mac": "cmd+alt+2",
+        "when": "activeCustomEditorId == 'human-learning.markdownEditor' && humanLearningMarkdownVimMode"
+      },
+      {
+        "command": "human-learning.consumeVimHostShortcut",
+        "key": "ctrl+alt+3",
+        "mac": "cmd+alt+3",
+        "when": "activeCustomEditorId == 'human-learning.markdownEditor' && humanLearningMarkdownVimMode"
+      },
+      {
+        "command": "human-learning.consumeVimHostShortcut",
+        "key": "ctrl+alt+4",
+        "mac": "cmd+alt+4",
+        "when": "activeCustomEditorId == 'human-learning.markdownEditor' && humanLearningMarkdownVimMode"
+      },
+      {
+        "command": "human-learning.consumeVimHostShortcut",
+        "key": "ctrl+alt+5",
+        "mac": "cmd+alt+5",
+        "when": "activeCustomEditorId == 'human-learning.markdownEditor' && humanLearningMarkdownVimMode"
+      },
+      {
+        "command": "human-learning.consumeVimHostShortcut",
+        "key": "ctrl+alt+6",
+        "mac": "cmd+alt+6",
+        "when": "activeCustomEditorId == 'human-learning.markdownEditor' && humanLearningMarkdownVimMode"
+      },
+      {
+        "command": "human-learning.consumeVimHostShortcut",
+        "key": "ctrl+shift+t",
+        "mac": "cmd+shift+t",
+        "when": "activeCustomEditorId == 'human-learning.markdownEditor' && humanLearningMarkdownVimMode"
+      },
+      {
+        "command": "human-learning.consumeVimHostShortcut",
+        "key": "ctrl+shift+h",
+        "mac": "cmd+shift+h",
+        "when": "activeCustomEditorId == 'human-learning.markdownEditor' && humanLearningMarkdownVimMode"
       }
     ],
     "views": {
@@ -75,16 +178,6 @@
         {
           "id": "hl-outline",
           "name": "Outline",
-          "type": "tree"
-        },
-        {
-          "id": "hl-agent-context",
-          "name": "Agent Context",
-          "type": "tree"
-        },
-        {
-          "id": "hl-problems",
-          "name": "Problems",
           "type": "tree"
         }
       ]

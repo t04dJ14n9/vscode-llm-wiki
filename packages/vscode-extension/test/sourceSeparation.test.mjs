@@ -21,7 +21,16 @@ test('markdown and PDF extension source packages have independent roots', () => 
   assertPackageFile(pdfRoot, 'src/extension.ts');
   assertPackageFile(pdfRoot, 'src/pdfEditorProvider.ts');
   assertPackageFile(pdfRoot, 'webview-src/pdf-viewer.ts');
+  assertPackageFile(pdfRoot, 'webview-src/pdfAskPanel.ts');
   assertPackageFile(pdfRoot, 'webpack.config.js');
+});
+
+test('combined and standalone PDF webview sources stay byte-identical', () => {
+  for (const file of ['pdf-viewer.ts', 'pdfAskPanel.ts']) {
+    const combined = readFileSync(join(extensionRoot, 'webview-src', file));
+    const standalone = readFileSync(join(pdfRoot, 'webview-src', file));
+    assert.deepEqual(standalone, combined, `${file} must stay byte-identical`);
+  }
 });
 
 test('separate source package manifests only expose their editor surface', () => {
@@ -76,6 +85,22 @@ test('source package dependencies are scoped to their shipped editor', () => {
   assert.equal(pdfDependencies.includes('@mathjax/src'), false);
   assert.equal(pdfDependencies.includes('mermaid'), false);
   assert.equal(pdfDependencies.includes('turndown'), false);
+  assert.equal(pdfDependencies.includes('dompurify'), true);
+  assert.equal(pdfDependencies.includes('marked'), true);
+});
+
+test('Ask PDF ships a Marked release compatible with the repository Node 18 floor', () => {
+  const rootManifest = readJson(join(repoRoot, 'package.json'));
+  assert.equal(rootManifest.engines.node, '>=18.0.0');
+  for (const root of [extensionRoot, pdfRoot]) {
+    const manifest = readJson(join(root, 'package.json'));
+    const version = manifest.dependencies?.marked;
+    const major = Number.parseInt(String(version).match(/\d+/)?.[0] ?? '', 10);
+    assert.ok(
+      Number.isFinite(major) && major <= 13,
+      `${manifest.name} must not require Marked's Node 20+ releases`,
+    );
+  }
 });
 
 function assertPackageFile(packageRoot, file) {

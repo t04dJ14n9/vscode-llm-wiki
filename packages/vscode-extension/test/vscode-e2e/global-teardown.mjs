@@ -1,11 +1,16 @@
 import { readFileSync, unlinkSync, existsSync } from 'fs';
-import { resolve, dirname } from 'path';
+import { dirname, resolve } from 'path';
 import { fileURLToPath } from 'url';
 import { listProcesses, selectStaleE2eProcesses, stopProcesses } from './processCleanup.mjs';
+import { resolveVsCodeE2eTestDir } from './testDirectory.mjs';
+import { cleanupSandboxFixtures } from './sandboxFixtures.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const pidFile = resolve(__dirname, '.vscode-test', 'pid');
-const userDataDir = resolve(__dirname, '.vscode-test', 'user-data');
+const fixtures = resolve(__dirname, 'fixtures', 'test-vault');
+
+const testDir = resolveVsCodeE2eTestDir();
+const pidFile = resolve(testDir, 'pid');
+const userDataDir = resolve(testDir, 'user-data');
 
 export default async function globalTeardown() {
   if (existsSync(pidFile)) {
@@ -22,6 +27,7 @@ export default async function globalTeardown() {
     unlinkSync(pidFile);
   }
   await killRemainingTestProcesses();
+  cleanupSandboxFixtures(fixtures);
 }
 
 async function killRemainingTestProcesses() {

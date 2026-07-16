@@ -6,20 +6,12 @@ import {
   openDatabase,
   resolveWebTarget,
   runMigrations,
+  type PdfTextFragment,
 } from '@human-learning/core';
 import { existsSync } from 'fs';
-import { join } from 'path';
-
-interface AnchorRow {
-  uri?: unknown;
-}
+import { isAbsolute, join } from 'path';
 
 export async function dispatchUri(vaultRoot: string, uri: string): Promise<void> {
-  if (uri.startsWith('anc_')) {
-    await dispatchAnchorId(vaultRoot, uri);
-    return;
-  }
-
   const target = classifyReferenceTarget(uri);
 
   switch (target.kind) {
@@ -65,14 +57,13 @@ export async function dispatchUri(vaultRoot: string, uri: string): Promise<void>
 
     case 'pdf': {
       if (!target.path) break;
-      const args: { pdfPath: string; anchorId?: string; chunkId?: string; page?: number } = {
+      const args: { pdfPath: string; page?: number; textFragment?: PdfTextFragment } = {
         pdfPath: target.path,
       };
-      if (target.anchorId) args.anchorId = target.anchorId;
-      if (target.chunkId) args.chunkId = target.chunkId;
       if (target.page) args.page = target.page;
+      if (target.textFragment) args.textFragment = target.textFragment;
       try {
-        await vscode.commands.executeCommand('human-learning.openPdfAtAnchor', args);
+        await vscode.commands.executeCommand('human-learning.openPdfTarget', args);
       } catch (error) {
         if (!isMissingPdfEditorCommand(error)) throw error;
         await openPdfWithDefaultEditor(vaultRoot, target.path);
@@ -107,21 +98,6 @@ export async function dispatchUri(vaultRoot: string, uri: string): Promise<void>
   vscode.window.showErrorMessage(`Cannot open link target: ${uri}`);
 }
 
-async function dispatchAnchorId(vaultRoot: string, anchorId: string): Promise<void> {
-  const db = await openDatabase(vaultRoot);
-  runMigrations(db);
-  const anchor = db.prepare(
-    'SELECT uri, source_id FROM anchors WHERE id = ?',
-  ).get(anchorId) as AnchorRow | undefined;
-  closeDatabase(db);
-
-  if (typeof anchor?.uri === 'string') {
-    await dispatchUri(vaultRoot, anchor.uri);
-  } else {
-    vscode.window.showErrorMessage(`Anchor not found: ${anchorId}`);
-  }
-}
-
 async function openWebTarget(vaultRoot: string, url: string, webTargetId?: string): Promise<void> {
   let targetUrl = url;
   if (webTargetId) {
@@ -152,12 +128,13 @@ function openInChrome(url: string): Promise<boolean> {
 }
 
 async function openPdfWithDefaultEditor(vaultRoot: string, pdfPath: string): Promise<void> {
-  await vscode.commands.executeCommand('vscode.open', vscode.Uri.file(join(vaultRoot, pdfPath)));
+  const filePath = isAbsolute(pdfPath) ? pdfPath : join(vaultRoot, pdfPath);
+  await vscode.commands.executeCommand('vscode.open', vscode.Uri.file(filePath));
 }
 
 function isMissingPdfEditorCommand(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
-  return message.includes('human-learning.openPdfAtAnchor')
+  return message.includes('human-learning.openPdfTarget')
     && /not found|not registered|does not exist|unknown command/i.test(message);
 }
 

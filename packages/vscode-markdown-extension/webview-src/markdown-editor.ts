@@ -3,7 +3,7 @@
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
 import { markdown } from '@codemirror/lang-markdown';
 import { languages } from '@codemirror/language-data';
-import { bracketMatching, defaultHighlightStyle, syntaxHighlighting } from '@codemirror/language';
+import { bracketMatching, defaultHighlightStyle, foldGutter, syntaxHighlighting } from '@codemirror/language';
 import { Compartment, EditorSelection, EditorState, Prec } from '@codemirror/state';
 import type { Range, Text } from '@codemirror/state';
 import { search, searchKeymap } from '@codemirror/search';
@@ -22,6 +22,7 @@ import {
 } from '@codemirror/view';
 import { applyInsertText } from './insertText';
 import { copySelectionToClipboard, handleCopy, handlePaste } from './markdownClipboard';
+import { closeObsidianContextMenu, showObsidianContextMenu } from './obsidianContextMenu';
 import {
   hybridRendering,
   initialBodyPositionAfterFrontmatter,
@@ -176,6 +177,86 @@ const obsidianLikeCommands: Record<string, EditorCommand> = {
   'editor:set-heading-6': view => setHeading(view, 6),
 };
 
+function runOutsideVimMode(command: EditorCommand): EditorCommand {
+  return editorView => {
+    if (vimModeEnabled) {
+      restoreEditorFocusAfterShortcut(editorView);
+      return true;
+    }
+    return command(editorView);
+  };
+}
+
+const consumeInVimMode: EditorCommand = editorView => {
+  if (!vimModeEnabled) return false;
+  restoreEditorFocusAfterShortcut(editorView);
+  return true;
+};
+
+function handleVimBacktickKeydown(event: KeyboardEvent, editorView: EditorView): boolean {
+  if (!vimModeEnabled || !isPlainBacktickKeydown(event)) return false;
+  const state = vimStateForEditorView(editorView);
+  if (state?.insertMode) return false;
+  event.preventDefault();
+  event.stopPropagation();
+  event.stopImmediatePropagation();
+  restoreEditorFocusAfterShortcut(editorView);
+  return true;
+}
+
+function handleVimNormalModeBeforeInput(event: InputEvent, editorView: EditorView): boolean {
+  if (!vimModeEnabled || !isRawBacktickInsertion(event)) return false;
+  const state = vimStateForEditorView(editorView);
+  if (state?.insertMode) return false;
+  event.preventDefault();
+  event.stopPropagation();
+  event.stopImmediatePropagation();
+  restoreEditorFocusAfterShortcut(editorView);
+  return true;
+}
+
+function isPlainBacktickKeydown(event: KeyboardEvent): boolean {
+  if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return false;
+  return event.key === '`' || event.code === 'Backquote';
+}
+
+function isRawBacktickInsertion(event: InputEvent): boolean {
+  return event.inputType === 'insertText'
+    && typeof event.data === 'string'
+    && /^`+$/.test(event.data);
+}
+
+function vimStateForEditorView(editorView: EditorView): { insertMode?: boolean } | undefined {
+  return (editorView as unknown as {
+    cm?: { state?: { vim?: { insertMode?: boolean } } };
+  }).cm?.state?.vim;
+}
+
+const vimBacktickGuard = ViewPlugin.define((editorView: EditorView) => {
+  const keydown = (event: KeyboardEvent) => {
+    handleVimBacktickKeydown(event, editorView);
+  };
+  const beforeinput = (event: Event) => {
+    if (event instanceof InputEvent) {
+      handleVimNormalModeBeforeInput(event, editorView);
+    }
+  };
+  editorView.dom.addEventListener('keydown', keydown, true);
+  editorView.dom.addEventListener('beforeinput', beforeinput, true);
+  return {
+    destroy() {
+      editorView.dom.removeEventListener('keydown', keydown, true);
+      editorView.dom.removeEventListener('beforeinput', beforeinput, true);
+    },
+  };
+});
+
+function restoreEditorFocusAfterShortcut(editorView: EditorView): void {
+  editorView.focus();
+  window.requestAnimationFrame(() => editorView.focus());
+  window.setTimeout(() => editorView.focus(), 0);
+}
+
 installHumanLearningVimMotions();
 installHumanLearningVimExCommands();
 
@@ -265,6 +346,8 @@ function createView(text: string, title?: string): EditorView {
         : EditorSelection.cursor(initialBodyPosition),
       extensions: [
         lineNumbers(),
+        foldGutter({ openText: '⌄', closedText: '›' }),
+        vimBacktickGuard,
         vimModeCompartment.of(vimModeEnabled ? [vim()] : []),
         history(),
         drawSelection(),
@@ -311,26 +394,27 @@ function createView(text: string, title?: string): EditorView {
             preventDefault: true,
           },
           { key: 'Mod-e', run: obsidianLikeCommands['markdown:toggle-preview']!, preventDefault: true },
-          { key: 'Mod-b', run: obsidianLikeCommands['editor:toggle-bold']!, preventDefault: true },
-          { key: 'Mod-i', run: obsidianLikeCommands['editor:toggle-italics']!, preventDefault: true },
-          { key: 'Mod-Shift-x', run: obsidianLikeCommands['editor:toggle-strikethrough']!, preventDefault: true },
+          { key: 'Mod-o', run: consumeInVimMode, preventDefault: true },
+          { key: 'Mod-b', run: runOutsideVimMode(obsidianLikeCommands['editor:toggle-bold']!), preventDefault: true },
+          { key: 'Mod-i', run: runOutsideVimMode(obsidianLikeCommands['editor:toggle-italics']!), preventDefault: true },
+          { key: 'Mod-Shift-x', run: runOutsideVimMode(obsidianLikeCommands['editor:toggle-strikethrough']!), preventDefault: true },
           { key: 'Mod-c', run: editorView => copySelectionToClipboard(editorView, postCopyTextToHost) },
-          { key: 'Mod-`', run: obsidianLikeCommands['editor:toggle-code']!, preventDefault: true },
-          { key: 'Mod-k', run: obsidianLikeCommands['editor:insert-link']!, preventDefault: true },
-          { key: 'Mod-l', run: obsidianLikeCommands['editor:toggle-checklist-status']!, preventDefault: true },
+          { key: 'Mod-`', run: runOutsideVimMode(obsidianLikeCommands['editor:toggle-code']!), preventDefault: true },
+          { key: 'Mod-k', run: runOutsideVimMode(obsidianLikeCommands['editor:insert-link']!), preventDefault: true },
+          { key: 'Mod-l', run: runOutsideVimMode(obsidianLikeCommands['editor:toggle-checklist-status']!), preventDefault: true },
           { key: 'Mod-Enter', run: obsidianLikeCommands['editor:follow-link']!, preventDefault: true },
           { key: 'Alt-Enter', run: obsidianLikeCommands['editor:follow-link']!, preventDefault: true },
           { key: 'Tab', run: indentCodeOrListItems, preventDefault: true },
           { key: 'Shift-Tab', run: outdentCodeOrListItems, preventDefault: true },
-          { key: 'Mod-Alt-0', run: obsidianLikeCommands['editor:set-heading-0']!, preventDefault: true },
-          { key: 'Mod-Alt-1', run: obsidianLikeCommands['editor:set-heading-1']!, preventDefault: true },
-          { key: 'Mod-Alt-2', run: obsidianLikeCommands['editor:set-heading-2']!, preventDefault: true },
-          { key: 'Mod-Alt-3', run: obsidianLikeCommands['editor:set-heading-3']!, preventDefault: true },
-          { key: 'Mod-Alt-4', run: obsidianLikeCommands['editor:set-heading-4']!, preventDefault: true },
-          { key: 'Mod-Alt-5', run: obsidianLikeCommands['editor:set-heading-5']!, preventDefault: true },
-          { key: 'Mod-Alt-6', run: obsidianLikeCommands['editor:set-heading-6']!, preventDefault: true },
-          { key: 'Mod-Shift-t', run: obsidianLikeCommands['editor:insert-table']!, preventDefault: true },
-          { key: 'Mod-Shift-h', run: obsidianLikeCommands['editor:toggle-highlight']!, preventDefault: true },
+          { key: 'Mod-Alt-0', run: runOutsideVimMode(obsidianLikeCommands['editor:set-heading-0']!), preventDefault: true },
+          { key: 'Mod-Alt-1', run: runOutsideVimMode(obsidianLikeCommands['editor:set-heading-1']!), preventDefault: true },
+          { key: 'Mod-Alt-2', run: runOutsideVimMode(obsidianLikeCommands['editor:set-heading-2']!), preventDefault: true },
+          { key: 'Mod-Alt-3', run: runOutsideVimMode(obsidianLikeCommands['editor:set-heading-3']!), preventDefault: true },
+          { key: 'Mod-Alt-4', run: runOutsideVimMode(obsidianLikeCommands['editor:set-heading-4']!), preventDefault: true },
+          { key: 'Mod-Alt-5', run: runOutsideVimMode(obsidianLikeCommands['editor:set-heading-5']!), preventDefault: true },
+          { key: 'Mod-Alt-6', run: runOutsideVimMode(obsidianLikeCommands['editor:set-heading-6']!), preventDefault: true },
+          { key: 'Mod-Shift-t', run: runOutsideVimMode(obsidianLikeCommands['editor:insert-table']!), preventDefault: true },
+          { key: 'Mod-Shift-h', run: runOutsideVimMode(obsidianLikeCommands['editor:toggle-highlight']!), preventDefault: true },
         ])),
         keymap.of([
           ...defaultKeymap,
@@ -342,10 +426,10 @@ function createView(text: string, title?: string): EditorView {
             height: '100%',
             backgroundColor: 'var(--vscode-editor-background)',
             color: 'var(--vscode-editor-foreground)',
-            fontFamily: 'var(--hl-editor-font-family, var(--vscode-font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif))',
-            fontSize: 'var(--hl-editor-font-size, var(--vscode-editor-font-size, 14px))',
+            fontFamily: 'var(--hl-editor-font-family, var(--vscode-editor-font-family, ui-monospace, Menlo, monospace))',
+            fontSize: 'var(--hl-editor-font-size, 16px)',
             fontWeight: 'var(--hl-editor-font-weight, var(--vscode-editor-font-weight, normal))',
-            lineHeight: 'var(--hl-editor-line-height, 1.55)',
+            lineHeight: 'var(--hl-editor-line-height, 24px)',
             letterSpacing: 'var(--hl-editor-letter-spacing, normal)',
             caretColor: 'var(--vscode-editorCursor-foreground, currentColor)',
           },
@@ -357,22 +441,89 @@ function createView(text: string, title?: string): EditorView {
             letterSpacing: 'inherit',
           },
           '.cm-content': {
-            padding: '8px 0',
+            padding: '0',
             lineHeight: 'inherit',
             letterSpacing: 'inherit',
             boxSizing: 'border-box',
-            flex: '0 1 min(100%, 52rem)',
-            maxWidth: '52rem',
+            flex: '0 0 calc(100% - 160px)',
+            maxWidth: 'calc(100% - 160px)',
             minWidth: '0',
-            width: 'min(100%, 52rem)',
+            width: 'calc(100% - 160px)',
           },
           '.cm-gutters': {
             backgroundColor: 'var(--vscode-editorGutter-background)',
             color: 'var(--vscode-editorGutter-foreground)',
-            borderRight: '1px solid var(--vscode-editorGutter-border, transparent)',
+            borderRight: '0',
+            boxSizing: 'border-box',
+            minWidth: '66px',
+            width: '66px',
+            paddingLeft: '18px',
+            paddingRight: '8px',
+          },
+          '.cm-lineNumbers': {
+            minWidth: '22px',
+            width: '22px',
+          },
+          '.cm-foldGutter': {
+            minWidth: '18px',
+            width: '18px',
+            color: 'var(--vscode-editorGutter-foreground)',
+          },
+          '.cm-foldGutter .cm-gutterElement': {
+            boxSizing: 'border-box',
+            width: '18px',
+            padding: '0',
+            textAlign: 'center',
+            cursor: 'pointer',
+            opacity: '0',
+            transition: 'opacity 80ms ease',
+          },
+          '.cm-foldGutter .cm-gutterElement:hover': {
+            opacity: '1',
+          },
+          '.cm-lineNumbers .cm-gutterElement': {
+            boxSizing: 'border-box',
+            minWidth: '22px',
+            width: '22px',
+            height: 'var(--hl-editor-line-height, 24px)',
+            padding: '0',
+            lineHeight: 'var(--hl-editor-line-height, 24px)',
+            textAlign: 'right',
           },
           '.cm-cursor, .cm-dropCursor': {
             borderLeftColor: 'var(--vscode-editorCursor-foreground, currentColor)',
+          },
+          '.cm-panel.cm-vim-panel': {
+            boxSizing: 'border-box',
+            display: 'flex',
+            alignItems: 'center',
+            minHeight: '30px',
+            padding: '4px 10px 4px 76px',
+            borderTop: '1px solid var(--vscode-panel-border, #3e3e3e)',
+            backgroundColor: 'var(--vscode-editorWidget-background, var(--vscode-sideBar-background, #252526))',
+            color: 'var(--vscode-editor-foreground, #d4d4d4)',
+            boxShadow: '0 -2px 8px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.28))',
+            fontFamily: 'var(--hl-editor-font-family, var(--vscode-editor-font-family, ui-monospace, Menlo, monospace))',
+            fontSize: 'var(--hl-editor-font-size, var(--vscode-editor-font-size, 14px))',
+            lineHeight: 'var(--hl-editor-line-height, 20px)',
+          },
+          '.cm-panel.cm-vim-panel input': {
+            flex: '1 1 auto',
+            minWidth: '0',
+            height: 'calc(var(--hl-editor-line-height, 20px) + 2px)',
+            margin: '0 0 0 6px',
+            padding: '0',
+            border: '0',
+            outline: 'none',
+            appearance: 'none',
+            WebkitAppearance: 'none',
+            backgroundColor: 'transparent',
+            color: 'inherit',
+            caretColor: 'var(--vscode-editorCursor-foreground, currentColor)',
+            font: 'inherit',
+          },
+          '.cm-panel.cm-vim-panel input::selection': {
+            backgroundColor: 'var(--vscode-editor-selectionBackground, rgba(38, 79, 120, 0.65))',
           },
           '.cm-panels.cm-panels-top:has(.cm-search)': {
             position: 'absolute',
@@ -601,6 +752,12 @@ function createView(text: string, title?: string): EditorView {
   if (typeof title === 'string') {
     editorView.dispatch({ effects: setDocumentTitle.of(title) });
   }
+  const postActive = () => {
+    vscode.postMessage({ type: 'active' });
+  };
+  editorView.dom.addEventListener('focusin', postActive);
+  editorView.dom.addEventListener('mousedown', postActive, true);
+  editorView.dom.addEventListener('keydown', postActive, true);
   editorView.dom.addEventListener('copy', event => {
     handleCopy(event, editorView);
   }, true);
@@ -827,11 +984,12 @@ function handleForceLookup(event: MouseEvent, editorView: EditorView): void {
   if (!lookup) return;
   event.preventDefault();
   event.stopPropagation();
-  document.getElementById('selection-toolbar')?.remove();
+  closeObsidianContextMenu();
   vscode.postMessage({ type: 'lookupSelection', ...lookup });
 }
 
 function handleSelectionContextMenu(event: MouseEvent, editorView: EditorView): boolean {
+  syncNativeSelectionToEditorSelection(editorView);
   const selection = editorView.state.selection.main;
   if (selection.empty) return false;
   const lookup = lookupRequestForSelection(editorView);
@@ -839,169 +997,60 @@ function handleSelectionContextMenu(event: MouseEvent, editorView: EditorView): 
 
   event.preventDefault();
   event.stopPropagation();
-  showMarkdownSelectionToolbar(editorView, event.clientX, event.clientY);
+  showMarkdownSelectionContextMenu(editorView, event.clientX, event.clientY);
   return true;
 }
 
-function showMarkdownSelectionToolbar(editorView: EditorView, clientX: number, clientY: number): void {
-  ensureMarkdownSelectionToolbarStyles();
-  document.getElementById('selection-toolbar')?.remove();
+function syncNativeSelectionToEditorSelection(editorView: EditorView): void {
+  const selection = window.getSelection();
+  if (!selection || selection.isCollapsed || selection.rangeCount === 0) return;
 
-  const toolbar = document.createElement('div');
-  toolbar.id = 'selection-toolbar';
-  toolbar.className = 'selection-toolbar markdown-selection-toolbar';
-  toolbar.style.left = `${clientX + window.scrollX}px`;
-  toolbar.style.top = `${Math.max(8, clientY - 42 + window.scrollY)}px`;
-  toolbar.addEventListener('pointerdown', event => {
-    event.preventDefault();
-    event.stopPropagation();
-  });
-
-  const runCommand = (command: string) => {
-    obsidianLikeCommands[command]?.(editorView);
-    toolbar.remove();
-  };
-
-  const addButton = (label: string, command: string, ariaLabel = label, className = '') => {
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.textContent = label;
-    button.className = className;
-    button.setAttribute('aria-label', ariaLabel);
-    button.addEventListener('click', event => {
-      event.preventDefault();
-      event.stopPropagation();
-      runCommand(command);
-    });
-    toolbar.appendChild(button);
-    return button;
-  };
-
-  addButton('B', 'editor:toggle-bold', 'Bold');
-  addButton('I', 'editor:toggle-italics', 'Italic', 'secondary');
-  addButton('Code', 'editor:toggle-code', 'Inline Code', 'secondary');
-  addButton('Mark', 'editor:toggle-highlight', 'Highlight', 'secondary');
-  addButton('Look Up', 'editor:lookup-selection', 'Look Up', 'secondary');
-
-  const menu = document.createElement('div');
-  menu.className = 'menu';
-  const heading = document.createElement('button');
-  heading.type = 'button';
-  heading.textContent = 'Heading';
-  heading.className = 'secondary';
-  heading.setAttribute('aria-label', 'Heading');
-  heading.addEventListener('click', event => {
-    event.preventDefault();
-    event.stopPropagation();
-    menu.classList.toggle('open');
-  });
-  toolbar.appendChild(heading);
-
-  for (const [label, command] of [
-    ['Paragraph', 'editor:set-heading-0'],
-    ['H1', 'editor:set-heading-1'],
-    ['H2', 'editor:set-heading-2'],
-    ['H3', 'editor:set-heading-3'],
-    ['H4', 'editor:set-heading-4'],
-    ['H5', 'editor:set-heading-5'],
-    ['H6', 'editor:set-heading-6'],
-  ] as const) {
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.textContent = label;
-    button.className = 'secondary';
-    button.addEventListener('click', event => {
-      event.preventDefault();
-      event.stopPropagation();
-      runCommand(command);
-    });
-    menu.appendChild(button);
+  const range = selection.getRangeAt(0);
+  if (
+    !editorView.dom.contains(range.startContainer)
+    || !editorView.dom.contains(range.endContainer)
+  ) {
+    return;
   }
-  toolbar.appendChild(menu);
 
-  document.body.appendChild(toolbar);
-  requestAnimationFrame(() => {
-    const box = toolbar.getBoundingClientRect();
-    const half = box.width / 2;
-    const minLeft = window.scrollX + 12 + half;
-    const maxLeft = window.scrollX + window.innerWidth - 12 - half;
-    toolbar.style.left = `${Math.max(minLeft, Math.min(maxLeft, clientX + window.scrollX))}px`;
-    if (box.top < 8) {
-      toolbar.style.top = `${clientY + 10 + window.scrollY}px`;
+  try {
+    const anchor = editorView.posAtDOM(selection.anchorNode!, selection.anchorOffset);
+    const head = editorView.posAtDOM(selection.focusNode!, selection.focusOffset);
+    if (anchor !== head) {
+      editorView.dispatch({ selection: { anchor, head } });
     }
-  });
-
-  const dismiss = (event: Event) => {
-    if (toolbar.contains(event.target as Node)) return;
-    toolbar.remove();
-    document.removeEventListener('pointerdown', dismiss, true);
-    document.removeEventListener('keydown', dismissOnEscape, true);
-  };
-  const dismissOnEscape = (event: Event) => {
-    if ((event as KeyboardEvent).key !== 'Escape') return;
-    toolbar.remove();
-    document.removeEventListener('pointerdown', dismiss, true);
-    document.removeEventListener('keydown', dismissOnEscape, true);
-  };
-  setTimeout(() => {
-    document.addEventListener('pointerdown', dismiss, true);
-    document.addEventListener('keydown', dismissOnEscape, true);
-  }, 0);
+  } catch {
+    // Some rendered widgets do not map cleanly back to document positions.
+  }
 }
 
-function ensureMarkdownSelectionToolbarStyles(): void {
-  if (document.getElementById('markdown-selection-toolbar-styles')) return;
-  const style = document.createElement('style');
-  style.id = 'markdown-selection-toolbar-styles';
-  style.textContent = `
-    .selection-toolbar {
-      position: absolute;
-      transform: translateX(-50%);
-      z-index: 50;
-      display: flex;
-      gap: 4px;
-      padding: 4px;
-      border: 1px solid var(--vscode-panel-border);
-      border-radius: 6px;
-      background: var(--vscode-editorWidget-background);
-      box-shadow: 0 4px 16px rgba(0,0,0,.3);
-      color: var(--vscode-editor-foreground);
-      font: 12px var(--vscode-font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
-      user-select: none;
-    }
-    .selection-toolbar button {
-      min-width: 24px;
-      min-height: 24px;
-      border: 0;
-      border-radius: 4px;
-      padding: 4px 8px;
-      background: var(--vscode-button-background);
-      color: var(--vscode-button-foreground);
-      cursor: pointer;
-      font: inherit;
-      white-space: nowrap;
-    }
-    .selection-toolbar .secondary {
-      background: var(--vscode-button-secondaryBackground);
-      color: var(--vscode-button-secondaryForeground);
-    }
-    .selection-toolbar .menu {
-      position: absolute;
-      top: calc(100% + 6px);
-      right: 0;
-      min-width: 160px;
-      display: none;
-      flex-direction: column;
-      gap: 3px;
-      padding: 4px;
-      border: 1px solid var(--vscode-panel-border);
-      border-radius: 6px;
-      background: var(--vscode-editorWidget-background);
-      box-shadow: 0 4px 16px rgba(0,0,0,.3);
-    }
-    .selection-toolbar .menu.open { display: flex; }
-  `;
-  document.head.appendChild(style);
+function showMarkdownSelectionContextMenu(editorView: EditorView, clientX: number, clientY: number): void {
+  const runCommand = (command: string) => {
+    obsidianLikeCommands[command]?.(editorView);
+  };
+
+  showObsidianContextMenu({
+    clientX,
+    clientY,
+    items: [
+      {
+        label: 'Copy',
+        onSelect: () => {
+          copySelectionToClipboard(editorView, postCopyTextToHost);
+          editorView.focus();
+        },
+      },
+      { type: 'separator' },
+      { label: 'Bold', onSelect: () => runCommand('editor:toggle-bold') },
+      { label: 'Italic', onSelect: () => runCommand('editor:toggle-italics') },
+      { label: 'Strikethrough', onSelect: () => runCommand('editor:toggle-strikethrough') },
+      { label: 'Inline code', onSelect: () => runCommand('editor:toggle-code') },
+      { label: 'Highlight', onSelect: () => runCommand('editor:toggle-highlight') },
+      { label: 'Link', onSelect: () => runCommand('editor:insert-link') },
+      { type: 'separator' },
+      { label: 'Look Up', onSelect: () => runCommand('editor:lookup-selection') },
+    ],
+  });
 }
 
 interface LookupRequest {
@@ -1581,7 +1630,11 @@ window.addEventListener('message', event => {
     }
 
     case 'insertText': {
-      if (!view || typeof message.text !== 'string') return;
+      const requestId = typeof message.requestId === 'string' ? message.requestId : undefined;
+      if (!view || typeof message.text !== 'string') {
+        if (requestId) vscode.postMessage({ type: 'insertTextApplied', requestId, applied: false });
+        return;
+      }
       const current = view.state.doc.toString();
       const result = applyInsertText(
         current,
@@ -1595,6 +1648,7 @@ window.addEventListener('message', event => {
         scrollIntoView: true,
       });
       view.focus();
+      if (requestId) vscode.postMessage({ type: 'insertTextApplied', requestId, applied: true });
       break;
     }
 
@@ -1607,6 +1661,11 @@ window.addEventListener('message', event => {
     case 'focus':
       if (!view) return;
       queueInitialFocus(view);
+      break;
+
+    case 'restoreFocus':
+      if (!view) return;
+      restoreEditorFocusAfterShortcut(view);
       break;
 
     case 'updateSettings':

@@ -120,6 +120,9 @@ importers:
       dompurify:
         specifier: ^3.4.7
         version: 3.4.7
+      marked:
+        specifier: ^13.0.3
+        version: 13.0.3
       mermaid:
         specifier: 11.4.1
         version: 11.4.1
@@ -263,6 +266,12 @@ importers:
       '@human-learning/core':
         specifier: workspace:*
         version: link:../core
+      dompurify:
+        specifier: ^3.4.7
+        version: 3.4.7
+      marked:
+        specifier: ^13.0.3
+        version: 13.0.3
       sql.js:
         specifier: ^1.10.0
         version: 1.14.1

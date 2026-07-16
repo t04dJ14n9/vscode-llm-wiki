@@ -1,8 +1,9 @@
 Below is the updated implementation plan and design philosophy for the **PDF viewer** and **markdown system** in Human Learning.
 
-> Current status: this document predates the native reference-model update in a
-> few examples. The current generated link format is native Markdown/Obsidian,
-> not `hl://`. See [reference model.md](reference%20model.md) and
+> Historical/obsolete design note: this assessment predates the native
+> reference-model update. The current generated link format is native
+> Markdown/Obsidian, not `hl://`. See
+> [reference model.md](reference%20model.md) and
 > [implementation detail.md](implementation%20detail.md) for current behavior.
 
 The core direction is:
@@ -103,16 +104,11 @@ For whole files and headings, links can be simple:
 [Online Softmax](hl://note/notes/Concepts/FlashAttention.md#online-softmax)
 ```
 
-For precise PDF regions or markdown paragraphs, links should reference a stable anchor:
+For precise PDF regions, links carry the exact quoted text with an explicit
+page:
 
 ```md
-[source](hl://anchor/anc_pdf_8f21)
-```
-
-or hybrid readable form:
-
-```md
-[source](hl://pdf/raw/pdf/fa.pdf?anchor=anc_pdf_8f21)
+[FlashAttention uses tiling](raw/pdf/fa.pdf#page=3:~:text=FlashAttention%20uses%20tiling)
 ```
 
 The agent should **not** hallucinate geometry like:
@@ -357,14 +353,10 @@ Use anchor IDs for durable precise references.
 Preferred markdown link:
 
 ```md
-[source](hl://pdf/raw/pdf/fa.pdf?anchor=anc_pdf_8f21)
+[FlashAttention uses tiling](raw/pdf/fa.pdf#page=3:~:text=FlashAttention%20uses%20tiling)
 ```
 
-Also support:
-
-```md
-[source](hl://anchor/anc_pdf_8f21)
-```
+Internal annotation IDs are storage identity only and are not link targets.
 
 Only treat raw geometry links as transitional/debug syntax:
 
@@ -390,7 +382,7 @@ Generate this from SQLite links. Do not hand-edit it normally.
   "source_hash": "sha256:...",
   "references": [
     {
-      "anchor_uri": "hl://pdf/raw/pdf/fa.pdf?anchor=anc_pdf_8f21",
+      "anchor_uri": "raw/pdf/fa.pdf#page=3:~:text=FlashAttention%20uses%20tiling",
       "anchor_id": "anc_pdf_8f21",
       "page": 3,
       "rects": [[120, 240, 530, 310]],
@@ -483,8 +475,8 @@ CLI commands:
 
 ```bash
 hl anchor create-pdf --source raw/pdf/fa.pdf --quote "..." --page-hint 3 --json
-hl anchor resolve hl://anchor/anc_pdf_8f21 --json
-hl anchor validate hl://anchor/anc_pdf_8f21 --json
+hl anchor resolve 'raw/pdf/fa.pdf#page=3:~:text=FlashAttention%20uses%20tiling' --json
+hl anchor validate 'raw/pdf/fa.pdf#page=3:~:text=FlashAttention%20uses%20tiling' --json
 hl references rebuild --source raw/pdf/fa.pdf
 hl links check --fix
 ```
@@ -499,11 +491,11 @@ hl.anchor.createFromQuote({
 })
 
 hl.anchor.resolve({
-  uri: "hl://anchor/anc_pdf_8f21"
+  uri: "raw/pdf/fa.pdf#page=3:~:text=FlashAttention%20uses%20tiling"
 })
 
 hl.get_backlinks({
-  uri: "hl://anchor/anc_pdf_8f21"
+  uri: "raw/pdf/fa.pdf#page=3:~:text=FlashAttention%20uses%20tiling"
 })
 ```
 
@@ -555,10 +547,10 @@ Select paragraph → create anchor → insert note link → reopen PDF → overl
 ### Phase PDF-2 — Note ↔ PDF navigation
 
 ```text
-[ ] Parse hl://pdf and hl://anchor links.
+[ ] Parse portable PDF page/text-fragment links.
 [ ] Implement DocumentLinkProvider routing.
-[ ] Implement openPdfAtAnchor.
-[ ] Implement PDF webview jumpToAnchor message.
+[ ] Implement openPdfAtTarget.
+[ ] Implement PDF webview page/text-fragment navigation.
 [ ] Implement PDF reference overlay.
 [ ] Implement referenced-by popup.
 [ ] Implement open note at line.
@@ -697,7 +689,7 @@ Anchor record:
 ### PDF-level / source-level
 
 ```md
-[source](hl://pdf/raw/pdf/fa.pdf)
+[source](raw/pdf/fa.pdf#page=3)
 ```
 
 No precise anchor, only source-level.
@@ -705,10 +697,10 @@ No precise anchor, only source-level.
 ### PDF region
 
 ```md
-[source](hl://pdf/raw/pdf/fa.pdf?anchor=anc_pdf_8f21)
+[FlashAttention uses tiling](raw/pdf/fa.pdf#page=3:~:text=FlashAttention%20uses%20tiling)
 ```
 
-Precise anchor required.
+Precise page/text selector required.
 
 ### Code range
 
@@ -811,7 +803,7 @@ Fully rendered, minimal raw syntax.
 Inactive line:
 
 ```md
-[source](hl://pdf/raw/pdf/fa.pdf?anchor=anc_pdf_8f21)
+[FlashAttention uses tiling](raw/pdf/fa.pdf#page=3:~:text=FlashAttention%20uses%20tiling)
 ```
 
 renders as:

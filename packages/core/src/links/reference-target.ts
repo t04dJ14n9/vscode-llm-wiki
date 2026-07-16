@@ -1,5 +1,12 @@
 export type ReferenceKind = 'note' | 'pdf' | 'code' | 'web' | 'image' | 'text' | 'unknown';
 
+export interface PdfTextFragment {
+  textStart: string;
+  textEnd?: string;
+  prefix?: string;
+  suffix?: string;
+}
+
 export interface ReferenceTarget {
   kind: ReferenceKind;
   uri: string;
@@ -8,8 +15,7 @@ export interface ReferenceTarget {
   heading?: string;
   lines?: { start: number; end: number };
   page?: number;
-  chunkId?: string;
-  anchorId?: string;
+  textFragment?: PdfTextFragment;
   webTargetId?: string;
 }
 
@@ -29,17 +35,16 @@ export function classifyReferenceTarget(uri: string): ReferenceTarget {
   const extension = fileExtension(decodedPath);
 
   if (extension === 'pdf' || decodedPath.startsWith('raw/pdf/')) {
-    const params = fragmentParams(fragment);
+    const { navigation, directives } = splitFragmentDirective(fragment);
+    const params = fragmentParams(navigation);
     const page = numberParam(params, 'page');
-    const chunkId = params.get('chunk') ?? undefined;
-    const anchorId = params.get('anchor') ?? undefined;
+    const textFragment = parsePdfTextFragment(directives);
     return withoutUndefined({
       kind: 'pdf',
       uri: cleaned,
       path: decodedPath,
       page,
-      chunkId,
-      anchorId,
+      textFragment,
     });
   }
 
@@ -83,17 +88,16 @@ export function noteHref(path: string, heading?: string): string {
 
 export function pdfHref(path: string, options: {
   page?: number;
-  chunkId?: string;
-  anchorId?: string;
+  textFragment?: PdfTextFragment;
 } = {}): string {
   const params = new URLSearchParams();
   if (typeof options.page === 'number' && Number.isFinite(options.page)) {
     params.set('page', String(Math.max(1, Math.floor(options.page))));
   }
-  if (options.chunkId) params.set('chunk', options.chunkId);
-  if (options.anchorId) params.set('anchor', options.anchorId);
-  const suffix = params.toString();
-  return `${normalizeRelativePath(path)}${suffix ? `#${suffix}` : ''}`;
+  const navigation = params.toString();
+  const textDirective = serializePdfTextFragment(options.textFragment);
+  const fragment = `${navigation}${textDirective ? `:~:${textDirective}` : ''}`;
+  return `${normalizePdfPath(path)}${fragment ? `#${fragment}` : ''}`;
 }
 
 export function codeHref(path: string, lines?: { start: number; end?: number }): string {
@@ -113,6 +117,16 @@ export function normalizeRelativePath(path: string): string {
     .join('/');
 }
 
+function normalizePdfPath(path: string): string {
+  const slashNormalized = path.replace(/\\/g, '/');
+  const absolutePrefix = slashNormalized.startsWith('//')
+    ? '//'
+    : slashNormalized.startsWith('/')
+      ? '/'
+      : '';
+  return `${absolutePrefix}${normalizeRelativePath(slashNormalized)}`;
+}
+
 function classifyWebTarget(uri: string): ReferenceTarget {
   const webTargetId = webTargetIdFromUrl(uri);
   return withoutUndefined({
@@ -126,7 +140,7 @@ function classifyWebTarget(uri: string): ReferenceTarget {
 function webTargetIdFromUrl(uri: string): string | undefined {
   const hash = uri.match(/#(.+)$/)?.[1] ?? '';
   if (!hash.startsWith('hl-web=')) return undefined;
-  const value = hash.slice('hl-web='.length);
+  const value = hash.slice('hl-web='.length).split(':~:')[0];
   return value ? decodeURIComponent(value) : undefined;
 }
 
@@ -137,6 +151,89 @@ function splitPathAndFragment(uri: string): { path: string; fragment: string } {
     path: uri.slice(0, hashIndex),
     fragment: uri.slice(hashIndex + 1),
   };
+}
+
+function splitFragmentDirective(fragment: string): { navigation: string; directives: string } {
+  const directiveIndex = fragment.indexOf(':~:');
+  if (directiveIndex < 0) {
+    return { navigation: fragment, directives: '' };
+  }
+  return {
+    navigation: fragment.slice(0, directiveIndex),
+    directives: fragment.slice(directiveIndex + 3),
+  };
+}
+
+function serializePdfTextFragment(fragment: PdfTextFragment | undefined): string | undefined {
+  if (!fragment?.textStart) return undefined;
+  const terms: string[] = [];
+  if (fragment.prefix) terms.push(`${encodeTextTerm(fragment.prefix)}-`);
+  terms.push(encodeTextTerm(fragment.textStart));
+  if (fragment.textEnd) terms.push(encodeTextTerm(fragment.textEnd));
+  if (fragment.suffix) terms.push(`-${encodeTextTerm(fragment.suffix)}`);
+  return `text=${terms.join(',')}`;
+}
+
+function parsePdfTextFragment(directives: string): PdfTextFragment | undefined {
+  for (const directive of directives.split('&')) {
+    if (!directive.startsWith('text=')) continue;
+    const parsed = parsePdfTextDirective(directive.slice('text='.length));
+    if (parsed) return parsed;
+  }
+  return undefined;
+}
+
+function parsePdfTextDirective(value: string): PdfTextFragment | undefined {
+  const terms = value.split(',');
+  if (terms.length < 1 || terms.length > 4) return undefined;
+
+  let firstTextTerm = 0;
+  let afterLastTextTerm = terms.length;
+  let rawPrefix: string | undefined;
+  let rawSuffix: string | undefined;
+
+  if (terms[0]!.endsWith('-')) {
+    rawPrefix = terms[0]!.slice(0, -1);
+    firstTextTerm++;
+  }
+  if (terms[terms.length - 1]!.startsWith('-')) {
+    rawSuffix = terms[terms.length - 1]!.slice(1);
+    afterLastTextTerm--;
+  }
+
+  const rawTextTerms = terms.slice(firstTextTerm, afterLastTextTerm);
+  if (rawTextTerms.length < 1 || rawTextTerms.length > 2) return undefined;
+
+  const prefix = rawPrefix === undefined ? undefined : decodeTextTerm(rawPrefix);
+  const textStart = decodeTextTerm(rawTextTerms[0]!);
+  const textEnd = rawTextTerms[1] === undefined ? undefined : decodeTextTerm(rawTextTerms[1]);
+  const suffix = rawSuffix === undefined ? undefined : decodeTextTerm(rawSuffix);
+  if (!textStart) return undefined;
+  if (rawPrefix !== undefined && !prefix) return undefined;
+  if (rawTextTerms[1] !== undefined && !textEnd) return undefined;
+  if (rawSuffix !== undefined && !suffix) return undefined;
+
+  return withoutUndefinedTextFragment({ textStart, textEnd, prefix, suffix });
+}
+
+function encodeTextTerm(term: string): string {
+  return encodeURIComponent(term).replace(/-/g, '%2D');
+}
+
+function decodeTextTerm(term: string): string | undefined {
+  if (!term || term.includes('-')) return undefined;
+  try {
+    return decodeURIComponent(term) || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function withoutUndefinedTextFragment(fragment: PdfTextFragment): PdfTextFragment {
+  if (fragment.textEnd === undefined) delete fragment.textEnd;
+  if (fragment.prefix === undefined) delete fragment.prefix;
+  if (fragment.suffix === undefined) delete fragment.suffix;
+  return fragment;
 }
 
 function fragmentParams(fragment: string): URLSearchParams {

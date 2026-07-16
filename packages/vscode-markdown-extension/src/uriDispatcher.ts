@@ -6,17 +6,14 @@ import {
   openDatabase,
   resolveWebTarget,
   runMigrations,
+  type PdfTextFragment,
 } from '@human-learning/core';
-import { existsSync } from 'fs';
-import { join } from 'path';
+import { existsSync, mkdirSync, writeFileSync } from 'fs';
+import { isAbsolute, join } from 'path';
 
-interface AnchorRow {
-  uri?: unknown;
-}
-
-export async function dispatchUri(vaultRoot: string, uri: string): Promise<void> {
-  if (uri.startsWith('anc_')) {
-    await dispatchAnchorId(vaultRoot, uri);
+export async function dispatchUri(vaultRoot: string | undefined, uri: string): Promise<void> {
+  if (!vaultRoot) {
+    await dispatchStandaloneUri(uri);
     return;
   }
 
@@ -25,7 +22,9 @@ export async function dispatchUri(vaultRoot: string, uri: string): Promise<void>
   switch (target.kind) {
     case 'note': {
       if (!target.path) break;
-      const fileUri = vscode.Uri.file(join(vaultRoot, target.path));
+      const filePath = join(vaultRoot, target.path);
+      ensureMarkdownNoteExists(filePath);
+      const fileUri = vscode.Uri.file(filePath);
       await vscode.commands.executeCommand(
         'vscode.openWith',
         fileUri,
@@ -65,14 +64,13 @@ export async function dispatchUri(vaultRoot: string, uri: string): Promise<void>
 
     case 'pdf': {
       if (!target.path) break;
-      const args: { pdfPath: string; anchorId?: string; chunkId?: string; page?: number } = {
+      const args: { pdfPath: string; page?: number; textFragment?: PdfTextFragment } = {
         pdfPath: target.path,
       };
-      if (target.anchorId) args.anchorId = target.anchorId;
-      if (target.chunkId) args.chunkId = target.chunkId;
       if (target.page) args.page = target.page;
+      if (target.textFragment) args.textFragment = target.textFragment;
       try {
-        await vscode.commands.executeCommand('human-learning.openPdfAtAnchor', args);
+        await vscode.commands.executeCommand('human-learning.openPdfTarget', args);
       } catch (error) {
         if (!isMissingPdfEditorCommand(error)) throw error;
         await openPdfWithDefaultEditor(vaultRoot, target.path);
@@ -107,19 +105,106 @@ export async function dispatchUri(vaultRoot: string, uri: string): Promise<void>
   vscode.window.showErrorMessage(`Cannot open link target: ${uri}`);
 }
 
-async function dispatchAnchorId(vaultRoot: string, anchorId: string): Promise<void> {
-  const db = await openDatabase(vaultRoot);
-  runMigrations(db);
-  const anchor = db.prepare(
-    'SELECT uri, source_id FROM anchors WHERE id = ?',
-  ).get(anchorId) as AnchorRow | undefined;
-  closeDatabase(db);
-
-  if (typeof anchor?.uri === 'string') {
-    await dispatchUri(vaultRoot, anchor.uri);
-  } else {
-    vscode.window.showErrorMessage(`Anchor not found: ${anchorId}`);
+export async function dispatchStandaloneUri(uri: string): Promise<void> {
+  if (/^https?:\/\//i.test(uri)) {
+    await vscode.env.openExternal(vscode.Uri.parse(uri));
+    return;
   }
+
+  const referenceTarget = classifyReferenceTarget(uri);
+  if (referenceTarget.kind === 'pdf' && referenceTarget.path) {
+    const target = standalonePdfTarget(referenceTarget.path);
+    if (target) {
+      const args: { pdfPath: string; page?: number; textFragment?: PdfTextFragment } = {
+        pdfPath: target.pdfPath,
+      };
+      if (referenceTarget.page) args.page = referenceTarget.page;
+      if (referenceTarget.textFragment) args.textFragment = referenceTarget.textFragment;
+      try {
+        await vscode.commands.executeCommand('human-learning.openPdfTarget', args);
+      } catch (error) {
+        if (!isMissingPdfEditorCommand(error)) throw error;
+        await vscode.commands.executeCommand('vscode.open', target.fileUri);
+      }
+      return;
+    }
+  }
+
+  const target = standaloneMarkdownTarget(uri);
+  if (target) {
+    ensureMarkdownNoteExists(target.fileUri.fsPath);
+    await vscode.commands.executeCommand(
+      'vscode.openWith',
+      target.fileUri,
+      'human-learning.markdownEditor',
+    );
+    const selection = await resolveNoteSelection(target.fileUri, target.heading, undefined);
+    if (selection) {
+      await vscode.commands.executeCommand('human-learning.revealInMarkdownEditor', {
+        uri: target.fileUri,
+        selection,
+      });
+    }
+    return;
+  }
+
+  vscode.window.showErrorMessage(`Cannot open link target: ${uri}`);
+}
+
+function standalonePdfTarget(rawPath: string): { fileUri: vscode.Uri; pdfPath: string } | undefined {
+  const activeUri = getActiveMarkdownUri();
+  const workspaceRoot = activeUri
+    ? vscode.workspace.getWorkspaceFolder(activeUri)?.uri
+    : vscode.workspace.workspaceFolders?.[0]?.uri;
+  const basePath = activeUri?.fsPath ? dirnamePath(activeUri.fsPath) : workspaceRoot?.fsPath;
+  if (!rawPath) return undefined;
+
+  const decodedPath = safeDecodeURIComponent(rawPath);
+  const absolutePath = isAbsolute(decodedPath);
+  if (/^[a-z][a-z0-9+.-]*:/i.test(decodedPath) && !absolutePath) {
+    return undefined;
+  }
+  if (absolutePath) {
+    return {
+      fileUri: vscode.Uri.file(decodedPath),
+      pdfPath: decodedPath,
+    };
+  }
+  if (!basePath) return undefined;
+
+  const rootPath = workspaceRoot?.fsPath ?? basePath;
+  const filePath = decodedPath.includes('/') && !decodedPath.startsWith('./') && !decodedPath.startsWith('../')
+      ? join(rootPath, decodedPath)
+      : join(basePath, decodedPath);
+  return {
+    fileUri: vscode.Uri.file(filePath),
+    pdfPath: filePath,
+  };
+}
+
+function standaloneMarkdownTarget(uri: string): { fileUri: vscode.Uri; heading?: string } | undefined {
+  const [rawPath, rawHeading] = splitStandaloneFragment(uri);
+  const heading = rawHeading ? safeDecodeURIComponent(rawHeading) : undefined;
+  const activeUri = getActiveMarkdownUri();
+  const workspaceRoot = activeUri ? vscode.workspace.getWorkspaceFolder(activeUri)?.uri : vscode.workspace.workspaceFolders?.[0]?.uri;
+  const basePath = activeUri?.fsPath ? dirnamePath(activeUri.fsPath) : workspaceRoot?.fsPath;
+
+  if (!rawPath && activeUri) {
+    return { fileUri: activeUri, heading };
+  }
+
+  if (!rawPath || /^[a-z][a-z0-9+.-]*:/i.test(rawPath) || !basePath) {
+    return undefined;
+  }
+
+  const decodedPath = safeDecodeURIComponent(rawPath);
+  const rootPath = workspaceRoot?.fsPath ?? basePath;
+  const filePath = decodedPath.startsWith('/')
+    ? join(rootPath, decodedPath.slice(1))
+    : decodedPath.includes('/') && !decodedPath.startsWith('./') && !decodedPath.startsWith('../')
+      ? join(rootPath, decodedPath)
+    : join(basePath, decodedPath);
+  return { fileUri: vscode.Uri.file(filePath), heading };
 }
 
 async function openWebTarget(vaultRoot: string, url: string, webTargetId?: string): Promise<void> {
@@ -152,12 +237,13 @@ function openInChrome(url: string): Promise<boolean> {
 }
 
 async function openPdfWithDefaultEditor(vaultRoot: string, pdfPath: string): Promise<void> {
-  await vscode.commands.executeCommand('vscode.open', vscode.Uri.file(join(vaultRoot, pdfPath)));
+  const filePath = isAbsolute(pdfPath) ? pdfPath : join(vaultRoot, pdfPath);
+  await vscode.commands.executeCommand('vscode.open', vscode.Uri.file(filePath));
 }
 
 function isMissingPdfEditorCommand(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
-  return message.includes('human-learning.openPdfAtAnchor')
+  return message.includes('human-learning.openPdfTarget')
     && /not found|not registered|does not exist|unknown command/i.test(message);
 }
 
@@ -210,4 +296,55 @@ function lineStartAt(text: string, offset: number): number {
 
 function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function getActiveMarkdownUri(): vscode.Uri | undefined {
+  const activeEditorUri = vscode.window.activeTextEditor?.document.uri;
+  if (activeEditorUri && isMarkdownUri(activeEditorUri)) return activeEditorUri;
+
+  const tabInput = vscode.window.tabGroups.activeTabGroup.activeTab?.input as { uri?: vscode.Uri } | undefined;
+  if (tabInput?.uri && isMarkdownUri(tabInput.uri)) return tabInput.uri;
+  return undefined;
+}
+
+function isMarkdownUri(uri: vscode.Uri): boolean {
+  return uri.scheme === 'file' && uri.fsPath.toLowerCase().endsWith('.md');
+}
+
+function ensureMarkdownNoteExists(filePath: string): void {
+  if (!filePath.toLowerCase().endsWith('.md') || existsSync(filePath)) return;
+  const directory = dirnamePath(filePath);
+  if (directory) mkdirSync(directory, { recursive: true });
+  try {
+    writeFileSync(filePath, '', { flag: 'wx' });
+  } catch (error) {
+    if (!isFileExistsError(error)) throw error;
+  }
+}
+
+function isFileExistsError(error: unknown): boolean {
+  return typeof error === 'object'
+    && error !== null
+    && 'code' in error
+    && (error as { code?: unknown }).code === 'EEXIST';
+}
+
+function splitStandaloneFragment(uri: string): [string, string | undefined] {
+  const index = uri.indexOf('#');
+  if (index < 0) return [uri, undefined];
+  return [uri.slice(0, index), uri.slice(index + 1)];
+}
+
+function dirnamePath(filePath: string): string {
+  const normalized = filePath.replace(/\\/g, '/');
+  const index = normalized.lastIndexOf('/');
+  return index < 0 ? '' : normalized.slice(0, index);
+}
+
+function safeDecodeURIComponent(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
 }

@@ -23,12 +23,19 @@ interface RevealSelection {
   to: number;
 }
 
+interface PendingInsertion {
+  resolve: (applied: boolean) => void;
+  timeout: ReturnType<typeof setTimeout>;
+}
+
 export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
   static readonly viewType = 'human-learning.markdownEditor';
   private static readonly vimModeStorageKey = 'markdownVimMode';
+  private static readonly vimModeContextKey = 'humanLearningMarkdownVimMode';
 
   private readonly webviews = new Map<string, ActiveMarkdownWebview>();
   private readonly pendingReveals = new Map<string, RevealSelection>();
+  private readonly pendingInsertions = new Map<string, PendingInsertion>();
   private activeKey: string | undefined;
   private vimModeEnabled: boolean;
 
@@ -36,12 +43,27 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
     this.vimModeEnabled = Boolean(
       this.context.workspaceState?.get<boolean>(MarkdownEditorProvider.vimModeStorageKey, false),
     );
+    this.updateVimModeContext();
   }
 
   async insertMarkdown(markdown: string): Promise<boolean> {
     const active = this.activeKey ? this.webviews.get(this.activeKey) : undefined;
     if (!active) return false;
-    return active.postMessage({ type: 'insertText', text: markdown });
+    active.panel.reveal(undefined, true);
+    const requestId = `insert-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const applied = new Promise<boolean>(resolve => {
+      const timeout = setTimeout(() => {
+        this.pendingInsertions.delete(requestId);
+        resolve(false);
+      }, 2500);
+      this.pendingInsertions.set(requestId, { resolve, timeout });
+    });
+    const posted = await active.postMessage({ type: 'insertText', text: markdown, requestId });
+    if (!posted) {
+      this.resolvePendingInsertion(requestId, false);
+      return false;
+    }
+    return applied;
   }
 
   async toggleVimMode(): Promise<boolean> {
@@ -50,10 +72,30 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
       MarkdownEditorProvider.vimModeStorageKey,
       this.vimModeEnabled,
     );
+    this.updateVimModeContext();
     for (const webview of this.webviews.values()) {
       void webview.postMessage({ type: 'setVimMode', enabled: this.vimModeEnabled });
     }
     return this.vimModeEnabled;
+  }
+
+  async consumeVimHostShortcut(): Promise<boolean> {
+    if (!this.vimModeEnabled) return false;
+    return this.focusActiveEditor();
+  }
+
+  async focusActiveEditor(): Promise<boolean> {
+    const active = this.activeKey ? this.webviews.get(this.activeKey) : undefined;
+    if (!active) return false;
+
+    active.panel.reveal(undefined, false);
+    for (const delay of [0, 50, 150]) {
+      setTimeout(() => {
+        void vscode.commands.executeCommand('workbench.action.focusActiveEditorGroup');
+        void active.postMessage({ type: 'restoreFocus' });
+      }, delay);
+    }
+    return true;
   }
 
   async revealInEditor(uri: vscode.Uri, selection: RevealSelection): Promise<void> {
@@ -127,7 +169,7 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
       webviewPanel.webview.postMessage({
         type: 'setText',
         text: document.getText(),
-        title: noteTitleFromUri(document.uri),
+        title: path.basename(document.uri.fsPath, path.extname(document.uri.fsPath)),
         currentNotePath: documentRelativePath(document.uri),
         notePaths: await markdownNotePaths(document.uri),
         resourceBaseUri: webviewResourceUriString(webviewPanel.webview, documentDirectoryUri(document.uri)),
@@ -247,6 +289,9 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
     webviewPanel.webview.onDidReceiveMessage(async (rawMessage: unknown) => {
       const message = asMessageRecord(rawMessage);
       switch (message?.type) {
+        case 'active':
+          this.activeKey = key;
+          break;
         case 'ready':
           webviewPanel.reveal(undefined, false);
           pushSettings();
@@ -268,6 +313,12 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
           if (selection) {
             const active = this.webviews.get(key);
             if (active) active.selection = selection;
+          }
+          break;
+        }
+        case 'insertTextApplied': {
+          if (typeof message.requestId === 'string') {
+            this.resolvePendingInsertion(message.requestId, Boolean(message.applied));
           }
           break;
         }
@@ -338,6 +389,22 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
     };
   }
 
+  private updateVimModeContext(): void {
+    void vscode.commands.executeCommand(
+      'setContext',
+      MarkdownEditorProvider.vimModeContextKey,
+      this.vimModeEnabled,
+    );
+  }
+
+  private resolvePendingInsertion(requestId: string, applied: boolean): void {
+    const pending = this.pendingInsertions.get(requestId);
+    if (!pending) return;
+    this.pendingInsertions.delete(requestId);
+    clearTimeout(pending.timeout);
+    pending.resolve(applied);
+  }
+
   private getHtml(webview: vscode.Webview): string {
     const nonce = String(Date.now());
     const scriptUri = webview.asWebviewUri(
@@ -364,12 +431,13 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
   private getEditorPresentationSettings(): EditorPresentationSettings {
     const config = vscode.workspace.getConfiguration('editor');
     const fontFamily = normalizeNonEmptyString(config.get<string>('fontFamily'));
-    const fontSize = normalizePixelValue(config.get<number>('fontSize'), 14);
+    const fontSize = Math.max(16, normalizePixelValue(config.get<number>('fontSize'), 16));
     const fontWeight = normalizeFontWeight(config.get<string | number>('fontWeight'));
     const configuredLineHeight = normalizeNumber(config.get<number>('lineHeight'), 0);
+    const minimumLineHeight = automaticEditorLineHeight(fontSize);
     const lineHeight = configuredLineHeight > 0
-      ? configuredLineHeight
-      : Math.round(fontSize * 1.55);
+      ? Math.max(configuredLineHeight, minimumLineHeight)
+      : minimumLineHeight;
     const letterSpacing = normalizeNumber(config.get<number>('letterSpacing'), 0);
 
     return {
@@ -415,6 +483,10 @@ function normalizeNonEmptyString(value: string | undefined): string | undefined 
 function normalizePixelValue(value: number | undefined, fallback: number): number {
   const normalized = normalizeNumber(value, fallback);
   return normalized > 0 ? normalized : fallback;
+}
+
+function automaticEditorLineHeight(fontSize: number): number {
+  return Math.round(fontSize * 1.5);
 }
 
 function normalizeNumber(value: number | undefined, fallback: number): number {
@@ -527,8 +599,8 @@ async function markdownNotePaths(documentUri: vscode.Uri): Promise<string[]> {
   if (!workspaceRoot) return currentPath ? [currentPath] : [];
 
   const noteUris = await vscode.workspace.findFiles(
-    new vscode.RelativePattern(workspaceRoot, 'notes/**/*.md'),
-    undefined,
+    new vscode.RelativePattern(workspaceRoot, '**/*.md'),
+    new vscode.RelativePattern(workspaceRoot, '**/{.git,node_modules}/**'),
     10_000,
   );
   const paths = noteUris

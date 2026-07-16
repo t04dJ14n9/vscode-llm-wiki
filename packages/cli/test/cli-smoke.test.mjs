@@ -93,7 +93,10 @@ test('hl smoke flow initializes, ingests, embeds, searches, links, anchors, and 
     '--json',
   ], root);
   assert.equal(anchor.status, 'ok');
-  assert.match(anchor.anchor.uri, /^raw\/pdf\/fa.txt#page=\d+&anchor=anc_pdf_/);
+  assert.match(
+    anchor.anchor.uri,
+    /^raw\/pdf\/fa\.txt#page=\d+:~:text=FlashAttention%20uses%20tiling$/,
+  );
 
   const context = run([
     'context',
@@ -132,4 +135,41 @@ test('hl serializes concurrent writes to the vault database', async () => {
   const status = run(['status'], root);
   assert.equal(status.counts.sources, 80);
   assert.equal(status.counts.chunks, 80);
+});
+
+test('hl web persist stores a page snapshot and returns a markdown link', () => {
+  const root = mkdtempSync(join(tmpdir(), 'hl-cli-web-'));
+  run(['init', '.', '--name', 'Web Smoke'], root);
+  const htmlPath = join(root, 'fixture.html');
+  writeFileSync(
+    htmlPath,
+    '<!doctype html><html><head><title>Persistent Browser Page</title></head><body><p>Durable web knowledge starts here.</p></body></html>',
+  );
+
+  const result = run([
+    'web',
+    'persist',
+    'https://example.com/browser/page',
+    '--title',
+    'Persistent Browser Page',
+    '--selected-text',
+    'Durable web knowledge starts here.',
+    '--text-fragment',
+    'https://example.com/browser/page#:~:text=Durable%20web%20knowledge',
+    '--selector',
+    'body > p',
+    '--html-file',
+    htmlPath,
+    '--json',
+  ], root);
+
+  assert.equal(result.status, 'ok');
+  assert.match(result.persisted_path, /^raw\/web\/persistent-browser-page-[a-f0-9]{12}\.html$/);
+  assert.ok(readFileSync(join(root, result.persisted_path), 'utf8').includes('Durable web knowledge'));
+  assert.match(result.href, /^https:\/\/example\.com\/browser\/page#hl-web=web_/);
+  assert.equal(result.anchor.kind, 'dom_range');
+  assert.equal(
+    result.quote_markdown,
+    `> Durable web knowledge starts here.\n>\n> [Persistent Browser Page](${result.href})`,
+  );
 });

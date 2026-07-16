@@ -1,8 +1,10 @@
 import { test as base, expect, chromium, type Page, type Browser, type BrowserContext } from '@playwright/test';
 import path from 'path';
 import fs from 'fs';
+import { resolveVsCodeE2eTestDir } from './testDirectory.mjs';
+import { VIM_SANDBOXES } from './sandboxFixtures.mjs';
 
-const TEST_DIR = path.resolve(__dirname, '.vscode-test');
+const TEST_DIR = resolveVsCodeE2eTestDir();
 const WS_URL_FILE = path.resolve(TEST_DIR, 'ws-url');
 const DEBUG_PORT_FILE = path.resolve(TEST_DIR, 'debug-port');
 const SCREENSHOT_DIR = path.resolve(__dirname, '..', '..', '..', '..', 'e2e-report', 'vscode-e2e-screenshots');
@@ -86,9 +88,100 @@ async function openQuickFile(page: Page, query: string, waitMs = 4000): Promise<
   await page.waitForTimeout(waitMs);
 }
 
+async function runCommandFromPalette(page: Page, query: string, waitMs = 500): Promise<void> {
+  const modifier = process.platform === 'darwin' ? 'Meta' : 'Control';
+  await openQuickInput(page, `${modifier}+Shift+p`);
+  await page.keyboard.type(query, { delay: 50 });
+  await page.waitForTimeout(1000);
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(waitMs);
+}
+
+async function ensureHostVimMode(page: Page, docNeedle: string, enabled: boolean): Promise<void> {
+  const current = await evaluateHumanLearningWebview<boolean>(docNeedle, `
+    return typeof win.__hlVimModeEnabled === 'function' ? win.__hlVimModeEnabled() : false;
+  `);
+  if (current !== enabled) {
+    await runCommandFromPalette(page, 'Human Learning: Toggle Vim Mode', 750);
+  }
+  await expect.poll(() => evaluateHumanLearningWebview<boolean>(docNeedle, `
+    return typeof win.__hlVimModeEnabled === 'function' ? win.__hlVimModeEnabled() : false;
+  `)).toBe(enabled);
+}
+
 async function openMathAndCode(page: Page): Promise<void> {
   await openQuickFile(page, 'notes/Concepts/Math and Code.md');
   await expect(page.locator('iframe.webview:visible').first()).toBeVisible({ timeout: 15_000 });
+}
+
+async function openVimSandbox(
+  page: Page,
+  fixture: (typeof VIM_SANDBOXES)[keyof typeof VIM_SANDBOXES],
+): Promise<string> {
+  const modifier = process.platform === 'darwin' ? 'Meta' : 'Control';
+  await focusWorkbenchChrome(page);
+  await page.keyboard.press(`${modifier}+K`);
+  await page.keyboard.press('W');
+  await page.waitForTimeout(750);
+  await openQuickFile(page, fixture.relativePath, 4000);
+  await expect(page.locator('iframe.webview:visible').first()).toBeVisible({ timeout: 15_000 });
+  return fixture.marker;
+}
+
+interface EditorPixelMetrics {
+  editorLeft: number;
+  editorTop: number;
+  editorWidth: number;
+  contentLeft: number;
+  contentTop: number;
+  contentWidth: number;
+  firstLineLeft: number;
+  firstLineTop: number;
+  firstLineHeight: number;
+  firstLineFontFamily: string;
+  firstLineFontSize: string;
+  firstLineFontWeight: string;
+  firstLineLineHeight: string;
+  lineNumberLeft: number;
+  lineNumberTop: number;
+  lineNumberWidth: number;
+  lineNumberHeight: number;
+}
+
+async function measureNativeEditorPixels(page: Page): Promise<EditorPixelMetrics> {
+  return page.evaluate(() => {
+    const editor = document.querySelector<HTMLElement>('.monaco-editor.focused, .monaco-editor');
+    const content = editor?.querySelector<HTMLElement>('.view-lines');
+    const firstLine = editor?.querySelector<HTMLElement>('.view-line');
+    const lineNumber = editor?.querySelector<HTMLElement>('.margin-view-overlays .line-numbers');
+    if (!editor || !content || !firstLine || !lineNumber) {
+      throw new Error('Missing native Monaco editor elements');
+    }
+    const editorRect = editor.getBoundingClientRect();
+    const contentRect = content.getBoundingClientRect();
+    const firstLineRect = firstLine.getBoundingClientRect();
+    const lineNumberRect = lineNumber.getBoundingClientRect();
+    const firstLineStyle = getComputedStyle(firstLine);
+    return {
+      editorLeft: editorRect.left,
+      editorTop: editorRect.top,
+      editorWidth: editorRect.width,
+      contentLeft: contentRect.left,
+      contentTop: contentRect.top,
+      contentWidth: contentRect.width,
+      firstLineLeft: firstLineRect.left,
+      firstLineTop: firstLineRect.top,
+      firstLineHeight: firstLineRect.height,
+      firstLineFontFamily: firstLineStyle.fontFamily,
+      firstLineFontSize: firstLineStyle.fontSize,
+      firstLineFontWeight: firstLineStyle.fontWeight,
+      firstLineLineHeight: firstLineStyle.lineHeight,
+      lineNumberLeft: lineNumberRect.left,
+      lineNumberTop: lineNumberRect.top,
+      lineNumberWidth: lineNumberRect.width,
+      lineNumberHeight: lineNumberRect.height,
+    };
+  });
 }
 
 async function moveCursorToTop(page: Page): Promise<void> {
@@ -142,7 +235,14 @@ async function evaluateHumanLearningWebview<T>(
             ? [...doc.querySelectorAll('script')].map(script => script.getAttribute('src') ?? '[inline]').join(', ')
             : 'no document';
           const body = doc?.body?.textContent?.trim().slice(0, 160) ?? '';
-          return { ok: false, reason: 'missing editor', preview: scripts + ' :: ' + body };
+          const scriptReady = typeof win?.__hlCommands === 'object';
+          return {
+            ok: false,
+            reason: 'missing editor',
+            preview: 'scriptReady=' + scriptReady
+              + ' readyState=' + (doc?.readyState ?? 'no document')
+              + ' :: ' + scripts + ' :: ' + body,
+          };
         }
         const source = view.state.doc.toString();
         if (!source.includes(${JSON.stringify(docNeedle)})) {
@@ -205,6 +305,10 @@ async function cdpEvaluate<T>(wsUrl: string, expression: string): Promise<T> {
       reject(new Error(`CDP websocket error: ${String(event)}`));
     });
   });
+}
+
+function expectCloseTo(actual: number, expected: number, tolerance = 1): void {
+  expect(Math.abs(actual - expected)).toBeLessThanOrEqual(tolerance);
 }
 
 test.describe('Human Learning — VS Code Extension E2E', () => {
@@ -439,6 +543,66 @@ test.describe('Human Learning — VS Code Extension E2E', () => {
     // Verify the file is loaded in the editor
     const editor = page.locator('.monaco-editor, .editor-instance').first();
     await expect(editor).toBeVisible({ timeout: 10_000 });
+  });
+
+  test('markdown editor source rows use native VS Code typography and align with line numbers', async ({ vsCodePage: page }) => {
+    await openQuickFile(page, 'raw/text/native-typography.txt', 3000);
+    await expect(page.locator('.monaco-editor').first()).toBeVisible({ timeout: 10_000 });
+    const nativeMetrics = await measureNativeEditorPixels(page);
+
+    await openQuickFile(page, 'notes/Concepts/Native Typography.md', 4000);
+    await expect(page.locator('iframe.webview:visible').first()).toBeVisible({ timeout: 15_000 });
+
+    const markdownMetrics = await evaluateHumanLearningWebview<EditorPixelMetrics>('Typography Check', `
+      view.dispatch({ selection: { anchor: view.state.doc.line(1).from }, scrollIntoView: true });
+      view.focus();
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      const editor = doc.querySelector('.cm-editor');
+      const content = doc.querySelector('.cm-content');
+      const firstLine = doc.querySelector('.cm-line');
+      const lineNumber = [...doc.querySelectorAll('.cm-lineNumbers .cm-gutterElement')]
+        .find(row => row.textContent?.trim().length > 0 && row.getBoundingClientRect().height > 0);
+      if (!editor || !content || !firstLine || !lineNumber) {
+        throw new Error('Missing markdown CodeMirror editor elements');
+      }
+      const editorRect = editor.getBoundingClientRect();
+      const contentRect = content.getBoundingClientRect();
+      const firstLineRect = firstLine.getBoundingClientRect();
+      const lineNumberRect = lineNumber.getBoundingClientRect();
+      const firstLineStyle = getComputedStyle(firstLine);
+      return {
+        editorLeft: editorRect.left,
+        editorTop: editorRect.top,
+        editorWidth: editorRect.width,
+        contentLeft: contentRect.left,
+        contentTop: contentRect.top,
+        contentWidth: contentRect.width,
+        firstLineLeft: firstLineRect.left,
+        firstLineTop: firstLineRect.top,
+        firstLineHeight: firstLineRect.height,
+        firstLineFontFamily: firstLineStyle.fontFamily,
+        firstLineFontSize: firstLineStyle.fontSize,
+        firstLineFontWeight: firstLineStyle.fontWeight,
+        firstLineLineHeight: firstLineStyle.lineHeight,
+        lineNumberLeft: lineNumberRect.left,
+        lineNumberTop: lineNumberRect.top,
+        lineNumberWidth: lineNumberRect.width,
+        lineNumberHeight: lineNumberRect.height,
+      };
+    `);
+    expect(markdownMetrics.firstLineFontFamily).toBe(nativeMetrics.firstLineFontFamily);
+    expect(markdownMetrics.firstLineFontSize).toBe(nativeMetrics.firstLineFontSize);
+    expect(markdownMetrics.firstLineFontWeight).toBe(nativeMetrics.firstLineFontWeight);
+    expect(markdownMetrics.firstLineLineHeight).toBe(nativeMetrics.firstLineLineHeight);
+    expectCloseTo(markdownMetrics.firstLineHeight, nativeMetrics.firstLineHeight);
+    expectCloseTo(markdownMetrics.firstLineLeft, markdownMetrics.contentLeft);
+    expectCloseTo(markdownMetrics.lineNumberTop, markdownMetrics.firstLineTop);
+    expectCloseTo(markdownMetrics.lineNumberHeight, markdownMetrics.firstLineHeight);
+    expect(markdownMetrics.lineNumberLeft).toBeLessThan(markdownMetrics.contentLeft);
+    expect(markdownMetrics.firstLineTop).toBeGreaterThan(markdownMetrics.contentTop);
+    expect(markdownMetrics.contentWidth).toBeGreaterThan(0);
+
+    await screenshot(page, '37-native-markdown-pixel-parity');
   });
 
   test('inline math equations render via MathJax', async ({ vsCodePage: page }) => {
@@ -787,5 +951,422 @@ test.describe('Human Learning — VS Code Extension E2E', () => {
 
     expect(humanLearningErrors).toHaveLength(0);
     expect(errorMessages.filter(m => m.includes("Cannot read properties of undefined"))).toHaveLength(0);
+  });
+
+  test('Vim mode modifier shortcuts stay stable in the VS Code-hosted markdown webview', async ({ vsCodePage: page }) => {
+    const modifier = process.platform === 'darwin' ? 'Meta' : 'Control';
+    const initialNeedle = await openVimSandbox(page, VIM_SANDBOXES.modifierShortcuts);
+    await ensureHostVimMode(page, initialNeedle, true);
+
+    const shortcuts = [
+      { label: 'open file', key: `${modifier}+O` },
+      { label: 'italics', key: `${modifier}+I` },
+      { label: 'bold', key: `${modifier}+B` },
+      { label: 'inline code', key: `${modifier}+Backquote` },
+      { label: 'insert link', key: `${modifier}+K` },
+      { label: 'insert table', key: `${modifier}+Shift+T` },
+    ];
+    let docNeedle = initialNeedle;
+
+    for (const shortcut of shortcuts) {
+      await test.step(shortcut.label, async () => {
+        const before = await evaluateHumanLearningWebview<{
+          text: string;
+          head: number;
+          focused: boolean;
+        }>(docNeedle, `
+          win.postMessage({ type: 'setText', text: 'alpha beta' }, '*');
+          win.postMessage({ type: 'setVimMode', enabled: true }, '*');
+          await new Promise(resolve => setTimeout(resolve, 100));
+          const currentView = win.__cmView;
+          currentView.dispatch({ selection: { anchor: currentView.state.doc.line(1).from + 'alpha '.length } });
+          currentView.focus();
+          await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+          const editor = doc.querySelector('.cm-editor');
+          return {
+            text: currentView.state.doc.toString(),
+            head: currentView.state.selection.main.head,
+            focused: editor?.classList.contains('cm-focused') ?? false,
+          };
+        `);
+        docNeedle = 'alpha beta';
+
+        await page.locator('iframe.webview:visible').first().click({ position: { x: 300, y: 300 } });
+        await page.waitForTimeout(200);
+        await page.keyboard.press('Escape');
+        await page.waitForTimeout(100);
+
+        const normalModeState = await evaluateHumanLearningWebview<typeof before>('alpha beta', `
+          const editor = doc.querySelector('.cm-editor');
+          return {
+            text: view.state.doc.toString(),
+            head: view.state.selection.main.head,
+            focused: editor?.classList.contains('cm-focused') ?? false,
+          };
+        `);
+
+        await page.keyboard.press(shortcut.key);
+        await page.waitForTimeout(200);
+
+        const after = await evaluateHumanLearningWebview<typeof before>('alpha beta', `
+          const editor = doc.querySelector('.cm-editor');
+          return {
+            text: view.state.doc.toString(),
+            head: view.state.selection.main.head,
+            focused: editor?.classList.contains('cm-focused') ?? false,
+          };
+        `);
+
+        expect(normalModeState.text).toBe(before.text);
+        expect(normalModeState.focused).toBe(true);
+        expect(after.text).toBe(normalModeState.text);
+        expect(after.head).toBe(normalModeState.head);
+        expect(after.focused).toBe(true);
+      });
+    }
+  });
+
+  test('Vim Cmd/Ctrl+O keypress keeps the next edit on the current rendered line', async ({ vsCodePage: page }) => {
+    const modifier = process.platform === 'darwin' ? 'Meta' : 'Control';
+    const initialNeedle = await openVimSandbox(page, VIM_SANDBOXES.commandO);
+    await ensureHostVimMode(page, initialNeedle, true);
+
+    await page.locator('iframe.webview:visible').first().click({ position: { x: 300, y: 300 } });
+    await page.waitForTimeout(200);
+    const before = await evaluateHumanLearningWebview<{
+      text: string;
+      lineNumber: number;
+      offset: number;
+    }>(initialNeedle, `
+      win.postMessage({
+        type: 'setText',
+        text: ['First line', '## Current Heading', 'Last line'].join('\\n'),
+      }, '*');
+      win.postMessage({ type: 'setVimMode', enabled: true }, '*');
+      await new Promise(resolve => setTimeout(resolve, 100));
+      const currentView = win.__cmView;
+      const target = currentView.state.doc.line(2).from + '## '.length;
+      currentView.dispatch({ selection: { anchor: target }, scrollIntoView: true });
+      currentView.focus();
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      const selectedLine = currentView.state.doc.lineAt(currentView.state.selection.main.head);
+      return {
+        text: currentView.state.doc.toString(),
+        lineNumber: selectedLine.number,
+        offset: currentView.state.selection.main.head - selectedLine.from,
+      };
+    `);
+    expect(before).toEqual({
+      text: 'First line\n## Current Heading\nLast line',
+      lineNumber: 2,
+      offset: 3,
+    });
+
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(100);
+    await page.keyboard.press(`${modifier}+O`);
+    await page.waitForTimeout(300);
+    await page.keyboard.press('i');
+    await page.keyboard.type('Z');
+    await page.waitForTimeout(200);
+
+    const after = await evaluateHumanLearningWebview<{
+      text: string;
+      lineNumber: number;
+      offset: number;
+    }>('ZCurrent Heading', `
+      const selectedLine = view.state.doc.lineAt(view.state.selection.main.head);
+      return {
+        text: view.state.doc.toString(),
+        lineNumber: selectedLine.number,
+        offset: view.state.selection.main.head - selectedLine.from,
+      };
+    `);
+
+    expect(after).toEqual({
+      text: 'First line\n## ZCurrent Heading\nLast line',
+      lineNumber: 2,
+      offset: 4,
+    });
+  });
+
+  test('Vim host shortcut keeps the next edit anchored after delayed focus retries', async ({ vsCodePage: page }) => {
+    const initialNeedle = await openVimSandbox(page, VIM_SANDBOXES.delayedFocus);
+    await ensureHostVimMode(page, initialNeedle, true);
+
+    await page.locator('iframe.webview:visible').first().click({ position: { x: 300, y: 300 } });
+    await page.waitForTimeout(200);
+    const before = await evaluateHumanLearningWebview<{
+      text: string;
+      head: number;
+      lineNumber: number;
+      offset: number;
+    }>(initialNeedle, `
+      win.postMessage({
+        type: 'setText',
+        text: ['Intro line', '# Rendered Heading', 'Tail line'].join('\\n'),
+      }, '*');
+      win.postMessage({ type: 'setVimMode', enabled: true }, '*');
+      await new Promise(resolve => setTimeout(resolve, 100));
+      const currentView = win.__cmView;
+      const target = currentView.state.doc.line(2).from + '# '.length;
+      currentView.dispatch({ selection: { anchor: target }, scrollIntoView: true });
+      currentView.focus();
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      const selectedLine = currentView.state.doc.lineAt(currentView.state.selection.main.head);
+      return {
+        text: currentView.state.doc.toString(),
+        head: currentView.state.selection.main.head,
+        lineNumber: selectedLine.number,
+        offset: currentView.state.selection.main.head - selectedLine.from,
+      };
+    `);
+    expect(before).toEqual({
+      text: 'Intro line\n# Rendered Heading\nTail line',
+      head: 'Intro line\n# '.length,
+      lineNumber: 2,
+      offset: 2,
+    });
+
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(100);
+    await runCommandFromPalette(page, 'Human Learning: Consume Vim Host Shortcut', 900);
+    await page.keyboard.press('i');
+    await page.keyboard.type('X');
+    await page.waitForTimeout(200);
+
+    const after = await evaluateHumanLearningWebview<{
+      text: string;
+      lineNumber: number;
+      offset: number;
+    }>('XRendered Heading', `
+      const selectedLine = view.state.doc.lineAt(view.state.selection.main.head);
+      return {
+        text: view.state.doc.toString(),
+        lineNumber: selectedLine.number,
+        offset: view.state.selection.main.head - selectedLine.from,
+      };
+    `);
+
+    expect(after).toEqual({
+      text: 'Intro line\n# XRendered Heading\nTail line',
+      lineNumber: 2,
+      offset: 3,
+    });
+  });
+
+  test('Vim dd keeps the next edit anchored on rendered markdown lines', async ({ vsCodePage: page }) => {
+    const initialNeedle = await openVimSandbox(page, VIM_SANDBOXES.deleteLine);
+    await ensureHostVimMode(page, initialNeedle, true);
+
+    await page.locator('iframe.webview:visible').first().click({ position: { x: 300, y: 300 } });
+    await page.waitForTimeout(200);
+    await evaluateHumanLearningWebview(initialNeedle, `
+      win.postMessage({
+        type: 'setText',
+        text: ['Intro line', '# Delete Me', 'Tail line', 'Final line'].join('\\n'),
+      }, '*');
+      win.postMessage({ type: 'setVimMode', enabled: true }, '*');
+      await new Promise(resolve => setTimeout(resolve, 100));
+      const currentView = win.__cmView;
+      currentView.dispatch({
+        selection: { anchor: currentView.state.doc.line(2).from + '# '.length },
+        scrollIntoView: true,
+      });
+      currentView.focus();
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      return true;
+    `);
+
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(100);
+    await page.keyboard.press('d');
+    await page.keyboard.press('d');
+    await page.keyboard.press('i');
+    await page.keyboard.type('X');
+    await page.waitForTimeout(200);
+
+    const after = await evaluateHumanLearningWebview<{
+      text: string;
+      lineNumber: number;
+      offset: number;
+    }>('XTail line', `
+      const selectedLine = view.state.doc.lineAt(view.state.selection.main.head);
+      return {
+        text: view.state.doc.toString(),
+        lineNumber: selectedLine.number,
+        offset: view.state.selection.main.head - selectedLine.from,
+      };
+    `);
+
+    expect(after).toEqual({
+      text: 'Intro line\nXTail line\nFinal line',
+      lineNumber: 2,
+      offset: 1,
+    });
+  });
+
+  test('Vim dd keypress keeps the next edit off the first line after rendered markdown', async ({ vsCodePage: page }) => {
+    const initialNeedle = await openVimSandbox(page, VIM_SANDBOXES.deleteHeading);
+    await ensureHostVimMode(page, initialNeedle, true);
+
+    await page.locator('iframe.webview:visible').first().click({ position: { x: 300, y: 300 } });
+    await page.waitForTimeout(200);
+    await evaluateHumanLearningWebview(initialNeedle, `
+      win.postMessage({
+        type: 'setText',
+        text: [
+          'Top line',
+          '## Rendered Heading',
+          'Paragraph before delete',
+          '### Delete This Heading',
+          'Tail stays here',
+          'Last line',
+        ].join('\\n'),
+      }, '*');
+      win.postMessage({ type: 'setVimMode', enabled: true }, '*');
+      await new Promise(resolve => setTimeout(resolve, 100));
+      const currentView = win.__cmView;
+      currentView.dispatch({
+        selection: { anchor: currentView.state.doc.line(4).from + '### '.length },
+        scrollIntoView: true,
+      });
+      currentView.focus();
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      return true;
+    `);
+
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(100);
+    await page.keyboard.press('d');
+    await page.keyboard.press('d');
+    await page.keyboard.press('i');
+    await page.keyboard.type('Z');
+    await page.waitForTimeout(200);
+
+    const after = await evaluateHumanLearningWebview<{
+      text: string;
+      lineNumber: number;
+      offset: number;
+    }>('ZTail stays here', `
+      const selectedLine = view.state.doc.lineAt(view.state.selection.main.head);
+      return {
+        text: view.state.doc.toString(),
+        lineNumber: selectedLine.number,
+        offset: view.state.selection.main.head - selectedLine.from,
+      };
+    `);
+
+    expect(after).toEqual({
+      text: [
+        'Top line',
+        '## Rendered Heading',
+        'Paragraph before delete',
+        'ZTail stays here',
+        'Last line',
+      ].join('\n'),
+      lineNumber: 4,
+      offset: 1,
+    });
+  });
+
+  test('Vim insert and open-line commands stay anchored on scaled headings in the VS Code-hosted markdown webview', async ({ vsCodePage: page }) => {
+    const initialNeedle = await openVimSandbox(page, VIM_SANDBOXES.headingCommands);
+
+    const cases = [
+      {
+        label: 'insert',
+        command: 'i',
+        typed: 'X',
+        expectedText: [
+          'Intro',
+          'X# Rendered Heading',
+          'Tail',
+          initialNeedle,
+        ].join('\n'),
+        expectedLine: 2,
+        expectedOffset: 1,
+      },
+      {
+        label: 'open line',
+        command: 'o',
+        typed: 'Inserted',
+        expectedText: [
+          'Intro',
+          '# Rendered Heading',
+          'Inserted',
+          'Tail',
+          initialNeedle,
+        ].join('\n'),
+        expectedLine: 3,
+        expectedOffset: 'Inserted'.length,
+      },
+    ];
+    let docNeedle = initialNeedle;
+
+    for (const testCase of cases) {
+      await test.step(testCase.label, async () => {
+        await page.locator('iframe.webview:visible').first().click({ position: { x: 300, y: 300 } });
+        await page.waitForTimeout(200);
+        await evaluateHumanLearningWebview(docNeedle, `
+          win.postMessage({
+            type: 'setText',
+            text: ['Intro', '# Rendered Heading', 'Tail', ${JSON.stringify(initialNeedle)}].join('\\n'),
+          }, '*');
+          win.postMessage({ type: 'setVimMode', enabled: true }, '*');
+          await new Promise(resolve => setTimeout(resolve, 100));
+          const currentView = win.__cmView;
+          currentView.dispatch({ selection: { anchor: currentView.state.doc.line(1).from } });
+          currentView.focus();
+          await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+          return true;
+        `);
+        await page.keyboard.press('Escape');
+        await page.waitForTimeout(100);
+        await page.keyboard.press('j');
+        await page.waitForTimeout(100);
+
+        const beforeCommand = await evaluateHumanLearningWebview<{
+          lineNumber: number;
+          offset: number;
+          text: string;
+        }>(docNeedle, `
+          const selectedLine = view.state.doc.lineAt(view.state.selection.main.head);
+          return {
+            lineNumber: selectedLine.number,
+            offset: view.state.selection.main.head - selectedLine.from,
+            text: selectedLine.text,
+          };
+        `);
+        expect(beforeCommand).toEqual({
+          lineNumber: 2,
+          offset: 0,
+          text: '# Rendered Heading',
+        });
+
+        await page.keyboard.press(testCase.command);
+        await page.keyboard.type(testCase.typed);
+        await page.waitForTimeout(200);
+
+        const after = await evaluateHumanLearningWebview<{
+          text: string;
+          lineNumber: number;
+          offset: number;
+        }>(docNeedle, `
+          const selectedLine = view.state.doc.lineAt(view.state.selection.main.head);
+          return {
+            text: view.state.doc.toString(),
+            lineNumber: selectedLine.number,
+            offset: view.state.selection.main.head - selectedLine.from,
+          };
+        `);
+
+        expect(after).toEqual({
+          text: testCase.expectedText,
+          lineNumber: testCase.expectedLine,
+          offset: testCase.expectedOffset,
+        });
+      });
+    }
   });
 });

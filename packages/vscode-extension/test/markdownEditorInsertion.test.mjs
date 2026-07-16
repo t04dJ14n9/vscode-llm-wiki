@@ -27,6 +27,13 @@ function loadTsModule(relativePath, mocks = {}) {
     if (Object.prototype.hasOwnProperty.call(mocks, request)) {
       return mocks[request];
     }
+    if (request === './pdfDiscussionController') {
+      return {
+        createPdfDiscussionStoreForDocument: () => {
+          throw new Error('PDF discussion storage is not configured in this legacy provider test');
+        },
+      };
+    }
     return originalLoad.call(this, request, parent, isMain);
   };
   try {
@@ -41,10 +48,10 @@ test('insert helper replaces selections and returns cursor positions', () => {
   const { applyInsertText } = loadTsModule('webview-src/insertText.ts');
 
   assert.deepEqual(
-    applyInsertText('alpha beta gamma', [{ from: 6, to: 10 }], '[PDF](hl://pdf/raw/paper.pdf)'),
+    applyInsertText('alpha beta gamma', [{ from: 6, to: 10 }], '[PDF](raw/paper.pdf#page=1)'),
     {
-      text: 'alpha [PDF](hl://pdf/raw/paper.pdf) gamma',
-      cursorPositions: [35],
+      text: 'alpha [PDF](raw/paper.pdf#page=1) gamma',
+      cursorPositions: [33],
     },
   );
 
@@ -66,12 +73,19 @@ test('markdown editor provider can insert text into the active custom editor web
   panel.visible = false;
 
   await provider.resolveCustomTextEditor(createDocumentMock(), panel, {});
-  const inserted = await provider.insertMarkdown('[PDF](hl://pdf/raw/pdf/paper.pdf?anchor=anc_pdf_123)');
+  const insertPromise = provider.insertMarkdown('[PDF](raw/pdf/paper.pdf#page=7)');
+  const insertMessage = messages.at(-1);
+  assert.equal(insertMessage.type, 'insertText');
+  assert.equal(insertMessage.text, '[PDF](raw/pdf/paper.pdf#page=7)');
+  assert.equal(typeof insertMessage.requestId, 'string');
+  await panel.fireMessage({ type: 'insertTextApplied', requestId: insertMessage.requestId, applied: true });
+  const inserted = await insertPromise;
 
   assert.equal(inserted, true);
-  assert.deepEqual(messages.at(-1), {
+  assert.deepEqual(insertMessage, {
     type: 'insertText',
-    text: '[PDF](hl://pdf/raw/pdf/paper.pdf?anchor=anc_pdf_123)',
+    text: '[PDF](raw/pdf/paper.pdf#page=7)',
+    requestId: insertMessage.requestId,
   });
 });
 
@@ -104,7 +118,36 @@ test('markdown editor provider posts normalized editor typography settings', asy
   });
 });
 
-test('markdown editor provider sends the note title with document text', async () => {
+test('markdown editor provider keeps automatic VS Code metrics at Obsidian\'s readable minimum', async () => {
+  const messages = [];
+  const vscode = createVscodeMock({
+    editorConfig: {
+      fontFamily: 'Menlo, Monaco, "Courier New", monospace',
+      fontSize: 14,
+      fontWeight: 'normal',
+      lineHeight: 0,
+      letterSpacing: 0,
+    },
+  });
+  const { MarkdownEditorProvider } = loadTsModule('src/markdownEditorProvider.ts', { vscode });
+  const provider = new MarkdownEditorProvider({ extensionUri: { scheme: 'file', path: '/extension' } });
+  const panel = createPanelMock(messages);
+
+  await provider.resolveCustomTextEditor(createDocumentMock(), panel, {});
+
+  assert.deepEqual(messages.find(message => message.type === 'updateSettings'), {
+    type: 'updateSettings',
+    settings: {
+      fontFamily: 'Menlo, Monaco, "Courier New", monospace',
+      fontSize: '16px',
+      fontWeight: 'normal',
+      lineHeight: '24px',
+      letterSpacing: '0px',
+    },
+  });
+});
+
+test('markdown editor provider sends the filename title like Obsidian', async () => {
   const messages = [];
   const vscode = createVscodeMock();
   const { MarkdownEditorProvider } = loadTsModule('src/markdownEditorProvider.ts', { vscode });
@@ -138,6 +181,7 @@ test('markdown editor provider sends webview resource roots for note images', as
     findFiles: [
       createUri('/vault/notes/Concepts/Math and Code.md'),
       createUri('/vault/notes/Papers/FlashAttention Paper.md'),
+      createUri('/vault/Projects/Standalone.md'),
     ],
     findFilesCalls,
   });
@@ -165,10 +209,12 @@ test('markdown editor provider sends webview resource roots for note images', as
   assert.deepEqual(setTextMessage.notePaths, [
     'notes/Concepts/Math and Code.md',
     'notes/Papers/FlashAttention Paper.md',
+    'Projects/Standalone.md',
   ]);
   assert.equal(setTextMessage.resourceBaseUri, 'webview:///vault/notes/Concepts/');
   assert.equal(setTextMessage.resourceRootUri, 'webview:///vault/');
-  assert.equal(findFilesCalls[0]?.pattern, 'notes/**/*.md');
+  assert.equal(findFilesCalls[0]?.pattern, '**/*.md');
+  assert.equal(findFilesCalls[0]?.excludePattern, '**/{.git,node_modules}/**');
   assert.deepEqual(
     panel.webview.options.localResourceRoots.map(uri => uri.fsPath),
     ['/extension/dist', '/vault'],
@@ -293,6 +339,84 @@ test('markdown editor provider asks VS Code to focus the active editor group bef
   assert.ok(
     messages.some(message => message.type === 'focus'),
     'expected the provider to still post a webview focus message',
+  );
+});
+
+test('markdown editor provider retargets insertions after webview activity', async () => {
+  const firstMessages = [];
+  const secondMessages = [];
+  const vscode = createVscodeMock();
+  const { MarkdownEditorProvider } = loadTsModule('src/markdownEditorProvider.ts', { vscode });
+  const provider = new MarkdownEditorProvider({ extensionUri: { scheme: 'file', path: '/extension' } });
+  const firstDocument = createDocumentMock({ uri: 'file:///vault/notes/First.md' });
+  const secondDocument = createDocumentMock({ uri: 'file:///vault/notes/Second.md' });
+  const firstPanel = createPanelMock(firstMessages);
+  const secondPanel = createPanelMock(secondMessages);
+
+  await provider.resolveCustomTextEditor(secondDocument, secondPanel, {});
+  await provider.resolveCustomTextEditor(firstDocument, firstPanel, {});
+  await secondPanel.fireMessage({ type: 'active' });
+  const insertPromise = provider.insertMarkdown('cursor-safe');
+  const insertMessage = secondMessages.at(-1);
+  await secondPanel.fireMessage({ type: 'insertTextApplied', requestId: insertMessage.requestId, applied: true });
+  const inserted = await insertPromise;
+
+  assert.equal(inserted, true);
+  assert.deepEqual(insertMessage, {
+    type: 'insertText',
+    text: 'cursor-safe',
+    requestId: insertMessage.requestId,
+  });
+  assert.notDeepEqual(firstMessages.at(-1), {
+    type: 'insertText',
+    text: 'cursor-safe',
+  });
+});
+
+test('markdown editor provider returns false when the active webview does not acknowledge insertion', async () => {
+  const messages = [];
+  const vscode = createVscodeMock();
+  const { MarkdownEditorProvider } = loadTsModule('src/markdownEditorProvider.ts', { vscode });
+  const provider = new MarkdownEditorProvider({ extensionUri: { scheme: 'file', path: '/extension' } });
+  const panel = createPanelMock(messages);
+
+  await provider.resolveCustomTextEditor(createDocumentMock(), panel, {});
+  const inserted = await provider.insertMarkdown('unacknowledged');
+  const insertMessage = messages.find(message => message.type === 'insertText' && message.text === 'unacknowledged');
+
+  assert.equal(inserted, false);
+  assert.ok(insertMessage);
+  assert.equal(typeof insertMessage.requestId, 'string');
+});
+
+test('markdown editor provider uses selection-preserving focus for Vim host shortcuts', async () => {
+  const messages = [];
+  const executeCommandCalls = [];
+  const vscode = createVscodeMock({ executeCommandCalls });
+  const { MarkdownEditorProvider } = loadTsModule('src/markdownEditorProvider.ts', { vscode });
+  const provider = new MarkdownEditorProvider({
+    extensionUri: { scheme: 'file', path: '/extension' },
+    workspaceState: createStorageMock({ markdownVimMode: true }),
+  });
+  const panel = createPanelMock(messages);
+
+  await provider.resolveCustomTextEditor(createDocumentMock(), panel, {});
+  const consumed = await provider.consumeVimHostShortcut();
+  await new Promise(resolve => setTimeout(resolve, 200));
+
+  assert.equal(consumed, true);
+  assert.ok(
+    executeCommandCalls.some(args => args[0] === 'workbench.action.focusActiveEditorGroup'),
+    'expected the provider to ask VS Code to focus the active editor group',
+  );
+  assert.ok(
+    messages.some(message => message.type === 'restoreFocus'),
+    'expected a selection-preserving restoreFocus message for Vim host shortcuts',
+  );
+  assert.equal(
+    messages.some(message => message.type === 'focus'),
+    false,
+    'Vim host shortcuts should not re-run initial autofocus',
   );
 });
 
@@ -641,13 +765,9 @@ test('pdf insert action targets the active custom markdown editor before native 
   vscode.window.showInformationMessage = message => informationMessages.push(message);
 
   const core = {
-    closeDatabase: () => undefined,
-    createPdfAnchorFromSelection: () => ({
-      uri: 'hl://pdf/raw/pdf/flash-attention.pdf?anchor=anc_test',
-    }),
-    openDatabase: async () => ({}),
-    resolveAnchor: () => undefined,
-    runMigrations: () => undefined,
+    pdfHref: (sourcePath, { page, textFragment }) =>
+      `${sourcePath}#page=${page}:~:text=${encodeURIComponent(textFragment.textStart)}`,
+    openDatabase: () => { throw new Error('insert link must not open the database'); },
   };
   const { PdfEditorProvider } = loadTsModule('src/pdfEditorProvider.ts', {
     vscode,
@@ -677,10 +797,59 @@ test('pdf insert action targets the active custom markdown editor before native 
   );
 
   assert.deepEqual(insertedMarkdown, [
-    '[flash-attention.pdf p.1](hl://pdf/raw/pdf/flash-attention.pdf?anchor=anc_test)',
+    '[flash-attention.pdf p.1](raw/pdf/flash-attention.pdf#page=1:~:text=FlashAttention%20uses%20tiling)',
   ]);
   assert.deepEqual(clipboardWrites, []);
   assert.deepEqual(informationMessages, ['Human Learning PDF link inserted']);
+});
+
+test('pdf insert action wraps spaced PDF destinations so markdown link parsing remains stable', async () => {
+  const insertedMarkdown = [];
+  const vscode = createVscodeMock();
+  vscode.env = {
+    clipboard: {
+      writeText: async () => undefined,
+    },
+  };
+  vscode.workspace.asRelativePath = () => 'raw/pdf/Round Trip Live.pdf';
+  vscode.window.visibleTextEditors = [];
+  vscode.window.showInformationMessage = () => undefined;
+
+  const core = {
+    pdfHref: (sourcePath, { page, textFragment }) =>
+      `${sourcePath}#page=${page}:~:text=${encodeURIComponent(textFragment.textStart)}`,
+    openDatabase: () => { throw new Error('insert link must not open the database'); },
+  };
+  const { PdfEditorProvider } = loadTsModule('src/pdfEditorProvider.ts', {
+    vscode,
+    '@human-learning/core': core,
+  });
+  const provider = new PdfEditorProvider(
+    { extensionUri: { scheme: 'file', path: '/extension' } },
+    '/vault',
+    {
+      insertMarkdown: async markdown => {
+        insertedMarkdown.push(markdown);
+        return true;
+      },
+    },
+  );
+
+  await provider.handleSelectionAction(
+    { toString: () => 'file:///vault/raw/pdf/Round%20Trip%20Live.pdf' },
+    'insertLink',
+    {
+      page: 1,
+      textItemIndex: 0,
+      charOffset: 0,
+      length: 23,
+      snippet: 'Round trip anchor text',
+    },
+  );
+
+  assert.deepEqual(insertedMarkdown, [
+    '[Round Trip Live.pdf p.1](<raw/pdf/Round Trip Live.pdf#page=1:~:text=Round%20trip%20anchor%20text>)',
+  ]);
 });
 
 test('pdf quote link format keeps the quote separate from a stable source label', async () => {
@@ -696,13 +865,9 @@ test('pdf quote link format keeps the quote separate from a stable source label'
   vscode.window.showInformationMessage = message => informationMessages.push(message);
 
   const core = {
-    closeDatabase: () => undefined,
-    createPdfAnchorFromSelection: () => ({
-      uri: 'hl://pdf/raw/pdf/flash-attention.pdf?anchor=anc_test',
-    }),
-    openDatabase: async () => ({}),
-    resolveAnchor: () => undefined,
-    runMigrations: () => undefined,
+    pdfHref: (sourcePath, { page, textFragment }) =>
+      `${sourcePath}#page=${page}:~:text=${encodeURIComponent(textFragment.textStart)}`,
+    openDatabase: () => { throw new Error('quote link must not open the database'); },
   };
   const { PdfEditorProvider } = loadTsModule('src/pdfEditorProvider.ts', {
     vscode,
@@ -726,7 +891,7 @@ test('pdf quote link format keeps the quote separate from a stable source label'
   );
 
   assert.deepEqual(clipboardWrites, [
-    '> FlashAttention uses tiling\n>\n> [flash-attention.pdf p.1](hl://pdf/raw/pdf/flash-attention.pdf?anchor=anc_test)',
+    '> FlashAttention uses tiling\n>\n> [flash-attention.pdf p.1](raw/pdf/flash-attention.pdf#page=1:~:text=FlashAttention%20uses%20tiling)',
   ]);
   assert.deepEqual(informationMessages, ['Human Learning PDF quote copied']);
 });
@@ -812,7 +977,10 @@ function createVscodeMock(options = {}) {
         return options.document ?? createOpenDocumentMock(args[0]);
       },
       findFiles: async (...args) => {
-        options.findFilesCalls?.push(args[0]);
+        options.findFilesCalls?.push({
+          pattern: args[0]?.pattern,
+          excludePattern: args[1]?.pattern,
+        });
         return options.findFiles ?? [];
       },
       getWorkspaceFolder: () => options.workspaceFolder,

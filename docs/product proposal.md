@@ -16,14 +16,14 @@ links for notes, code, PDFs, or web targets. Current examples are:
 [[Online Softmax#Why This Matters]]
 [kernel](raw/code/attention.cu#L42-L57)
 [paper p7](raw/pdf/flash-attention.pdf#page=7)
-[quote](raw/pdf/flash-attention.pdf#page=7&chunk=chk_pdf_abc123)
-[selection](raw/pdf/flash-attention.pdf#page=7&anchor=anc_pdf_abc123)
+[selected text](raw/pdf/flash-attention.pdf#page=7:~:text=selected%20text)
 [quote](https://example.com/article#:~:text=selected%20text)
 [DOM block](https://example.com/article#hl-web=web_abc123)
 ```
 
-PDF chunks and PDF anchors coexist: chunks are retrieval units returned by
-search, while anchors are sparse durable records for arbitrary selections.
+PDF search results and selection links use portable page/text-fragment targets.
+Chunks remain retrieval units, while sparse annotation anchors remain internal
+database records and never appear as identifiers in Markdown links.
 Chrome is the default web-open target, with VS Code's external URL opener as the
 current fallback. See [reference model.md](reference%20model.md) for the current
 authoritative link and locator model.
@@ -275,7 +275,7 @@ Cmd-click / Ctrl-click link navigation
 Canonical persisted links should be valid markdown links:
 
 ```md
-[FlashAttention tiling explanation](raw/pdf/flash-attention.pdf#page=3&chunk=chk_pdf_abc123)
+[FlashAttention tiling explanation](raw/pdf/flash-attention.pdf#page=3)
 
 [CUDA kernel](raw/code/attention.cu#L80-L145)
 

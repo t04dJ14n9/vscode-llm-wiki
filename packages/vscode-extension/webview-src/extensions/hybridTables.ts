@@ -47,6 +47,8 @@ class TableWidget extends WidgetType {
     wrapper.className = 'cm-hybrid-table-widget';
     wrapper.dataset.sourceFrom = String(this.blockFrom);
     wrapper.dataset.sourceTo = String(this.blockTo);
+    const draftRows = this.rows.map(row => row.map(cell => cell.text));
+    let activeInput: HTMLInputElement | null = null;
     const inner = document.createElement('div');
     inner.className = 'cm-hybrid-table-widget-inner';
 
@@ -59,7 +61,39 @@ class TableWidget extends WidgetType {
       for (const [cellIndex, cell] of row.entries()) {
         const element = document.createElement(rowIndex === 0 ? 'th' : 'td');
         applyTableCellAlignment(element, this.alignments[cellIndex]);
-        this.renderCellInlineMarkdown(element, cell.text, 'cm-hybrid-table', cell.from, view);
+        const display = document.createElement('span');
+        display.className = 'cm-hybrid-table-cell-display';
+        this.renderCellInlineMarkdown(display, cell.text, 'cm-hybrid-table', cell.from, view);
+
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'cm-hybrid-table-cell-input';
+        input.value = cell.text;
+        input.hidden = true;
+        input.spellcheck = false;
+        input.autocomplete = 'off';
+        input.setAttribute('aria-label', `Table cell ${cell.text}`);
+        input.addEventListener('input', () => {
+          draftRows[rowIndex]![cellIndex] = input.value;
+        });
+
+        const activate = (event: Event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          if (activeInput && activeInput !== input) {
+            activeInput.hidden = true;
+            const previousDisplay = activeInput.previousElementSibling;
+            if (previousDisplay instanceof HTMLElement) previousDisplay.hidden = false;
+          }
+          display.hidden = true;
+          input.hidden = false;
+          activeInput = input;
+          input.focus({ preventScroll: true });
+          input.select();
+        };
+        display.addEventListener('mousedown', activate);
+        display.addEventListener('click', event => event.stopPropagation());
+        element.append(display, input);
         tr.appendChild(element);
       }
       tbody.appendChild(tr);
@@ -69,12 +103,18 @@ class TableWidget extends WidgetType {
     inner.appendChild(table);
     wrapper.appendChild(inner);
 
-    wrapper.addEventListener('mousedown', event => {
-      event.preventDefault();
-      event.stopPropagation();
-      view.dispatch({ selection: { anchor: this.blockFrom } });
-      view.focus();
+    wrapper.addEventListener('focusout', event => {
+      const nextTarget = event.relatedTarget;
+      if (nextTarget instanceof Node && wrapper.contains(nextTarget)) return;
+      const source = serializeMarkdownTable(draftRows, this.alignments);
+      if (source === view.state.doc.sliceString(this.blockFrom, this.blockTo)) return;
+      view.dispatch({
+        changes: { from: this.blockFrom, to: this.blockTo, insert: source },
+      });
     });
+    wrapper.addEventListener('mousedown', event => event.stopPropagation());
+    wrapper.addEventListener('keydown', event => event.stopPropagation());
+    wrapper.addEventListener('input', event => event.stopPropagation());
 
     return wrapper;
   }
@@ -89,6 +129,32 @@ class TableWidget extends WidgetType {
   override ignoreEvent(): boolean {
     return false;
   }
+}
+
+function serializeMarkdownTable(rows: string[][], alignments: TableAlignment[]): string {
+  const columnCount = Math.max(alignments.length, ...rows.map(row => row.length));
+  const escapedRows = rows.map(row => Array.from({ length: columnCount }, (_, index) => (
+    escapeTableCell(row[index] ?? '')
+  )));
+  const widths = Array.from({ length: columnCount }, (_, index) => {
+    const contentWidth = Math.max(0, ...escapedRows.map(row => row[index]!.length));
+    const minimum = alignments[index] === 'center' ? 5 : alignments[index] === 'right' ? 4 : 3;
+    return Math.max(contentWidth, minimum);
+  });
+  const rowLine = (row: string[]) => `| ${row
+    .map((cell, index) => cell.padEnd(widths[index]!))
+    .join(' | ')} |`;
+  const separator = widths.map((width, index) => {
+    if (alignments[index] === 'center') return `:${'-'.repeat(width - 2)}:`;
+    if (alignments[index] === 'right') return `${'-'.repeat(width - 1)}:`;
+    return '-'.repeat(width);
+  });
+  const [header = Array.from({ length: columnCount }, () => ''), ...body] = escapedRows;
+  return [rowLine(header), rowLine(separator), ...body.map(rowLine)].join('\n');
+}
+
+function escapeTableCell(value: string): string {
+  return value.trim().replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
 }
 
 export function buildTableDecorations(

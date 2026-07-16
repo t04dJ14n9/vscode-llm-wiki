@@ -17,7 +17,7 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
     const testDoc = [
       '# Test Note',
       '',
-      'This references a [PDF quote](raw/pdf/paper.pdf#page=7&anchor=anc_pdf_abc123).',
+      'This references a [PDF quote](raw/pdf/paper.pdf#page=7).',
       '',
       'See also [[FlashAttention]] for background.',
     ].join('\n');
@@ -104,12 +104,53 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
     expect(lastSelection).toEqual(selection);
   });
 
-  test('markdown editor applies host-provided typography settings', async ({ page }) => {
+  test('markdown editor defaults to Obsidian\'s 16px prose rhythm and heading scale', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+
+    await page.evaluate((message) => {
+      window.postMessage(message, '*');
+    }, {
+      type: 'setText',
+      title: 'Human Learning Parity',
+      text: '# Human Learning Parity\n\nBody copy\n\n## Second level\n\nTail',
+    });
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      view.dispatch({ selection: { anchor: view.state.doc.length } });
+    });
+
+    const rhythm = await page.evaluate(() => {
+      const body = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+        .find(line => line.textContent === 'Body copy');
+      const h1 = document.querySelector<HTMLElement>('.cm-hybrid-heading-line-1');
+      const h2 = document.querySelector<HTMLElement>('.cm-hybrid-heading-line-2');
+      const title = document.querySelector<HTMLElement>('.cm-hybrid-document-title');
+      if (!body || !h1 || !h2 || !title) throw new Error('Missing note typography surfaces');
+      return {
+        bodySize: getComputedStyle(body).fontSize,
+        bodyLineHeight: getComputedStyle(body).lineHeight,
+        h1Size: getComputedStyle(h1).fontSize,
+        h2Size: getComputedStyle(h2).fontSize,
+        titleSize: getComputedStyle(title).fontSize,
+      };
+    });
+
+    expect(rhythm).toEqual({
+      bodySize: '16px',
+      bodyLineHeight: '24px',
+      h1Size: '26.4px',
+      h2Size: '23.2px',
+      titleSize: '28px',
+    });
+  });
+
+  test('markdown editor applies host text metrics while keeping Obsidian-like prose and code families', async ({ page }) => {
     await page.goto('http://localhost:8979/test.html');
 
     await page.evaluate((text) => {
       window.postMessage({ type: 'setText', text }, '*');
-    }, '# Styled note\n\nBody copy');
+    }, '# Styled note\n\nBody copy with `inline code`.');
 
     await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
 
@@ -129,10 +170,13 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
     await page.waitForFunction(() => {
       const scroller = document.querySelector('.cm-scroller');
       const content = document.querySelector('.cm-content');
-      if (!scroller || !content) return false;
+      const inlineCode = document.querySelector('.cm-hybrid-inline-code');
+      if (!scroller || !content || !inlineCode) return false;
       const scrollerStyle = getComputedStyle(scroller);
       const contentStyle = getComputedStyle(content);
-      return scrollerStyle.fontFamily.includes('Fira Code')
+      const inlineCodeStyle = getComputedStyle(inlineCode);
+      return !scrollerStyle.fontFamily.includes('Fira Code')
+        && inlineCodeStyle.fontFamily.includes('Fira Code')
         && scrollerStyle.fontSize === '17px'
         && scrollerStyle.fontWeight === '500'
         && contentStyle.lineHeight === '29px'
@@ -142,10 +186,13 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
     const styles = await page.evaluate(() => {
       const scroller = document.querySelector('.cm-scroller');
       const content = document.querySelector('.cm-content');
+      const inlineCode = document.querySelector('.cm-hybrid-inline-code');
       const scrollerStyle = scroller ? getComputedStyle(scroller) : null;
       const contentStyle = content ? getComputedStyle(content) : null;
+      const inlineCodeStyle = inlineCode ? getComputedStyle(inlineCode) : null;
       return {
         fontFamily: scrollerStyle?.fontFamily ?? '',
+        inlineCodeFontFamily: inlineCodeStyle?.fontFamily ?? '',
         fontSize: scrollerStyle?.fontSize ?? '',
         fontWeight: scrollerStyle?.fontWeight ?? '',
         lineHeight: contentStyle?.lineHeight ?? '',
@@ -153,7 +200,8 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
       };
     });
 
-    expect(styles.fontFamily).toContain('Fira Code');
+    expect(styles.fontFamily).not.toContain('Fira Code');
+    expect(styles.inlineCodeFontFamily).toContain('Fira Code');
     expect(styles.fontSize).toBe('17px');
     expect(styles.fontWeight).toBe('500');
     expect(styles.lineHeight).toBe('29px');
@@ -221,9 +269,10 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
     expect(metrics!.buttonLabels).toContain('×');
   });
 
-  test('markdown editor uses an Obsidian-like readable content measure', async ({ page }) => {
+  test('markdown editor uses native full-width text editor geometry', async ({ page }) => {
     await page.setViewportSize({ width: 1600, height: 900 });
     await page.goto('http://localhost:8979/test.html');
+    await waitForEditorBootstrap(page);
 
     const longParagraph = 'This requires two passes over the data: one to find the max for numerical stability, and one to compute the sum and normalize before the attention tile can continue through the rest of the algorithm.';
     const doc = [
@@ -269,14 +318,15 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
     });
 
     expect(layout.scrollerWidth).toBeGreaterThan(1100);
-    expect(layout.contentWidth).toBeGreaterThan(500);
-    expect(layout.contentWidth).toBeLessThanOrEqual(860);
+    expect(layout.contentWidth).toBeGreaterThan(layout.scrollerWidth - 180);
+    expect(layout.contentWidth).toBeLessThan(layout.scrollerWidth);
     expect(layout.codeWidth).toBeLessThanOrEqual(layout.contentWidth + 1);
-    expect(layout.paragraphHeight).toBeGreaterThan(layout.normalHeight * 1.5);
+    expect(layout.paragraphHeight).toBeLessThanOrEqual(layout.normalHeight * 2.5);
   });
 
-  test('markdown editor defaults to prose typography while code stays monospace', async ({ page }) => {
+  test('markdown editor uses Obsidian-like sans prose and monospace code while headings keep visual hierarchy', async ({ page }) => {
     await page.goto('http://localhost:8979/test.html');
+    await waitForEditorBootstrap(page);
 
     const doc = [
       '# Typography Check',
@@ -295,6 +345,22 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
     }, doc);
 
     await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+    await page.evaluate(() => {
+      window.postMessage({
+        type: 'updateSettings',
+        settings: {
+          fontFamily: 'Menlo, Monaco, "Courier New", monospace',
+          fontSize: '14px',
+          fontWeight: '400',
+          lineHeight: '20px',
+          letterSpacing: '0px',
+        },
+      }, '*');
+    });
+    await page.waitForFunction(() => {
+      const content = document.querySelector('.cm-content');
+      return content ? getComputedStyle(content).lineHeight === '20px' : false;
+    }, { timeout: 5000 });
     await page.evaluate(() => {
       const view = window.__cmView;
       view.dispatch({ selection: { anchor: view.state.doc.length } });
@@ -316,10 +382,16 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
       return {
         bodyFontFamily: bodyStyle?.fontFamily ?? '',
         bodyFontSize: bodyStyle?.fontSize ?? '',
+        bodyLineHeight: bodyStyle?.lineHeight ?? '',
         headingFontFamily: headingStyle?.fontFamily ?? '',
         headingFontSize: headingStyle?.fontSize ?? '',
+        headingLineHeight: headingStyle?.lineHeight ?? '',
         inlineCodeFontFamily: inlineCodeStyle?.fontFamily ?? '',
+        inlineCodeFontSize: inlineCodeStyle?.fontSize ?? '',
+        inlineCodeLineHeight: inlineCodeStyle?.lineHeight ?? '',
         codeBlockFontFamily: codeBlockStyle?.fontFamily ?? '',
+        codeBlockFontSize: codeBlockStyle?.fontSize ?? '',
+        codeBlockLineHeight: codeBlockStyle?.lineHeight ?? '',
       };
     });
 
@@ -328,7 +400,14 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
     expect(styles.headingFontFamily).not.toMatch(monospaceFamily);
     expect(styles.inlineCodeFontFamily).toMatch(monospaceFamily);
     expect(styles.codeBlockFontFamily).toMatch(monospaceFamily);
+    expect(styles.bodyFontSize).toBe('14px');
+    expect(styles.inlineCodeFontSize).toBe('14px');
+    expect(styles.codeBlockFontSize).toBe('14px');
+    expect(styles.bodyLineHeight).toBe('20px');
     expect(Number.parseFloat(styles.headingFontSize)).toBeGreaterThan(Number.parseFloat(styles.bodyFontSize));
+    expect(Number.parseFloat(styles.headingLineHeight)).toBeGreaterThan(Number.parseFloat(styles.bodyLineHeight));
+    expect(styles.inlineCodeLineHeight).toBe('20px');
+    expect(styles.codeBlockLineHeight).toBe('20px');
   });
 
   test('markdown editor does not highlight the active line number', async ({ page }) => {
@@ -409,6 +488,15 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
       .evaluateAll(inputs => inputs.map(input => (input as HTMLInputElement).value));
     expect(propertyNames).toEqual(['id', 'tags', 'title']);
     await expect(page.locator('.cm-hybrid-property-chip')).toContainText(['test', 'math', 'code']);
+    await expect(page.getByLabel('tags property values')).toBeHidden();
+
+    const propertiesHeading = page.getByRole('button', { name: 'Properties' });
+    await expect(propertiesHeading).toHaveAttribute('aria-expanded', 'true');
+    await propertiesHeading.click();
+    await expect(propertiesHeading).toHaveAttribute('aria-expanded', 'false');
+    await expect(page.locator('.cm-hybrid-properties-rows')).toBeHidden();
+    await propertiesHeading.click();
+    await expect(page.locator('.cm-hybrid-properties-rows')).toBeVisible();
 
     const renderedText = await page.locator('.cm-content').textContent();
     expect(renderedText).not.toContain('---');
@@ -426,6 +514,37 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
 
     expect(editorState.startsWithProbe).toBe(false);
     expect(editorState.text).toContain('---\n\nIntro # Math and Code');
+  });
+
+  test('frontmatter property icons and removable chips match Obsidian controls', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+    const doc = [
+      '---',
+      'tags: [test, math, code]',
+      'aliases: [Parity Fixture]',
+      '---',
+      '',
+      '# Property controls',
+    ].join('\n');
+    await page.evaluate(text => {
+      window.postMessage({ type: 'setText', text, title: 'Property controls' }, '*');
+    }, doc);
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+
+    await expect(page.locator('[data-property-icon="tags"]')).toBeVisible();
+    await expect(page.locator('[data-property-icon="aliases"]')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Remove math from tags' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Remove Parity Fixture from aliases' })).toBeVisible();
+
+    await page.getByRole('button', { name: 'Remove math from tags' }).click();
+    await page.waitForFunction(() => /^tags: \[test, code\]$/m.test(window.__cmView.state.doc.toString()));
+    const state = await page.evaluate(() => ({
+      text: window.__cmView.state.doc.toString(),
+      chips: Array.from(document.querySelectorAll('.cm-hybrid-property-chip'))
+        .map(chip => chip.textContent?.replace(/×$/, '')),
+    }));
+    expect(state.text).toContain('tags: [test, code]');
+    expect(state.chips).toEqual(['test', 'code', 'Parity Fixture']);
   });
 
   test('markdown editor shows an Obsidian-like document title above properties', async ({ page }) => {
@@ -482,7 +601,7 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
       'd = 0     # running sum',
       '```',
       '',
-      'For details see [[FlashAttention]] and [PDF link](raw/pdf/flash-attention.pdf#page=7&anchor=anc_pdf).',
+      'For details see [[FlashAttention]] and [PDF link](raw/pdf/flash-attention.pdf#page=7).',
     ].join('\n');
 
     await page.evaluate((text) => {
@@ -1821,6 +1940,9 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
 
     const titleInput = page.locator('.cm-hybrid-property-value-input[aria-label="title property value"]');
     await expect(titleInput).toHaveValue('Math and Code');
+    await expect(titleInput).toBeHidden();
+    await page.getByLabel('title property display').click();
+    await expect(titleInput).toBeVisible();
 
     await titleInput.fill('Updated Math Note');
     await titleInput.press('Enter');
@@ -1966,6 +2088,9 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
 
     const tagsInput = page.locator('.cm-hybrid-property-list-input[aria-label="tags property values"]');
     await expect(tagsInput).toHaveValue('test, math');
+    await expect(tagsInput).toBeHidden();
+    await page.getByLabel('tags property display').click();
+    await expect(tagsInput).toBeVisible();
 
     await tagsInput.fill('test, math, code');
     await tagsInput.press('Enter');
@@ -2042,6 +2167,9 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
     const tagsInput = page.locator('.cm-hybrid-property-list-input[aria-label="tags property values"]');
     await expect(tagsInput).toHaveValue('test, math');
     await expect(page.locator('.cm-hybrid-property-chip')).toContainText(['test', 'math', 'Online softmax']);
+    await expect(tagsInput).toBeHidden();
+    await page.getByLabel('tags property display').click();
+    await expect(tagsInput).toBeVisible();
 
     await tagsInput.fill('test, math, code');
     await tagsInput.press('Enter');
@@ -2110,7 +2238,7 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
     expect(state.errorMessages).toEqual([]);
   });
 
-  test('active heading lines keep the Markdown heading marker visible like Obsidian live preview', async ({ page }) => {
+  test('active heading lines keep the Markdown heading marker visible with heading scale', async ({ page }) => {
     await page.goto('http://localhost:8979/test.html');
 
     await page.evaluate((text) => {
@@ -2175,6 +2303,75 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
 
     const activeHeadingText = await page.locator('.cm-line').first().textContent();
     expect(activeHeadingText).toBe('## Closing Marker ##');
+  });
+
+  test('heading gutter affordances collapse and expand Markdown sections like Obsidian live preview', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+
+    const doc = [
+      '# Root',
+      'Root introduction',
+      '## First section',
+      'Detail A',
+      'Detail B',
+      '## Second section',
+      'Tail detail',
+    ].join('\n');
+
+    await page.evaluate((text) => {
+      window.postMessage({ type: 'setText', text }, '*');
+    }, doc);
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      view.dispatch({ selection: { anchor: view.state.doc.length } });
+    });
+
+    await expect(page.locator('.cm-foldGutter')).toBeVisible();
+    await expect.poll(async () => page.locator('.cm-foldGutter .cm-gutterElement').filter({ hasText: '⌄' }).count())
+      .toBeGreaterThanOrEqual(3);
+    await page.evaluate(() => {
+      const heading = Array.from(document.querySelectorAll<HTMLElement>('.cm-hybrid-heading-line-2'))
+        .find(line => line.textContent?.includes('First section'));
+      const markers = Array.from(document.querySelectorAll<HTMLElement>('.cm-foldGutter .cm-gutterElement'))
+        .filter(marker => marker.textContent?.trim() === '⌄');
+      if (!heading || markers.length === 0) throw new Error('Missing first section fold affordance');
+      const headingTop = heading.getBoundingClientRect().top;
+      const marker = markers.sort((left, right) => (
+        Math.abs(left.getBoundingClientRect().top - headingTop)
+        - Math.abs(right.getBoundingClientRect().top - headingTop)
+      ))[0];
+      marker!.dataset.testHeadingFold = 'first-section';
+    });
+    const firstSectionMarker = page.locator('[data-test-heading-fold="first-section"]');
+    await firstSectionMarker.hover();
+    await expect(firstSectionMarker).toHaveCSS('opacity', '1');
+    await firstSectionMarker.click();
+
+    await expect(page.locator('.cm-content')).not.toContainText('Detail A');
+    await expect(page.locator('.cm-content')).not.toContainText('Detail B');
+    await expect(page.locator('.cm-content')).toContainText('Second section');
+    expect(await page.evaluate(() => window.__cmView.state.doc.toString())).toBe(doc);
+
+    await page.evaluate(() => {
+      const heading = Array.from(document.querySelectorAll<HTMLElement>('.cm-hybrid-heading-line-2'))
+        .find(line => line.textContent?.includes('First section'));
+      const markers = Array.from(document.querySelectorAll<HTMLElement>('.cm-foldGutter .cm-gutterElement'))
+        .filter(marker => marker.textContent?.trim() === '›' && marker.getBoundingClientRect().height > 0);
+      if (!heading || markers.length === 0) throw new Error('Missing collapsed first section affordance');
+      const headingTop = heading.getBoundingClientRect().top;
+      const marker = markers.sort((left, right) => (
+        Math.abs(left.getBoundingClientRect().top - headingTop)
+        - Math.abs(right.getBoundingClientRect().top - headingTop)
+      ))[0];
+      marker!.dataset.testHeadingFold = 'first-section-closed';
+    });
+    const closedMarker = page.locator('[data-test-heading-fold="first-section-closed"]');
+    await closedMarker.hover();
+    await expect(closedMarker).toHaveCSS('opacity', '1');
+    await closedMarker.click();
+    await expect(page.locator('.cm-content')).toContainText('Detail A');
+    await expect(page.locator('.cm-content')).toContainText('Detail B');
   });
 
   test('inactive indented ATX headings render like Obsidian live preview', async ({ page }) => {
@@ -2470,6 +2667,314 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
     expect(await page.evaluate(() => window.__cmView.state.doc.toString())).toBe('at');
   });
 
+  test('Vim mode ignores the markdown italics shortcut so the cursor stays put', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+
+    await page.evaluate(() => {
+      window.postMessage({ type: 'setVimMode', enabled: true }, '*');
+      window.postMessage({ type: 'setText', text: 'alpha beta' }, '*');
+    });
+
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+    await page.click('.cm-content');
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      view.dispatch({ selection: { anchor: view.state.doc.line(1).from + 'alpha '.length } });
+    });
+    await page.keyboard.press('Escape');
+
+    const before = await page.evaluate(() => ({
+      text: window.__cmView.state.doc.toString(),
+      head: window.__cmView.state.selection.main.head,
+    }));
+    const modifier = process.platform === 'darwin' ? 'Meta' : 'Control';
+    await page.keyboard.press(`${modifier}+I`);
+
+    await expect.poll(() => page.evaluate(() => ({
+      text: window.__cmView.state.doc.toString(),
+      head: window.__cmView.state.selection.main.head,
+    }))).toEqual(before);
+  });
+
+  test('Vim mode consumes the open-file shortcut without moving the cursor', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+
+    await page.evaluate(() => {
+      window.postMessage({ type: 'setVimMode', enabled: true }, '*');
+      window.postMessage({ type: 'setText', text: 'alpha beta' }, '*');
+    });
+
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+    await page.click('.cm-content');
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      view.dispatch({ selection: { anchor: view.state.doc.line(1).from + 'alpha '.length } });
+    });
+    await page.keyboard.press('Escape');
+
+    const before = await page.evaluate(() => ({
+      text: window.__cmView.state.doc.toString(),
+      head: window.__cmView.state.selection.main.head,
+      focused: document.querySelector('.cm-editor')?.classList.contains('cm-focused') ?? false,
+    }));
+    const modifier = process.platform === 'darwin' ? 'Meta' : 'Control';
+    await page.keyboard.press(`${modifier}+O`);
+
+    await expect.poll(() => page.evaluate(() => ({
+      text: window.__cmView.state.doc.toString(),
+      head: window.__cmView.state.selection.main.head,
+      focused: document.querySelector('.cm-editor')?.classList.contains('cm-focused') ?? false,
+    }))).toEqual(before);
+  });
+
+  test('Vim mode ignores stray backtick mark-motion input so the cursor stays put', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+
+    await page.evaluate(() => {
+      window.postMessage({ type: 'setVimMode', enabled: true }, '*');
+      window.postMessage({ type: 'setText', text: 'alpha beta\ngamma delta' }, '*');
+    });
+
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+    await page.click('.cm-content');
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      view.dispatch({ selection: { anchor: view.state.doc.line(2).from + 'gamma '.length } });
+    });
+    await page.keyboard.press('Escape');
+
+    const before = await page.evaluate(() => ({
+      text: window.__cmView.state.doc.toString(),
+      head: window.__cmView.state.selection.main.head,
+      focused: document.querySelector('.cm-editor')?.classList.contains('cm-focused') ?? false,
+    }));
+
+    await page.keyboard.press('Backquote');
+    await page.keyboard.press('Backquote');
+    await page.keyboard.press('Backquote');
+
+    await expect.poll(() => page.evaluate(() => ({
+      text: window.__cmView.state.doc.toString(),
+      head: window.__cmView.state.selection.main.head,
+      focused: document.querySelector('.cm-editor')?.classList.contains('cm-focused') ?? false,
+    }))).toEqual(before);
+  });
+
+  test('Vim normal mode ignores raw repeated backtick text input', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+
+    await page.evaluate(() => {
+      window.postMessage({ type: 'setVimMode', enabled: true }, '*');
+      window.postMessage({ type: 'setText', text: 'alpha beta\ngamma delta' }, '*');
+    });
+
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+    await page.click('.cm-content');
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      view.dispatch({ selection: { anchor: view.state.doc.line(2).from + 'gamma '.length } });
+    });
+    await page.keyboard.press('Escape');
+
+    const before = await page.evaluate(() => ({
+      text: window.__cmView.state.doc.toString(),
+      head: window.__cmView.state.selection.main.head,
+      focused: document.querySelector('.cm-editor')?.classList.contains('cm-focused') ?? false,
+    }));
+
+    await page.keyboard.insertText('```');
+
+    await expect.poll(() => page.evaluate(() => ({
+      text: window.__cmView.state.doc.toString(),
+      head: window.__cmView.state.selection.main.head,
+      focused: document.querySelector('.cm-editor')?.classList.contains('cm-focused') ?? false,
+    }))).toEqual(before);
+  });
+
+  test('Vim insert mode leaves Markdown fence backticks typable', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+
+    await page.evaluate(() => {
+      window.postMessage({ type: 'setVimMode', enabled: true }, '*');
+      window.postMessage({ type: 'setText', text: 'alpha beta' }, '*');
+    });
+
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+    await page.click('.cm-content');
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      view.dispatch({ selection: { anchor: view.state.doc.line(1).from + 'alpha '.length } });
+      window.__backtickKeydowns = [];
+      document.querySelector('.cm-editor')?.addEventListener('keydown', event => {
+        if (event.key === '`' || event.code === 'Backquote') {
+          window.__backtickKeydowns.push({
+            defaultPrevented: event.defaultPrevented,
+            insertMode: view.cm.state.vim?.insertMode ?? false,
+          });
+        }
+      }, true);
+    });
+    await page.keyboard.press('Escape');
+    await page.keyboard.press('i');
+    await page.keyboard.press('Backquote');
+    await page.keyboard.press('Backquote');
+    await page.keyboard.press('Backquote');
+
+    const state = await page.evaluate(() => ({
+      text: window.__cmView.state.doc.toString(),
+      head: window.__cmView.state.selection.main.head,
+      keydowns: window.__backtickKeydowns,
+    }));
+
+    expect(state.keydowns).toEqual([
+      { defaultPrevented: false, insertMode: true },
+      { defaultPrevented: false, insertMode: true },
+      { defaultPrevented: false, insertMode: true },
+    ]);
+    expect(state.text).toBe('alpha ```beta');
+    expect(state.head).toBe('alpha ```'.length);
+  });
+
+  test('Vim mode keeps markdown modifier shortcuts from changing text cursor or focus', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+
+    const modifier = process.platform === 'darwin' ? 'Meta' : 'Control';
+    const cases = [
+      { label: 'bold', key: `${modifier}+B`, text: 'alpha beta', line: 1, offset: 'alpha '.length },
+      { label: 'italics', key: `${modifier}+I`, text: 'alpha beta', line: 1, offset: 'alpha '.length },
+      { label: 'strikethrough', key: `${modifier}+Shift+X`, text: 'alpha beta', line: 1, offset: 'alpha '.length },
+      { label: 'inline code', key: `${modifier}+Backquote`, text: 'alpha beta', line: 1, offset: 'alpha '.length },
+      { label: 'insert link', key: `${modifier}+K`, text: 'alpha beta', line: 1, offset: 'alpha '.length },
+      { label: 'toggle checklist', key: `${modifier}+L`, text: '- [ ] task', line: 1, offset: '- [ ] '.length },
+      { label: 'remove heading', key: `${modifier}+Alt+0`, text: '# alpha beta', line: 1, offset: '# alpha '.length },
+      { label: 'heading 1', key: `${modifier}+Alt+1`, text: 'alpha beta', line: 1, offset: 'alpha '.length },
+      { label: 'heading 2', key: `${modifier}+Alt+2`, text: 'alpha beta', line: 1, offset: 'alpha '.length },
+      { label: 'heading 3', key: `${modifier}+Alt+3`, text: 'alpha beta', line: 1, offset: 'alpha '.length },
+      { label: 'heading 4', key: `${modifier}+Alt+4`, text: 'alpha beta', line: 1, offset: 'alpha '.length },
+      { label: 'heading 5', key: `${modifier}+Alt+5`, text: 'alpha beta', line: 1, offset: 'alpha '.length },
+      { label: 'heading 6', key: `${modifier}+Alt+6`, text: 'alpha beta', line: 1, offset: 'alpha '.length },
+      { label: 'insert table', key: `${modifier}+Shift+T`, text: 'alpha beta', line: 1, offset: 'alpha '.length },
+      { label: 'highlight', key: `${modifier}+Shift+H`, text: 'alpha beta', line: 1, offset: 'alpha '.length },
+      { label: 'open file', key: `${modifier}+O`, text: 'alpha beta', line: 1, offset: 'alpha '.length },
+    ];
+
+    await page.waitForSelector('body', { timeout: 10_000 });
+
+    for (const testCase of cases) {
+      await test.step(testCase.label, async () => {
+        await page.evaluate((text) => {
+          window.postMessage({ type: 'setVimMode', enabled: true }, '*');
+          window.postMessage({ type: 'setText', text }, '*');
+        }, testCase.text);
+        await page.waitForFunction(
+          (text) => window.__cmView?.state.doc.toString() === text,
+          testCase.text,
+          { timeout: 5000 },
+        );
+
+        await page.click('.cm-content');
+        await page.evaluate(({ line, offset }) => {
+          const view = window.__cmView;
+          const targetLine = view.state.doc.line(line);
+          view.dispatch({ selection: { anchor: targetLine.from + offset } });
+        }, { line: testCase.line, offset: testCase.offset });
+        await page.keyboard.press('Escape');
+
+        const before = await page.evaluate(() => ({
+          text: window.__cmView.state.doc.toString(),
+          head: window.__cmView.state.selection.main.head,
+          focused: document.querySelector('.cm-editor')?.classList.contains('cm-focused') ?? false,
+        }));
+        await page.keyboard.press(testCase.key);
+
+        await expect.poll(() => page.evaluate(() => ({
+          text: window.__cmView.state.doc.toString(),
+          head: window.__cmView.state.selection.main.head,
+          focused: document.querySelector('.cm-editor')?.classList.contains('cm-focused') ?? false,
+        }))).toEqual(before);
+      });
+    }
+  });
+
+  test('markdown modifier shortcuts still edit text outside Vim mode', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+
+    const modifier = process.platform === 'darwin' ? 'Meta' : 'Control';
+    const cases = [
+      {
+        label: 'bold',
+        key: `${modifier}+B`,
+        text: 'alpha beta',
+        selection: { anchor: 0, head: 'alpha'.length },
+        expected: '**alpha** beta',
+      },
+      {
+        label: 'italics',
+        key: `${modifier}+I`,
+        text: 'alpha beta',
+        selection: { anchor: 0, head: 'alpha'.length },
+        expected: '*alpha* beta',
+      },
+      {
+        label: 'insert link',
+        key: `${modifier}+K`,
+        text: 'alpha beta',
+        selection: { anchor: 0, head: 'alpha'.length },
+        expected: '[alpha](url) beta',
+      },
+      {
+        label: 'toggle checklist',
+        key: `${modifier}+L`,
+        text: '- [ ] task',
+        selection: { anchor: '- [ ] '.length },
+        expected: '- [x] task',
+      },
+      {
+        label: 'heading',
+        key: `${modifier}+Alt+2`,
+        text: 'alpha beta',
+        selection: { anchor: 'alpha '.length },
+        expected: '## alpha beta',
+      },
+      {
+        label: 'insert table',
+        key: `${modifier}+Shift+T`,
+        text: 'alpha beta',
+        selection: { anchor: 'alpha '.length },
+        expected: [
+          'alpha | Column 1 | Column 2 |',
+          '| --- | --- |',
+          '|  |  |beta',
+        ].join('\n'),
+      },
+    ];
+
+    await page.waitForSelector('body', { timeout: 10_000 });
+
+    for (const testCase of cases) {
+      await test.step(testCase.label, async () => {
+        await page.evaluate((text) => {
+          window.postMessage({ type: 'setVimMode', enabled: false }, '*');
+          window.postMessage({ type: 'setText', text }, '*');
+        }, testCase.text);
+        await page.waitForFunction(
+          (text) => window.__cmView?.state.doc.toString() === text,
+          testCase.text,
+          { timeout: 5000 },
+        );
+
+        await page.click('.cm-content');
+        await page.evaluate((selection) => {
+          window.__cmView.dispatch({ selection });
+        }, testCase.selection);
+        await page.keyboard.press(testCase.key);
+
+        await expect.poll(() => page.evaluate(() => window.__cmView.state.doc.toString()))
+          .toBe(testCase.expected);
+      });
+    }
+  });
+
   test('markdown editor retains Vim mode when the toggle arrives before the editor is created', async ({ page }) => {
     await page.goto('http://localhost:8979/test.html');
 
@@ -2521,6 +3026,50 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
     await expectVimCommandMessages(':wq', ['saveAndClose']);
   });
 
+  test('Vim command line uses VS Code editor styling', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+
+    await page.evaluate(() => {
+      window.postMessage({ type: 'setVimMode', enabled: true }, '*');
+      window.postMessage({ type: 'setText', text: '# Note\n\nBody' }, '*');
+    });
+
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+    await page.click('.cm-content');
+    await page.keyboard.press('Escape');
+    await page.keyboard.type(':');
+
+    const panel = page.locator('.cm-vim-panel.cm-panel');
+    await expect(panel).toBeVisible();
+    await expect(panel).toContainText(':');
+
+    const styles = await panel.evaluate((element) => {
+      const input = element.querySelector('input');
+      const panelStyle = getComputedStyle(element);
+      const inputStyle = input ? getComputedStyle(input) : null;
+      const rect = element.getBoundingClientRect();
+      return {
+        panelBackground: panelStyle.backgroundColor,
+        panelColor: panelStyle.color,
+        panelBorderTopColor: panelStyle.borderTopColor,
+        panelBorderTopWidth: panelStyle.borderTopWidth,
+        panelHeight: rect.height,
+        inputBackground: inputStyle?.backgroundColor ?? '',
+        inputColor: inputStyle?.color ?? '',
+        inputOutlineStyle: inputStyle?.outlineStyle ?? '',
+      };
+    });
+
+    expect(styles.panelBackground).toBe('rgb(37, 37, 38)');
+    expect(styles.panelColor).toBe('rgb(212, 212, 212)');
+    expect(styles.panelBorderTopColor).toBe('rgb(62, 62, 62)');
+    expect(styles.panelBorderTopWidth).toBe('1px');
+    expect(styles.panelHeight).toBeGreaterThanOrEqual(28);
+    expect(styles.inputBackground).toBe('rgba(0, 0, 0, 0)');
+    expect(styles.inputColor).toBe('rgb(212, 212, 212)');
+    expect(styles.inputOutlineStyle).toBe('none');
+  });
+
   test('Vim normal mode can move into fenced code blocks and edit code lines', async ({ page }) => {
     await page.goto('http://localhost:8979/test.html');
 
@@ -2566,7 +3115,7 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
       .toEqual([]);
   });
 
-  test('active fenced code opening and closing lines reveal raw fence markers', async ({ page }) => {
+  test('active fenced code blocks reveal both raw fence markers like Obsidian', async ({ page }) => {
     await page.goto('http://localhost:8979/test.html');
 
     const doc = [
@@ -2594,17 +3143,10 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
 
     await page.evaluate(() => {
       const view = window.__cmView;
-      view.dispatch({ selection: { anchor: view.state.doc.line(3).from } });
+      view.dispatch({ selection: { anchor: view.state.doc.line(4).from + 2 } });
     });
 
-    await expect.poll(visibleFenceLines).toEqual(['```python']);
-
-    await page.evaluate(() => {
-      const view = window.__cmView;
-      view.dispatch({ selection: { anchor: view.state.doc.line(5).from } });
-    });
-
-    await expect.poll(visibleFenceLines).toEqual(['```']);
+    await expect.poll(visibleFenceLines).toEqual(['```python', '```']);
   });
 
   test('Vim normal mode moves into rendered display math instead of skipping it', async ({ page }) => {
@@ -2708,6 +3250,397 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
     });
   });
 
+  test('Vim insert command keeps the cursor on a scaled rendered heading source line', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+
+    const doc = [
+      'Intro',
+      '# Rendered Heading',
+      'Tail',
+    ].join('\n');
+
+    await page.evaluate((text) => {
+      window.postMessage({ type: 'setVimMode', enabled: true }, '*');
+      window.postMessage({ type: 'setText', text }, '*');
+    }, doc);
+
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+    await expect(page.locator('.cm-hybrid-heading-line-1')).toBeVisible();
+    await page.click('.cm-content');
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      view.dispatch({ selection: { anchor: view.state.doc.line(1).from } });
+    });
+
+    await page.keyboard.press('Escape');
+    await page.keyboard.press('j');
+
+    await expect.poll(() => page.evaluate(() => {
+      const view = window.__cmView;
+      const selectedLine = view.state.doc.lineAt(view.state.selection.main.head);
+      return {
+        number: selectedLine.number,
+        offset: view.state.selection.main.head - selectedLine.from,
+        text: selectedLine.text,
+      };
+    })).toEqual({ number: 2, offset: 0, text: '# Rendered Heading' });
+
+    await page.keyboard.press('i');
+    await page.keyboard.type('X');
+
+    await expect.poll(() => page.evaluate(() => window.__cmView.state.doc.line(2).text))
+      .toBe('X# Rendered Heading');
+    await expect.poll(() => page.evaluate(() => {
+      const view = window.__cmView;
+      const selectedLine = view.state.doc.lineAt(view.state.selection.main.head);
+      return {
+        number: selectedLine.number,
+        offset: view.state.selection.main.head - selectedLine.from,
+      };
+    })).toEqual({ number: 2, offset: 1 });
+  });
+
+  test('Vim open-line command inserts below a scaled rendered heading source line', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+
+    const doc = [
+      'Intro',
+      '# Rendered Heading',
+      'Tail',
+    ].join('\n');
+
+    await page.evaluate((text) => {
+      window.postMessage({ type: 'setVimMode', enabled: true }, '*');
+      window.postMessage({ type: 'setText', text }, '*');
+    }, doc);
+
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+    await expect(page.locator('.cm-hybrid-heading-line-1')).toBeVisible();
+    await page.click('.cm-content');
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      view.dispatch({ selection: { anchor: view.state.doc.line(1).from } });
+    });
+
+    await page.keyboard.press('Escape');
+    await page.keyboard.press('j');
+
+    await expect.poll(() => page.evaluate(() => {
+      const view = window.__cmView;
+      const selectedLine = view.state.doc.lineAt(view.state.selection.main.head);
+      return {
+        number: selectedLine.number,
+        offset: view.state.selection.main.head - selectedLine.from,
+        text: selectedLine.text,
+      };
+    })).toEqual({ number: 2, offset: 0, text: '# Rendered Heading' });
+
+    await page.keyboard.press('o');
+    await page.keyboard.type('Inserted');
+
+    await expect.poll(() => page.evaluate(() => window.__cmView.state.doc.toString()))
+      .toBe([
+        'Intro',
+        '# Rendered Heading',
+        'Inserted',
+        'Tail',
+      ].join('\n'));
+    await expect.poll(() => page.evaluate(() => {
+      const view = window.__cmView;
+      const selectedLine = view.state.doc.lineAt(view.state.selection.main.head);
+      return {
+        number: selectedLine.number,
+        offset: view.state.selection.main.head - selectedLine.from,
+      };
+    })).toEqual({ number: 3, offset: 'Inserted'.length });
+  });
+
+  test('Vim insert command after clicking a scaled rendered heading edits the heading source line', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+
+    const doc = [
+      '# Rendered Heading',
+      'Tail',
+    ].join('\n');
+
+    await page.evaluate((text) => {
+      window.postMessage({ type: 'setVimMode', enabled: true }, '*');
+      window.postMessage({ type: 'setText', text }, '*');
+    }, doc);
+
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+    await expect(page.locator('.cm-hybrid-heading-line-1')).toBeVisible();
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      view.dispatch({ selection: { anchor: view.state.doc.line(2).from } });
+      view.focus();
+    });
+    await expect.poll(() => page.evaluate(() => {
+      const view = window.__cmView;
+      return view.state.doc.lineAt(view.state.selection.main.head).number;
+    })).toBe(2);
+
+    const renderedHeadingText = page.locator('.cm-hybrid-heading-line-1 span', { hasText: 'Rendered Heading' }).first();
+    await expect(renderedHeadingText).toBeVisible();
+    await renderedHeadingText.click({ position: { x: 1, y: 8 } });
+    await page.keyboard.press('Escape');
+
+    await expect.poll(() => page.evaluate(() => {
+      const view = window.__cmView;
+      const selectedLine = view.state.doc.lineAt(view.state.selection.main.head);
+      return {
+        number: selectedLine.number,
+        offset: view.state.selection.main.head - selectedLine.from,
+        text: selectedLine.text,
+      };
+    })).toEqual({ number: 1, offset: 2, text: '# Rendered Heading' });
+
+    await page.keyboard.press('i');
+    await page.keyboard.type('X');
+
+    await expect.poll(() => page.evaluate(() => ({
+      fullText: window.__cmView.state.doc.toString(),
+      selectedLineNumber: window.__cmView.state.doc.lineAt(window.__cmView.state.selection.main.head).number,
+    }))).toEqual({
+      fullText: '# XRendered Heading\nTail',
+      selectedLineNumber: 1,
+    });
+  });
+
+  test('Vim open-line command after clicking a scaled rendered heading inserts below the heading', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+
+    const doc = [
+      '# Rendered Heading',
+      'Tail',
+    ].join('\n');
+
+    await page.evaluate((text) => {
+      window.postMessage({ type: 'setVimMode', enabled: true }, '*');
+      window.postMessage({ type: 'setText', text }, '*');
+    }, doc);
+
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+    await expect(page.locator('.cm-hybrid-heading-line-1')).toBeVisible();
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      view.dispatch({ selection: { anchor: view.state.doc.line(2).from } });
+      view.focus();
+    });
+    await expect.poll(() => page.evaluate(() => {
+      const view = window.__cmView;
+      return view.state.doc.lineAt(view.state.selection.main.head).number;
+    })).toBe(2);
+
+    const renderedHeadingText = page.locator('.cm-hybrid-heading-line-1 span', { hasText: 'Rendered Heading' }).first();
+    await expect(renderedHeadingText).toBeVisible();
+    await renderedHeadingText.click({ position: { x: 1, y: 8 } });
+    await page.keyboard.press('Escape');
+
+    await expect.poll(() => page.evaluate(() => {
+      const view = window.__cmView;
+      const selectedLine = view.state.doc.lineAt(view.state.selection.main.head);
+      return {
+        number: selectedLine.number,
+        offset: view.state.selection.main.head - selectedLine.from,
+        text: selectedLine.text,
+      };
+    })).toEqual({ number: 1, offset: 2, text: '# Rendered Heading' });
+
+    await page.keyboard.press('o');
+    await page.keyboard.type('Inserted');
+
+    await expect.poll(() => page.evaluate(() => ({
+      fullText: window.__cmView.state.doc.toString(),
+      selectedLineNumber: window.__cmView.state.doc.lineAt(window.__cmView.state.selection.main.head).number,
+    }))).toEqual({
+      fullText: '# Rendered Heading\nInserted\nTail',
+      selectedLineNumber: 2,
+    });
+  });
+
+  test('Vim insert command keeps the cursor on the rendered source line', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+
+    const doc = [
+      'Intro',
+      '[Rendered link](https://example.com)',
+      'Tail',
+    ].join('\n');
+
+    await page.evaluate((text) => {
+      window.postMessage({ type: 'setVimMode', enabled: true }, '*');
+      window.postMessage({ type: 'setText', text }, '*');
+    }, doc);
+
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+    await expect(page.locator('.cm-hl-link')).toBeVisible();
+    await page.click('.cm-content');
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      view.dispatch({ selection: { anchor: view.state.doc.line(1).from } });
+    });
+
+    await page.keyboard.press('Escape');
+    await page.keyboard.press('j');
+    await page.keyboard.press('i');
+    await page.keyboard.type('X');
+
+    await expect.poll(() => page.evaluate(() => window.__cmView.state.doc.line(2).text))
+      .toBe('X[Rendered link](https://example.com)');
+    await expect.poll(() => page.evaluate(() => {
+      const view = window.__cmView;
+      const selectedLine = view.state.doc.lineAt(view.state.selection.main.head);
+      return {
+        number: selectedLine.number,
+        offset: view.state.selection.main.head - selectedLine.from,
+      };
+    })).toEqual({ number: 2, offset: 1 });
+  });
+
+  test('Vim open-line command inserts below the rendered source line', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+
+    const doc = [
+      'Intro',
+      '[Rendered link](https://example.com)',
+      'Tail',
+    ].join('\n');
+
+    await page.evaluate((text) => {
+      window.postMessage({ type: 'setVimMode', enabled: true }, '*');
+      window.postMessage({ type: 'setText', text }, '*');
+    }, doc);
+
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+    await expect(page.locator('.cm-hl-link')).toBeVisible();
+    await page.click('.cm-content');
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      view.dispatch({ selection: { anchor: view.state.doc.line(1).from } });
+    });
+
+    await page.keyboard.press('Escape');
+    await page.keyboard.press('j');
+    await page.keyboard.press('o');
+    await page.keyboard.type('Inserted');
+
+    await expect.poll(() => page.evaluate(() => window.__cmView.state.doc.toString()))
+      .toBe([
+        'Intro',
+        '[Rendered link](https://example.com)',
+        'Inserted',
+        'Tail',
+      ].join('\n'));
+    await expect.poll(() => page.evaluate(() => {
+      const view = window.__cmView;
+      const selectedLine = view.state.doc.lineAt(view.state.selection.main.head);
+      return {
+        number: selectedLine.number,
+        offset: view.state.selection.main.head - selectedLine.from,
+      };
+    })).toEqual({ number: 3, offset: 'Inserted'.length });
+  });
+
+  test('Vim insert command keeps the cursor inside rendered fenced code content', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+
+    const doc = [
+      'Intro',
+      '',
+      '```python',
+      'value = 1',
+      '```',
+      '',
+      'Tail',
+    ].join('\n');
+
+    await page.evaluate((text) => {
+      window.postMessage({ type: 'setVimMode', enabled: true }, '*');
+      window.postMessage({ type: 'setText', text }, '*');
+    }, doc);
+
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+    await expect(page.locator('.cm-hybrid-codeblock')).toBeVisible();
+    await page.click('.cm-content');
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      view.dispatch({ selection: { anchor: view.state.doc.line(1).from } });
+    });
+
+    await page.keyboard.press('Escape');
+    await page.keyboard.press('j');
+    await page.keyboard.press('j');
+    await page.keyboard.press('j');
+    await page.keyboard.press('i');
+    await page.keyboard.type('X');
+
+    await expect.poll(() => page.evaluate(() => window.__cmView.state.doc.line(4).text))
+      .toBe('Xvalue = 1');
+    await expect.poll(() => page.evaluate(() => {
+      const view = window.__cmView;
+      const selectedLine = view.state.doc.lineAt(view.state.selection.main.head);
+      return {
+        number: selectedLine.number,
+        offset: view.state.selection.main.head - selectedLine.from,
+      };
+    })).toEqual({ number: 4, offset: 1 });
+  });
+
+  test('Vim open-line command inserts below rendered fenced code content', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+
+    const doc = [
+      'Intro',
+      '',
+      '```python',
+      'value = 1',
+      '```',
+      '',
+      'Tail',
+    ].join('\n');
+
+    await page.evaluate((text) => {
+      window.postMessage({ type: 'setVimMode', enabled: true }, '*');
+      window.postMessage({ type: 'setText', text }, '*');
+    }, doc);
+
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+    await expect(page.locator('.cm-hybrid-codeblock')).toBeVisible();
+    await page.click('.cm-content');
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      view.dispatch({ selection: { anchor: view.state.doc.line(1).from } });
+    });
+
+    await page.keyboard.press('Escape');
+    await page.keyboard.press('j');
+    await page.keyboard.press('j');
+    await page.keyboard.press('j');
+    await page.keyboard.press('o');
+    await page.keyboard.type('inserted = true');
+
+    await expect.poll(() => page.evaluate(() => window.__cmView.state.doc.toString()))
+      .toBe([
+        'Intro',
+        '',
+        '```python',
+        'value = 1',
+        'inserted = true',
+        '```',
+        '',
+        'Tail',
+      ].join('\n'));
+    await expect.poll(() => page.evaluate(() => {
+      const view = window.__cmView;
+      const selectedLine = view.state.doc.lineAt(view.state.selection.main.head);
+      return {
+        number: selectedLine.number,
+        offset: view.state.selection.main.head - selectedLine.from,
+      };
+    })).toEqual({ number: 5, offset: 'inserted = true'.length });
+  });
+
   test('Vim mode can click into rendered fenced code lines and edit them', async ({ page }) => {
     await page.goto('http://localhost:8979/test.html');
 
@@ -2787,7 +3720,7 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
   test('link widgets render and clicking them sends openUri messages', async ({ page }) => {
     await page.goto('http://localhost:8979/test.html');
 
-    const testDoc = '# Note\n\nClick [the PDF link](raw/paper.pdf#page=7&anchor=anc_test) here.\n';
+    const testDoc = '# Note\n\nClick [the PDF link](raw/paper.pdf#page=7) here.\n';
 
     await page.evaluate((text) => {
       window.postMessage({ type: 'setText', text }, '*');
@@ -2811,7 +3744,7 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
     );
 
     expect(openUriMessages.length).toBe(1);
-    expect(openUriMessages[0].uri).toBe('raw/paper.pdf#page=7&anchor=anc_test');
+    expect(openUriMessages[0].uri).toBe('raw/paper.pdf#page=7');
   });
 
   test('folder-qualified Obsidian wikilinks preserve vault paths when opened', async ({ page }) => {
@@ -3365,7 +4298,7 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
 
     await page.evaluate((text) => {
       window.postMessage({ type: 'setText', text }, '*');
-    }, '# Note\n\nClick [the PDF link](raw/paper.pdf#page=7&anchor=anc_test) here.\n');
+    }, '# Note\n\nClick [the PDF link](raw/paper.pdf#page=7) here.\n');
 
     await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
 
@@ -3468,7 +4401,7 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
     expect(openUriMessages).toEqual([{ type: 'openUri', uri: 'https://example.com/docs' }]);
   });
 
-  test('active raw markdown lines keep inline formatting styled like Obsidian live preview', async ({ page }) => {
+  test('active markdown reveals only the caret token delimiters like Obsidian live preview', async ({ page }) => {
     await page.goto('http://localhost:8979/test.html');
 
     const doc = [
@@ -3490,21 +4423,26 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
       view.dispatch({ selection: { anchor: target.from + 8 } });
     });
 
-    await expect(page.locator('.cm-hl-link')).toHaveCount(0);
     await expect(page.locator('.cm-active-bold')).toContainText(['bold']);
-    await expect(page.locator('.cm-active-italic')).toContainText(['italic']);
-    await expect(page.locator('.cm-active-strikethrough')).toContainText(['strike']);
-    await expect(page.locator('.cm-active-highlight')).toContainText(['highlight']);
-    await expect(page.locator('.cm-active-inline-code')).toContainText(['code']);
+    await expect(page.locator('.cm-hybrid-italic')).toContainText(['italic']);
+    await expect(page.locator('.cm-hybrid-strikethrough')).toContainText(['strike']);
+    await expect(page.locator('.cm-hybrid-highlight')).toContainText(['highlight']);
+    await expect(page.locator('.cm-hybrid-inline-code')).toContainText(['code']);
+
+    const activeLineText = await page.evaluate(() => {
+      return Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+        .find(line => line.textContent?.includes('Mix'))?.textContent ?? '';
+    });
+    expect(activeLineText).toBe('Mix **bold**, italic, strike, highlight, and code while editing.');
 
     const styles = await page.evaluate(() => {
       const bold = getComputedStyle(document.querySelector('.cm-active-bold'));
-      const italic = getComputedStyle(document.querySelector('.cm-active-italic'));
-      const strike = getComputedStyle(document.querySelector('.cm-active-strikethrough'));
-      const highlight = getComputedStyle(document.querySelector('.cm-active-highlight'));
-      const code = getComputedStyle(document.querySelector('.cm-active-inline-code'));
+      const italic = getComputedStyle(document.querySelector('.cm-hybrid-italic'));
+      const strike = getComputedStyle(document.querySelector('.cm-hybrid-strikethrough'));
+      const highlight = getComputedStyle(document.querySelector('.cm-hybrid-highlight'));
+      const code = getComputedStyle(document.querySelector('.cm-hybrid-inline-code'));
       return {
-        italicTexts: Array.from(document.querySelectorAll('.cm-active-italic')).map(element => element.textContent),
+        italicTexts: Array.from(document.querySelectorAll('.cm-hybrid-italic')).map(element => element.textContent),
         boldWeight: bold.fontWeight,
         boldStyle: bold.fontStyle,
         italicStyle: italic.fontStyle,
@@ -4390,6 +5328,49 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
     expect(activeMathLayout.previewTop).toBeGreaterThanOrEqual(activeMathLayout.sourceBottom);
   });
 
+  test('hybrid rendering shows readable errors for invalid display math', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+
+    const doc = [
+      'Before math',
+      '',
+      '$$',
+      '\\\\frac{a}{b} = \\\\frac{c}{d',
+      '$$',
+      '',
+      'After math',
+    ].join('\n');
+
+    await page.evaluate((text) => {
+      window.postMessage({ type: 'setText', text }, '*');
+    }, doc);
+
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+
+    const error = page.locator('.cm-hybrid-math-error').first();
+    await expect(error).toBeVisible();
+    await expect(error.locator('.cm-hybrid-math-error-title')).toHaveText('Invalid TeX');
+    await expect(error.locator('.cm-hybrid-math-error-message')).not.toHaveText('');
+    await expect(error.locator('.cm-hybrid-math-error-source')).toContainText('\\\\frac{c}{d');
+
+    const layout = await error.evaluate((element) => {
+      const rect = element.getBoundingClientRect();
+      const style = getComputedStyle(element);
+      return {
+        height: rect.height,
+        backgroundColor: style.backgroundColor,
+        borderTopColor: style.borderTopColor,
+        color: style.color,
+      };
+    });
+
+    expect(layout.height).toBeGreaterThan(28);
+    expect(layout.height).toBeLessThan(160);
+    expect(layout.backgroundColor).not.toBe('rgba(0, 0, 0, 0)');
+    expect(layout.borderTopColor).not.toBe('rgba(0, 0, 0, 0)');
+    expect(layout.color).not.toBe('rgb(0, 0, 0)');
+  });
+
   test('hybrid rendering renders inline math inside list items like Obsidian', async ({ page }) => {
     await page.goto('http://localhost:8979/test.html');
 
@@ -4823,6 +5804,9 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
 
   test('hybrid rendering turns fenced code blocks into Obsidian-like preview blocks until the block is active', async ({ page }) => {
     await page.goto('http://localhost:8979/test.html');
+    await page.evaluate(() => {
+      document.documentElement.style.setProperty('--vscode-descriptionForeground', '#808080');
+    });
 
     const doc = [
       'Prelude line',
@@ -4847,6 +5831,42 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
     await expect(page.locator('.cm-hybrid-codeblock-content-line').filter({ hasText: 'console.log' })).toBeVisible();
     await expect(page.locator('.cm-hybrid-codeblock-content-line .cm-hybrid-prism-token.token.keyword').filter({ hasText: 'const' })).toBeVisible();
     await expect(page.locator('.cm-hybrid-codeblock-content-line .cm-hybrid-prism-token.token.function').filter({ hasText: 'greet' }).first()).toBeVisible();
+    const codeTheme = await page.evaluate(() => {
+      const rootStyle = getComputedStyle(document.documentElement);
+      const codeBlock = document.querySelector<HTMLElement>('.cm-hybrid-codeblock-inner');
+      const codeLine = Array.from(document.querySelectorAll<HTMLElement>('.cm-hybrid-codeblock-content-line'))
+        .find(line => line.textContent?.includes('const greet'));
+      const consoleLine = Array.from(document.querySelectorAll<HTMLElement>('.cm-hybrid-codeblock-content-line'))
+        .find(line => line.textContent?.includes('console.log'));
+      const tokenColor = (root: HTMLElement | undefined, selector: string): string => {
+        const token = root?.querySelector<HTMLElement>(selector);
+        return token ? getComputedStyle(token).color : '';
+      };
+      return {
+        editorBackground: rootStyle.getPropertyValue('--vscode-editor-background').trim(),
+        lineBackground: codeLine ? getComputedStyle(codeLine).backgroundColor : '',
+        surfaceBackground: codeBlock ? getComputedStyle(codeBlock).backgroundColor : '',
+        lineColor: codeLine ? getComputedStyle(codeLine).color : '',
+        dimDescriptionColor: rootStyle.getPropertyValue('--vscode-descriptionForeground').trim(),
+        keywordColor: tokenColor(codeLine, '.cm-hybrid-prism-token.token.keyword'),
+        functionColor: tokenColor(codeLine, '.cm-hybrid-prism-token.token.function'),
+        punctuationColor: tokenColor(codeLine, '.cm-hybrid-prism-token.token.punctuation'),
+        stringColor: tokenColor(consoleLine, '.cm-hybrid-prism-token.token.string'),
+      };
+    });
+    expect(codeTheme.surfaceBackground).toBe('rgb(30, 30, 30)');
+    expect(codeTheme.lineBackground).toBe('rgb(30, 30, 30)');
+    expect(codeTheme.keywordColor).toBe('rgb(197, 134, 192)');
+    expect(codeTheme.functionColor).toBe('rgb(220, 220, 170)');
+    expect(codeTheme.stringColor).toBe('rgb(206, 145, 120)');
+    expect(codeTheme.punctuationColor).toBe(codeTheme.lineColor);
+    expect(codeTheme.punctuationColor).not.toBe('rgb(128, 128, 128)');
+    expect(new Set([
+      codeTheme.lineColor,
+      codeTheme.keywordColor,
+      codeTheme.functionColor,
+      codeTheme.stringColor,
+    ]).size).toBeGreaterThanOrEqual(4);
     const headerLayout = await page.locator('.cm-hybrid-codeblock-header').evaluate((header) => {
       const label = header.querySelector('.cm-hybrid-codeblock-language');
       const copy = header.querySelector('.cm-hybrid-codeblock-copy');
@@ -4918,7 +5938,7 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
     expect(codeSurface.borderTopWidth).toBe('0px');
     expect(codeSurface.borderLeftStyle).toBe('solid');
     expect(codeSurface.borderLeftWidth).toBe('1px');
-    expect(codeSurface.boxShadow).toContain('rgba(127, 127, 127, 0.22)');
+    expect(codeSurface.boxShadow).not.toBe('none');
     expect(codeSurface.boxShadow).toContain('inset');
 
     const codeFrameGeometry = await page.evaluate(() => {
@@ -5016,7 +6036,10 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
       view.dispatch({ selection: { anchor: line.from + 8 } });
     });
 
-    await expect(page.locator('.cm-hybrid-codeblock')).toHaveCount(1);
+    await expect(page.locator('.cm-hybrid-codeblock')).toHaveCount(0);
+    expect(await page.locator('.cm-line').evaluateAll(lines => lines
+      .map(line => line.textContent?.trim() ?? '')
+      .filter(text => text.startsWith('```')))).toEqual(['```ts', '```']);
     await expect(page.locator('.cm-hybrid-codeblock-content-line').filter({ hasText: 'const greet' })).toBeVisible();
     await expect(page.locator('.cm-hybrid-codeblock-content-line .cm-hybrid-prism-token.token.keyword').filter({ hasText: 'const' })).toBeVisible();
     const activeCodeLayout = await page.evaluate(() => {
@@ -5084,11 +6107,12 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
       const openingLine = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
         .find(line => line.textContent?.includes('```ts'));
       const contentLines = Array.from(document.querySelectorAll<HTMLElement>('.cm-hybrid-codeblock-content-line'));
-      const footer = document.querySelector<HTMLElement>('.cm-hybrid-codeblock-footer');
+      const closingLine = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+        .find(line => line.textContent?.trim() === '```');
       const elements = [
         openingLine,
         ...contentLines,
-        footer,
+        closingLine,
       ].filter((element): element is HTMLElement => Boolean(element));
       const rects = elements.map((element) => {
         const rect = element.getBoundingClientRect();
@@ -5121,11 +6145,11 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
 
     expect(activeFrame.opening.text).toContain('```ts');
     expect(activeFrame.opening.borderTopWidth).toBe('0px');
-    expect(activeFrame.opening.boxShadow).toContain('rgba(127, 127, 127, 0.22)');
+    expect(activeFrame.opening.boxShadow).not.toBe('none');
     expect(activeFrame.opening.boxShadow).toContain('inset');
     expect(activeFrame.opening.borderLeftStyle).toBe('solid');
     expect(activeFrame.opening.borderLeftWidth).toBe('1px');
-    expect(activeFrame.opening.borderLeftColor).toBe('rgba(127, 127, 127, 0.22)');
+    expect(activeFrame.opening.borderLeftColor).toBe('rgb(62, 62, 62)');
     expect(activeFrame.maxLeftDelta).toBeLessThanOrEqual(1);
     expect(activeFrame.maxRightDelta).toBeLessThanOrEqual(1);
 
@@ -5139,7 +6163,10 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
       const firstContentLine = view.state.doc.line(4);
       view.dispatch({ selection: { anchor: firstContentLine.from + 1 } });
     });
-    await expect(page.locator('.cm-hybrid-codeblock')).toBeVisible();
+    await expect(page.locator('.cm-hybrid-codeblock')).toHaveCount(0);
+    expect(await page.locator('.cm-line').evaluateAll(lines => lines
+      .map(line => line.textContent?.trim() ?? '')
+      .filter(text => text.startsWith('```')))).toEqual(['```ts', '```']);
 
     const contentTopsWithFirstContentActive = await page.evaluate(() => Array.from(
       document.querySelectorAll<HTMLElement>('.cm-hybrid-codeblock-content-line'),
@@ -5528,7 +6555,10 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
       view.dispatch({ selection: { anchor: line.from + 6 } });
     });
 
-    await expect(page.locator('.cm-hybrid-codeblock')).toHaveCount(1);
+    await expect(page.locator('.cm-hybrid-codeblock')).toHaveCount(0);
+    expect(await page.locator('.cm-line').evaluateAll(lines => lines
+      .map(line => line.textContent?.trim() ?? '')
+      .filter(text => text.startsWith('```')))).toEqual(['```python', '```']);
     await expect(page.locator('.cm-hybrid-codeblock-content-line').filter({ hasText: 'm_new = max' })).toBeVisible();
     const activeLayout = await page.evaluate(() => {
       const line = Array.from(document.querySelectorAll<HTMLElement>('.cm-hybrid-codeblock-content-line'))
@@ -5677,7 +6707,10 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
       view.dispatch({ selection: { anchor: line.from + 2 } });
     });
 
-    await expect(page.locator('.cm-hybrid-codeblock')).toHaveCount(1);
+    await expect(page.locator('.cm-hybrid-codeblock')).toHaveCount(0);
+    expect(await page.locator('.cm-line').evaluateAll(lines => lines
+      .map(line => line.textContent?.trim() ?? '')
+      .filter(text => text.startsWith('```')))).toEqual(['```python', '```']);
     await expect(page.locator('.cm-hybrid-codeblock-content-line .cm-hybrid-prism-token.token.keyword').filter({ hasText: 'for' })).toBeVisible();
 
     const activeLayout = await page.evaluate((mathSource) => {
@@ -5800,7 +6833,7 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
     await expect(page.locator('.cm-content')).toContainText('print("literal fence")');
   });
 
-  test('hybrid rendering renders Mermaid fences as Obsidian-like diagrams until the block is active', async ({ page }) => {
+  test('hybrid rendering keeps Mermaid diagrams focused until edit source is requested like Obsidian', async ({ page }) => {
     await page.goto('http://localhost:8979/test.html');
 
     const mermaidSource = [
@@ -5857,6 +6890,11 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
     });
     await expect(page.locator('.cm-hybrid-mermaid-block')).toBeVisible();
     await page.locator('.cm-hybrid-mermaid-block').click();
+    await expect(page.locator('.cm-hybrid-mermaid-block')).toBeVisible();
+    await expect(page.getByLabel('Edit Mermaid source')).toBeVisible();
+    await expect(page.locator('.cm-line').filter({ hasText: '```mermaid' })).toHaveCount(0);
+
+    await page.getByLabel('Edit Mermaid source').click();
     await expect(page.locator('.cm-hybrid-mermaid-block')).toHaveCount(0);
     await expect(page.locator('.cm-line').filter({ hasText: '```mermaid' })).toBeVisible();
     await expect(page.locator('.cm-line').filter({ hasText: 'graph TD' })).toBeVisible();
@@ -6040,7 +7078,7 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
     expect(metrics.labelHeight).toBeGreaterThan(8);
   });
 
-  test('hybrid rendering lets Mermaid diagrams zoom without activating source editing', async ({ page }) => {
+  test('hybrid rendering shows only Obsidian\'s edit affordance over Mermaid diagrams', async ({ page }) => {
     await page.setViewportSize({ width: 900, height: 700 });
     await page.goto('http://localhost:8979/test.html');
 
@@ -6048,7 +7086,7 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
       '```mermaid',
       'graph TD',
       '  A[Markdown note] --> B[Rendered diagram]',
-      '  B --> C[Zoom controls]',
+      '  B --> C[Edit source]',
       '```',
     ].join('\n');
     const doc = [
@@ -6069,54 +7107,15 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
       view.dispatch({ selection: { anchor: view.state.doc.length } });
     });
 
-    await expect(page.locator('.cm-hybrid-mermaid-block svg')).toBeVisible({ timeout: 10_000 });
-    await expect(page.getByLabel('Zoom in Mermaid diagram')).toBeVisible();
-    await expect(page.getByLabel('Zoom out Mermaid diagram')).toBeVisible();
-
-    const metrics = async () => page.evaluate(() => {
-      const block = document.querySelector<HTMLElement>('.cm-hybrid-mermaid-block');
-      const svg = block?.querySelector<SVGSVGElement>('svg');
-      const label = block?.querySelector<HTMLElement>('.cm-hybrid-mermaid-zoom-level');
-      if (!block || !svg || !label) throw new Error('Missing Mermaid zoom controls');
-      return {
-        svgWidth: svg.getBoundingClientRect().width,
-        zoomLabel: label.textContent?.trim(),
-        blockCount: document.querySelectorAll('.cm-hybrid-mermaid-block').length,
-        sourceFenceLines: Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
-          .filter(line => line.textContent?.includes('```mermaid')).length,
-      };
-    });
-
-    const initial = await metrics();
-    expect(initial.zoomLabel).toBe('100%');
-
-    await page.getByLabel('Zoom in Mermaid diagram').click();
-    await expect.poll(metrics).toMatchObject({
-      zoomLabel: '125%',
-      blockCount: 1,
-      sourceFenceLines: 0,
-    });
-    const zoomedIn = await metrics();
-    expect(zoomedIn.svgWidth).toBeGreaterThan(initial.svgWidth * 1.2);
-
-    await page.getByLabel('Zoom out Mermaid diagram').click();
-    await expect.poll(metrics).toMatchObject({
-      zoomLabel: '100%',
-      blockCount: 1,
-      sourceFenceLines: 0,
-    });
-    const zoomedBack = await metrics();
-    expect(zoomedBack.svgWidth).toBeLessThan(zoomedIn.svgWidth);
-    expect(zoomedBack.svgWidth).toBeGreaterThan(initial.svgWidth * 0.95);
-
-    await page.getByLabel('Zoom out Mermaid diagram').click();
-    await expect.poll(metrics).toMatchObject({
-      zoomLabel: '75%',
-      blockCount: 1,
-      sourceFenceLines: 0,
-    });
-    const zoomedOut = await metrics();
-    expect(zoomedOut.svgWidth).toBeLessThan(initial.svgWidth * 0.8);
+    const block = page.locator('.cm-hybrid-mermaid-block');
+    await expect(block.locator('svg')).toBeVisible({ timeout: 10_000 });
+    await block.hover();
+    await expect(page.getByLabel('Edit Mermaid source')).toBeVisible();
+    await expect(page.getByLabel('Zoom in Mermaid diagram')).toHaveCount(0);
+    await expect(page.getByLabel('Zoom out Mermaid diagram')).toHaveCount(0);
+    await expect(page.locator('.cm-hybrid-mermaid-zoom-level')).toHaveCount(0);
+    await expect(block).toHaveCount(1);
+    await expect(page.locator('.cm-line').filter({ hasText: '```mermaid' })).toHaveCount(0);
   });
 
   test('hybrid rendering displays fenced code language names like Obsidian', async ({ page }) => {
@@ -6151,7 +7150,7 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
       '| Name | Description |',
       '| --- | --- |',
       '| vkid.official_account | 小企鹅公众号 |',
-      'Keep [PDF link](raw/paper.pdf#page=7&anchor=anc_hybrid) clickable.',
+      'Keep [PDF link](raw/paper.pdf#page=7) clickable.',
       '',
       'cursor lands here',
     ].join('\n');
@@ -6295,7 +7294,7 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
     expect(copied).toBe(hrSource);
   });
 
-  test('clicking a rendered table enters raw table editing like Obsidian live preview', async ({ page }) => {
+  test('clicking a rendered table keeps in-place cells and normalizes edits like Obsidian live preview', async ({ page }) => {
     await page.goto('http://localhost:8979/test.html');
 
     const testDoc = [
@@ -6320,15 +7319,19 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
 
     await expect(page.locator('.cm-hybrid-table-widget')).toBeVisible();
     await page.getByText('Online softmax').click();
+    const editableCell = page.getByRole('textbox', { name: 'Table cell Online softmax' });
+    await editableCell.fill('Streaming softmax');
+    await page.getByText('After table').click();
 
-    await expect(page.locator('.cm-hybrid-table-widget')).toHaveCount(0);
-    expect(await page.evaluate(() => {
+    await expect(page.locator('.cm-hybrid-table-widget')).toBeVisible();
+    await expect.poll(() => page.evaluate(() => {
       const view = window.__cmView;
-      return view.state.doc.lineAt(view.state.selection.main.head).number;
-    })).toBe(3);
-    await page.keyboard.type('edited ');
-    await expect.poll(() => page.evaluate(() => window.__cmView.state.doc.line(3).text))
-      .toBe('edited | Term | Detail |');
+      return [3, 4, 5].map(lineNumber => view.state.doc.line(lineNumber).text);
+    })).toEqual([
+      '| Term              | Detail                      |',
+      '| ----------------- | --------------------------- |',
+      '| Streaming softmax | Running max and denominator |',
+    ]);
   });
 
   test('hybrid rendering renders inline Markdown inside table cells like Obsidian', async ({ page }) => {
@@ -6554,9 +7557,28 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
 
     await expect(page.locator('.cm-hybrid-callout')).toBeVisible();
     await expect(page.locator('.cm-hybrid-callout-title')).toContainText('Stability trick');
+    await expect(page.locator('.cm-hybrid-callout-icon')).toHaveAttribute('data-callout-icon', 'flame');
+    await expect(page.locator('.cm-hybrid-callout-icon svg')).toBeVisible();
     await expect(page.locator('.cm-hybrid-callout-body')).toContainText('streaming statistics.');
     await expect(page.locator('.cm-hybrid-callout-body')).toContainText('Works across tiles.');
     await expect(page.locator('.cm-hybrid-callout')).not.toContainText('[!tip]');
+
+    const calloutVisual = await page.evaluate(() => {
+      const callout = document.querySelector<HTMLElement>('.cm-hybrid-callout');
+      const title = callout?.querySelector<HTMLElement>('.cm-hybrid-callout-title');
+      const icon = callout?.querySelector<HTMLElement>('.cm-hybrid-callout-icon');
+      if (!callout || !title || !icon) throw new Error('Missing rendered callout chrome');
+      const calloutStyle = getComputedStyle(callout);
+      return {
+        backgroundColor: calloutStyle.backgroundColor,
+        borderLeftWidth: calloutStyle.borderLeftWidth,
+        titleColor: getComputedStyle(title).color,
+        iconColor: getComputedStyle(icon).color,
+      };
+    });
+    expect(calloutVisual.backgroundColor).not.toBe('rgba(0, 0, 0, 0)');
+    expect(calloutVisual.borderLeftWidth).toBe('0px');
+    expect(calloutVisual.titleColor).toBe(calloutVisual.iconColor);
 
     const copiedCallout = await page.evaluate(() => new Promise<string>((resolve) => {
       const callout = document.querySelector('.cm-hybrid-callout');
@@ -6920,7 +7942,7 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
 
     const testDoc = [
       '> [!tip] Related [[FlashAttention]]',
-      '> See [[Online Softmax]] and [paper](raw/pdf/flash-attention.pdf#page=7&anchor=anc_callout).',
+      '> See [[Online Softmax]] and [paper](raw/pdf/flash-attention.pdf#page=7).',
       '',
       'cursor lands here',
     ].join('\n');
@@ -6957,7 +7979,7 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
     expect(openMessages).toEqual([
       { type: 'openUri', uri: 'notes/Concepts/FlashAttention.md' },
       { type: 'openUri', uri: 'notes/Concepts/Online Softmax.md' },
-      { type: 'openUri', uri: 'raw/pdf/flash-attention.pdf#page=7&anchor=anc_callout' },
+      { type: 'openUri', uri: 'raw/pdf/flash-attention.pdf#page=7' },
     ]);
   });
 
@@ -7005,7 +8027,7 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
     const testDoc = [
       'plain text',
       '- [ ] task',
-      'Click [PDF link](raw/paper.pdf#page=7&anchor=anc_cmd).',
+      'Click [PDF link](raw/paper.pdf#page=7).',
       '',
       '| A | B |',
       '| --- | --- |',
@@ -7058,7 +8080,7 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
       window.postMessage({ type: 'executeCommand', command: 'editor:follow-link' }, '*');
     });
     const openMessages = await page.evaluate(() => window.__mockMessages.filter((m) => m.type === 'openUri'));
-    expect(openMessages).toEqual([{ type: 'openUri', uri: 'raw/paper.pdf#page=7&anchor=anc_cmd' }]);
+    expect(openMessages).toEqual([{ type: 'openUri', uri: 'raw/paper.pdf#page=7' }]);
   });
 
   test('Obsidian-like formatting commands unwrap the current formatted span when the cursor is inside it', async ({ page }) => {
@@ -7217,7 +8239,7 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
       .toBe('alpha beta gamma');
   });
 
-  test('right-clicking selected markdown opens a formatting panel and applies inline style commands', async ({ page }) => {
+  test('Obsidian-style context menu exposes selected-text actions and applies Bold', async ({ page }) => {
     await page.goto('http://localhost:8979/test.html');
 
     await page.evaluate(() => {
@@ -7225,6 +8247,77 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
       window.__mockMessages = [];
     });
     await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      const from = view.state.doc.toString().indexOf('beta');
+      view.dispatch({ selection: { anchor: from, head: from + 'beta'.length } });
+      view.focus();
+      const line = document.querySelector('.cm-line');
+      line.dispatchEvent(new MouseEvent('contextmenu', {
+        bubbles: true,
+        cancelable: true,
+        clientX: window.innerWidth - 1,
+        clientY: window.innerHeight - 1,
+      }));
+    });
+
+    const menu = page.getByRole('menu');
+    await expect(menu).toHaveCount(1);
+    await expect(menu).toBeVisible();
+    await expect(menu.getByRole('menuitem')).toHaveText([
+      'Copy',
+      'Bold',
+      'Italic',
+      'Strikethrough',
+      'Inline code',
+      'Highlight',
+      'Link',
+      'Look Up',
+    ]);
+    await expect(menu.getByRole('menuitem').first()).toBeFocused();
+    expect(await menu.evaluate(element => getComputedStyle(element).flexDirection)).toBe('column');
+    const bounds = await menu.evaluate(element => {
+      const rect = element.getBoundingClientRect();
+      return {
+        left: rect.left,
+        top: rect.top,
+        right: rect.right,
+        bottom: rect.bottom,
+        viewportWidth: window.innerWidth,
+        viewportHeight: window.innerHeight,
+      };
+    });
+    expect(bounds.left).toBeGreaterThanOrEqual(0);
+    expect(bounds.top).toBeGreaterThanOrEqual(0);
+    expect(bounds.right).toBeLessThanOrEqual(bounds.viewportWidth);
+    expect(bounds.bottom).toBeLessThanOrEqual(bounds.viewportHeight);
+
+    await page.keyboard.press('ArrowDown');
+    await expect(menu.getByRole('menuitem').nth(1)).toBeFocused();
+    await page.keyboard.press('ArrowUp');
+    await expect(menu.getByRole('menuitem').first()).toBeFocused();
+    await page.keyboard.press('End');
+    await expect(menu.getByRole('menuitem').last()).toBeFocused();
+    await page.keyboard.press('Home');
+    await expect(menu.getByRole('menuitem').first()).toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(menu).toHaveCount(0);
+
+    await page.evaluate(() => {
+      const line = document.querySelector('.cm-line');
+      const rect = line.getBoundingClientRect();
+      line.dispatchEvent(new MouseEvent('contextmenu', {
+        bubbles: true,
+        cancelable: true,
+        clientX: rect.left + 80,
+        clientY: rect.top + 8,
+      }));
+    });
+
+    await expect(menu).toHaveCount(1);
+    await page.mouse.click(1, 1);
+    await expect(menu).toHaveCount(0);
 
     await page.evaluate(() => {
       const view = window.__cmView;
@@ -7241,45 +8334,149 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
       }));
     });
 
-    await expect(page.locator('#selection-toolbar')).toBeVisible();
-    await expect(page.locator('#selection-toolbar')).toContainText('Look Up');
-    await expect(page.locator('#selection-toolbar')).toContainText('Heading');
-
-    await page.locator('#selection-toolbar button[aria-label="Bold"]').click();
+    await page.getByRole('menuitem', { name: 'Bold', exact: true }).click();
     await expect.poll(() => page.evaluate(() => window.__cmView.state.doc.toString()))
       .toBe('alpha **beta** gamma');
   });
 
-  test('markdown selection panel applies heading levels to selected lines', async ({ page }) => {
+  test('Obsidian-style context menu handles native drag selections', async ({ page }) => {
     await page.goto('http://localhost:8979/test.html');
 
     await page.evaluate(() => {
-      window.postMessage({ type: 'setText', text: ['Intro', 'Selected heading', 'Tail'].join('\n') }, '*');
-      window.__mockMessages = [];
+      window.postMessage({ type: 'setText', text: 'alpha beta gamma' }, '*');
     });
     await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
 
     await page.evaluate(() => {
       const view = window.__cmView;
-      const line = view.state.doc.line(2);
-      view.dispatch({ selection: { anchor: line.from, head: line.to } });
+      view.dispatch({ selection: { anchor: 0 } });
       view.focus();
-      const secondLine = document.querySelectorAll('.cm-line')[1];
-      const rect = secondLine.getBoundingClientRect();
-      secondLine.dispatchEvent(new MouseEvent('contextmenu', {
+
+      const line = document.querySelector<HTMLElement>('.cm-line');
+      if (!line?.firstChild) throw new Error('Missing editor text node');
+      const text = line.textContent ?? '';
+      const from = text.indexOf('beta');
+      const range = document.createRange();
+      range.setStart(line.firstChild, from);
+      range.setEnd(line.firstChild, from + 'beta'.length);
+      const selection = window.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+
+      const rect = range.getBoundingClientRect();
+      line.dispatchEvent(new MouseEvent('contextmenu', {
         bubbles: true,
         cancelable: true,
-        clientX: rect.left + 40,
-        clientY: rect.top + 8,
+        clientX: rect.left + rect.width / 2,
+        clientY: rect.top + rect.height / 2,
       }));
     });
 
-    await page.locator('#selection-toolbar button', { hasText: 'Heading' }).click();
-    await expect(page.locator('#selection-toolbar .menu.open')).toBeVisible();
-    await page.locator('#selection-toolbar button', { hasText: 'H2' }).click();
+    const menu = page.getByRole('menu');
+    await expect(menu).toBeVisible();
+    await expect(menu.getByRole('menuitem')).toHaveText([
+      'Copy',
+      'Bold',
+      'Italic',
+      'Strikethrough',
+      'Inline code',
+      'Highlight',
+      'Link',
+      'Look Up',
+    ]);
+  });
 
-    await expect.poll(() => page.evaluate(() => window.__cmView.state.doc.toString()))
-      .toBe(['Intro', '## Selected heading', 'Tail'].join('\n'));
+  test('Obsidian-style context menu stays within narrow viewport insets', async ({ page }) => {
+    await page.setViewportSize({ width: 160, height: 480 });
+    await page.goto('http://localhost:8979/test.html');
+
+    await page.evaluate(() => {
+      window.postMessage({ type: 'setText', text: 'alpha beta gamma' }, '*');
+    });
+    await page.waitForSelector('#editor .cm-content', { state: 'attached', timeout: 10_000 });
+    await page.waitForFunction(() => window.__cmView?.state.doc.toString() === 'alpha beta gamma');
+
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      const from = view.state.doc.toString().indexOf('beta');
+      view.dispatch({ selection: { anchor: from, head: from + 'beta'.length } });
+      view.focus();
+      document.querySelector('.cm-line').dispatchEvent(new MouseEvent('contextmenu', {
+        bubbles: true,
+        cancelable: true,
+        clientX: window.innerWidth - 1,
+        clientY: window.innerHeight - 1,
+      }));
+    });
+
+    const bounds = await page.getByRole('menu').evaluate(element => {
+      const rect = element.getBoundingClientRect();
+      return {
+        left: rect.left,
+        top: rect.top,
+        right: rect.right,
+        bottom: rect.bottom,
+        viewportWidth: window.innerWidth,
+        viewportHeight: window.innerHeight,
+      };
+    });
+    expect(bounds.left).toBeGreaterThanOrEqual(8);
+    expect(bounds.top).toBeGreaterThanOrEqual(8);
+    expect(bounds.right).toBeLessThanOrEqual(bounds.viewportWidth - 8);
+    expect(bounds.bottom).toBeLessThanOrEqual(bounds.viewportHeight - 8);
+  });
+
+  test('Obsidian-style context menu scrolls keyboard focus into a constrained menu viewport', async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 120 });
+    await page.goto('http://localhost:8979/test.html');
+
+    await page.evaluate(() => {
+      window.postMessage({ type: 'setText', text: 'alpha beta gamma' }, '*');
+    });
+    await page.waitForSelector('#editor .cm-content', { state: 'attached', timeout: 10_000 });
+    await page.waitForFunction(() => window.__cmView?.state.doc.toString() === 'alpha beta gamma');
+
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      const from = view.state.doc.toString().indexOf('beta');
+      view.dispatch({ selection: { anchor: from, head: from + 'beta'.length } });
+      view.focus();
+      document.querySelector('.cm-line').dispatchEvent(new MouseEvent('contextmenu', {
+        bubbles: true,
+        cancelable: true,
+        clientX: 24,
+        clientY: 24,
+      }));
+    });
+
+    const menu = page.getByRole('menu');
+    const menuItems = menu.getByRole('menuitem');
+    await expect(menuItems.first()).toBeFocused();
+    expect(await menu.evaluate(element => element.scrollHeight > element.clientHeight)).toBe(true);
+
+    const expectFocusedItemVisible = async () => {
+      const visibility = await menu.evaluate(element => {
+        const activeItem = document.activeElement as HTMLElement;
+        const menuBounds = element.getBoundingClientRect();
+        const itemBounds = activeItem.getBoundingClientRect();
+        return {
+          intersects: itemBounds.bottom > menuBounds.top && itemBounds.top < menuBounds.bottom,
+          scrollTop: element.scrollTop,
+        };
+      });
+      expect(visibility.intersects).toBe(true);
+      return visibility.scrollTop;
+    };
+
+    await page.keyboard.press('End');
+    await expect(menuItems.last()).toBeFocused();
+    expect(await expectFocusedItemVisible()).toBeGreaterThan(0);
+
+    await page.keyboard.press('Home');
+    await expect(menuItems.first()).toBeFocused();
+    await page.keyboard.press('ArrowUp');
+    await expect(menuItems.last()).toBeFocused();
+    expect(await expectFocusedItemVisible()).toBeGreaterThan(0);
   });
 
   test('force-clicking selected markdown asks the host to look it up', async ({ page }) => {
@@ -7803,7 +9000,7 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
   test('Cmd+Enter follows the link under the cursor in Vim mode', async ({ page }) => {
     await page.goto('http://localhost:8979/test.html');
 
-    const testDoc = 'Jump to [PDF link](raw/paper.pdf#page=7&anchor=anc_cmd_enter).';
+    const testDoc = 'Jump to [PDF link](raw/paper.pdf#page=7).';
 
     await page.evaluate((text) => {
       window.postMessage({ type: 'setVimMode', enabled: true }, '*');
@@ -7822,7 +9019,7 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
     await page.keyboard.press('Meta+Enter');
 
     const openMessages = await page.evaluate(() => window.__mockMessages.filter((m) => m.type === 'openUri'));
-    expect(openMessages).toEqual([{ type: 'openUri', uri: 'raw/paper.pdf#page=7&anchor=anc_cmd_enter' }]);
+    expect(openMessages).toEqual([{ type: 'openUri', uri: 'raw/paper.pdf#page=7' }]);
   });
 
   test('Cmd+Enter also follows regular markdown links in Vim mode', async ({ page }) => {
@@ -7872,7 +9069,7 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
     });
 
     // Send insertText (simulates PDF viewer sending a link)
-    const insertMd = '[PDF](raw/paper.pdf#page=7&anchor=anc_insert)';
+    const insertMd = '[PDF](raw/paper.pdf#page=7)';
     await page.evaluate((md) => {
       window.postMessage({ type: 'insertText', text: md }, '*');
     }, insertMd);
@@ -7888,6 +9085,6 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
       return el?.textContent ?? '';
     });
 
-    expect(content).toContain('[PDF](raw/paper.pdf#page=7&anchor=anc_insert)');
+    expect(content).toContain('[PDF](raw/paper.pdf#page=7)');
   });
 });

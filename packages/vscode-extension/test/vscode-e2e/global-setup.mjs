@@ -5,13 +5,15 @@ import { spawn } from 'child_process';
 import { mkdirSync, rmSync, writeFileSync } from 'fs';
 import { findFreePort } from './debugPort.mjs';
 import { listProcesses, selectStaleE2eProcesses, stopProcesses } from './processCleanup.mjs';
+import { resolveVsCodeE2eTestDir } from './testDirectory.mjs';
+import { cleanupSandboxFixtures, prepareSandboxFixtures } from './sandboxFixtures.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const VSCODE_VERSION = 'stable';
 const FIXTURES = resolve(__dirname, 'fixtures', 'test-vault');
 const EXTENSION_PATH = resolve(__dirname, '..', '..');
-const TEST_DIR = resolve(__dirname, '.vscode-test');
+const TEST_DIR = resolveVsCodeE2eTestDir();
 
 export default async function globalSetup() {
   console.log('\n[global-setup] Downloading VS Code...');
@@ -26,6 +28,14 @@ export default async function globalSetup() {
   rmSync(extensionsDir, { recursive: true, force: true });
   mkdirSync(userDataDir, { recursive: true });
   mkdirSync(extensionsDir, { recursive: true });
+  const userSettingsDir = resolve(userDataDir, 'User');
+  mkdirSync(userSettingsDir, { recursive: true });
+  writeFileSync(resolve(userSettingsDir, 'settings.json'), JSON.stringify({
+    'editor.fontSize': 16,
+    'editor.lineHeight': 24,
+  }));
+  cleanupSandboxFixtures(FIXTURES);
+  prepareSandboxFixtures(FIXTURES);
 
   // Use a file:// URI for the folder
   const folderUri = `file://${FIXTURES}`;

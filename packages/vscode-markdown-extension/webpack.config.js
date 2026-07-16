@@ -27,6 +27,28 @@ const resolveFromPackage = (anchorPackage, request = anchorPackage) => (
   })
 );
 
+class CopySqlJsRuntimePlugin {
+  apply(compiler) {
+    compiler.hooks.afterEmit.tap('CopySqlJsRuntimePlugin', () => {
+      const fs = require('fs');
+      const sqlJsEntrypoint = resolveWorkspaceModule('sql.js');
+      const sqlJsRoot = path.resolve(path.dirname(sqlJsEntrypoint), '..');
+      const targetRoot = path.join(dist, 'node_modules', 'sql.js');
+      const targetDist = path.join(targetRoot, 'dist');
+
+      fs.rmSync(targetRoot, { recursive: true, force: true });
+      fs.mkdirSync(targetDist, { recursive: true });
+
+      for (const file of ['package.json', 'LICENSE']) {
+        fs.copyFileSync(path.join(sqlJsRoot, file), path.join(targetRoot, file));
+      }
+      for (const file of ['sql-wasm.js', 'sql-wasm.wasm']) {
+        fs.copyFileSync(path.join(sqlJsRoot, 'dist', file), path.join(targetDist, file));
+      }
+    });
+  }
+}
+
 const markdownEditorAliases = {
   '@codemirror/commands$': resolveFromPackage('@codemirror/commands'),
   '@codemirror/language$': resolveFromPackage('@codemirror/language'),
@@ -65,6 +87,7 @@ module.exports = [
     module: {
       rules: [tsRule()],
     },
+    plugins: [new CopySqlJsRuntimePlugin()],
     devtool: 'source-map',
   },
   {
