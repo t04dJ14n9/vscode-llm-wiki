@@ -215,7 +215,27 @@ test('initialize is public and reuses the live process handshake', async t => {
   assert.match(thread.threadId, /^thread-default-\d+$/);
 });
 
-test('forwards only the supported v2 thread policy fields and keeps protocol data out of diagnostics', async t => {
+test('lists every visible Codex model page and forwards model overrides', async t => {
+  const { CodexAppServerClient } = loadClientModule();
+  const client = createClient(CodexAppServerClient);
+  t.after(() => client.dispose());
+
+  const models = await client.listModels();
+  assert.deepEqual(models.map(model => [model.model, model.isDefault]), [
+    ['gpt-5.4', true],
+    ['gpt-5.4-mini', false],
+  ]);
+
+  const thread = await client.startThread({ model: 'gpt-5.4' });
+  assert.equal(thread.model, 'gpt-5.4');
+  await client.startTurn({
+    threadId: thread.threadId,
+    model: 'gpt-5.4-mini',
+    input: [{ type: 'text', text: 'model-override' }],
+  });
+});
+
+test('forwards supported v2 thread policy and model fields while keeping protocol data out of diagnostics', async t => {
   const diagnostics = [];
   const { CodexAppServerClient } = loadClientModule();
   const client = createClient(CodexAppServerClient, {
@@ -233,7 +253,7 @@ test('forwards only the supported v2 thread policy fields and keeps protocol dat
       fixtureMode: 'policy',
       reasoning_effort: 'medium',
     },
-    model: 'must-not-be-forwarded',
+    model: 'gpt-5.4',
   });
 
   assert.equal(response.thread.ephemeral, true);
@@ -242,7 +262,7 @@ test('forwards only the supported v2 thread policy fields and keeps protocol dat
   assert.deepEqual(response.sandbox, { type: 'readOnly', networkAccess: false });
   await waitFor(() => diagnostics.length > 0);
   assertSanitizedDiagnostics(diagnostics);
-  assert.doesNotMatch(diagnostics.join(''), /Answer only|ask-pdf-vault|must-not-be-forwarded/);
+  assert.doesNotMatch(diagnostics.join(''), /Answer only|ask-pdf-vault|gpt-5\.4/);
 });
 
 test('sends text and localImage inputs and routes fragmented and coalesced completion notifications', async t => {

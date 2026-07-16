@@ -165,6 +165,26 @@ export interface AccountReadResponse {
   requiresOpenaiAuth: boolean;
 }
 
+export interface CodexModel {
+  id: string;
+  model: string;
+  displayName: string;
+  description: string;
+  hidden: boolean;
+  isDefault: boolean;
+}
+
+export interface ModelListParams {
+  cursor?: string | null;
+  limit?: number | null;
+  includeHidden?: boolean | null;
+}
+
+export interface ModelListResponse {
+  data: CodexModel[];
+  nextCursor?: string | null;
+}
+
 export type SandboxMode = 'read-only' | 'workspace-write' | 'danger-full-access';
 
 export interface GranularApprovalPolicy {
@@ -180,6 +200,7 @@ export interface GranularApprovalPolicy {
 export type ApprovalPolicy = 'untrusted' | 'on-request' | 'never' | GranularApprovalPolicy;
 
 export interface ThreadStartParams {
+  model?: string | null;
   ephemeral?: boolean | null;
   cwd?: string | null;
   sandbox?: SandboxMode | null;
@@ -280,6 +301,7 @@ export type TurnUserInput = TextUserInput | LocalImageUserInput;
 export interface TurnStartParams {
   threadId: string;
   input: TurnUserInput[];
+  model?: string | null;
 }
 
 export interface TurnStartResponse {
@@ -397,12 +419,32 @@ export class CodexAppServerClient {
     return initialized.result;
   }
 
+  async listModels(options: RequestOptions = {}): Promise<CodexModel[]> {
+    const { state } = await this.ensureInitializedState();
+    const models: CodexModel[] = [];
+    let cursor: string | null | undefined;
+    do {
+      const params: ModelListParams = { includeHidden: false };
+      copyDefined(params, 'cursor', cursor);
+      const response = await this.request<ModelListResponse>(
+        state,
+        'model/list',
+        params,
+        validTimeout(options.timeoutMs, this.requestTimeoutMs, 'timeoutMs'),
+      );
+      models.push(...response.data);
+      cursor = response.nextCursor;
+    } while (cursor);
+    return models;
+  }
+
   async startThread(
     params: ThreadStartParams,
     options: RequestOptions = {},
   ): Promise<StartThreadResult> {
     const { state } = await this.ensureInitializedState();
     const wireParams: ThreadStartParams = {};
+    copyDefined(wireParams, 'model', params.model);
     copyDefined(wireParams, 'ephemeral', params.ephemeral);
     copyDefined(wireParams, 'cwd', params.cwd);
     copyDefined(wireParams, 'sandbox', params.sandbox);
@@ -423,13 +465,15 @@ export class CodexAppServerClient {
     options: RequestOptions = {},
   ): Promise<StartTurnResult> {
     const { state } = await this.ensureInitializedState();
+    const wireParams: TurnStartParams = {
+      threadId: params.threadId,
+      input: params.input,
+    };
+    copyDefined(wireParams, 'model', params.model);
     const response = await this.request<TurnStartResponse>(
       state,
       'turn/start',
-      {
-        threadId: params.threadId,
-        input: params.input,
-      },
+      wireParams,
       validTimeout(options.timeoutMs, this.turnTimeoutMs, 'timeoutMs'),
     );
     return {

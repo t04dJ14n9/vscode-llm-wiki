@@ -6,6 +6,7 @@ import { closeSync } from 'node:fs';
 const EXPECTED_ARGS = ['app-server', '--listen', 'stdio://'];
 const EXPECTED_CLIENT_NAME = 'human-learning-pdf';
 const EXPECTED_CLIENT_TITLE = 'Human Learning PDF';
+const VISIBLE_MODELS = new Set(['gpt-5.4', 'gpt-5.4-mini']);
 
 if (JSON.stringify(process.argv.slice(2)) !== JSON.stringify(EXPECTED_ARGS)) {
   process.stderr.write('fixture: invalid app-server arguments\n');
@@ -94,6 +95,9 @@ function handleMessage(message) {
   }
 
   switch (message.method) {
+    case 'model/list':
+      handleModelList(message);
+      break;
     case 'thread/start':
       handleThreadStart(message);
       break;
@@ -106,6 +110,50 @@ function handleMessage(message) {
     default:
       respondError(message.id, -32601, 'fixture method not found');
   }
+}
+
+function handleModelList(message) {
+  const params = message.params ?? {};
+  if (params.includeHidden !== false || ('limit' in params && params.limit !== null)) {
+    respondError(message.id, -32602, 'fixture invalid model/list params');
+    return;
+  }
+  if (params.cursor === 'page-2') {
+    respond(message.id, {
+      data: [model('model-fast', 'gpt-5.4-mini', 'GPT-5.4-Mini', false)],
+      nextCursor: null,
+    });
+    return;
+  }
+  if (params.cursor !== undefined) {
+    respondError(message.id, -32602, 'fixture invalid model/list cursor');
+    return;
+  }
+  respond(message.id, {
+    data: [model('model-default', 'gpt-5.4', 'GPT-5.4', true)],
+    nextCursor: 'page-2',
+  });
+}
+
+function model(id, slug, displayName, isDefault) {
+  return {
+    id,
+    model: slug,
+    upgrade: null,
+    upgradeInfo: null,
+    availabilityNux: null,
+    displayName,
+    description: isDefault ? 'Default model' : 'Fast answers',
+    hidden: false,
+    supportedReasoningEfforts: [],
+    defaultReasoningEffort: 'medium',
+    inputModalities: ['text', 'image'],
+    supportsPersonality: true,
+    additionalSpeedTiers: [],
+    serviceTiers: [],
+    defaultServiceTier: null,
+    isDefault,
+  };
 }
 
 function handleNotification(message) {
@@ -189,8 +237,8 @@ function handleThreadStart(message) {
   const params = message.params ?? {};
   const mode = params.config?.fixtureMode;
 
-  if ('model' in params) {
-    respondError(message.id, -32602, 'fixture thread/start must not set model');
+  if (params.model !== undefined && !VISIBLE_MODELS.has(params.model)) {
+    respondError(message.id, -32602, 'fixture thread/start received an unavailable model');
     return;
   }
   if (mode === 'policy' && !isExpectedPolicyParams(params)) {
@@ -247,6 +295,7 @@ function handleThreadStart(message) {
 
 function isExpectedPolicyParams(params) {
   return JSON.stringify(params) === JSON.stringify({
+    model: 'gpt-5.4',
     ephemeral: true,
     cwd: '/tmp/ask-pdf-vault',
     sandbox: 'read-only',
@@ -277,7 +326,7 @@ function makeThreadStartResponse(params, label) {
       turns: [],
       sessionId: `session-${process.pid}`,
     },
-    model: 'gpt-5.4',
+    model: params.model ?? 'gpt-5.4',
     modelProvider: 'openai',
     cwd,
     approvalPolicy: params.approvalPolicy ?? 'on-request',
@@ -310,6 +359,15 @@ function handleTurnStart(message) {
   const params = message.params ?? {};
   const turnId = `turn-${++turnSequence}-${process.pid}`;
   const text = params.input?.find(input => input?.type === 'text')?.text;
+
+  if (params.model !== undefined && !VISIBLE_MODELS.has(params.model)) {
+    respondError(message.id, -32602, 'fixture turn/start received an unavailable model');
+    return;
+  }
+  if (text === 'model-override' && params.model !== 'gpt-5.4-mini') {
+    respondError(message.id, -32602, 'fixture turn/start did not receive the model override');
+    return;
+  }
 
   if (text === 'Validate local image input') {
     const expected = [
