@@ -59,6 +59,7 @@ class RecordingClient {
     this.threadCalls = [];
     this.turnCalls = [];
     this.interruptCalls = [];
+    this.modelListCalls = 0;
   }
 
   onNotification(method, listener) {
@@ -67,6 +68,11 @@ class RecordingClient {
 
   onTransportError(listener) {
     return this.client.onTransportError(listener);
+  }
+
+  async listModels(options) {
+    this.modelListCalls += 1;
+    return this.client.listModels(options);
   }
 
   async startThread(params, options) {
@@ -332,6 +338,69 @@ test('persists a first question and snapshot before Codex, streams deltas, and c
   assert.equal(result.lastTurn.ownerPid, undefined);
   assert.equal(result.lastTurn.startedAt, undefined);
   assert.doesNotMatch(readFileSync(document.store.sidecarPath, 'utf8'), /thread-default-/);
+});
+
+test('lists, validates, persists, and retries the selected model', async t => {
+  const { PdfDiscussionController } = controllerModule();
+  const document = await tempDocument();
+  t.after(async () => rm(document.root, { recursive: true, force: true }));
+  const client = createFixtureClient();
+  t.after(() => client.dispose());
+  const controller = new PdfDiscussionController({ client });
+  t.after(() => controller.dispose());
+
+  const models = await controller.listModels();
+  assert.deepEqual(models.map(model => ({
+    model: model.model,
+    displayName: model.displayName,
+    isDefault: model.isDefault,
+  })), [
+    { model: 'gpt-5.4', displayName: 'GPT-5.4', isDefault: true },
+    { model: 'gpt-5.4-mini', displayName: 'GPT-5.4-Mini', isDefault: false },
+  ]);
+
+  const result = await controller.submit(document.store, {
+    anchor: anchor(),
+    question: 'model-override',
+    model: 'gpt-5.4-mini',
+  });
+
+  assert.equal(client.modelListCalls, 2);
+  assert.equal(client.threadCalls[0].model, 'gpt-5.4-mini');
+  assert.equal(client.turnCalls[0].model, 'gpt-5.4-mini');
+  assert.equal(result.lastTurn.model, 'gpt-5.4-mini');
+  assert.equal(result.messages.at(-1).codexModel, 'gpt-5.4-mini');
+  assert.equal(document.store.load().annotations[0].lastTurn.model, 'gpt-5.4-mini');
+
+  await assert.rejects(
+    controller.submit(document.store, {
+      annotationId: result.id,
+      question: 'Do not send this.',
+      model: 'internal-model',
+    }),
+    /available Codex model/i,
+  );
+
+  await assert.rejects(
+    controller.submit(document.store, {
+      annotationId: result.id,
+      question: 'server-error',
+      model: 'gpt-5.4-mini',
+    }),
+    /fixture server error/,
+  );
+  const failed = document.store.load().annotations[0];
+  const messageCount = failed.messages.length;
+  assert.equal(failed.lastTurn.model, 'gpt-5.4-mini');
+  await assert.rejects(
+    controller.retry(document.store, { annotationId: result.id }),
+    /fixture server error/,
+  );
+  const retried = document.store.load().annotations[0];
+  assert.equal(retried.messages.length, messageCount);
+  assert.equal(retried.lastTurn.model, 'gpt-5.4-mini');
+  assert.equal(client.threadCalls.at(-1).model, 'gpt-5.4-mini');
+  assert.equal(client.turnCalls.at(-1).model, 'gpt-5.4-mini');
 });
 
 test('hands Codex immutable verified crop copies and removes them after turns and promotion', async t => {

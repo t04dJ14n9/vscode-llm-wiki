@@ -321,7 +321,13 @@ test('routes server error notifications without converting them into transport f
     threadId: thread.threadId,
     input: [{ type: 'text', text: 'server-error' }],
   });
-  await waitFor(() => errors.length === 1);
+  await waitFor(() => (
+    errors.length === 1
+    && diagnostics.some(message => message.startsWith(
+      'Codex app-server turn completed (threadId=' + thread.threadId
+        + ', turnId=' + turn.turnId,
+    ))
+  ));
 
   assert.equal(errors[0].threadId, thread.threadId);
   assert.equal(errors[0].turnId, turn.turnId);

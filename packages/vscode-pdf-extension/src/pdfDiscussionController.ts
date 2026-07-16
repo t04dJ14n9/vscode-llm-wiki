@@ -20,6 +20,7 @@ import {
   type PdfDiscussionSnapshotV1,
 } from '@human-learning/core';
 import type {
+  CodexModel,
   CodexDisposable,
   CodexThreadItem,
   CodexTurn,
@@ -51,6 +52,7 @@ const controllerOwnerRegistry = (() => {
 })();
 
 export interface PdfDiscussionCodexClient {
+  listModels(): Promise<CodexModel[]>;
   startThread(params: ThreadStartParams): Promise<StartThreadResult>;
   startTurn(params: TurnStartParams): Promise<StartTurnResult>;
   interruptTurn(threadId: string, turnId: string): Promise<void>;
@@ -90,10 +92,19 @@ export interface PdfDiscussionPrepareResult {
   annotation?: PdfDiscussionAnnotationV1;
 }
 
+export interface PdfDiscussionModelSnapshot {
+  id: string;
+  model: string;
+  displayName: string;
+  description: string;
+  isDefault: boolean;
+}
+
 export interface PdfDiscussionSubmitInput {
   annotationId?: string;
   anchor?: PdfDiscussionAnchorV1;
   question: string;
+  model?: string;
   snapshotPng?: Uint8Array;
 }
 
@@ -128,6 +139,7 @@ interface ActiveAnnotationTurn {
   store: PdfDiscussionStore;
   questionMessageId: string;
   question: string;
+  model?: string;
   threadId?: string;
   turnId?: string;
   cancelRequested: boolean;
@@ -314,6 +326,19 @@ export class PdfDiscussionController {
     ));
   }
 
+  async listModels(): Promise<PdfDiscussionModelSnapshot[]> {
+    this.assertUsable();
+    return (await this.client.listModels())
+      .filter(model => !model.hidden)
+      .map(({ id, model, displayName, description, isDefault }) => ({
+        id,
+        model,
+        displayName,
+        description,
+        isDefault,
+      }));
+  }
+
   prepare(
     store: PdfDiscussionStore,
     input: PdfDiscussionPrepareInput,
@@ -333,6 +358,7 @@ export class PdfDiscussionController {
   ): Promise<PdfDiscussionAnnotationV1> {
     this.assertUsable();
     const question = validateQuestion(input.question);
+    const model = await this.resolveRequestedModel(input.model);
     if (input.snapshotPng && input.snapshotPng.byteLength > PDF_DISCUSSION_MAX_PNG_BYTES) {
       throw new PdfDiscussionControllerError(
         'invalid-input',
@@ -342,7 +368,7 @@ export class PdfDiscussionController {
 
     if (input.annotationId !== undefined) {
       const annotationId = validateId(input.annotationId, 'annotation');
-      return this.startExistingQuestion(store, annotationId, question);
+      return this.startExistingQuestion(store, annotationId, question, model);
     }
     if (!input.anchor) {
       throw new PdfDiscussionControllerError(
@@ -358,7 +384,7 @@ export class PdfDiscussionController {
       annotation => annotation.selectionKey === selectionKey,
     );
     if (existing) {
-      return this.startExistingQuestion(store, existing.id, question);
+      return this.startExistingQuestion(store, existing.id, question, model);
     }
     const annotationId = validateId(this.createId('annotation'), 'generated annotation');
     const questionMessageId = validateId(this.createId('message'), 'generated message');
@@ -385,6 +411,7 @@ export class PdfDiscussionController {
       lastTurn: {
         status: 'running',
         questionMessageId,
+        ...(model ? { model } : {}),
         ownerId: this.ownerId,
         ownerPid: this.ownerPid,
         startedAt: timestamp,
@@ -408,7 +435,7 @@ export class PdfDiscussionController {
       };
     });
     if (concurrentExistingId) {
-      return this.startExistingQuestion(store, concurrentExistingId, question);
+      return this.startExistingQuestion(store, concurrentExistingId, question, model);
     }
     const persistedAnnotation = findAnnotation(saved, annotationId);
     this.emit({ type: 'changed', pdfPath: store.pdfPath, annotation: persistedAnnotation });
@@ -418,6 +445,7 @@ export class PdfDiscussionController {
       annotationId,
       questionMessageId,
       question,
+      model,
     );
     active.promise = this.runAnnotationTurn(active, persistedAnnotation, true);
     return active.promise;
@@ -432,6 +460,7 @@ export class PdfDiscussionController {
     const key = annotationKey(store, annotationId);
     this.assertNoActiveTurn(key);
     let questionMessage!: PdfDiscussionMessageV1;
+    let model: string | undefined;
     const running = this.replaceAnnotation(store, annotationId, current => {
       this.assertAnnotationAvailableForTurn(current);
       if (current.lastTurn.status !== 'failed' || !current.lastTurn.questionMessageId) {
@@ -450,12 +479,14 @@ export class PdfDiscussionController {
         );
       }
       questionMessage = candidate;
+      model = current.lastTurn.model;
       const startedAt = this.now();
       return {
         ...current,
         lastTurn: {
           status: 'running',
           questionMessageId: candidate.id,
+          ...(model ? { model } : {}),
           ownerId: this.ownerId,
           ownerPid: this.ownerPid,
           startedAt,
@@ -468,6 +499,7 @@ export class PdfDiscussionController {
       annotationId,
       questionMessage.id,
       questionMessage.markdown,
+      model,
     );
     active.promise = this.runAnnotationTurn(
       active,
@@ -818,10 +850,24 @@ export class PdfDiscussionController {
     this.removeTrustedSnapshotCopies();
   }
 
+  private async resolveRequestedModel(requested: string | undefined): Promise<string | undefined> {
+    if (requested === undefined) return undefined;
+    const models = await this.listModels();
+    const match = models.find(candidate => candidate.model === requested);
+    if (!match) {
+      throw new PdfDiscussionControllerError(
+        'invalid-input',
+        'Choose an available Codex model before submitting this PDF question.',
+      );
+    }
+    return match.model;
+  }
+
   private async startExistingQuestion(
     store: PdfDiscussionStore,
     annotationId: string,
     question: string,
+    model: string | undefined,
   ): Promise<PdfDiscussionAnnotationV1> {
     const key = annotationKey(store, annotationId);
     this.assertNoActiveTurn(key);
@@ -841,6 +887,7 @@ export class PdfDiscussionController {
         lastTurn: {
           status: 'running',
           questionMessageId,
+          ...(model ? { model } : {}),
           ownerId: this.ownerId,
           ownerPid: this.ownerPid,
           startedAt,
@@ -853,6 +900,7 @@ export class PdfDiscussionController {
       annotationId,
       questionMessageId,
       question,
+      model,
     );
     active.promise = this.runAnnotationTurn(
       active,
@@ -867,6 +915,7 @@ export class PdfDiscussionController {
     annotationId: string,
     questionMessageId: string,
     question: string,
+    model: string | undefined,
   ): ActiveAnnotationTurn {
     const key = annotationKey(store, annotationId);
     const active: ActiveAnnotationTurn = {
@@ -875,6 +924,7 @@ export class PdfDiscussionController {
       store,
       questionMessageId,
       question,
+      ...(model ? { model } : {}),
       cancelRequested: false,
       promise: Promise.resolve(undefined as unknown as PdfDiscussionAnnotationV1),
     };
@@ -897,6 +947,7 @@ export class PdfDiscussionController {
           approvalPolicy: 'never',
           developerInstructions: PDF_DISCUSSION_DEVELOPER_INSTRUCTIONS,
           config: { web_search: 'cached' },
+          ...(active.model ? { model: active.model } : {}),
         });
         threadId = started.threadId;
         this.ephemeralThreads.set(active.key, threadId);
@@ -941,6 +992,7 @@ export class PdfDiscussionController {
             lastTurn: {
               status: 'cancelled',
               questionMessageId: active.questionMessageId,
+              ...(active.model ? { model: active.model } : {}),
             },
             updatedAt: this.now(),
           };
@@ -960,6 +1012,7 @@ export class PdfDiscussionController {
         markdown: agentMarkdown,
         createdAt: this.now(),
         codexTurnId: outcome.turnId,
+        ...(active.model ? { codexModel: active.model } : {}),
       };
       return this.replaceAnnotation(active.store, active.annotationId, annotation => {
         this.assertActiveTurnOwnership(annotation, active);
@@ -967,7 +1020,10 @@ export class PdfDiscussionController {
           ...annotation,
           messages: [...annotation.messages, assistantMessage],
           summaryMarkdown: firstParagraph(agentMarkdown),
-          lastTurn: { status: 'idle' },
+          lastTurn: {
+            status: 'idle',
+            ...(active.model ? { model: active.model } : {}),
+          },
           updatedAt: this.now(),
         };
       });
@@ -980,6 +1036,7 @@ export class PdfDiscussionController {
             lastTurn: {
               status: 'cancelled',
               questionMessageId: active.questionMessageId,
+              ...(active.model ? { model: active.model } : {}),
             },
             updatedAt: this.now(),
           };
@@ -996,6 +1053,7 @@ export class PdfDiscussionController {
           lastTurn: {
             status: 'failed',
             questionMessageId: active.questionMessageId,
+            ...(active.model ? { model: active.model } : {}),
             error,
           },
           updatedAt: this.now(),
@@ -1064,7 +1122,11 @@ export class PdfDiscussionController {
       try {
         let started: StartTurnResult;
         try {
-          started = await this.client.startTurn({ threadId, input });
+          started = await this.client.startTurn({
+            threadId,
+            input,
+            ...(active?.model ? { model: active.model } : {}),
+          });
         } catch (cause) {
           this.rejectWaiter(waiter, asError(cause));
           return await waiter.promise;
@@ -1268,6 +1330,7 @@ export class PdfDiscussionController {
             ...(next.lastTurn.questionMessageId
               ? { questionMessageId: next.lastTurn.questionMessageId }
               : {}),
+            ...(next.lastTurn.model ? { model: next.lastTurn.model } : {}),
             error: 'Interrupted before completion',
           },
           updatedAt: this.now(),

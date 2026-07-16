@@ -15,6 +15,7 @@ import {
 import {
   createPdfDiscussionStoreForDocument,
   PDF_DISCUSSION_MAX_PNG_BYTES,
+  PDF_DISCUSSION_MAX_QUESTION_BYTES,
   type PdfDiscussionController,
   type PdfDiscussionControllerEvent,
 } from './pdfDiscussionController';
@@ -443,15 +444,36 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
           await this.context.globalState.update(PDF_DISCUSSION_CONSENT_KEY, message.accepted);
           await this.sendPdfDiscussionState(webview, pdfUri, undefined, message.requestId);
           return;
+        case 'pdfDiscussionListModels': {
+          this.assertPdfDiscussionConsent();
+          try {
+            const models = await controller.listModels();
+            await this.postDiscussionMessage(webview, {
+              type: 'pdfDiscussionModels',
+              models,
+              requestId: message.requestId,
+            });
+          } catch (cause) {
+            await this.postDiscussionMessage(webview, {
+              type: 'pdfDiscussionModels',
+              models: [],
+              error: cause instanceof Error ? cause.message : 'Codex models are unavailable.',
+              requestId: message.requestId,
+            });
+          }
+          return;
+        }
         case 'pdfDiscussionSubmit': {
           this.assertPdfDiscussionConsent();
           const snapshotPng = decodePdfDiscussionSnapshot(message.snapshotPngBase64);
+          const model = normalizePdfDiscussionModel(message.model);
           await controller.submit(store, {
             ...(message.annotationId ? { annotationId: message.annotationId } : {}),
             ...(message.selection
               ? { anchor: this.toDiscussionAnchor(pdfUri, message.selection) }
               : {}),
             question: message.question,
+            ...(model ? { model } : {}),
             ...(snapshotPng ? { snapshotPng } : {}),
           });
           await this.sendPdfDiscussionState(webview, pdfUri, message.annotationId, message.requestId);
@@ -1232,6 +1254,7 @@ function toPdfDiscussionAnnotationSnapshot(
       markdown: message.markdown,
       createdAt: message.createdAt,
       ...(message.codexTurnId !== undefined ? { codexTurnId: message.codexTurnId } : {}),
+      ...(message.codexModel !== undefined ? { codexModel: message.codexModel } : {}),
     })),
     ...(annotation.summaryMarkdown !== undefined
       ? { summaryMarkdown: annotation.summaryMarkdown }
@@ -1241,6 +1264,7 @@ function toPdfDiscussionAnnotationSnapshot(
       ...(annotation.lastTurn.questionMessageId !== undefined
         ? { questionMessageId: annotation.lastTurn.questionMessageId }
         : {}),
+      ...(annotation.lastTurn.model !== undefined ? { model: annotation.lastTurn.model } : {}),
       ...(annotation.lastTurn.error !== undefined ? { error: annotation.lastTurn.error } : {}),
     },
     ...(annotation.promotion
@@ -1307,6 +1331,7 @@ function isPdfDiscussionMessage(
     'pdfDiscussionList',
     'pdfDiscussionOpen',
     'pdfDiscussionLoadSnapshot',
+    'pdfDiscussionListModels',
     'pdfDiscussionSubmit',
     'pdfDiscussionRetry',
     'pdfDiscussionCancel',
@@ -1357,6 +1382,18 @@ function normalizePdfMessageText(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined;
   const text = value.replace(/\s+/g, ' ').trim();
   return text || undefined;
+}
+
+function normalizePdfDiscussionModel(value: unknown): string | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'string') {
+    throw new Error('Ask PDF requires a valid Codex model identifier.');
+  }
+  const model = value.trim();
+  if (!model || Buffer.byteLength(model, 'utf8') > PDF_DISCUSSION_MAX_QUESTION_BYTES) {
+    throw new Error('Ask PDF requires a valid Codex model identifier.');
+  }
+  return model;
 }
 
 function normalizeLookupText(value: unknown): string | undefined {

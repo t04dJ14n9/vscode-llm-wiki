@@ -33,6 +33,15 @@ export interface PdfDiscussionMessageSnapshot {
   markdown: string;
   createdAt: string;
   codexTurnId?: string;
+  codexModel?: string;
+}
+
+export interface PdfDiscussionModelSnapshot {
+  id: string;
+  model: string;
+  displayName: string;
+  description: string;
+  isDefault: boolean;
 }
 
 export interface PdfDiscussionAnnotationSnapshot {
@@ -51,6 +60,7 @@ export interface PdfDiscussionAnnotationSnapshot {
   lastTurn: {
     status: PdfDiscussionTurnStatus;
     questionMessageId?: string;
+    model?: string;
     error?: string;
   };
   promotion?: {
@@ -66,12 +76,14 @@ export type PdfDiscussionWebviewToHostMessage =
   | { type: 'pdfDiscussionList'; requestId?: string }
   | { type: 'pdfDiscussionOpen'; requestId?: string; annotationId: string }
   | { type: 'pdfDiscussionLoadSnapshot'; requestId?: string; annotationId: string }
+  | { type: 'pdfDiscussionListModels'; requestId?: string }
   | {
       type: 'pdfDiscussionSubmit';
       requestId?: string;
       annotationId?: string;
       selection?: PdfDiscussionSelection;
       question: string;
+      model?: string;
       snapshotPngBase64?: string;
     }
   | { type: 'pdfDiscussionRetry'; requestId?: string; annotationId: string }
@@ -100,6 +112,12 @@ export type PdfDiscussionHostToWebviewMessage =
       annotationId: string;
       snapshotPngBase64?: string;
       requestId?: string;
+    }
+  | {
+      type: 'pdfDiscussionModels';
+      models: PdfDiscussionModelSnapshot[];
+      requestId?: string;
+      error?: string;
     }
   | {
       type: 'pdfDiscussionHighlights';

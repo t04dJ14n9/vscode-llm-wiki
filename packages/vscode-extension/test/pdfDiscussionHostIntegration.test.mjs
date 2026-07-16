@@ -417,16 +417,27 @@ async function createPersistedSnapshotTransportHarness(
   return { harness, snapshotVerifications };
 }
 
-async function createSnapshotSubmitHarness(root) {
+async function createSnapshotSubmitHarness(root, { modelError } = {}) {
   const { vscode } = createVscodeMock();
   const fakeStore = { pdfPath: '/vault/docs/real.pdf' };
   const annotation = discussionAnnotation();
   const submissions = [];
+  const models = [{
+    id: 'model-default',
+    model: 'gpt-5.4',
+    displayName: 'GPT-5.4',
+    description: 'Default model',
+    isDefault: true,
+  }];
   const controller = {
     onEvent: () => ({ dispose() {} }),
     list(store) {
       assert.equal(store, fakeStore);
       return [annotation];
+    },
+    async listModels() {
+      if (modelError) throw modelError;
+      return models;
     },
     async submit(store, input) {
       assert.equal(store, fakeStore);
@@ -454,6 +465,7 @@ async function createSnapshotSubmitHarness(root) {
     './pdfDiscussionController': {
       createPdfDiscussionStoreForDocument: () => ({ store: fakeStore, layout: 'vault' }),
       PDF_DISCUSSION_MAX_PNG_BYTES: 5 * 1024 * 1024,
+      PDF_DISCUSSION_MAX_QUESTION_BYTES: 8 * 1024,
     },
   });
   const provider = new PdfEditorProvider(context, {
@@ -722,9 +734,18 @@ test('both providers keep lifecycle ownership and promotion attempts host-intern
       root,
       Buffer.from('persisted-png-bytes'),
       {
+        messages: [{
+          id: 'message-1',
+          role: 'assistant',
+          markdown: 'Model-authored answer.',
+          createdAt: '2026-07-15T00:00:00.000Z',
+          codexTurnId: 'turn-1',
+          codexModel: 'gpt-5.4',
+        }],
         lastTurn: {
           status: 'running',
           questionMessageId: 'message-1',
+          model: 'gpt-5.4',
           ownerId: 'internal-controller-owner',
           ownerPid: process.pid,
           startedAt: '2026-07-15T00:00:00.000Z',
@@ -747,7 +768,9 @@ test('both providers keep lifecycle ownership and promotion attempts host-intern
     assert.deepEqual(snapshot.lastTurn, {
       status: 'running',
       questionMessageId: 'message-1',
+      model: 'gpt-5.4',
     });
+    assert.equal(snapshot.messages[0].codexModel, 'gpt-5.4');
     assert.equal('promotionAttempt' in snapshot, false);
     assert.doesNotMatch(JSON.stringify(snapshot), /internal-controller-owner|internal-thread-id/);
   }
@@ -807,6 +830,70 @@ test('both providers validate incoming crop base64 before decoding and accept ex
       });
       assert.doesNotMatch(JSON.stringify(harness.posted.at(-1)), /\/vault|assets\//);
     }
+  }
+});
+
+test('both providers list Codex models and forward the selected model to submissions', async () => {
+  for (const root of [packageRoot, standaloneRoot]) {
+    const { harness, submissions } = await createSnapshotSubmitHarness(root);
+    await harness.receive({ type: 'pdfDiscussionListModels', requestId: 'models-1' });
+    assert.deepEqual(harness.posted.at(-1), {
+      type: 'pdfDiscussionModels',
+      models: [{
+        id: 'model-default',
+        model: 'gpt-5.4',
+        displayName: 'GPT-5.4',
+        description: 'Default model',
+        isDefault: true,
+      }],
+      requestId: 'models-1',
+    });
+
+    await harness.receive({
+      type: 'pdfDiscussionSubmit',
+      requestId: 'submit-model-1',
+      annotationId: 'ann-1',
+      question: 'Explain this.',
+      model: '  gpt-5.4  ',
+    });
+    assert.equal(submissions.at(-1).model, 'gpt-5.4');
+
+    for (const [requestId, model] of [
+      ['submit-empty-model', '   '],
+      ['submit-non-string-model', { model: 'gpt-5.4' }],
+      ['submit-oversized-model', 'x'.repeat(8 * 1024 + 1)],
+    ]) {
+      const submissionCount = submissions.length;
+      await harness.receive({
+        type: 'pdfDiscussionSubmit',
+        requestId,
+        annotationId: 'ann-1',
+        question: 'Reject this model.',
+        model,
+      });
+      assert.equal(submissions.length, submissionCount);
+      assert.deepEqual(harness.posted.at(-1), {
+        type: 'pdfDiscussionError',
+        message: 'Ask PDF requires a valid Codex model identifier.',
+        annotationId: 'ann-1',
+        requestId,
+      });
+    }
+  }
+});
+
+test('both providers return a non-blocking empty catalog when Codex model discovery fails', async () => {
+  for (const root of [packageRoot, standaloneRoot]) {
+    const { harness } = await createSnapshotSubmitHarness(root, {
+      modelError: new Error('Codex model catalog is unavailable.'),
+    });
+    await harness.receive({ type: 'pdfDiscussionListModels', requestId: 'models-failed' });
+    assert.deepEqual(harness.posted.at(-1), {
+      type: 'pdfDiscussionModels',
+      models: [],
+      error: 'Codex model catalog is unavailable.',
+      requestId: 'models-failed',
+    });
   }
 });
 
