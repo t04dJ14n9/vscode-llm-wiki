@@ -1,3 +1,4 @@
+// Pure page layout calculations shared by rendering and tests.
 export interface PdfPageSize {
   width: number;
   height: number;

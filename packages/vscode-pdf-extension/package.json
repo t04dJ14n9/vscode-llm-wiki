@@ -151,6 +151,7 @@
     "@embedpdf/models": "^2.14.3",
     "@embedpdf/pdfium": "^2.14.3",
     "@human-learning/core": "workspace:*",
+    "@human-learning/pdf-editor": "workspace:*",
     "dompurify": "^3.4.7",
     "marked": "^13.0.3",
     "sql.js": "^1.10.0"

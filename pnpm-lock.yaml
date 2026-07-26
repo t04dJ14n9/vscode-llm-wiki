@@ -67,6 +67,28 @@ importers:
         specifier: ^5.4.0
         version: 5.9.3
 
+  packages/pdf-editor:
+    dependencies:
+      '@embedpdf/engines':
+        specifier: ^2.14.3
+        version: 2.14.3(preact@10.29.2)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)(svelte@5.55.9)(vue@3.5.34(typescript@5.9.3))
+      '@embedpdf/models':
+        specifier: ^2.14.3
+        version: 2.14.3
+      '@embedpdf/pdfium':
+        specifier: ^2.14.3
+        version: 2.14.3
+      dompurify:
+        specifier: ^3.4.7
+        version: 3.4.7
+      marked:
+        specifier: ^13.0.3
+        version: 13.0.3
+    devDependencies:
+      typescript:
+        specifier: ^5.4.0
+        version: 5.9.3
+
   packages/vscode-extension:
     dependencies:
       '@codemirror/autocomplete':
@@ -108,6 +130,9 @@ importers:
       '@human-learning/core':
         specifier: workspace:*
         version: link:../core
+      '@human-learning/pdf-editor':
+        specifier: workspace:*
+        version: link:../pdf-editor
       '@lezer/highlight':
         specifier: ^1.2.3
         version: 1.2.3
@@ -266,6 +291,9 @@ importers:
       '@human-learning/core':
         specifier: workspace:*
         version: link:../core
+      '@human-learning/pdf-editor':
+        specifier: workspace:*
+        version: link:../pdf-editor
       dompurify:
         specifier: ^3.4.7
         version: 3.4.7

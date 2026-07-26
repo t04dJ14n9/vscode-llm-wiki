@@ -1,7 +1,11 @@
 export interface ObsidianContextMenuAction {
   type?: 'action';
+  id?: string;
   label: string;
   icon?: string;
+  role?: 'menuitem' | 'menuitemcheckbox' | 'menuitemradio';
+  checked?: boolean;
+  disabled?: boolean;
   onSelect: () => void;
 }
 
@@ -65,8 +69,14 @@ export function showObsidianContextMenu(options: ObsidianContextMenuOptions): HT
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'obsidian-context-menu__item';
-    button.setAttribute('role', 'menuitem');
+    button.setAttribute('role', item.role ?? 'menuitem');
     button.tabIndex = -1;
+    if (item.id) button.dataset.contextAction = item.id;
+    if (item.checked !== undefined) button.setAttribute('aria-checked', String(item.checked));
+    if (item.disabled) {
+      button.disabled = true;
+      button.setAttribute('aria-disabled', 'true');
+    }
 
     if (item.icon) {
       const icon = document.createElement('span');
@@ -87,7 +97,7 @@ export function showObsidianContextMenu(options: ObsidianContextMenuOptions): HT
       item.onSelect();
     });
 
-    menuItems.push(button);
+    if (!item.disabled) menuItems.push(button);
     menu.appendChild(button);
   }
 
@@ -203,6 +213,13 @@ function ensureObsidianContextMenuStyles(): void {
       background: var(--vscode-menu-selectionBackground, var(--vscode-list-activeSelectionBackground));
       box-shadow: inset 0 0 0 1px var(--vscode-focusBorder, var(--vscode-contrastActiveBorder, transparent));
       color: var(--vscode-menu-selectionForeground, var(--vscode-list-activeSelectionForeground, inherit));
+    }
+    .obsidian-context-menu__item[aria-checked="true"] {
+      box-shadow: inset 2px 0 0 var(--vscode-focusBorder, var(--vscode-menu-selectionBackground));
+      font-weight: 600;
+    }
+    .obsidian-context-menu__item:disabled {
+      opacity: .45;
     }
     .obsidian-context-menu__icon {
       flex: 0 0 16px;

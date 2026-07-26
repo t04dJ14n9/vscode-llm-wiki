@@ -27,6 +27,12 @@ const markdownEditorAliases = {
   '@lezer/markdown$': resolveFromPackage('@codemirror/lang-markdown', '@lezer/markdown'),
 };
 
+const pdfEditorWebviewEntry = require.resolve('@human-learning/pdf-editor/webview', {
+  paths: [__dirname],
+});
+const pdfEditorPackageRoot = path.resolve(path.dirname(pdfEditorWebviewEntry), '../..');
+const pdfEditorWebviewTsConfig = path.join(pdfEditorPackageRoot, 'tsconfig.webview.json');
+
 const webviewPerformance = {
   maxAssetSize: webviewBundleBudget,
   maxEntrypointSize: webviewBundleBudget,
@@ -57,7 +63,7 @@ module.exports = [
   {
     name: 'pdf-viewer',
     target: 'web',
-    entry: './webview-src/pdf-viewer.ts',
+    entry: pdfEditorWebviewEntry,
     output: {
       path: dist,
       filename: 'pdf-viewer.js',
@@ -71,7 +77,7 @@ module.exports = [
     },
     module: {
       rules: [
-        tsRule(),
+        tsRule(pdfEditorWebviewTsConfig),
         {
           test: /\.wasm$/,
           type: 'asset/resource',

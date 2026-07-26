@@ -12,12 +12,12 @@ const resolveWorkspaceModule = (request) => (
   require.resolve(request, { paths: [__dirname, legacyExtensionRoot] })
 );
 
-const tsRule = () => ({
+const tsRule = (configFile = path.resolve(__dirname, 'tsconfig.json')) => ({
   test: /\.ts$/,
   exclude: /node_modules/,
   use: [{
     loader: resolveWorkspaceModule('ts-loader'),
-    options: { configFile: path.resolve(__dirname, 'tsconfig.json') },
+    options: { configFile },
   }],
 });
 
@@ -34,6 +34,9 @@ const resolveOptions = {
 };
 
 const pdfiumPackageRoot = path.resolve(path.dirname(resolveWorkspaceModule('@embedpdf/pdfium')), '..');
+const pdfEditorWebviewEntry = resolveWorkspaceModule('@human-learning/pdf-editor/webview');
+const pdfEditorPackageRoot = path.resolve(path.dirname(pdfEditorWebviewEntry), '../..');
+const pdfEditorWebviewTsConfig = path.join(pdfEditorPackageRoot, 'tsconfig.webview.json');
 
 module.exports = [
   {
@@ -61,7 +64,7 @@ module.exports = [
   {
     name: 'pdf-viewer',
     target: 'web',
-    entry: './webview-src/pdf-viewer.ts',
+    entry: pdfEditorWebviewEntry,
     output: {
       path: dist,
       filename: 'pdf-viewer.js',
@@ -70,7 +73,7 @@ module.exports = [
     resolve: resolveOptions,
     module: {
       rules: [
-        tsRule(),
+        tsRule(pdfEditorWebviewTsConfig),
         {
           test: /\.wasm$/,
           type: 'asset/resource',

@@ -7,9 +7,10 @@ import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const sharedPdfRoot = resolve(packageRoot, '../pdf-editor');
 
 function loadTsModule(relativePath) {
-  const filename = join(packageRoot, relativePath);
+  const filename = join(sharedPdfRoot, relativePath);
   const source = readFileSync(filename, 'utf8');
   const { outputText } = ts.transpileModule(source, {
     compilerOptions: {
@@ -27,7 +28,7 @@ function loadTsModule(relativePath) {
 }
 
 test('pdf layout preserves exact scaled CSS size and DPR backing store', () => {
-  const { createPdfPageLayout, formatCssPx } = loadTsModule('webview-src/pdfLayout.ts');
+  const { createPdfPageLayout, formatCssPx } = loadTsModule('src/webview/pdfLayout.ts');
 
   const layout = createPdfPageLayout({ width: 612, height: 792 }, 1.35, 2);
 
@@ -43,7 +44,7 @@ test('pdf layout preserves exact scaled CSS size and DPR backing store', () => {
 });
 
 test('pdf layout clamps invalid device pixel ratios to one', () => {
-  const { createPdfPageLayout } = loadTsModule('webview-src/pdfLayout.ts');
+  const { createPdfPageLayout } = loadTsModule('src/webview/pdfLayout.ts');
 
   const layout = createPdfPageLayout({ width: 612, height: 792 }, 1.35, 0);
 

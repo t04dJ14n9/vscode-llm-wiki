@@ -3,6 +3,82 @@ import { test, expect, type Locator, type Page } from '@playwright/test';
 const PDF_URL = 'http://localhost:8979/pdf-viewer.html';
 const ACCENT = { red: 77, green: 171, blue: 247 };
 
+test('Ask PDF renders a stable Codex-quiet semantic conversation surface', async ({ page }) => {
+  await openPdf(page);
+  const answered = annotation({
+    messages: [
+      message('q-codex-quiet', 'user', 'Why does tiling matter?'),
+      { ...message('a-codex-quiet', 'assistant', 'It reduces repeated **HBM traffic**.'), codexModel: 'gpt-5.4' },
+    ],
+    lastTurn: { status: 'idle', model: 'gpt-5.4' },
+  });
+  await postHost(page, {
+    type: 'pdfDiscussionSnapshot',
+    annotations: [answered],
+    consentGranted: true,
+    activeAnnotationId: answered.id,
+  });
+
+  const panel = page.getByRole('complementary', { name: 'Ask about selection' });
+  await expect(panel).toBeVisible();
+  await expect(panel.getByRole('heading', { name: 'Ask about selection' })).toBeVisible();
+  await expect(panel.locator('details[data-ask-source]')).not.toHaveAttribute('open', '');
+  await expect(panel.getByText('YOU', { exact: true })).toHaveCount(0);
+  await expect(panel.getByText('CODEX', { exact: true })).toHaveCount(0);
+  await expect(panel.getByRole('button', { name: 'Send question' }).locator('svg')).toHaveCount(1);
+
+  await expect.poll(() => messagesOfType(page, 'pdfDiscussionListModels')).toHaveLength(1);
+  await postHost(page, {
+    type: 'pdfDiscussionModels',
+    models: [
+      { id: 'default', model: 'gpt-5.4', displayName: 'GPT-5.4', description: 'Default model', isDefault: true },
+      { id: 'fast', model: 'gpt-5.4-mini', displayName: 'GPT-5.4 Mini', description: 'Fast model', isDefault: false },
+    ],
+  });
+  await expect(panel.getByRole('combobox', { name: 'Codex model' })).toHaveValue('gpt-5.4');
+
+  const composer = panel.getByRole('textbox', { name: 'Ask about this selection' });
+  await composer.focus();
+  await composer.evaluate(element => { (window as any).__askComposerNode = element; });
+  await postHost(page, { type: 'pdfDiscussionDelta', annotationId: answered.id, delta: 'Additional detail.' });
+  await expect.poll(() => composer.evaluate(element => element === (window as any).__askComposerNode)).toBe(true);
+  await expect(composer).toBeFocused();
+});
+
+test('Ask PDF submits the selected Codex model and locks the picker during the turn', async ({ page }) => {
+  await openPdf(page);
+  await askAbout(page, 'FlashAttention uses tiling');
+  const prepare = await lastMessage(page, 'pdfDiscussionPrepare');
+  await postHost(page, {
+    type: 'pdfDiscussionPrepared',
+    requestId: prepare.requestId,
+    selectionKey: 'selection-model-picker',
+  });
+  await postHost(page, { type: 'pdfDiscussionSnapshot', annotations: [], consentGranted: true });
+  await expect.poll(() => messagesOfType(page, 'pdfDiscussionListModels')).toHaveLength(1);
+  await postHost(page, {
+    type: 'pdfDiscussionModels',
+    models: [
+      { id: 'default', model: 'gpt-5.4', displayName: 'GPT-5.4', description: 'Default model', isDefault: true },
+      { id: 'fast', model: 'gpt-5.4-mini', displayName: 'GPT-5.4 Mini', description: 'Fast model', isDefault: false },
+    ],
+  });
+
+  const panel = page.getByRole('complementary', { name: 'Ask about selection' });
+  const modelPicker = panel.getByRole('combobox', { name: 'Codex model' });
+  await modelPicker.selectOption('gpt-5.4-mini');
+  await panel.getByRole('textbox', { name: 'Ask about this selection' }).fill('Explain this with the fast model.');
+  await panel.getByRole('button', { name: 'Send question' }).click();
+  await expect.poll(() => messagesOfType(page, 'pdfDiscussionSubmit')).toEqual([
+    expect.objectContaining({
+      question: 'Explain this with the fast model.',
+      model: 'gpt-5.4-mini',
+    }),
+  ]);
+  await expect(modelPicker).toBeDisabled();
+  await expect(panel.getByRole('button', { name: 'Send question' })).toBeDisabled();
+});
+
 test('Ask PDF follows Look up, prepares without persisting, and captures an outlined bounded crop', async ({ page }) => {
   await openPdf(page);
   await selectText(page, 'FlashAttention uses tiling');
@@ -19,7 +95,7 @@ test('Ask PDF follows Look up, prepares without persisting, and captures an outl
   expect(await messagesOfType(page, 'pdfDiscussionSubmit')).toHaveLength(0);
   expect(await page.evaluate(() => window.getSelection()?.isCollapsed)).toBe(true);
 
-  const panel = page.getByRole('complementary', { name: 'Ask PDF' });
+  const panel = page.getByRole('complementary', { name: 'Ask about selection' });
   await expect(panel).toBeVisible();
   await expect(panel.getByRole('link', { name: 'Page 1' })).toBeVisible();
   await panel.getByRole('button', { name: 'Copy portable selection link' }).click();
@@ -28,8 +104,9 @@ test('Ask PDF follows Look up, prepares without persisting, and captures an outl
       selection: expect.objectContaining({ page: 1, snippet: 'FlashAttention uses tiling' }),
     }),
   ]);
-  await expect(panel.getByText('FlashAttention uses tiling', { exact: true })).toBeVisible();
+  await expect(panel.locator('.ask-pdf-source-preview')).toHaveText('FlashAttention uses tiling');
 
+  await panel.locator('details[data-ask-source] summary').click();
   const crop = panel.locator('img.ask-pdf-crop');
   await expect(crop).toBeVisible();
   const stats = await crop.evaluate(async (image: HTMLImageElement, accent) => {
@@ -75,7 +152,7 @@ test('Ask PDF opens as an anchored floating inspector inside the PDF viewport', 
   await openSelectionContextMenu(page);
   await page.getByRole('menuitem', { name: 'Ask about selection…', exact: true }).click();
 
-  const panel = page.getByRole('complementary', { name: 'Ask PDF' });
+  const panel = page.getByRole('complementary', { name: 'Ask about selection' });
   await expect(panel).toBeVisible();
   await expect(panel).toHaveCSS('position', 'absolute');
   await expect(panel).toHaveClass(/attached/);
@@ -91,9 +168,16 @@ test('Ask PDF opens as an anchored floating inspector inside the PDF viewport', 
   expect(overlapArea(panelBox, toolbarBox)).toBe(0);
 
   await page.locator('#viewer-container').evaluate((container: HTMLElement) => {
+    // The default one-page fixture is auto-fit and has no natural overflow.
+    // Add document-space below it so this remains a deterministic assertion
+    // that an attached inspector follows its anchor during a real scroll.
+    document.querySelector<HTMLElement>('#page-container')!.style.paddingBottom = '180px';
     container.scrollTop += 72;
     container.dispatchEvent(new Event('scroll'));
   });
+  await expect.poll(() => page.locator('#viewer-container').evaluate(
+    (container: HTMLElement) => container.scrollTop,
+  )).toBeGreaterThan(0);
   await expect.poll(async () => Math.round((await requiredBox(panel)).y)).not.toBe(Math.round(panelBox.y));
   await expect(panel).toHaveClass(/attached/);
 });
@@ -110,7 +194,7 @@ test('Ask PDF migrates moved draft geometry and restores the durable inspector a
   });
   await postHost(page, { type: 'pdfDiscussionSnapshot', annotations: [], consentGranted: true });
 
-  const panel = page.getByRole('complementary', { name: 'Ask PDF' });
+  const panel = page.getByRole('complementary', { name: 'Ask about selection' });
   const composer = panel.getByPlaceholder('Ask about this selection');
   await composer.fill('Draft owned by the floating inspector');
   await dragBy(page, panel.locator('.ask-pdf-header'), 84, 68);
@@ -180,7 +264,7 @@ test('Ask PDF markers and overview restore annotation-owned geometry drafts and 
     activeAnnotationId: first.id,
   });
 
-  const panel = page.getByRole('complementary', { name: 'Ask PDF' });
+  const panel = page.getByRole('complementary', { name: 'Ask about selection' });
   const composer = panel.getByPlaceholder('Ask about this selection');
   await expect(panel).toContainText('Question A transcript');
   await composer.fill('Draft A');
@@ -236,7 +320,7 @@ test('Ask PDF keyboard resizing stays accessible while narrow mode disables poin
     activeAnnotationId: cited.id,
   });
 
-  const panel = page.getByRole('complementary', { name: 'Ask PDF' });
+  const panel = page.getByRole('complementary', { name: 'Ask about selection' });
   const separator = panel.locator('.ask-pdf-resizer');
   await expect(separator).toHaveAttribute('aria-valuemin', '320');
   await expect(separator).toHaveAttribute('aria-valuemax', '560');
@@ -263,11 +347,13 @@ test('Ask PDF keyboard resizing stays accessible while narrow mode disables poin
       right: Math.round(shellRect.right - panelRect.right),
       bottom: Math.round(shellRect.bottom - panelRect.bottom),
     };
-  })).toEqual({ left: 12, top: 12, right: 12, bottom: expect.any(Number) });
+  })).toEqual({ left: 0, top: 0, right: 0, bottom: expect.any(Number) });
 
   const narrow = await requiredBox(panel);
   await dragBy(page, panel.locator('.ask-pdf-header'), 72, 68);
-  await resizeBy(page, panel.locator('.ask-pdf-resize-handle[data-direction="se"]'), -64, -52);
+  expect(await panel.locator('.ask-pdf-resize-handle:not(.ask-pdf-resizer)').evaluateAll(elements =>
+    elements.every(element => getComputedStyle(element).display === 'none'),
+  )).toBe(true);
   expectBoxNear(await requiredBox(panel), narrow);
 });
 
@@ -282,13 +368,13 @@ test('Ask PDF exposes only reachable resize values below its nominal minimum wid
     activeAnnotationId: cited.id,
   });
 
-  const panel = page.getByRole('complementary', { name: 'Ask PDF' });
+  const panel = page.getByRole('complementary', { name: 'Ask about selection' });
   const separator = panel.locator('.ask-pdf-resizer');
   await expect(separator).toHaveAttribute('aria-valuemin', '320');
   await expect(separator).toHaveAttribute('aria-valuemax', '560');
 
   await page.setViewportSize({ width: 330, height: 820 });
-  await expect.poll(async () => Math.round((await requiredBox(panel)).width)).toBeLessThan(320);
+  await expect.poll(async () => Math.round((await requiredBox(panel)).width)).toBe(330);
   const narrowWidth = Math.round((await requiredBox(panel)).width);
   await expect(separator).toHaveAttribute('aria-valuemin', String(narrowWidth));
   await expect(separator).toHaveAttribute('aria-valuemax', String(narrowWidth));
@@ -321,7 +407,7 @@ test('Ask PDF minimizes the active annotation when Escape originates in the PDF'
     activeAnnotationId: first.id,
   });
 
-  const panel = page.getByRole('complementary', { name: 'Ask PDF' });
+  const panel = page.getByRole('complementary', { name: 'Ask about selection' });
   await page.locator(`.pdf-discussion-marker[data-annotation-id="${second.id}"]`).click();
   await page.locator(`.pdf-discussion-marker[data-annotation-id="${first.id}"]`).click();
   await page.keyboard.press('Control+F');
@@ -357,7 +443,7 @@ test('Ask PDF yields panel-origin Escape to an active PDF tool before minimizing
     activeAnnotationId: cited.id,
   });
 
-  const panel = page.getByRole('complementary', { name: 'Ask PDF' });
+  const panel = page.getByRole('complementary', { name: 'Ask about selection' });
   const composer = panel.getByPlaceholder('Ask about this selection');
   await page.keyboard.press('Control+F');
   await expect(page.locator('#pdf-search')).toBeVisible();
@@ -392,7 +478,7 @@ test('Ask PDF rejects a cross-page native selection with a precise text-only err
     window.postMessage({ type: 'pdfDiscussionOpenForSelection' }, '*');
   });
 
-  await expect(page.getByRole('complementary', { name: 'Ask PDF' })).toContainText('Select text on one page');
+  await expect(page.getByRole('complementary', { name: 'Ask about selection' })).toContainText('Select text on one page');
   expect(await messagesOfType(page, 'pdfDiscussionPrepare')).toHaveLength(0);
 });
 
@@ -406,9 +492,12 @@ test('Ask PDF separates the exact selected passage from explicitly labelled near
     activeAnnotationId: cited.id,
   });
 
-  const source = page.getByRole('complementary', { name: 'Ask PDF' }).locator('.ask-pdf-source');
+  const source = page.getByRole('complementary', { name: 'Ask about selection' }).locator('.ask-pdf-source');
   const disclosure = source.locator('details.ask-pdf-context');
-  await expect(disclosure.locator('summary')).toHaveText('Exact selected passage');
+  await expect(disclosure).not.toHaveAttribute('open', '');
+  await expect(disclosure.locator('summary > span').first()).toHaveText('Selected passage');
+  await expect(disclosure.locator('.ask-pdf-source-preview')).toHaveText(cited.anchor.quote);
+  await disclosure.locator('summary').click();
   await expect(disclosure.locator('blockquote')).toHaveText(cited.anchor.quote);
 
   const nearby = source.getByRole('region', { name: 'Nearby context' });
@@ -427,8 +516,9 @@ test('Ask PDF omits nearby context when the anchor has no prefix or suffix', asy
     activeAnnotationId: cited.id,
   });
 
-  const source = page.getByRole('complementary', { name: 'Ask PDF' }).locator('.ask-pdf-source');
-  await expect(source.locator('summary')).toHaveText('Exact selected passage');
+  const source = page.getByRole('complementary', { name: 'Ask about selection' }).locator('.ask-pdf-source');
+  await expect(source.locator('summary > span').first()).toHaveText('Selected passage');
+  await source.locator('summary').click();
   await expect(source.locator('blockquote')).toHaveText(cited.anchor.quote);
   await expect(source.getByRole('region', { name: 'Nearby context' })).toHaveCount(0);
 });
@@ -448,7 +538,7 @@ test('Ask PDF submits text-only context when page-crop capture fails', async ({ 
     selectionKey: 'selection-text-only',
   });
 
-  const panel = page.getByRole('complementary', { name: 'Ask PDF' });
+  const panel = page.getByRole('complementary', { name: 'Ask about selection' });
   await expect(panel.locator('img.ask-pdf-crop')).toHaveCount(0);
   await expect(panel).toContainText('The page crop is unavailable, so Ask PDF will use text-only context.');
   await panel.getByRole('button', { name: 'Accept and continue' }).click();
@@ -473,7 +563,7 @@ test('Ask PDF preserves the exact draft until persistence is acknowledged and bl
   });
   await postHost(page, { type: 'pdfDiscussionSnapshot', annotations: [], consentGranted: true });
 
-  const panel = page.getByRole('complementary', { name: 'Ask PDF' });
+  const panel = page.getByRole('complementary', { name: 'Ask about selection' });
   const composer = panel.getByPlaceholder('Ask about this selection');
   const exactDraft = '  Explain this passage after the crop is saved.  ';
   await composer.fill(exactDraft);
@@ -497,7 +587,7 @@ test('Ask PDF preserves the exact draft until persistence is acknowledged and bl
   await expect(composer).toBeEnabled();
   expect(await page.evaluate(() => window.__mockState.askPdfDraft)).toBe(exactDraft);
 
-  await panel.getByRole('button', { name: 'Ask Codex' }).click();
+  await panel.getByRole('button', { name: 'Send question' }).click();
   await expect.poll(() => messagesOfType(page, 'pdfDiscussionSubmit')).toHaveLength(2);
   const persisted = annotation({
     selectionKey: 'selection-pending-draft',
@@ -535,7 +625,7 @@ test('Ask PDF keeps pending submit state and identical drafts owned by their ann
     activeAnnotationId: first.id,
   });
 
-  const panel = page.getByRole('complementary', { name: 'Ask PDF' });
+  const panel = page.getByRole('complementary', { name: 'Ask about selection' });
   const composer = panel.getByPlaceholder('Ask about this selection');
   const identicalDraft = 'Explain the same phrase';
   await composer.fill(identicalDraft);
@@ -580,7 +670,7 @@ test('Ask PDF releases a pending submit after its late error without leaking tha
     activeAnnotationId: existing.id,
   });
 
-  const panel = page.getByRole('complementary', { name: 'Ask PDF' });
+  const panel = page.getByRole('complementary', { name: 'Ask about selection' });
   const composer = panel.getByPlaceholder('Ask about this selection');
   await composer.fill('Question from the old selection');
   await composer.press('Control+Enter');
@@ -613,10 +703,10 @@ test('Ask PDF waits for the matching prepare response before submitting a new se
   const prepare = await lastMessage(page, 'pdfDiscussionPrepare');
   await postHost(page, { type: 'pdfDiscussionSnapshot', annotations: [], consentGranted: true });
 
-  const panel = page.getByRole('complementary', { name: 'Ask PDF' });
+  const panel = page.getByRole('complementary', { name: 'Ask about selection' });
   const composer = panel.getByPlaceholder('Ask about this selection');
   await composer.fill('Do not race the prepare response.');
-  await expect(panel.getByRole('button', { name: 'Ask Codex' })).toBeDisabled();
+  await expect(panel.getByRole('button', { name: 'Send question' })).toBeDisabled();
   await composer.press('Control+Enter');
   expect(await messagesOfType(page, 'pdfDiscussionSubmit')).toHaveLength(0);
 
@@ -625,7 +715,7 @@ test('Ask PDF waits for the matching prepare response before submitting a new se
     requestId: prepare.requestId,
     selectionKey: 'selection-delayed-prepare',
   });
-  await expect(panel.getByRole('button', { name: 'Ask Codex' })).toBeEnabled();
+  await expect(panel.getByRole('button', { name: 'Send question' })).toBeEnabled();
   await composer.press('Control+Enter');
   expect(await messagesOfType(page, 'pdfDiscussionSubmit')).toHaveLength(1);
 
@@ -657,7 +747,7 @@ test('Ask PDF does not acknowledge a repeated question until a new user message 
     activeAnnotationId: existing.id,
   });
 
-  const panel = page.getByRole('complementary', { name: 'Ask PDF' });
+  const panel = page.getByRole('complementary', { name: 'Ask about selection' });
   const composer = panel.getByPlaceholder('Ask about this selection');
   await composer.fill('Explain more');
   await composer.press('Control+Enter');
@@ -705,7 +795,7 @@ test('Ask PDF withholds retry and promotion until first-use consent is accepted'
     activeAnnotationId: failedWithAnswer.id,
   });
 
-  const panel = page.getByRole('complementary', { name: 'Ask PDF' });
+  const panel = page.getByRole('complementary', { name: 'Ask about selection' });
   await expect(panel.getByRole('button', { name: 'Retry answer' })).toHaveCount(0);
   await expect(panel.getByRole('button', { name: 'Continue in Codex' })).toHaveCount(0);
   await expect(panel.getByPlaceholder('Ask about this selection')).toBeDisabled();
@@ -730,8 +820,8 @@ test('Ask PDF clears only a matching transient action error after the turn resol
     consentGranted: true,
     activeAnnotationId: running.id,
   });
-  const panel = page.getByRole('complementary', { name: 'Ask PDF' });
-  await panel.getByRole('button', { name: 'Stop' }).click();
+  const panel = page.getByRole('complementary', { name: 'Ask about selection' });
+  await panel.getByRole('button', { name: 'Stop response' }).click();
   const cancel = await lastMessage(page, 'pdfDiscussionCancel');
   await postHost(page, {
     type: 'pdfDiscussionError',
@@ -781,7 +871,7 @@ test('Ask PDF manages initial focus, preserves composer selection across streami
   const prepare = await lastMessage(page, 'pdfDiscussionPrepare');
   await postHost(page, { type: 'pdfDiscussionPrepared', requestId: prepare.requestId, selectionKey: 'selection-focus' });
 
-  const panel = page.getByRole('complementary', { name: 'Ask PDF' });
+  const panel = page.getByRole('complementary', { name: 'Ask about selection' });
   const accept = panel.getByRole('button', { name: 'Accept and continue' });
   await expect(accept).toBeFocused();
   await accept.click();
@@ -808,9 +898,9 @@ test('Ask PDF preserves draft consent and streams into a durable sanitized answe
   const prepare = await lastMessage(page, 'pdfDiscussionPrepare');
   await postHost(page, { type: 'pdfDiscussionPrepared', requestId: prepare.requestId, selectionKey: 'selection-1' });
 
-  const panel = page.getByRole('complementary', { name: 'Ask PDF' });
+  const panel = page.getByRole('complementary', { name: 'Ask about selection' });
   await expect(panel).toContainText('Selected text and crop are sent to Codex');
-  await expect(panel).toContainText('cached web search may be used');
+  await expect(panel).toContainText(/cached web search may be used/i);
   await panel.getByRole('button', { name: 'Accept and continue' }).click();
   await expect.poll(() => messagesOfType(page, 'pdfDiscussionConsent')).toHaveLength(1);
   await postHost(page, { type: 'pdfDiscussionSnapshot', annotations: [], consentGranted: true });
@@ -830,11 +920,11 @@ test('Ask PDF preserves draft consent and streams into a durable sanitized answe
     consentGranted: true,
     activeAnnotationId: 'discussion-1',
   });
-  await expect(panel.getByLabel('Codex is responding')).toContainText('Codex is responding');
+  await expect(panel.getByLabel('Codex is responding')).toContainText('Thinking…');
   await postHost(page, { type: 'pdfDiscussionDelta', annotationId: 'discussion-1', delta: '**Tiling** is ' });
   await postHost(page, { type: 'pdfDiscussionDelta', annotationId: 'discussion-1', delta: 'I/O efficient.' });
   await expect(panel.getByLabel('Codex is responding')).toContainText('Tiling is I/O efficient.');
-  await expect(panel.getByRole('button', { name: 'Stop' })).toBeVisible();
+  await expect(panel.getByRole('button', { name: 'Stop response' })).toBeVisible();
   await postHost(page, {
     type: 'pdfDiscussionError',
     requestId: submit.requestId,
@@ -852,8 +942,10 @@ test('Ask PDF preserves draft consent and streams into a durable sanitized answe
   await postHost(page, { type: 'pdfDiscussionSnapshot', annotations: [answered], consentGranted: true, activeAnnotationId: answered.id });
   await expect(panel).not.toContainText('This PDF discussion already has an active turn.');
 
-  await expect(panel.getByText('YOU', { exact: true })).toBeVisible();
-  await expect(panel.getByText('CODEX', { exact: true })).toBeVisible();
+  await expect(panel.getByText('YOU', { exact: true })).toHaveCount(0);
+  await expect(panel.getByText('CODEX', { exact: true })).toHaveCount(0);
+  await expect(panel.locator('.ask-pdf-message.user')).toContainText('Why does tiling reduce HBM traffic?');
+  await expect(panel.locator('.ask-pdf-message.assistant')).toContainText('Tiling reuses blocks.');
   await expect(panel.locator('strong', { hasText: 'Tiling' })).toBeVisible();
   await expect(panel.locator('script')).toHaveCount(0);
   await expect(panel.locator('img[src="x"]')).toHaveCount(0);
@@ -875,7 +967,7 @@ test('Ask PDF preserves draft consent and streams into a durable sanitized answe
 
   await page.evaluate(() => { window.__mockMessages = []; });
   await composer.fill('What should I read next?');
-  const send = panel.getByRole('button', { name: 'Ask Codex' });
+  const send = panel.getByRole('button', { name: 'Send question' });
   await expect(send).toBeEnabled();
   await send.click();
   await expect.poll(() => messagesOfType(page, 'pdfDiscussionSubmit')).toEqual([
@@ -893,7 +985,7 @@ test('Ask PDF announces only each new stream delta while keeping the visible res
     activeAnnotationId: running.id,
   });
 
-  const panel = page.getByRole('complementary', { name: 'Ask PDF' });
+  const panel = page.getByRole('complementary', { name: 'Ask about selection' });
   const liveRegion = panel.getByRole('status', { name: 'Codex response updates' });
   await expect(liveRegion).toHaveCount(1);
   expect(await liveRegion.evaluate(element => element.closest('.ask-pdf-content'))).toBeNull();
@@ -928,7 +1020,7 @@ test('Ask PDF announces stream deltas only for the active discussion', async ({ 
     activeAnnotationId: active.id,
   });
 
-  const panel = page.getByRole('complementary', { name: 'Ask PDF' });
+  const panel = page.getByRole('complementary', { name: 'Ask about selection' });
   const liveRegion = panel.getByRole('status', { name: 'Codex response updates' });
   await postHost(page, {
     type: 'pdfDiscussionDelta',
@@ -983,7 +1075,7 @@ test('Ask PDF keeps the newer selection active across stale responses and backgr
     annotations: [first, second],
     consentGranted: true,
   });
-  const panel = page.getByRole('complementary', { name: 'Ask PDF' });
+  const panel = page.getByRole('complementary', { name: 'Ask about selection' });
   await expect(panel).toContainText('Question B');
   await expect(panel).toContainText('Partial B');
 
@@ -1044,7 +1136,7 @@ test('Ask PDF markers, count, overview, retry, promotion, minimize, and Stop use
   await expect.poll(() => messagesOfType(page, 'pdfDiscussionOpen')).toContainEqual(
     expect.objectContaining({ annotationId: failed.id }),
   );
-  const panel = page.getByRole('complementary', { name: 'Ask PDF' });
+  const panel = page.getByRole('complementary', { name: 'Ask about selection' });
   await panel.getByRole('button', { name: 'Retry answer' }).click();
   await expect.poll(() => messagesOfType(page, 'pdfDiscussionRetry')).toContainEqual(
     expect.objectContaining({ annotationId: failed.id }),
@@ -1056,7 +1148,7 @@ test('Ask PDF markers, count, overview, retry, promotion, minimize, and Stop use
   await expect(panel).toBeHidden();
   expect(await messagesOfType(page, 'pdfDiscussionCancel')).toHaveLength(0);
   await page.locator('.pdf-discussion-marker').first().click();
-  await panel.getByRole('button', { name: 'Stop' }).click();
+  await panel.getByRole('button', { name: 'Stop response' }).click();
   await expect.poll(() => messagesOfType(page, 'pdfDiscussionCancel')).toContainEqual(
     expect.objectContaining({ annotationId: failed.id }),
   );
@@ -1113,6 +1205,66 @@ test('Ask PDF keeps one keyboard marker and lets an overlapping reference highli
   await expect.poll(() => messagesOfType(page, 'requestReferencesForAnchor')).toHaveLength(1);
 });
 
+test('Ask PDF persists mixed-style selection as the same two fill-only visual bands', async ({ page }) => {
+  await openPdf(page, 'mixed-style-selection');
+  await selectAcrossTextItems(
+    page,
+    'Normal text before',
+    'Tightly spaced normal second line.',
+  );
+  const selectionBands = await page.locator('#page-1 .pdf-selection-rect').evaluateAll(elements => elements
+    .map(element => {
+      const rect = element.getBoundingClientRect();
+      return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+    })
+    .sort((left, right) => left.y - right.y || left.x - right.x));
+  expect(selectionBands).toHaveLength(2);
+
+  await openSelectionContextMenu(page);
+  await page.getByRole('menuitem', { name: 'Ask about selection…', exact: true }).click();
+  const prepare = await lastMessage(page, 'pdfDiscussionPrepare');
+  expect(prepare.selection.rects).toHaveLength(2);
+  const persisted = annotation({
+    id: 'discussion-mixed-style-bands',
+    selectionKey: 'selection-mixed-style-bands',
+    anchor: {
+      ...baseAnchor(),
+      quote: prepare.selection.snippet,
+      rects: prepare.selection.rects,
+    },
+  });
+  await postHost(page, {
+    type: 'pdfDiscussionSnapshot',
+    annotations: [persisted],
+    consentGranted: true,
+    activeAnnotationId: persisted.id,
+  });
+
+  const discussionBands = page.locator('.pdf-discussion-outline');
+  await expect(discussionBands).toHaveCount(2);
+  const persistedBands = await discussionBands.evaluateAll(elements => elements
+    .map(element => {
+      const rect = element.getBoundingClientRect();
+      const style = getComputedStyle(element);
+      return {
+        box: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+        backgroundColor: style.backgroundColor,
+        borderTopStyle: style.borderTopStyle,
+        borderTopWidth: style.borderTopWidth,
+        outlineStyle: style.outlineStyle,
+      };
+    })
+    .sort((left, right) => left.box.y - right.box.y || left.box.x - right.box.x));
+
+  persistedBands.forEach((band, index) => {
+    expectBoxNear(band.box, selectionBands[index]);
+    expect(band.borderTopStyle).toBe('none');
+    expect(band.borderTopWidth).toBe('0px');
+    expect(band.outlineStyle).toBe('none');
+    expect(cssAlpha(band.backgroundColor)).toBeGreaterThan(0);
+  });
+});
+
 test('Ask PDF restores persisted crop lazily and initializes durable floating state', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 820 });
   await openPdf(page);
@@ -1126,9 +1278,10 @@ test('Ask PDF restores persisted crop lazily and initializes durable floating st
   );
   const dataUrl = await page.locator('#page-1 .pdf-canvas').evaluate((canvas: HTMLCanvasElement) => canvas.toDataURL('image/png'));
   await postHost(page, { type: 'pdfDiscussionSnapshotImage', annotationId: answered.id, snapshotPngBase64: dataUrl.split(',')[1] });
+  await page.getByRole('complementary', { name: 'Ask about selection' }).locator('details[data-ask-source] summary').click();
   await expect(page.locator('img.ask-pdf-crop')).toBeVisible();
 
-  const panel = page.getByRole('complementary', { name: 'Ask PDF' });
+  const panel = page.getByRole('complementary', { name: 'Ask about selection' });
   await expect(panel).toHaveCSS('width', '380px');
   await expect(panel).toHaveCSS('height', '520px');
   const resizer = panel.locator('.ask-pdf-resizer');
@@ -1159,7 +1312,8 @@ test('Ask PDF treats a missing persisted crop as a text-only acknowledgement wit
   });
   await expect.poll(() => messagesOfType(page, 'pdfDiscussionLoadSnapshot')).toHaveLength(1);
 
-  const panel = page.getByRole('complementary', { name: 'Ask PDF' });
+  const panel = page.getByRole('complementary', { name: 'Ask about selection' });
+  await panel.locator('details[data-ask-source] summary').click();
   await expect(panel.locator('img.ask-pdf-crop')).toBeVisible();
   await postHost(page, { type: 'pdfDiscussionSnapshotImage', annotationId: withMissingCrop.id });
   await expect(panel.locator('img.ask-pdf-crop')).toHaveCount(0);
@@ -1177,17 +1331,26 @@ test('Ask PDF treats a missing persisted crop as a text-only acknowledgement wit
   await expect(panel.locator('img.ask-pdf-crop')).toHaveCount(0);
 });
 
-test('Ask PDF answered desktop and narrow overlay retain stable scholarly-marginalia visuals', async ({ page }) => {
+test('Ask PDF answered desktop and narrow overlay retain stable Codex-quiet visuals', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 820 });
   await openPdf(page);
   const answered = annotation({
     messages: [
       message('q', 'user', 'Why does the paper tile attention?'),
-      message('a', 'assistant', 'Tiling keeps working blocks close to compute, reducing repeated **HBM traffic**.'),
+      { ...message('a', 'assistant', 'Tiling keeps working blocks close to compute, reducing repeated **HBM traffic**.'), codexModel: 'gpt-5.4' },
     ],
+    lastTurn: { status: 'idle', model: 'gpt-5.4' },
   });
   await postHost(page, { type: 'pdfDiscussionSnapshot', annotations: [answered], consentGranted: true, activeAnnotationId: answered.id });
-  const panel = page.getByRole('complementary', { name: 'Ask PDF' });
+  await expect.poll(() => messagesOfType(page, 'pdfDiscussionListModels')).toHaveLength(1);
+  await postHost(page, {
+    type: 'pdfDiscussionModels',
+    models: [
+      { id: 'default', model: 'gpt-5.4', displayName: 'GPT-5.4', description: 'Default model', isDefault: true },
+      { id: 'fast', model: 'gpt-5.4-mini', displayName: 'GPT-5.4 Mini', description: 'Fast model', isDefault: false },
+    ],
+  });
+  const panel = page.getByRole('complementary', { name: 'Ask about selection' });
   await expect(panel).toHaveScreenshot('ask-pdf-answered-desktop.png');
 
   await page.setViewportSize({ width: 600, height: 820 });
@@ -1220,6 +1383,21 @@ async function selectText(page: Page, quote: string): Promise<void> {
   await expect(page.locator('#selection-toolbar')).toBeVisible();
 }
 
+async function selectAcrossTextItems(page: Page, startText: string, endText: string): Promise<void> {
+  const startItem = page.locator('#page-1 .text-layer span[data-item-index]').filter({ hasText: startText });
+  const endItem = page.locator('#page-1 .text-layer span[data-item-index]').filter({ hasText: endText });
+  await expect(startItem).toHaveCount(1);
+  await expect(endItem).toHaveCount(1);
+  const start = await requiredBox(startItem);
+  const end = await requiredBox(endItem);
+  await page.mouse.move(start.x + 1, start.y + start.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(end.x + end.width - 1, end.y + end.height / 2, { steps: 12 });
+  await page.mouse.up();
+  await expect(page.locator('#selection-toolbar')).toBeVisible();
+  await expect(page.locator('#page-1 .pdf-selection-rect')).toHaveCount(2);
+}
+
 async function openSelectionContextMenu(page: Page): Promise<void> {
   await page.evaluate(() => {
     const selection = window.getSelection();
@@ -1241,7 +1419,7 @@ async function askAbout(page: Page, quote: string): Promise<void> {
   await selectText(page, quote);
   await openSelectionContextMenu(page);
   await page.getByRole('menuitem', { name: 'Ask about selection…', exact: true }).click();
-  await expect(page.getByRole('complementary', { name: 'Ask PDF' })).toBeVisible();
+  await expect(page.getByRole('complementary', { name: 'Ask about selection' })).toBeVisible();
 }
 
 async function messagesOfType(page: Page, type: string): Promise<any[]> {
@@ -1285,6 +1463,12 @@ function annotation(overrides: Record<string, any> = {}) {
     updatedAt: '2026-07-15T12:00:00.000Z',
     ...overrides,
   };
+}
+
+function cssAlpha(color: string): number {
+  const values = color.match(/[\d.]+/gu)?.map(Number) ?? [];
+  if (color.startsWith('rgba')) return values[3] ?? 0;
+  return values.length >= 3 ? 1 : 0;
 }
 
 type ElementBox = { x: number; y: number; width: number; height: number };

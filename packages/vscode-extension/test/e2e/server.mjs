@@ -49,8 +49,23 @@ const server = createServer((_req, res) => {
     return;
   }
 
+  if (url.pathname === '/fixtures/out-of-order-text.pdf') {
+    serveBuffer(outOfOrderTextPdfFixture(), 'application/pdf', res);
+    return;
+  }
+
+  if (url.pathname === '/fixtures/mixed-style-selection.pdf') {
+    serveBuffer(mixedStyleSelectionPdfFixture(), 'application/pdf', res);
+    return;
+  }
+
   if (url.pathname === '/fixtures/unicode-selector.pdf') {
     serveBuffer(unicodeSelectorPdfFixture(), 'application/pdf', res);
+    return;
+  }
+
+  if (url.pathname === '/fixtures/internal-destinations.pdf') {
+    serveBuffer(internalDestinationsPdfFixture(), 'application/pdf', res);
     return;
   }
 
@@ -193,6 +208,36 @@ function selectorEdgePdfFixture() {
   return pdfFixture(objects);
 }
 
+function outOfOrderTextPdfFixture() {
+  const objects = [
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 420 320] /Resources << /Font << /F1 9 0 R >> >> /Contents [4 0 R 5 0 R 6 0 R 7 0 R 8 0 R] >>',
+    pdfStream('BT /F1 16 Tf 48 250 Td (First line starts the paragraph.) Tj ET'),
+    pdfStream('BT /F1 16 Tf 48 160 Td (Fourth line should not jump ahead.) Tj ET'),
+    pdfStream('BT /F1 16 Tf 48 130 Td (Fifth line ends the paragraph.) Tj ET'),
+    pdfStream('BT /F1 16 Tf 48 220 Td (\\007Second line continues in visual order.) Tj ET'),
+    pdfStream('BT /F1 16 Tf 48 190 Td (Third line remains part of selection.) Tj ET'),
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+  ];
+  return pdfFixture(objects);
+}
+
+function mixedStyleSelectionPdfFixture() {
+  const objects = [
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 420 240] /Resources << /Font << /F1 8 0 R /F2 9 0 R >> >> /Contents [4 0 R 5 0 R 6 0 R 7 0 R] >>',
+    pdfStream('BT /F1 18 Tf 48 160 Td (Normal text before ) Tj ET'),
+    pdfStream('BT /F2 18 Tf 201 160 Td (bold words) Tj ET'),
+    pdfStream('BT /F1 18 Tf 298 160 Td ( and after.) Tj ET'),
+    pdfStream('BT /F1 18 Tf 48 140 Td (Tightly spaced normal second line.) Tj ET'),
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>',
+  ];
+  return pdfFixture(objects);
+}
+
 function unicodeSelectorPdfFixture() {
   const toUnicode = [
     '/CIDInit /ProcSet findresource begin',
@@ -225,6 +270,37 @@ function unicodeSelectorPdfFixture() {
     '<< /Type /Font /Subtype /CIDFontType2 /BaseFont /ReviewUnicode /CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) /Supplement 0 >> /FontDescriptor 8 0 R /DW 1000 /CIDToGIDMap /Identity >>',
     pdfStream(toUnicode),
     '<< /Type /FontDescriptor /FontName /ReviewUnicode /Flags 4 /FontBBox [0 -200 1000 900] /ItalicAngle 0 /Ascent 800 /Descent -200 /CapHeight 700 /StemV 80 >>',
+  ];
+  return pdfFixture(objects);
+}
+
+function internalDestinationsPdfFixture() {
+  const objects = [
+    '<< /Type /Catalog /Pages 2 0 R /Names << /Dests 12 0 R >> >>',
+    '<< /Type /Pages /Kids [3 0 R 7 0 R 9 0 R] /Count 3 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 600] /Resources << /Font << /F1 11 0 R >> >> /Contents 4 0 R /Annots [5 0 R 6 0 R] >>',
+    pdfStream([
+      'BT /F1 20 Tf 42 540 Td (Internal destinations) Tj ET',
+      '0 0 1 rg BT /F1 16 Tf 42 470 Td (Figure 11.1) Tj ET',
+      '0 0 1 rg BT /F1 16 Tf 42 420 Td (Section 12.2) Tj ET',
+      '0 g BT /F1 12 Tf 42 120 Td (Return should restore this exact reading position.) Tj ET',
+    ].join('\n')),
+    '<< /Type /Annot /Subtype /Link /Rect [40 460 137 486] /Border [0 0 0] /Contents (Figure 11.1) /Dest [7 0 R /XYZ 42 302 0] >>',
+    '<< /Type /Annot /Subtype /Link /Rect [40 410 140 436] /Border [0 0 0] /Contents (Section 12.2) /A << /S /GoTo /D (section.12.2) >> >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 600] /Resources << /Font << /F1 11 0 R >> >> /Contents 8 0 R /Annots [13 0 R] >>',
+    pdfStream([
+      'BT /F1 18 Tf 42 286 Td (Figure 11.1 target) Tj ET',
+      'BT /F1 12 Tf 42 260 Td (The direct destination should align the figure here.) Tj ET',
+      '0 0 1 rg BT /F1 14 Tf 42 220 Td (Section 12.2) Tj ET',
+    ].join('\n')),
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 600] /Resources << /Font << /F1 11 0 R >> >> /Contents 10 0 R >>',
+    pdfStream([
+      'BT /F1 18 Tf 42 500 Td (Section 12.2 target) Tj ET',
+      'BT /F1 12 Tf 42 474 Td (The named destination should align the section here.) Tj ET',
+    ].join('\n')),
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+    '<< /Names [(section.12.2) [9 0 R /XYZ 42 516 0]] >>',
+    '<< /Type /Annot /Subtype /Link /Rect [40 210 140 234] /Border [0 0 0] /Contents (Section 12.2) /Dest (section.12.2) >>',
   ];
   return pdfFixture(objects);
 }

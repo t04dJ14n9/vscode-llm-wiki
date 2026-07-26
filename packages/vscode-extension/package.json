@@ -371,6 +371,7 @@
     "@embedpdf/models": "^2.14.3",
     "@embedpdf/pdfium": "^2.14.3",
     "@human-learning/core": "workspace:*",
+    "@human-learning/pdf-editor": "workspace:*",
     "@lezer/highlight": "^1.2.3",
     "@mathjax/src": "^4.1.2",
     "@replit/codemirror-vim": "^6.3.0",

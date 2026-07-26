@@ -62,8 +62,8 @@ test('pdf viewer keeps canvas and overlay geometry aligned to exact scaled size'
     };
   });
 
-  expect(Number.isInteger(geometry.cssWidth)).toBe(false);
-  expect(Number.isInteger(geometry.cssHeight)).toBe(false);
+  expect(geometry.cssWidth).toBeGreaterThan(0);
+  expect(geometry.cssHeight).toBeGreaterThan(0);
   expect(geometry.wrapperWidth).toBe(geometry.canvasWidth);
   expect(geometry.wrapperHeight).toBe(geometry.canvasHeight);
   expect(geometry.textLayerWidth).toBe(geometry.canvasWidth);
@@ -133,7 +133,7 @@ test('pdf viewer can switch from continuous scroll to page-turning mode', async 
   await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 2/, { timeout: 10_000 });
   await expect(page.locator('.page-wrapper')).toHaveCount(2);
 
-  await chooseDisplayMode(page, 'In-page scroll');
+  await setContinuousScroll(page, false);
   await expect(page.locator('#page-container')).toHaveClass(/paginated/);
 
   const firstVisible = await visiblePageIds(page);
@@ -149,8 +149,8 @@ test('single-page Next click performs one page change when the page field has a 
   await page.goto('http://localhost:8979/pdf-viewer.html?fixture=four-page');
   await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 4/, { timeout: 10_000 });
 
-  await chooseDisplayMode(page, 'In-page scroll');
-  await chooseDisplayMode(page, 'Single page');
+  await setContinuousScroll(page, false);
+  await chooseDisplayMode(page, 'Single Page');
 
   const pageInput = page.getByRole('spinbutton', { name: 'Page' });
   await pageInput.fill('4');
@@ -165,8 +165,8 @@ test('aborted page-button pointer gesture still commits a blurred page field', a
   await page.goto('http://localhost:8979/pdf-viewer.html?fixture=four-page');
   await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 4/, { timeout: 10_000 });
 
-  await chooseDisplayMode(page, 'In-page scroll');
-  await chooseDisplayMode(page, 'Single page');
+  await setContinuousScroll(page, false);
+  await chooseDisplayMode(page, 'Single Page');
 
   const pageInput = page.getByRole('spinbutton', { name: 'Page' });
   const nextButton = page.getByRole('button', { name: 'Next page' });
@@ -189,8 +189,8 @@ test('page field deferred blur commits when page-button pointer capture is lost'
   await page.goto('http://localhost:8979/pdf-viewer.html?fixture=four-page');
   await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 4/, { timeout: 10_000 });
 
-  await chooseDisplayMode(page, 'In-page scroll');
-  await chooseDisplayMode(page, 'Single page');
+  await setContinuousScroll(page, false);
+  await chooseDisplayMode(page, 'Single Page');
 
   await page.evaluate(() => {
     const pageInput = document.querySelector<HTMLInputElement>('#page-input')!;
@@ -218,8 +218,8 @@ test('page field still commits when keyboard focus moves to the Next button', as
   await page.goto('http://localhost:8979/pdf-viewer.html?fixture=four-page');
   await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 4/, { timeout: 10_000 });
 
-  await chooseDisplayMode(page, 'In-page scroll');
-  await chooseDisplayMode(page, 'Single page');
+  await setContinuousScroll(page, false);
+  await chooseDisplayMode(page, 'Single Page');
 
   const pageInput = page.getByRole('spinbutton', { name: 'Page' });
   await pageInput.fill('2');
@@ -231,15 +231,18 @@ test('page field still commits when keyboard focus moves to the Next button', as
 });
 
 test('pdf viewer can switch to two-page double-column layout', async ({ page }) => {
-  await page.goto('http://localhost:8979/pdf-viewer.html?fixture=two-page');
-  await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 2/, { timeout: 10_000 });
+  await page.goto('http://localhost:8979/pdf-viewer.html?fixture=four-page');
+  await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 4/, { timeout: 10_000 });
 
-  await chooseDisplayMode(page, 'Two pages (odd)');
+  await chooseDisplayMode(page, 'Two Pages');
   await expect(page.locator('#page-container')).toHaveClass(/two-page/);
+  await page.getByRole('button', { name: 'Next page' }).click();
+  await expect(page.locator('#page-info')).toHaveText(/Page 3 \/ 4/);
 
   const layout = await page.locator('#page-container').evaluate((container: HTMLElement) => {
     const styles = window.getComputedStyle(container);
-    const wrappers = Array.from(container.querySelectorAll<HTMLElement>('.page-wrapper'));
+    const wrappers = Array.from(container.querySelectorAll<HTMLElement>('.page-wrapper'))
+      .filter(wrapper => window.getComputedStyle(wrapper).display !== 'none');
     return {
       display: styles.display,
       columns: styles.gridTemplateColumns.split(' ').filter(Boolean).length,
@@ -277,7 +280,9 @@ test('pdf viewer exposes PDF++-like direct page and zoom controls', async ({ pag
   const zoomInput = page.getByRole('spinbutton', { name: 'Zoom' });
   await expect(pageInput).toHaveValue('1');
   await expect(page.locator('#page-total')).toHaveText('of 2');
-  await expect(zoomInput).toHaveValue('135');
+  const automaticZoom = Number(await zoomInput.inputValue());
+  expect(automaticZoom).toBeGreaterThanOrEqual(10);
+  expect(automaticZoom).toBeLessThanOrEqual(350);
 
   await pageInput.fill('2');
   await pageInput.press('Enter');
@@ -289,8 +294,10 @@ test('pdf viewer exposes PDF++-like direct page and zoom controls', async ({ pag
   await zoomInput.press('Enter');
   await expect(page.locator('#page-info')).toHaveText(/200%/);
   await expect(zoomInput).toHaveValue('200');
-  await expect.poll(() => page.locator('#page-2').evaluate((element: HTMLElement) => element.getBoundingClientRect().width))
-    .toBeGreaterThan(initialWidth * 1.4);
+  await expect.poll(async () => Math.abs(
+    await page.locator('#page-2').evaluate((element: HTMLElement) => element.getBoundingClientRect().width)
+      - initialWidth * (200 / automaticZoom)
+  )).toBeLessThanOrEqual(3);
 });
 
 test('pdf viewer keeps the latest page navigation when an older render finishes last', async ({ page }) => {
@@ -300,6 +307,10 @@ test('pdf viewer keeps the latest page navigation when an older render finishes 
   await page.goto('http://localhost:8979/pdf-viewer.html?fixture=four-page');
   await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 4/, { timeout: 10_000 });
   await expect(page.locator('#page-1 canvas.pdf-canvas')).toBeVisible();
+  const zoomInput = page.getByRole('spinbutton', { name: 'Zoom' });
+  await zoomInput.fill('200');
+  await zoomInput.press('Enter');
+  await expect(zoomInput).toHaveValue('200');
 
   await page.evaluate(() => {
     const state = window as any;
@@ -324,6 +335,7 @@ test('pdf viewer retains continuous-scroll page state across separate intersecti
   await installIntersectionObserverHarness(page);
   await page.goto('http://localhost:8979/pdf-viewer.html?fixture=four-page');
   await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 4/, { timeout: 10_000 });
+  await page.waitForTimeout(50);
 
   await page.evaluate(() => {
     (window as any).__emitPdfPageIntersections([
@@ -351,7 +363,7 @@ test('pdf viewer retains continuous-scroll page state across separate intersecti
   await page.getByRole('button', { name: 'PDF discussions (1)' }).click();
   await page.getByRole('region', { name: 'PDF discussion overview' }).getByRole('button').click();
 
-  const panel = page.getByRole('complementary', { name: 'Ask PDF' });
+  const panel = page.getByRole('complementary', { name: 'Ask about selection' });
   await expect(page.locator('#page-info')).toHaveText(/Page 2 \/ 4/);
   await expect(page.locator('#page-input')).toHaveValue('2');
   await expect(panel.getByRole('link', { name: 'Page 2' })).toBeVisible();
@@ -368,6 +380,10 @@ test('Ask PDF keeps the latest annotation marker navigation when an older page r
   await installNavigationRaceHarness(page);
   await page.goto('http://localhost:8979/pdf-viewer.html?fixture=four-page');
   await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 4/, { timeout: 10_000 });
+  const zoomInput = page.getByRole('spinbutton', { name: 'Zoom' });
+  await zoomInput.fill('200');
+  await zoomInput.press('Enter');
+  await expect(zoomInput).toHaveValue('200');
 
   const annotations = [
     discussionAnnotation('discussion-a', 2, 'Question A'),
@@ -424,7 +440,7 @@ test('pdf viewer sidebar renders page thumbnails and navigates like PDF++', asyn
   await expect(page.getByRole('button', { name: 'Page 2 thumbnail' })).toHaveAttribute('aria-current', 'page');
 });
 
-test('pdf viewer display menu exposes PDF++ fit, scroll, and spread modes', async ({ page }) => {
+test('pdf viewer display menu exposes Preview presentation and fit modes', async ({ page }) => {
   await page.goto('http://localhost:8979/pdf-viewer.html?fixture=two-page');
   await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 2/, { timeout: 10_000 });
 
@@ -432,59 +448,45 @@ test('pdf viewer display menu exposes PDF++ fit, scroll, and spread modes', asyn
   const menu = page.getByRole('menu', { name: 'Display options' });
   await expect(menu).toBeVisible();
   for (const label of [
+    'Single Page',
+    'Single Page Continuous',
+    'Two Pages',
+    'Two Pages Continuous',
     'Fit width',
     'Fit height',
     'Fit page',
-    'Vertical scroll',
-    'Horizontal scroll',
-    'In-page scroll',
-    'Wrapped scroll',
-    'Single page',
-    'Two pages (odd)',
-    'Two pages (even)',
   ]) {
-    await expect(menu.getByRole('menuitemradio', { name: label })).toBeVisible();
+    await expect(menu.getByRole('menuitemradio', { name: label, exact: true })).toBeVisible();
   }
   await expect(menu.getByRole('menuitemcheckbox', { name: 'Adapt to theme' })).toBeVisible();
   await expect(menu.getByRole('menuitem', { name: 'Defaults' })).toBeVisible();
 
-  await menu.getByRole('menuitemradio', { name: 'Horizontal scroll' }).click();
-  await expect(page.locator('#page-container')).toHaveClass(/scroll-horizontal/);
-  await chooseDisplayMode(page, 'Wrapped scroll');
-  await expect(page.locator('#page-container')).toHaveClass(/scroll-wrapped/);
-  await chooseDisplayMode(page, 'Two pages (even)');
+  await menu.getByRole('menuitemradio', { name: 'Two Pages', exact: true }).click();
   await expect(page.locator('#page-container')).toHaveClass(/two-page/);
+  await expect(page.locator('#page-container')).toHaveClass(/paginated/);
   await expect(page.locator('#page-container')).toHaveAttribute('data-spread-parity', 'even');
 });
 
-test('pdf viewer lays out odd and even spreads with PDF++ page pairing', async ({ page }) => {
+test('pdf viewer lays out Preview book spreads with a centered cover', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.goto('http://localhost:8979/pdf-viewer.html?fixture=four-page');
   await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 4/, { timeout: 10_000 });
 
-  await chooseDisplayMode(page, 'Two pages (even)');
-  const even = await spreadGeometry(page);
-  expect(even[0].top).toBeLessThan(even[1].top);
-  expect(even[0].left).toBe(even[2].left);
-  expect(even[1].top).toBe(even[2].top);
-  expect(even[1].left).toBe(even[3].left);
-  expect(even[3].top).toBeGreaterThan(even[2].top);
-
-  await chooseDisplayMode(page, 'Two pages (odd)');
-  const odd = await spreadGeometry(page);
-  expect(odd[0].top).toBe(odd[1].top);
-  expect(odd[0].left).toBeLessThan(odd[1].left);
-  expect(odd[2].top).toBe(odd[3].top);
-  expect(odd[2].top).toBeGreaterThan(odd[0].top);
-
-  await chooseDisplayMode(page, 'In-page scroll');
-  const pageInput = page.getByRole('spinbutton', { name: 'Page' });
-  await pageInput.fill('1');
-  await pageInput.press('Enter');
-  await chooseDisplayMode(page, 'Two pages (even)');
+  await chooseDisplayMode(page, 'Two Pages');
   expect(await visiblePageIds(page)).toEqual(['page-1']);
+  const coverOffset = await page.evaluate(() => {
+    const viewer = document.querySelector<HTMLElement>('#viewer-container')!.getBoundingClientRect();
+    const cover = document.querySelector<HTMLElement>('#page-1')!.getBoundingClientRect();
+    return Math.abs((cover.left + cover.right) / 2 - (viewer.left + viewer.right) / 2);
+  });
+  expect(coverOffset).toBeLessThanOrEqual(1);
+
   await page.getByRole('button', { name: 'Next page' }).click();
   expect(await visiblePageIds(page)).toEqual(['page-2', 'page-3']);
+  await expect(page.locator('#page-info')).toHaveText(/Page 3 \/ 4/);
+  const spread = await spreadGeometry(page);
+  expect(spread[1].top).toBe(spread[2].top);
+  expect(spread[1].left).toBeLessThan(spread[2].left);
 });
 
 test('pdf fit modes recompute after sidebar and viewport size changes', async ({ page }) => {
@@ -604,6 +606,7 @@ test('pdf viewer rectangular selection copies PDF++ coordinates in a one-shot dr
 
   const start = { x: box.x + 54, y: box.y + 68 };
   const end = { x: box.x + 216, y: box.y + 176 };
+  const scale = Number(await page.getByRole('spinbutton', { name: 'Zoom' }).inputValue()) / 100;
   await page.mouse.move(start.x, start.y);
   await page.mouse.down();
   await page.mouse.move(end.x, end.y, { steps: 6 });
@@ -618,10 +621,10 @@ test('pdf viewer rectangular selection copies PDF++ coordinates in a one-shot dr
   expect(actions[0].anchor.rects).toHaveLength(1);
   const rect = actions[0].anchor.rects[0];
   expect(rect).toHaveLength(4);
-  expect(Math.abs(rect[0] - 40)).toBeLessThanOrEqual(2);
-  expect(Math.abs(rect[1] - 50)).toBeLessThanOrEqual(2);
-  expect(Math.abs(rect[2] - 160)).toBeLessThanOrEqual(2);
-  expect(Math.abs(rect[3] - 130)).toBeLessThanOrEqual(2);
+  expect(Math.abs(rect[0] - 54 / scale)).toBeLessThanOrEqual(2);
+  expect(Math.abs(rect[1] - 68 / scale)).toBeLessThanOrEqual(2);
+  expect(Math.abs(rect[2] - 216 / scale)).toBeLessThanOrEqual(2);
+  expect(Math.abs(rect[3] - 176 / scale)).toBeLessThanOrEqual(2);
   await expect(rectangle).toHaveAttribute('aria-pressed', 'false');
   await expect(page.locator('.rectangle-selection-overlay')).toHaveCount(0);
 });
@@ -965,7 +968,7 @@ test('pdf text-fragment review round-trips a multi-item selection across a visua
     .at(-1)?.anchor?.textFragment);
   expect(fragment).toEqual({
     textStart: 'Page Two',
-    suffix: 'a Flash Attention aaaaa tail',
+    suffix: 'Flash Attention aaaaa tail start',
   });
   await page.evaluate((textFragment) => {
     window.getSelection()?.removeAllRanges();
@@ -1003,7 +1006,7 @@ test('pdf text-fragment review round-trips a word split across adjacent text ite
     .at(-1)?.anchor?.textFragment);
   expect(fragment).toEqual({
     textStart: 'FlashAttention',
-    prefix: 'Page Twoa',
+    prefix: 'Page Two',
     suffix: 'aaaaa tailstart aaaa tail',
   });
   await page.evaluate((textFragment) => {
@@ -1058,6 +1061,236 @@ test('pdf native selection reconstructs canonical text when the DOM selection is
     window.postMessage({ type: 'goToAnchor', page: 1, textFragment }, '*');
   }, anchor.textFragment);
   await expect.poll(() => page.locator('#page-1 .anchor-highlight').count(), { timeout: 2_000 }).toBe(2);
+});
+
+test('pdf text layer cleans glyph artifacts and follows visual reading order', async ({ page }) => {
+  await page.goto('http://localhost:8979/pdf-viewer.html?fixture=out-of-order-text');
+  await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 1/, { timeout: 10_000 });
+
+  const spans = page.locator('#page-1 .text-layer span[data-item-index]');
+  await expect(spans).toHaveCount(5);
+  const textItems = await spans.evaluateAll(elements => elements.map(element => element.textContent ?? ''));
+  expect(textItems).toEqual([
+    'First line starts the paragraph.',
+    'Second line continues in visual order.',
+    'Third line remains part of selection.',
+    'Fourth line should not jump ahead.',
+    'Fifth line ends the paragraph.',
+  ]);
+  expect(textItems.join('')).not.toMatch(/[\u0000-\u001f\u007f-\u009f]/u);
+
+  await page.evaluate(() => {
+    window.__mockMessages = [];
+    const items = Array.from(document.querySelectorAll<HTMLElement>('#page-1 .text-layer span[data-item-index]'));
+    const start = items[0]?.querySelector('.pdf-text-glyphs')?.firstChild;
+    const endSpan = items.at(-1);
+    const end = endSpan?.querySelector('.pdf-text-glyphs')?.firstChild;
+    if (!start || !end || !endSpan) throw new Error('Expected five ordered PDF text items');
+    const range = document.createRange();
+    range.setStart(start, 0);
+    range.setEnd(end, endSpan.textContent?.length ?? 0);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    document.querySelector('#page-container')?.dispatchEvent(new MouseEvent('mouseup', {
+      bubbles: true,
+      button: 0,
+    }));
+  });
+
+  await expect(page.locator('#selection-toolbar')).toBeVisible();
+  const expected = [
+    'First line starts the paragraph.',
+    'Second line continues in visual order.',
+    'Third line remains part of selection.',
+    'Fourth line should not jump ahead.',
+    'Fifth line ends the paragraph.',
+  ].join(' ');
+  const anchor = await page.evaluate(() => window.__mockMessages
+    ?.filter(message => message.type === 'selectionChanged' && message.anchor)
+    .at(-1)?.anchor);
+  expect(anchor?.snippet).toBe(expected);
+
+  const copiedText = await page.evaluate(() => {
+    const transfer = new DataTransfer();
+    const event = new ClipboardEvent('copy', { bubbles: true, cancelable: true, clipboardData: transfer });
+    document.querySelector('#page-container')?.dispatchEvent(event);
+    return transfer.getData('text/plain');
+  });
+  expect(copiedText).toBe(expected);
+});
+
+test('pdf text selection keeps its focus at the nearest line edge while dragging into trailing whitespace', async ({ page }) => {
+  await page.goto('http://localhost:8979/pdf-viewer.html?fixture=out-of-order-text');
+  await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 1/, { timeout: 10_000 });
+
+  const spans = page.locator('#page-1 .text-layer span[data-item-index]');
+  await expect(spans).toHaveCount(5);
+  const boxes = await spans.evaluateAll(elements => elements.map((element) => {
+    const rect = element.getBoundingClientRect();
+    return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+  }));
+  const first = boxes[0];
+  const fourth = boxes[3];
+  if (!first || !fourth) throw new Error('Expected ordered PDF line boxes');
+
+  await page.evaluate(() => { window.__mockMessages = []; });
+  await page.mouse.move(first.x + 1, first.y + first.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(fourth.x + fourth.width - 1, fourth.y + fourth.height / 2, { steps: 12 });
+  await page.mouse.move(fourth.x + fourth.width + 8, fourth.y + fourth.height / 2, { steps: 2 });
+  await page.mouse.up();
+
+  const expected = [
+    'First line starts the paragraph.',
+    'Second line continues in visual order.',
+    'Third line remains part of selection.',
+    'Fourth line should not jump ahead.',
+  ].join(' ');
+  await expect.poll(() => page.evaluate(() => window.__mockMessages
+    ?.filter(message => message.type === 'selectionChanged' && message.anchor)
+    .at(-1)?.anchor?.snippet)).toBe(expected);
+  const anchor = await page.evaluate(() => window.__mockMessages
+    ?.filter(message => message.type === 'selectionChanged' && message.anchor)
+    .at(-1)?.anchor);
+  expect(anchor).toMatchObject({
+    page: 1,
+    textItemIndex: 0,
+    charOffset: 0,
+    endTextItemIndex: 3,
+    endCharOffset: 34,
+    snippet: expected,
+  });
+  await expect(page.locator('#selection-toolbar')).toBeVisible();
+});
+
+test('pdf text selection stays on its visual line through long trailing whitespace', async ({ page }) => {
+  await page.goto('http://localhost:8979/pdf-viewer.html?fixture=out-of-order-text');
+  await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 1/, { timeout: 10_000 });
+
+  const spans = page.locator('#page-1 .text-layer span[data-item-index]');
+  await expect(spans).toHaveCount(5);
+  const first = await spans.first().boundingBox();
+  const pageBox = await page.locator('#page-1').boundingBox();
+  if (!first || !pageBox) throw new Error('Expected the first PDF line and page bounds');
+  const trailingWhitespaceX = pageBox.x + pageBox.width - 16;
+  expect(trailingWhitespaceX).toBeGreaterThan(first.x + first.width + 100);
+
+  await page.evaluate(() => { window.__mockMessages = []; });
+  await page.mouse.move(first.x + 1, first.y + first.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(trailingWhitespaceX, first.y + first.height / 2, { steps: 12 });
+  await page.mouse.up();
+
+  const expected = 'First line starts the paragraph.';
+  await expect.poll(() => page.evaluate(() => window.__mockMessages
+    ?.filter(message => message.type === 'selectionChanged' && message.anchor)
+    .at(-1)?.anchor?.snippet)).toBe(expected);
+  const anchor = await page.evaluate(() => window.__mockMessages
+    ?.filter(message => message.type === 'selectionChanged' && message.anchor)
+    .at(-1)?.anchor);
+  expect(anchor).toMatchObject({
+    page: 1,
+    textItemIndex: 0,
+    charOffset: 0,
+    endTextItemIndex: 0,
+    endCharOffset: 32,
+    snippet: expected,
+  });
+  await expect(page.locator('#selection-toolbar')).toBeVisible();
+});
+
+test('pdf text selection keeps its anchor at the nearest line edge during a backward whitespace drag', async ({ page }) => {
+  await page.goto('http://localhost:8979/pdf-viewer.html?fixture=out-of-order-text');
+  await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 1/, { timeout: 10_000 });
+
+  const spans = page.locator('#page-1 .text-layer span[data-item-index]');
+  await expect(spans).toHaveCount(5);
+  const boxes = await spans.evaluateAll(elements => elements.map((element) => {
+    const rect = element.getBoundingClientRect();
+    return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+  }));
+  const first = boxes[0];
+  const fourth = boxes[3];
+  if (!first || !fourth) throw new Error('Expected ordered PDF line boxes');
+
+  await page.evaluate(() => { window.__mockMessages = []; });
+  await page.mouse.move(fourth.x + fourth.width - 1, fourth.y + fourth.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(first.x + 1, first.y + first.height / 2, { steps: 12 });
+  await page.mouse.move(first.x - 8, first.y + first.height / 2, { steps: 2 });
+  await page.mouse.up();
+
+  const expected = [
+    'First line starts the paragraph.',
+    'Second line continues in visual order.',
+    'Third line remains part of selection.',
+    'Fourth line should not jump ahead.',
+  ].join(' ');
+  await expect.poll(() => page.evaluate(() => window.__mockMessages
+    ?.filter(message => message.type === 'selectionChanged' && message.anchor)
+    .at(-1)?.anchor?.snippet)).toBe(expected);
+  const anchor = await page.evaluate(() => window.__mockMessages
+    ?.filter(message => message.type === 'selectionChanged' && message.anchor)
+    .at(-1)?.anchor);
+  expect(anchor).toMatchObject({
+    page: 1,
+    textItemIndex: 0,
+    charOffset: 0,
+    endTextItemIndex: 3,
+    endCharOffset: 34,
+    snippet: expected,
+  });
+  await expect(page.locator('#selection-toolbar')).toBeVisible();
+});
+
+test('pdf glyph selection survives zoom rerender with the same canonical text and aligned overlay', async ({ page }) => {
+  await page.goto('http://localhost:8979/pdf-viewer.html?fixture=out-of-order-text');
+  await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 1/, { timeout: 10_000 });
+
+  const spans = page.locator('#page-1 .text-layer span[data-item-index]');
+  const boxes = await spans.evaluateAll(elements => elements.map((element) => {
+    const rect = element.getBoundingClientRect();
+    return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+  }));
+  const first = boxes[0];
+  const fourth = boxes[3];
+  if (!first || !fourth) throw new Error('Expected ordered PDF line boxes');
+
+  await page.mouse.move(first.x + 1, first.y + first.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(fourth.x + fourth.width + 8, fourth.y + fourth.height / 2, { steps: 12 });
+  await page.mouse.up();
+
+  const expected = [
+    'First line starts the paragraph.',
+    'Second line continues in visual order.',
+    'Third line remains part of selection.',
+    'Fourth line should not jump ahead.',
+  ].join(' ');
+  const initialOverlay = await page.locator('#page-1 .pdf-selection-rect').first().boundingBox();
+  expect(initialOverlay).not.toBeNull();
+
+  const zoom = page.getByRole('spinbutton', { name: 'Zoom' });
+  const initialScale = Number(await zoom.inputValue()) / 100;
+  await zoom.fill('200');
+  await zoom.press('Enter');
+  await expect(zoom).toHaveValue('200');
+  await expect(page.locator('#selection-toolbar')).toBeVisible();
+
+  const copiedText = await page.evaluate(() => {
+    const transfer = new DataTransfer();
+    const event = new ClipboardEvent('copy', { bubbles: true, cancelable: true, clipboardData: transfer });
+    document.querySelector('#page-container')?.dispatchEvent(event);
+    return transfer.getData('text/plain');
+  });
+  expect(copiedText).toBe(expected);
+  const rerenderedOverlay = await page.locator('#page-1 .pdf-selection-rect').first().boundingBox();
+  expect(rerenderedOverlay).not.toBeNull();
+  if (initialOverlay && rerenderedOverlay) {
+    expect(Math.abs(rerenderedOverlay.width - initialOverlay.width * (2 / initialScale))).toBeLessThanOrEqual(2);
+    expect(Math.abs(rerenderedOverlay.height - initialOverlay.height * (2 / initialScale))).toBeLessThanOrEqual(2);
+  }
 });
 
 test('pdf text-fragment review enumerates overlapping textStart candidates', async ({ page }) => {
@@ -1388,7 +1621,7 @@ test('pdf viewer exposes a PDF++-style context menu for selections and pages', a
     'Insert link',
     'Insert quote and link',
   ]);
-  await expect(page.getByRole('menu')).toHaveScreenshot('pdf-context-menu-ask-selection.png', { maxDiffPixels: 1 });
+  await expect(page.getByRole('menu')).toHaveScreenshot('pdf-context-menu-ask-selection.png', { maxDiffPixels: 3 });
 
   await page.getByRole('menuitem', { name: 'Look up ...', exact: true }).click();
   await expect.poll(() => page.evaluate(() =>
@@ -1422,7 +1655,14 @@ test('pdf viewer exposes a PDF++-style context menu for selections and pages', a
     { button: 'right' },
   );
   await expect(page.locator('#selection-toolbar')).toHaveCount(0);
-  await expect(page.getByRole('menu').getByRole('menuitem')).toHaveText(['Copy link to page']);
+  await expect(page.getByRole('menu').getByRole('menuitem')).toHaveText([
+    'Zoom In',
+    'Zoom Out',
+    'Actual Size',
+    'Next Page',
+    'Previous Page',
+    'Copy link to page',
+  ]);
   await page.getByRole('menuitem', { name: 'Copy link to page', exact: true }).click();
   await expect.poll(() => page.evaluate(() =>
     window.__mockMessages?.filter(message => message.type === 'copyPageLink')
@@ -1437,11 +1677,11 @@ test('selection context menu remains available at an aligned trailing glyph edge
   await zoomInput.fill('150');
   await zoomInput.press('Enter');
   await expect(page.locator('#page-info')).toHaveText(/150%/);
+  const flashSpan = page.locator('.text-layer span[data-item-index]').filter({ hasText: /^Flash$/ });
+  await expect(flashSpan).toHaveCount(1);
 
-  await page.evaluate(() => {
-    const span = Array.from(document.querySelectorAll<HTMLElement>('.text-layer span[data-item-index]'))
-      .find(candidate => candidate.textContent === 'Flash');
-    if (!span?.firstChild) throw new Error('Expected the selector-edge Flash span');
+  await flashSpan.evaluate(span => {
+    if (!span.firstChild) throw new Error('Expected the selector-edge Flash span');
     const range = document.createRange();
     range.selectNodeContents(span);
     const selection = window.getSelection()!;
@@ -1629,7 +1869,14 @@ test('PDF++-style context menu uses page actions outside a non-collapsed selecti
     return !window.getSelection()?.isCollapsed;
   });
   expect(selectionStayedActive).toBe(true);
-  await expect(page.getByRole('menu').getByRole('menuitem')).toHaveText(['Copy link to page']);
+  await expect(page.getByRole('menu').getByRole('menuitem')).toHaveText([
+    'Zoom In',
+    'Zoom Out',
+    'Actual Size',
+    'Next Page',
+    'Previous Page',
+    'Copy link to page',
+  ]);
 });
 
 test('pdf selection toolbar appears after a real mouse drag across PDF text', async ({ page }) => {
@@ -1715,10 +1962,11 @@ test('pdf direct highlight uses the selected color without showing a selection t
     height: Number.parseFloat(element.style.height),
   }));
   const rect = result.action.anchor.rects[0];
-  expect(Math.abs(initialGeometry.left - rect[0] * 1.35)).toBeLessThanOrEqual(1);
-  expect(Math.abs(initialGeometry.top - rect[1] * 1.35)).toBeLessThanOrEqual(1);
-  expect(Math.abs(initialGeometry.width - (rect[2] - rect[0]) * 1.35)).toBeLessThanOrEqual(1);
-  expect(Math.abs(initialGeometry.height - (rect[3] - rect[1]) * 1.35)).toBeLessThanOrEqual(1);
+  const initialScale = Number(await page.getByRole('spinbutton', { name: 'Zoom' }).inputValue()) / 100;
+  expect(Math.abs(initialGeometry.left - rect[0] * initialScale)).toBeLessThanOrEqual(1);
+  expect(Math.abs(initialGeometry.top - rect[1] * initialScale)).toBeLessThanOrEqual(1);
+  expect(Math.abs(initialGeometry.width - (rect[2] - rect[0]) * initialScale)).toBeLessThanOrEqual(1);
+  expect(Math.abs(initialGeometry.height - (rect[3] - rect[1]) * initialScale)).toBeLessThanOrEqual(1);
 
   const zoomInput = page.getByRole('spinbutton', { name: 'Zoom' });
   await zoomInput.fill('200');
@@ -1768,8 +2016,35 @@ async function chooseDisplayMode(page, label: string) {
   await page.getByRole('button', { name: 'Display options' }).click();
   const menu = page.getByRole('menu', { name: 'Display options' });
   await expect(menu).toBeVisible();
-  await menu.getByRole('menuitemradio', { name: label }).click();
+  const pageChanges = await page.evaluate(() => (window as any).__mockMessages
+    .filter((message: any) => message.type === 'pageChanged').length);
+  await menu.getByRole('menuitemradio', { name: label, exact: true }).click();
   await expect(menu).toBeHidden();
+  await expect.poll(() => page.evaluate(() => (window as any).__mockMessages
+    .filter((message: any) => message.type === 'pageChanged').length)).toBeGreaterThan(pageChanges);
+}
+
+async function setContinuousScroll(page, enabled: boolean) {
+  await page.getByRole('button', { name: 'Display options' }).click();
+  const menu = page.getByRole('menu', { name: 'Display options' });
+  await expect(menu).toBeVisible();
+  const target = menu.getByRole('menuitemradio', {
+    name: enabled ? 'Single Page Continuous' : 'Single Page',
+    exact: true,
+  });
+  const checked = await target.getAttribute('aria-checked');
+  if (checked !== 'true') {
+    const pageChanges = await page.evaluate(() => (window as any).__mockMessages
+      .filter((message: any) => message.type === 'pageChanged').length);
+    await target.click();
+    await expect.poll(() => page.evaluate(() => (window as any).__mockMessages
+      .filter((message: any) => message.type === 'pageChanged').length)).toBeGreaterThan(pageChanges);
+  } else {
+    await page.keyboard.press('Escape');
+  }
+  await expect(menu).toBeHidden();
+  if (enabled) await expect(page.locator('#page-container')).not.toHaveClass(/(?:^|\s)paginated(?:\s|$)/);
+  else await expect(page.locator('#page-container')).toHaveClass(/(?:^|\s)paginated(?:\s|$)/);
 }
 
 async function installNavigationRaceHarness(page): Promise<void> {

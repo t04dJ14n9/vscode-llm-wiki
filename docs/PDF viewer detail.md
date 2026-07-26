@@ -141,6 +141,27 @@ The PDF provider resolves:
 
 When selector matching fails, page-level navigation still works.
 
+### Preview-style viewing and selection
+
+The combined and standalone readers share the same viewing implementation.
+Single-page versus two-page layout is independent from continuous versus
+paginated navigation, producing the same four combinations as Preview. The
+default zoom fits the whole visible page or spread; fit mode recomputes when the
+viewer, sidebar, or spread changes. A manually entered zoom is preserved during
+page turns. `Option+Left/Right` and `Option+Up/Down` turn pages without taking
+focus from an active text field.
+
+Text selection does not rely on Chromium guessing carets inside stretched DOM
+text runs. The reader obtains PDFium's loose and tight per-glyph boxes, uses the
+tight boxes for pointer hit-testing, and draws the visible selection from the
+loose PDF boxes. Dragging into leading or trailing line whitespace therefore
+snaps to the nearest glyph on that visual line instead of jumping to the first
+text item on the page. The logical selection and its PDF-coordinate rectangles
+survive zoom and layout rerenders.
+
+Layout, continuity, zoom mode, custom scale, page, spread parity, and theme
+adaptation are saved in VS Code webview state.
+
 ## 7. Source Of Truth
 
 Raw PDFs remain immutable. Ask PDF never modifies PDF bytes. Locator, reference,
@@ -187,20 +208,29 @@ standalone PDF extension. Select text on one page, right-click, and choose
 **Ask about selection…**. The first submitted question creates the durable
 annotation; simply opening and closing the panel does not create empty data.
 
-Each annotation owns a floating Ask PDF inspector rather than sharing a docked
-document sidebar. The inspector opens beside its selected passage and follows
-that passage while attached. Dragging its header detaches it; its edges and
-corners resize it within the PDF viewport. Position, size, draft, and minimized
-state are retained per annotation, so switching markers restores that
-discussion's own window. Minimizing or pressing Escape collapses the inspector
-back into its blue numbered marker without cancelling a running turn. On narrow
-screens the same annotation-owned inspector becomes a clamped near-full-width
-overlay with pointer movement and resizing disabled.
+Each annotation owns a quiet, Codex-inspired floating inspector rather than
+sharing a docked document sidebar. The inspector opens beside its selected
+passage and follows that passage while attached. Dragging its header detaches
+it; its edges and corners resize it within the PDF viewport. Position, size,
+draft, selected model, and minimized state are retained per annotation, so
+switching markers restores that discussion's own window. Minimizing or pressing
+Escape collapses the inspector back into its blue numbered marker without
+cancelling a running turn. The source quote and crop stay collapsed until
+needed, transcript nodes remain stable while answers stream, and the composer
+uses icon controls. Below 900 px the inspector becomes an overlay; below 620 px
+it becomes full-width with pointer movement and resizing disabled.
 
 The extension host launches the local `codex app-server`, reuses the user's
 existing Codex authentication, and never stores an API key. The supported
 development baseline is Codex CLI 0.144.1 or newer. The executable defaults to
 `codex` and can be changed with `humanLearning.pdf.codexCommand`.
+
+After consent, the composer loads the visible model catalog from the signed-in
+Codex account. It starts with the catalog default, lets the user choose another
+visible model for the lightweight discussion, and records the chosen model as
+turn provenance. If a previously selected model disappears, Ask PDF falls back
+to the current catalog default. Promotion remains a clean handoff and does not
+force the lightweight discussion's model onto the persistent Codex task.
 
 Lightweight discussion tasks use:
 

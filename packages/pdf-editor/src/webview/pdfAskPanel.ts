@@ -1,12 +1,44 @@
+// PDF discussion UI orchestration shared by every PDF editor host.
 import DOMPurify from 'dompurify';
 import { marked } from 'marked';
+import {
+  createAskPdfPanelView,
+  type AskPdfPanelView,
+  type AskPdfViewEvent,
+  type AskPdfViewModel,
+} from './pdfAskPanelView';
+import {
+  annotationHasAnswer,
+  annotationVisualStatus,
+  base64ByteLength,
+  clampAskPdfPanelWidth as clampPanelWidth,
+  isTransientAskPdfWindowKey as isTransientWindowKey,
+  normalizeAskPdfDrafts,
+  normalizeAskPdfModelSelections,
+  normalizeAskPdfState as stateRecord,
+  normalizeAskPdfWindows,
+  normalizePdfDiscussionModels,
+  normalizeTurnStatus,
+  selectionFromAnnotation,
+  sortAnnotations,
+  validPdfRects as validRects,
+  type AskPdfWebviewState,
+  type AskPdfWindowState,
+  type PdfAskSelection,
+  type PdfDiscussionAnnotationSnapshot,
+  type PdfDiscussionModelSnapshot,
+  type PdfDiscussionTurnStatus,
+} from './domain/pdfAskState';
+import { installAskPdfPanelStyles } from './pdfAskPanelStyles';
+import { normalizePdfTextBands, type PdfRect } from './pdfTextBands';
+
+export type { PdfAskSelection } from './domain/pdfAskState';
 
 const ASK_PDF_ACCENT = '#4dabf7';
 const ASK_PDF_MAX_PNG_BYTES = 5 * 1024 * 1024;
 const ASK_PDF_MAX_CROP_EDGE = 1600;
 const ASK_PDF_CROP_PADDING_POINTS = 24;
 const ASK_PDF_MIN_WIDTH = 320;
-const ASK_PDF_DEFAULT_WIDTH = 380;
 const ASK_PDF_MAX_WIDTH = 560;
 const ASK_PDF_MIN_HEIGHT = 260;
 const ASK_PDF_DEFAULT_HEIGHT = 520;
@@ -15,66 +47,6 @@ const ASK_PDF_VIEWPORT_INSET = 12;
 const ASK_PDF_ANCHOR_GAP = 16;
 const ASK_PDF_NARROW_BREAKPOINT = 620;
 const ASK_PDF_OVERVIEW_KEY = '__overview__';
-
-type PdfDiscussionTurnStatus = 'idle' | 'running' | 'failed' | 'cancelled';
-type PdfRect = [number, number, number, number];
-
-export interface PdfAskSelection {
-  page: number;
-  snippet?: string;
-  quote?: string;
-  prefix?: string;
-  suffix?: string;
-  rects: number[][];
-  textItemIndex?: number;
-  charOffset?: number;
-  endTextItemIndex?: number;
-  endCharOffset?: number;
-}
-
-interface PdfDiscussionMessageSnapshot {
-  id: string;
-  role: 'user' | 'assistant';
-  markdown: string;
-  createdAt: string;
-  codexTurnId?: string;
-}
-
-interface PdfDiscussionAnnotationSnapshot {
-  id: string;
-  kind: 'agent_discussion';
-  selectionKey: string;
-  anchor: {
-    page: number;
-    quote: string;
-    prefix?: string;
-    suffix?: string;
-    rects: PdfRect[];
-    textItemIndex?: number;
-    charOffset?: number;
-    endTextItemIndex?: number;
-    endCharOffset?: number;
-  };
-  snapshot?: {
-    sha256: string;
-    width: number;
-    height: number;
-    mimeType: 'image/png';
-  };
-  messages: PdfDiscussionMessageSnapshot[];
-  summaryMarkdown?: string;
-  lastTurn: {
-    status: PdfDiscussionTurnStatus;
-    questionMessageId?: string;
-    error?: string;
-  };
-  promotion?: {
-    threadId: string;
-    promotedAt: string;
-  };
-  createdAt: string;
-  updatedAt: string;
-}
 
 interface PdfAskPageSurface {
   canvas: HTMLCanvasElement;
@@ -103,22 +75,6 @@ export interface PdfAskPanel {
   showSelectionError(message: string): void;
   handleHostMessage(message: any): boolean;
   renderMarkersForPage(page: number, layer: HTMLElement, scale: number): void;
-}
-
-interface AskPdfWebviewState {
-  askPdfPanelWidth?: number;
-  askPdfDraft?: string;
-  askPdfDrafts?: Record<string, string>;
-  askPdfWindows?: Record<string, AskPdfWindowState>;
-}
-
-interface AskPdfWindowState {
-  left: number;
-  top: number;
-  width: number;
-  height: number;
-  detached: boolean;
-  minimized: boolean;
 }
 
 type AskPdfResizeDirection = 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w' | 'nw';
@@ -217,18 +173,22 @@ export function capturePdfSelectionCrop(
 }
 
 class PdfAskPanelController implements PdfAskPanel {
+  private readonly view: AskPdfPanelView;
   private readonly panel: HTMLElement;
   private readonly header: HTMLElement;
-  private readonly content: HTMLElement;
   private readonly liveRegion: HTMLElement;
   private readonly countButton: HTMLButtonElement;
-  private readonly closeButton: HTMLButtonElement;
   private readonly resetPositionButton: HTMLButtonElement;
   private readonly resizer: HTMLElement;
   private readonly windows: Record<string, AskPdfWindowState>;
   private readonly drafts: Record<string, string>;
+  private readonly modelSelections: Record<string, string>;
   private readonly legacyPanelWidth: number;
   private annotations: PdfDiscussionAnnotationSnapshot[] = [];
+  private models: PdfDiscussionModelSnapshot[] = [];
+  private modelCatalogRequested = false;
+  private modelCatalogResolved = false;
+  private modelCatalogError: string | undefined;
   private consentGranted = false;
   private activeAnnotationId: string | undefined;
   private activeWindowKey: string | undefined;
@@ -258,10 +218,11 @@ class PdfAskPanelController implements PdfAskPanel {
   private placementFrame: number | undefined;
 
   constructor(private readonly options: PdfAskPanelOptions) {
-    installAskPdfStyles();
+    installAskPdfPanelStyles();
     const restored = stateRecord(options.vscode.getState());
     this.windows = normalizeAskPdfWindows(restored.askPdfWindows);
     this.drafts = normalizeAskPdfDrafts(restored.askPdfDrafts);
+    this.modelSelections = normalizeAskPdfModelSelections(restored.askPdfModelSelections);
     this.legacyPanelWidth = clampPanelWidth(restored.askPdfPanelWidth);
     this.draft = typeof restored.askPdfDraft === 'string' ? restored.askPdfDraft : '';
 
@@ -282,48 +243,21 @@ class PdfAskPanelController implements PdfAskPanel {
     });
     options.toolbar.insertBefore(this.countButton, document.getElementById('page-info'));
 
-    this.panel = document.createElement('aside');
-    this.panel.id = 'ask-pdf-panel';
-    this.panel.className = 'ask-pdf-panel';
-    this.panel.setAttribute('aria-label', 'Ask PDF');
-    this.panel.hidden = true;
+    this.view = createAskPdfPanelView(
+      event => this.handleViewEvent(event),
+      markdown => sanitizedMarkdown(markdown),
+    );
+    this.panel = this.view.element;
+    this.header = this.view.header;
+    this.liveRegion = this.view.liveRegion;
+    this.resetPositionButton = this.view.resetPositionButton;
     this.panel.style.width = `${this.legacyPanelWidth}px`;
     this.panel.style.height = `${ASK_PDF_DEFAULT_HEIGHT}px`;
 
     this.resizer = this.resizeHandle('se', true);
-
-    this.header = document.createElement('header');
-    this.header.className = 'ask-pdf-header';
-    const titleGroup = document.createElement('div');
-    const eyebrow = document.createElement('span');
-    eyebrow.className = 'ask-pdf-eyebrow';
-    eyebrow.textContent = 'SCHOLARLY MARGINALIA';
-    const title = document.createElement('h2');
-    title.textContent = 'Ask PDF';
-    titleGroup.append(eyebrow, title);
-    const headerActions = document.createElement('div');
-    headerActions.className = 'ask-pdf-header-actions';
-    this.resetPositionButton = iconButton('Reset Ask PDF position', '↺');
-    this.resetPositionButton.addEventListener('click', () => this.reattachPanel());
-    this.closeButton = iconButton('Close Ask PDF', '×');
-    this.closeButton.addEventListener('click', () => {
-      if (this.overviewOpen) this.closePanel();
-      else this.minimizePanel();
-    });
-    headerActions.append(this.resetPositionButton, this.closeButton);
-    this.header.append(titleGroup, headerActions);
     this.setupDrag(this.header);
-
-    this.content = document.createElement('div');
-    this.content.className = 'ask-pdf-content';
-    this.liveRegion = document.createElement('p');
-    this.liveRegion.className = 'ask-pdf-live-region';
-    this.liveRegion.setAttribute('role', 'status');
-    this.liveRegion.setAttribute('aria-live', 'polite');
-    this.liveRegion.setAttribute('aria-atomic', 'false');
-    this.liveRegion.setAttribute('aria-label', 'Codex response updates');
     const resizeHandles = ['n', 'ne', 'e', 's', 'sw', 'w', 'nw'].map(direction => this.resizeHandle(direction, false));
-    this.panel.append(this.resizer, ...resizeHandles, this.header, this.content, this.liveRegion);
+    this.panel.prepend(this.resizer, ...resizeHandles);
     window.addEventListener('keydown', event => {
       const target = event.target;
       const targetIsInsidePanel = target instanceof Node && this.panel.contains(target);
@@ -391,6 +325,7 @@ class PdfAskPanelController implements PdfAskPanel {
       case 'pdfDiscussionSnapshot': {
         this.annotations = sortAnnotations(Array.isArray(message.annotations) ? message.annotations : []);
         this.consentGranted = message.consentGranted === true;
+        this.ensureModelCatalog();
         if (typeof message.activeAnnotationId === 'string') {
           const candidate = this.annotations.find(annotation => annotation.id === message.activeAnnotationId);
           if (candidate && this.shouldAdoptSnapshotActive(message, candidate)) {
@@ -414,6 +349,16 @@ class PdfAskPanelController implements PdfAskPanel {
         this.updateCount();
         this.requestActiveSnapshot();
         this.options.redrawMarkers();
+        this.render();
+        return true;
+      }
+      case 'pdfDiscussionModels': {
+        this.modelCatalogRequested = false;
+        this.modelCatalogResolved = true;
+        this.models = normalizePdfDiscussionModels(message.models);
+        this.modelCatalogError = typeof message.error === 'string' && message.error.trim()
+          ? message.error.trim()
+          : undefined;
         this.render();
         return true;
       }
@@ -532,7 +477,7 @@ class PdfAskPanelController implements PdfAskPanel {
     const ordered = sortAnnotations(this.annotations);
     ordered.forEach((annotation, index) => {
       if (annotation.anchor.page !== page) return;
-      const rects = validRects(annotation.anchor.rects);
+      const rects = normalizePdfTextBands(annotation.anchor.rects);
       const state = this.turnStates.get(annotation.id) ?? annotation.lastTurn;
       const status = annotationVisualStatus(annotation, state.status);
       rects.forEach((rect, rectIndex) => {
@@ -561,6 +506,10 @@ class PdfAskPanelController implements PdfAskPanel {
         layer.appendChild(marker);
       });
     });
+    // Marker DOM is rebuilt after snapshots and page rerenders. Re-run
+    // placement on the next frame so the floating inspector can avoid nearby
+    // discussion controls that did not exist during the first geometry pass.
+    this.schedulePlacement();
   }
 
   private resizeHandle(direction: string, accessible: boolean): HTMLElement {
@@ -697,373 +646,227 @@ class PdfAskPanelController implements PdfAskPanel {
   }
 
   private render(): void {
-    const active = document.activeElement;
-    const composerFocus = active instanceof HTMLTextAreaElement && this.content.contains(active)
-      ? {
-          start: active.selectionStart,
-          end: active.selectionEnd,
-          direction: active.selectionDirection,
-          scrollTop: active.scrollTop,
-        }
-      : undefined;
-    const controlFocus = !composerFocus && active instanceof HTMLElement && this.content.contains(active)
-      ? {
-          tagName: active.tagName,
-          ariaLabel: active.getAttribute('aria-label'),
-          text: active.textContent?.trim() ?? '',
-        }
-      : undefined;
-    this.renderContent();
-    if (composerFocus && !this.pendingPanelFocus) {
-      const textarea = this.content.querySelector<HTMLTextAreaElement>('textarea:not(:disabled)');
-      if (textarea) {
-        textarea.focus({ preventScroll: true });
-        const length = textarea.value.length;
-        textarea.setSelectionRange(
-          Math.min(composerFocus.start, length),
-          Math.min(composerFocus.end, length),
-          composerFocus.direction,
-        );
-        textarea.scrollTop = composerFocus.scrollTop;
-      }
-    } else if (controlFocus && !this.pendingPanelFocus) {
-      const replacement = Array.from(this.content.querySelectorAll<HTMLElement>(
-        'button, a, summary, input, select, [tabindex]',
-      )).find(candidate => (
-        candidate.tagName === controlFocus.tagName
-        && candidate.getAttribute('aria-label') === controlFocus.ariaLabel
-        && (controlFocus.ariaLabel !== null || candidate.textContent?.trim() === controlFocus.text)
-      ));
-      replacement?.focus({ preventScroll: true });
-    }
+    this.view.update(this.createViewModel());
     if (this.pendingPanelFocus) {
       this.pendingPanelFocus = false;
       queueMicrotask(() => this.focusPrimaryPanelControl());
     }
   }
 
-  private renderContent(): void {
-    this.content.replaceChildren();
-    const closeLabel = this.overviewOpen ? 'Close Ask PDF' : 'Minimize Ask PDF';
-    this.closeButton.ariaLabel = closeLabel;
-    this.closeButton.title = closeLabel;
-    this.closeButton.textContent = this.overviewOpen ? '×' : '−';
-    this.resetPositionButton.hidden = this.overviewOpen || !this.activeWindowKey || !this.currentWindowState().detached;
+  private createViewModel(): AskPdfViewModel {
+    const responsiveMode: AskPdfViewModel['responsiveMode'] = window.innerWidth < ASK_PDF_NARROW_BREAKPOINT
+      ? 'full-width'
+      : window.innerWidth < 900
+        ? 'overlay'
+        : 'floating';
+    const resetPositionVisible = !this.overviewOpen
+      && Boolean(this.activeWindowKey)
+      && this.currentWindowState().detached;
+    const base = {
+      responsiveMode,
+      resetPositionVisible,
+      closeMode: this.overviewOpen ? 'close' as const : 'minimize' as const,
+      messages: [],
+      running: false,
+      notices: [],
+      actions: [],
+      overviewItems: [],
+    };
     if (this.overviewOpen) {
-      this.renderOverview();
-      return;
+      return {
+        ...base,
+        mode: 'overview',
+        overviewItems: sortAnnotations(this.annotations).map((annotation, index) => ({
+          id: annotation.id,
+          number: index + 1,
+          page: annotation.anchor.page,
+          title: annotation.messages.find(message => message.role === 'user')?.markdown
+            ?? annotation.anchor.quote,
+          status: annotationVisualStatus(annotation, annotation.lastTurn.status),
+        })),
+      };
     }
     const annotation = this.activeAnnotation();
     const selection = annotation ? selectionFromAnnotation(annotation) : this.currentSelection;
     if (!selection) {
-      const empty = document.createElement('div');
-      empty.className = 'ask-pdf-empty';
-      empty.innerHTML = '<span class="ask-pdf-index">✦</span><p>Select a passage, then choose <strong>Ask about selection…</strong>.</p>';
-      this.content.appendChild(empty);
-      if (this.errorMessage) this.content.appendChild(this.errorElement(this.errorMessage));
-      return;
+      return {
+        ...base,
+        mode: 'empty',
+        emptyText: this.errorMessage
+          ?? 'Select a passage, then choose Ask about selection…',
+      };
     }
 
-    this.content.appendChild(this.sourceCard(selection, annotation));
-    const transcript = document.createElement('section');
-    transcript.className = 'ask-pdf-transcript';
-    transcript.setAttribute('aria-label', 'Ask PDF transcript');
-    if (annotation) {
-      for (const message of annotation.messages) transcript.appendChild(this.messageElement(message));
-    }
     const turnState = this.activeTurnState(annotation);
     const streaming = this.activeAnnotationId ? this.streaming.get(this.activeAnnotationId) : undefined;
-    if (streaming) {
-      const live = this.messageElement({
-        id: 'streaming',
-        role: 'assistant',
-        markdown: streaming,
-        createdAt: new Date().toISOString(),
-      });
-      live.classList.add('streaming');
-      live.setAttribute('aria-label', 'Codex is responding');
-      transcript.appendChild(live);
-    } else if (turnState.status === 'running') {
-      const live = document.createElement('p');
-      live.className = 'ask-pdf-status-note';
-      live.setAttribute('aria-label', 'Codex is responding');
-      live.textContent = 'Codex is responding…';
-      transcript.appendChild(live);
-    }
-    if (!annotation?.messages.length && !streaming) {
-      const note = document.createElement('p');
-      note.className = 'ask-pdf-transcript-empty';
-      note.textContent = 'Your question and the cited response will appear here.';
-      transcript.appendChild(note);
-    }
-    this.content.appendChild(transcript);
-
-    if (this.errorMessage) this.content.appendChild(this.errorElement(this.errorMessage));
+    const notices: AskPdfViewModel['notices'] = [];
+    if (this.errorMessage) notices.push({ kind: 'error', text: this.errorMessage });
+    const actions: AskPdfViewModel['actions'] = [];
     if (turnState.status === 'failed') {
-      this.content.appendChild(this.errorElement(turnState.error ?? annotation?.lastTurn.error ?? 'Codex could not answer this question.'));
-      if (annotation) {
-        if (this.consentGranted) {
-          const retry = primaryButton('Retry answer');
-          retry.addEventListener('click', () => this.post({ type: 'pdfDiscussionRetry', annotationId: annotation.id }));
-          this.content.appendChild(retry);
+      notices.push({
+        kind: 'error',
+        text: turnState.error ?? annotation?.lastTurn.error ?? 'Codex could not answer this question.',
+      });
+      if (annotation && this.consentGranted) actions.push({ kind: 'retry', label: 'Retry answer', primary: true });
+    } else if (turnState.status === 'cancelled') {
+      notices.push({ kind: 'status', text: 'Response stopped. You can revise the question and send again.' });
+    }
+    if (annotation && annotationHasAnswer(annotation) && turnState.status !== 'running') {
+      if (!annotation.promotion && this.consentGranted) {
+        actions.push({ kind: 'promote', label: 'Continue in Codex', primary: true });
+      } else if (annotation.promotion) {
+        actions.push({ kind: 'open-task', label: 'Open Codex task', primary: true });
+        if (this.promotionError?.annotationId === annotation.id) {
+          notices.push({ kind: 'error', text: this.promotionError.error });
+          actions.push(
+            { kind: 'retry-open', label: 'Retry opening' },
+            { kind: 'copy-task-id', label: 'Copy task ID' },
+          );
         }
       }
-    } else if (turnState.status === 'cancelled') {
-      const cancelled = document.createElement('p');
-      cancelled.className = 'ask-pdf-status-note';
-      cancelled.textContent = 'Response stopped. You can revise the question and send again.';
-      this.content.appendChild(cancelled);
     }
-
-    if (!this.consentGranted) this.content.appendChild(this.consentNotice());
-    this.content.appendChild(this.composer(annotation, turnState.status));
-    if (annotation && annotationHasAnswer(annotation) && turnState.status !== 'running') {
-      if (this.consentGranted || annotation.promotion) this.content.appendChild(this.codexActions(annotation));
-    }
-  }
-
-  private renderOverview(): void {
-    const region = document.createElement('section');
-    region.className = 'ask-pdf-overview';
-    region.setAttribute('role', 'region');
-    region.setAttribute('aria-label', 'PDF discussion overview');
-    const heading = document.createElement('div');
-    heading.className = 'ask-pdf-section-heading';
-    heading.innerHTML = '<span>DISCUSSIONS</span><strong>Page order · recent first</strong>';
-    region.appendChild(heading);
-    if (!this.annotations.length) {
-      const empty = document.createElement('p');
-      empty.className = 'ask-pdf-transcript-empty';
-      empty.textContent = 'No PDF discussions yet.';
-      region.appendChild(empty);
-    }
-    sortAnnotations(this.annotations).forEach((annotation, index) => {
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.className = `ask-pdf-overview-item ${annotationVisualStatus(annotation, annotation.lastTurn.status)}`;
-      const number = document.createElement('span');
-      number.className = 'ask-pdf-overview-number';
-      number.textContent = String(index + 1);
-      const copy = document.createElement('span');
-      const page = document.createElement('span');
-      page.className = 'ask-pdf-overview-page';
-      page.textContent = `PAGE ${annotation.anchor.page}`;
-      const question = document.createElement('strong');
-      question.textContent = annotation.messages.find(message => message.role === 'user')?.markdown ?? annotation.anchor.quote;
-      copy.append(page, question);
-      button.append(number, copy);
-      button.addEventListener('click', () => this.openAnnotation(annotation));
-      region.appendChild(button);
-    });
-    this.content.appendChild(region);
-  }
-
-  private sourceCard(selection: PdfAskSelection, annotation: PdfDiscussionAnnotationSnapshot | undefined): HTMLElement {
-    const source = document.createElement('section');
-    source.className = 'ask-pdf-source';
-    const heading = document.createElement('div');
-    heading.className = 'ask-pdf-source-heading';
-    const label = document.createElement('span');
-    label.textContent = 'SOURCE';
-    const page = document.createElement('a');
-    page.href = '#';
-    page.textContent = `Page ${selection.page}`;
-    page.addEventListener('click', event => {
-      event.preventDefault();
-      void this.options.navigateTo(selection.page, validRects(selection.rects), annotation?.id);
-    });
-    const actions = document.createElement('span');
-    actions.className = 'ask-pdf-source-actions';
-    const copyLink = document.createElement('button');
-    copyLink.type = 'button';
-    copyLink.textContent = 'Copy link';
-    copyLink.ariaLabel = 'Copy portable selection link';
-    copyLink.title = 'Copy portable page/text link';
-    copyLink.addEventListener('click', () => this.post({
-      type: 'pdfDiscussionCopyPortableLink',
-      ...(annotation ? { annotationId: annotation.id } : { selection }),
-    }));
-    actions.append(page, copyLink);
-    heading.append(label, actions);
-    source.appendChild(heading);
-    if (this.linkCopyNotice) {
-      const copied = document.createElement('span');
-      copied.className = 'ask-pdf-link-copied';
-      copied.setAttribute('role', 'status');
-      copied.textContent = this.linkCopyNotice;
-      source.appendChild(copied);
-    }
-    const crop = this.availableCrop(annotation);
-    if (crop) {
-      const image = document.createElement('img');
-      image.className = 'ask-pdf-crop';
-      image.alt = `Selected PDF passage on page ${selection.page}`;
-      image.src = crop;
-      source.appendChild(image);
-    }
-    const details = document.createElement('details');
-    details.className = 'ask-pdf-context';
-    details.open = true;
-    const summary = document.createElement('summary');
-    summary.textContent = 'Exact selected passage';
-    const context = document.createElement('blockquote');
-    const quote = selection.quote ?? selection.snippet ?? '';
-    context.textContent = quote;
-    details.append(summary, context);
-    source.appendChild(details);
-    const nearbyEntries = [
-      ...(selection.prefix ? [{ label: 'Before', text: selection.prefix }] : []),
-      ...(selection.suffix ? [{ label: 'After', text: selection.suffix }] : []),
-    ];
-    if (nearbyEntries.length) {
-      const nearby = document.createElement('section');
-      nearby.className = 'ask-pdf-nearby-context';
-      nearby.setAttribute('aria-label', 'Nearby context');
-      const nearbyHeading = document.createElement('h3');
-      nearbyHeading.textContent = 'Nearby context';
-      const list = document.createElement('dl');
-      for (const entry of nearbyEntries) {
-        const row = document.createElement('div');
-        row.className = 'ask-pdf-nearby-row';
-        const term = document.createElement('dt');
-        term.textContent = entry.label;
-        const description = document.createElement('dd');
-        description.textContent = entry.text;
-        row.append(term, description);
-        list.appendChild(row);
-      }
-      nearby.append(nearbyHeading, list);
-      source.appendChild(nearby);
-    }
-    return source;
-  }
-
-  private messageElement(message: PdfDiscussionMessageSnapshot): HTMLElement {
-    const element = document.createElement('article');
-    element.className = `ask-pdf-message ${message.role}`;
-    const rail = document.createElement('span');
-    rail.className = 'ask-pdf-message-rail';
-    const label = document.createElement('span');
-    label.className = 'ask-pdf-role';
-    label.textContent = message.role === 'user' ? 'YOU' : 'CODEX';
-    const body = document.createElement('div');
-    body.className = 'ask-pdf-markdown';
-    if (message.role === 'assistant') {
-      body.innerHTML = sanitizedMarkdown(message.markdown);
-      for (const link of Array.from(body.querySelectorAll<HTMLAnchorElement>('a[href]'))) {
-        const href = link.href;
-        link.href = '#';
-        link.removeAttribute('target');
-        const openThroughHost = (event: Event) => {
-          event.preventDefault();
-          this.post({ type: 'pdfDiscussionOpenLink', href });
-        };
-        link.addEventListener('click', openThroughHost);
-        link.addEventListener('auxclick', openThroughHost);
-      }
-    } else {
-      body.textContent = message.markdown;
-    }
-    element.append(rail, label, body);
-    return element;
-  }
-
-  private consentNotice(): HTMLElement {
-    const notice = document.createElement('section');
-    notice.className = 'ask-pdf-consent';
-    notice.setAttribute('aria-label', 'Ask PDF first-use notice');
-    const title = document.createElement('strong');
-    title.textContent = 'Before the first question';
-    const body = document.createElement('p');
-    body.textContent = this.availableCrop(this.activeAnnotation())
-      ? 'Selected text and crop are sent to Codex, and cached web search may be used when it helps answer the question.'
-      : 'Selected text is sent to Codex, and cached web search may be used when it helps answer the question. The page crop is unavailable, so Ask PDF will use text-only context.';
-    const accept = primaryButton('Accept and continue');
-    accept.addEventListener('click', () => {
-      accept.disabled = true;
-      this.pendingPanelFocus = true;
-      this.post({ type: 'pdfDiscussionConsent', accepted: true });
-    });
-    notice.append(title, body, accept);
-    return notice;
-  }
-
-  private composer(annotation: PdfDiscussionAnnotationSnapshot | undefined, status: PdfDiscussionTurnStatus): HTMLElement {
-    const composer = document.createElement('section');
-    composer.className = 'ask-pdf-composer';
-    composer.setAttribute('aria-label', 'Ask PDF composer');
-    const textarea = document.createElement('textarea');
-    textarea.rows = 3;
-    textarea.placeholder = 'Ask about this selection';
-    textarea.ariaLabel = 'Ask about this selection';
-    textarea.value = this.draft;
     const pendingSubmit = this.pendingSubmitFor(annotation);
-    textarea.disabled = !this.consentGranted || status === 'running' || Boolean(pendingSubmit);
-    const selectionPrepared = Boolean(annotation || this.currentSelectionKey);
-    let sendButton: HTMLButtonElement | undefined;
-    textarea.addEventListener('input', () => {
-      this.draft = textarea.value;
-      this.saveActiveDraft();
-      if (sendButton) {
-        sendButton.disabled = !this.consentGranted
-          || !selectionPrepared
+    return {
+      ...base,
+      mode: 'discussion',
+      source: {
+        key: annotation?.id ?? this.currentSelectionKey ?? `selection:${selection.page}:${selection.quote ?? selection.snippet ?? ''}`,
+        page: selection.page,
+        quote: selection.quote ?? selection.snippet ?? '',
+        ...(selection.prefix ? { prefix: selection.prefix } : {}),
+        ...(selection.suffix ? { suffix: selection.suffix } : {}),
+        ...(this.availableCrop(annotation) ? { cropUrl: this.availableCrop(annotation) } : {}),
+        ...(this.linkCopyNotice ? { linkNotice: this.linkCopyNotice } : {}),
+      },
+      messages: annotation?.messages.map(message => ({
+        id: message.id,
+        role: message.role,
+        markdown: message.markdown,
+        ...(message.codexModel ? { codexModel: message.codexModel } : {}),
+      })) ?? [],
+      ...(streaming ? { streamingMarkdown: streaming } : {}),
+      running: turnState.status === 'running',
+      ...(!annotation?.messages.length && !streaming
+        ? { transcriptEmptyText: 'Your question and the cited response will appear here.' }
+        : {}),
+      notices,
+      ...(!this.consentGranted
+        ? {
+            consent: {
+              body: this.availableCrop(annotation)
+                ? 'Selected text and crop are sent to Codex. Cached web search may be used when it helps answer the question.'
+                : 'Selected text is sent to Codex. Cached web search may be used when it helps answer the question. The page crop is unavailable, so Ask PDF will use text-only context.',
+            },
+          }
+        : {}),
+      composer: {
+        draft: this.draft,
+        ariaLabel: 'Ask about this selection',
+        placeholder: 'Ask about this selection',
+        disabled: !this.consentGranted || turnState.status === 'running' || Boolean(pendingSubmit),
+        sendDisabled: !this.consentGranted
+          || !Boolean(annotation || this.currentSelectionKey)
           || Boolean(pendingSubmit)
-          || !this.draft.trim();
-      }
-    });
-    textarea.addEventListener('keydown', event => {
-      if (event.key !== 'Enter' || (!event.metaKey && !event.ctrlKey)) return;
-      event.preventDefault();
-      this.submit(annotation);
-    });
-    composer.appendChild(textarea);
-    const footer = document.createElement('div');
-    footer.className = 'ask-pdf-composer-footer';
-    const hint = document.createElement('span');
-    hint.textContent = '⌘/Ctrl + Enter';
-    footer.appendChild(hint);
-    if (status === 'running') {
-      const stop = dangerButton('Stop');
-      stop.addEventListener('click', () => {
+          || !this.draft.trim(),
+        running: turnState.status === 'running',
+        models: this.models,
+        ...(this.selectedModel(annotation) ? { selectedModel: this.selectedModel(annotation) } : {}),
+        ...(this.modelCatalogError ? { modelError: this.modelCatalogError } : {}),
+      },
+      actions,
+    };
+  }
+
+  private handleViewEvent(event: AskPdfViewEvent): void {
+    const annotation = this.activeAnnotation();
+    const selection = annotation ? selectionFromAnnotation(annotation) : this.currentSelection;
+    switch (event.type) {
+      case 'changeDraft':
+        this.draft = event.value;
+        this.saveActiveDraft();
+        this.render();
+        return;
+      case 'selectModel':
+        if (this.activeWindowKey && this.activeWindowKey !== ASK_PDF_OVERVIEW_KEY) {
+          if (event.model) this.modelSelections[this.activeWindowKey] = event.model;
+          else delete this.modelSelections[this.activeWindowKey];
+          this.persistWindowState();
+          this.render();
+        }
+        return;
+      case 'submit':
+        this.submit(annotation);
+        return;
+      case 'stop': {
         const annotationId = annotation?.id ?? this.activeAnnotationId;
         if (annotationId) this.post({ type: 'pdfDiscussionCancel', annotationId });
-      });
-      footer.appendChild(stop);
-    } else {
-      const send = primaryButton('Ask Codex');
-      sendButton = send;
-      send.disabled = !this.consentGranted
-        || !selectionPrepared
-        || Boolean(pendingSubmit)
-        || !this.draft.trim();
-      send.addEventListener('click', () => this.submit(annotation));
-      footer.appendChild(send);
+        return;
+      }
+      case 'retry':
+        if (annotation) this.post({ type: 'pdfDiscussionRetry', annotationId: annotation.id });
+        return;
+      case 'copyPortableLink':
+        if (annotation) this.post({ type: 'pdfDiscussionCopyPortableLink', annotationId: annotation.id });
+        else if (selection) this.post({ type: 'pdfDiscussionCopyPortableLink', selection });
+        return;
+      case 'navigateSource':
+        if (selection) void this.options.navigateTo(selection.page, validRects(selection.rects), annotation?.id);
+        return;
+      case 'openTranscriptLink':
+        this.post({ type: 'pdfDiscussionOpenLink', href: event.href });
+        return;
+      case 'promote':
+        if (annotation) this.post({ type: 'pdfDiscussionPromote', annotationId: annotation.id });
+        return;
+      case 'openPromotedTask':
+      case 'retryOpening':
+        if (annotation) this.post({ type: 'pdfDiscussionOpenPromotedTask', annotationId: annotation.id });
+        return;
+      case 'copyTaskId':
+        if (annotation?.promotion) {
+          void copyText(this.promotionError?.threadId ?? annotation.promotion.threadId);
+        }
+        return;
+      case 'acceptConsent':
+        this.pendingPanelFocus = true;
+        this.post({ type: 'pdfDiscussionConsent', accepted: true });
+        return;
+      case 'openAnnotation': {
+        const candidate = this.annotations.find(item => item.id === event.annotationId);
+        if (candidate) this.openAnnotation(candidate);
+        return;
+      }
+      case 'minimize':
+        this.minimizePanel();
+        return;
+      case 'close':
+        this.closePanel();
+        return;
+      case 'resetPosition':
+        this.reattachPanel();
+        return;
     }
-    composer.appendChild(footer);
-    return composer;
   }
 
-  private codexActions(annotation: PdfDiscussionAnnotationSnapshot): HTMLElement {
-    const actions = document.createElement('section');
-    actions.className = 'ask-pdf-actions';
-    if (!annotation.promotion) {
-      const promote = primaryButton('Continue in Codex');
-      promote.addEventListener('click', () => this.post({ type: 'pdfDiscussionPromote', annotationId: annotation.id }));
-      actions.appendChild(promote);
-      return actions;
+  private ensureModelCatalog(): void {
+    if (
+      !this.consentGranted
+      || this.modelCatalogRequested
+      || this.modelCatalogResolved
+    ) return;
+    this.modelCatalogRequested = true;
+    this.post({ type: 'pdfDiscussionListModels' });
+  }
+
+  private selectedModel(annotation: PdfDiscussionAnnotationSnapshot | undefined): string | undefined {
+    const key = this.activeWindowKey && this.activeWindowKey !== ASK_PDF_OVERVIEW_KEY
+      ? this.activeWindowKey
+      : undefined;
+    const candidate = (key ? this.modelSelections[key] : undefined) ?? annotation?.lastTurn.model;
+    if (candidate && (!this.modelCatalogResolved || this.models.some(model => model.model === candidate))) {
+      return candidate;
     }
-    const open = primaryButton('Open Codex task');
-    open.addEventListener('click', () => this.post({ type: 'pdfDiscussionOpenPromotedTask', annotationId: annotation.id }));
-    actions.appendChild(open);
-    if (this.promotionError?.annotationId === annotation.id) {
-      const error = this.errorElement(this.promotionError.error);
-      const retry = secondaryButton('Retry opening');
-      retry.addEventListener('click', () => this.post({ type: 'pdfDiscussionOpenPromotedTask', annotationId: annotation.id }));
-      const copy = secondaryButton('Copy task ID');
-      copy.addEventListener('click', () => void copyText(this.promotionError?.threadId ?? annotation.promotion!.threadId));
-      actions.append(error, retry, copy);
-    }
-    return actions;
+    return this.models.find(model => model.isDefault)?.model ?? this.models[0]?.model;
   }
 
   private submit(annotation: PdfDiscussionAnnotationSnapshot | undefined): void {
@@ -1076,6 +879,7 @@ class PdfAskPanelController implements PdfAskPanel {
       || this.pendingSubmitFor(annotation)
     ) return;
     const base64 = this.currentCropDataUrl?.split(',')[1];
+    const model = this.selectedModel(annotation);
     this.errorMessage = undefined;
     this.transientActionError = undefined;
     const draft = this.draft;
@@ -1084,6 +888,7 @@ class PdfAskPanelController implements PdfAskPanel {
       ...(annotation ? { annotationId: annotation.id } : {}),
       ...(!annotation && this.currentSelection ? { selection: this.currentSelection } : {}),
       question,
+      ...(model ? { model } : {}),
       ...(base64 ? { snapshotPngBase64: base64 } : {}),
     });
     this.pendingSubmits.set(pendingOwnerKey, {
@@ -1243,14 +1048,6 @@ class PdfAskPanelController implements PdfAskPanel {
     this.transientActionError = undefined;
   }
 
-  private errorElement(message: string): HTMLElement {
-    const error = document.createElement('p');
-    error.className = 'ask-pdf-error';
-    error.setAttribute('role', 'alert');
-    error.textContent = message;
-    return error;
-  }
-
   private updateCount(): void {
     const count = this.annotations.length;
     this.countButton.textContent = `✦ ${count}`;
@@ -1264,6 +1061,9 @@ class PdfAskPanelController implements PdfAskPanel {
     this.activeAnnotationId = annotation.id;
     this.currentSelection = selectionFromAnnotation(annotation);
     this.currentSelectionKey = annotation.selectionKey;
+    if (!(annotation.id in this.modelSelections) && annotation.lastTurn.model) {
+      this.modelSelections[annotation.id] = annotation.lastTurn.model;
+    }
     if (!this.overviewOpen) this.activateWindow(annotation.id, { migrateFrom });
   }
 
@@ -1276,8 +1076,12 @@ class PdfAskPanelController implements PdfAskPanel {
     if (migrateFrom && migrateFrom !== key) {
       if (!this.windows[key] && this.windows[migrateFrom]) this.windows[key] = { ...this.windows[migrateFrom] };
       if (!(key in this.drafts) && migrateFrom in this.drafts) this.drafts[key] = this.drafts[migrateFrom]!;
+      if (!(key in this.modelSelections) && migrateFrom in this.modelSelections) {
+        this.modelSelections[key] = this.modelSelections[migrateFrom]!;
+      }
       delete this.windows[migrateFrom];
       delete this.drafts[migrateFrom];
+      delete this.modelSelections[migrateFrom];
     }
     this.activeWindowKey = key;
     if (key in this.drafts) {
@@ -1334,9 +1138,9 @@ class PdfAskPanelController implements PdfAskPanel {
     if (window.innerWidth < ASK_PDF_NARROW_BREAKPOINT) {
       return {
         ...state,
-        left: ASK_PDF_VIEWPORT_INSET,
-        top: ASK_PDF_VIEWPORT_INSET,
-        width: Math.round(availableWidth),
+        left: 0,
+        top: 0,
+        width: Math.round(bounds.width),
         height,
       };
     }
@@ -1379,6 +1183,11 @@ class PdfAskPanelController implements PdfAskPanel {
     this.panel.style.top = `${state.top}px`;
     this.panel.style.width = `${state.width}px`;
     this.panel.style.height = `${state.height}px`;
+    this.panel.dataset.responsiveMode = window.innerWidth < ASK_PDF_NARROW_BREAKPOINT
+      ? 'full-width'
+      : window.innerWidth < 900
+        ? 'overlay'
+        : 'floating';
     this.panel.classList.toggle('attached', Boolean(attachment));
     if (attachment) this.panel.dataset.attachment = attachment;
     else delete this.panel.dataset.attachment;
@@ -1415,13 +1224,36 @@ class PdfAskPanelController implements PdfAskPanel {
       || candidate.top + state.height <= anchor.top
       || candidate.top >= anchor.bottom
     );
-    const candidate = candidates.find(fits)
-      ?? candidates.map(clampCandidate).find(value => !overlapsAnchor(value))
+    const markerObstacles = this.discussionMarkerObstacles();
+    const overlapsMarker = (candidate: { left: number; top: number }): boolean => markerObstacles.some(marker => !(
+      candidate.left + state.width <= marker.left
+      || candidate.left >= marker.right
+      || candidate.top + state.height <= marker.top
+      || candidate.top >= marker.bottom
+    ));
+    const candidate = candidates.find(value => fits(value) && !overlapsMarker(value))
+      ?? candidates.map(clampCandidate).find(value => !overlapsAnchor(value) && !overlapsMarker(value))
       ?? clampCandidate(candidates[0]!);
     return {
       state: this.boundGeometry({ ...state, left: candidate.left, top: candidate.top, detached: false }),
       attachment: candidate.attachment,
     };
+  }
+
+  private discussionMarkerObstacles(): Array<{ left: number; top: number; right: number; bottom: number }> {
+    const shell = this.options.viewerShell.getBoundingClientRect();
+    return Array.from(this.options.viewerShell.querySelectorAll<HTMLElement>('.pdf-discussion-marker'))
+      .filter(marker => marker.dataset.annotationId !== this.activeAnnotationId)
+      .map(marker => {
+        const rect = marker.getBoundingClientRect();
+        const clearance = 4;
+        return {
+          left: rect.left - shell.left - clearance,
+          top: rect.top - shell.top - clearance,
+          right: rect.right - shell.left + clearance,
+          bottom: rect.bottom - shell.top + clearance,
+        };
+      });
   }
 
   private updateResizeAccessibility(state: AskPdfWindowState): void {
@@ -1436,7 +1268,7 @@ class PdfAskPanelController implements PdfAskPanel {
   private resizeWidthRange(): { minimum: number; maximum: number } {
     const availableWidth = Math.max(1, this.shellBounds().width - ASK_PDF_VIEWPORT_INSET * 2);
     if (window.innerWidth < ASK_PDF_NARROW_BREAKPOINT) {
-      const fixedWidth = Math.round(availableWidth);
+      const fixedWidth = Math.round(this.shellBounds().width);
       return { minimum: fixedWidth, maximum: fixedWidth };
     }
     const maximum = Math.round(Math.min(ASK_PDF_MAX_WIDTH, availableWidth));
@@ -1467,6 +1299,7 @@ class PdfAskPanelController implements PdfAskPanel {
     this.saveState({
       askPdfDraft: this.draft,
       askPdfDrafts: { ...this.drafts },
+      askPdfModelSelections: { ...this.modelSelections },
       askPdfWindows: Object.fromEntries(
         Object.entries(this.windows).map(([key, value]) => [key, { ...value }]),
       ),
@@ -1506,12 +1339,7 @@ class PdfAskPanelController implements PdfAskPanel {
   }
 
   private focusPrimaryPanelControl(): void {
-    if (this.panel.hidden) return;
-    const target = this.content.querySelector<HTMLElement>('textarea:not(:disabled)')
-      ?? this.content.querySelector<HTMLElement>('.ask-pdf-consent button:not(:disabled)')
-      ?? this.content.querySelector<HTMLElement>('.ask-pdf-overview-item')
-      ?? this.closeButton;
-    target.focus({ preventScroll: true });
+    this.view.focusPrimary();
   }
 
   private post(message: Record<string, unknown>): string {
@@ -1569,145 +1397,6 @@ class PdfAskPanelController implements PdfAskPanel {
   }
 }
 
-function installAskPdfStyles(): void {
-  if (document.getElementById('ask-pdf-styles')) return;
-  const style = document.createElement('style');
-  style.id = 'ask-pdf-styles';
-  style.textContent = `
-    #viewer-shell { position: relative; }
-    #toolbar .ask-pdf-count { min-width: 42px; font-variant-numeric: tabular-nums; }
-    .ask-pdf-panel { box-sizing: border-box; position: absolute; z-index: 55; display: flex; flex-direction: column; border: 1px solid var(--vscode-panel-border); border-left: 2px solid color-mix(in srgb, ${ASK_PDF_ACCENT} 82%, var(--vscode-panel-border)); border-radius: 3px; background: var(--vscode-editorWidget-background, var(--vscode-sideBar-background, var(--vscode-editor-background))); box-shadow: 0 8px 24px rgba(0,0,0,.34), 0 1px 4px rgba(0,0,0,.28); color: var(--vscode-editor-foreground); font: 12px var(--vscode-font-family, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif); }
-    .ask-pdf-panel[hidden] { display: none; }
-    .ask-pdf-panel.attached::before { content: ''; position: absolute; z-index: -1; display: block; background: ${ASK_PDF_ACCENT}; pointer-events: none; }
-    .ask-pdf-panel.attached[data-attachment="left"]::before { top: 31px; left: -17px; width: 16px; height: 1px; }
-    .ask-pdf-panel.attached[data-attachment="right"]::before { top: 31px; right: -17px; width: 16px; height: 1px; }
-    .ask-pdf-panel.attached[data-attachment="top"]::before { top: -17px; left: 31px; width: 1px; height: 16px; }
-    .ask-pdf-panel.attached[data-attachment="bottom"]::before { bottom: -17px; left: 31px; width: 1px; height: 16px; }
-    .ask-pdf-live-region { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
-    .ask-pdf-resize-handle { position: absolute; z-index: 3; touch-action: none; }
-    .ask-pdf-resize-n { top: -4px; right: 8px; left: 8px; height: 8px; cursor: ns-resize; }
-    .ask-pdf-resize-ne { top: -4px; right: -4px; width: 12px; height: 12px; cursor: nesw-resize; }
-    .ask-pdf-resize-e { top: 8px; right: -4px; bottom: 8px; width: 8px; cursor: ew-resize; }
-    .ask-pdf-resize-se { right: -5px; bottom: -5px; width: 14px; height: 14px; cursor: nwse-resize; }
-    .ask-pdf-resize-s { right: 8px; bottom: -4px; left: 8px; height: 8px; cursor: ns-resize; }
-    .ask-pdf-resize-sw { bottom: -4px; left: -4px; width: 12px; height: 12px; cursor: nesw-resize; }
-    .ask-pdf-resize-w { top: 8px; bottom: 8px; left: -4px; width: 8px; cursor: ew-resize; }
-    .ask-pdf-resize-nw { top: -4px; left: -4px; width: 12px; height: 12px; cursor: nwse-resize; }
-    .ask-pdf-resizer:focus-visible, .ask-pdf-panel button:focus-visible, .ask-pdf-panel a:focus-visible, .ask-pdf-panel textarea:focus-visible, .pdf-discussion-marker:focus-visible { outline: 2px solid var(--vscode-focusBorder, ${ASK_PDF_ACCENT}); outline-offset: 1px; }
-    .ask-pdf-header { box-sizing: border-box; display: flex; min-height: 56px; flex: 0 0 auto; align-items: center; justify-content: space-between; padding: 8px 8px 8px 13px; border-bottom: 1px solid var(--vscode-panel-border); cursor: grab; user-select: none; touch-action: none; }
-    .ask-pdf-header:active { cursor: grabbing; }
-    .ask-pdf-header h2 { margin: 1px 0 0; font-size: 15px; font-weight: 650; letter-spacing: -.01em; }
-    .ask-pdf-header-actions { display: inline-flex; align-items: center; gap: 1px; }
-    .ask-pdf-eyebrow, .ask-pdf-role, .ask-pdf-source-heading, .ask-pdf-section-heading, .ask-pdf-overview-page { font-family: var(--vscode-editor-font-family, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: 9px; font-weight: 650; letter-spacing: .11em; color: var(--vscode-descriptionForeground); }
-    .ask-pdf-header button, .ask-pdf-panel button { border: 1px solid transparent; border-radius: 3px; background: transparent; color: inherit; font: inherit; cursor: pointer; }
-    .ask-pdf-header button { width: 28px; height: 28px; font-size: 18px; }
-    .ask-pdf-header button:hover, .ask-pdf-panel button:hover { background: var(--vscode-toolbar-hoverBackground, rgba(90,93,94,.31)); }
-    .ask-pdf-content { min-height: 0; flex: 1 1 auto; overflow: auto; padding: 0 14px 18px; }
-    .ask-pdf-source { margin: 0 -14px; padding: 11px 14px 12px; border-bottom: 1px solid var(--vscode-panel-border); background: color-mix(in srgb, var(--vscode-editor-background) 72%, transparent); }
-    .ask-pdf-source-heading { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
-    .ask-pdf-source-actions { display: inline-flex; align-items: center; gap: 8px; }
-    .ask-pdf-source-heading a, .ask-pdf-source-heading button { color: ${ASK_PDF_ACCENT}; font-family: var(--vscode-font-family, sans-serif); font-size: 11px; letter-spacing: 0; text-decoration: none; }
-    .ask-pdf-source-heading button { padding: 0; }
-    .ask-pdf-source-heading a:hover { text-decoration: underline; }
-    .ask-pdf-link-copied { display: block; margin: -3px 0 7px; color: var(--vscode-descriptionForeground); font-size: 10px; }
-    .ask-pdf-crop { box-sizing: border-box; display: block; width: 100%; max-height: 190px; margin: 0 0 9px; border: 1px solid color-mix(in srgb, ${ASK_PDF_ACCENT} 55%, var(--vscode-panel-border)); object-fit: contain; background: #fff; }
-    .ask-pdf-context summary { cursor: pointer; color: var(--vscode-descriptionForeground); font-size: 11px; }
-    .ask-pdf-context blockquote { margin: 8px 0 0; padding: 0 0 0 10px; border-left: 2px solid ${ASK_PDF_ACCENT}; line-height: 1.5; }
-    .ask-pdf-nearby-context { margin-top: 10px; color: var(--vscode-descriptionForeground); }
-    .ask-pdf-nearby-context h3 { margin: 0 0 5px; font-size: 10px; font-weight: 600; }
-    .ask-pdf-nearby-context dl { display: grid; gap: 4px; margin: 0; }
-    .ask-pdf-nearby-row { display: grid; grid-template-columns: 42px minmax(0, 1fr); gap: 6px; }
-    .ask-pdf-nearby-context dt { font-size: 9px; font-weight: 650; letter-spacing: .05em; text-transform: uppercase; }
-    .ask-pdf-nearby-context dd { margin: 0; line-height: 1.4; }
-    .ask-pdf-transcript { position: relative; display: flex; flex-direction: column; gap: 13px; padding: 16px 0 12px; }
-    .ask-pdf-message { position: relative; display: grid; grid-template-columns: 8px 43px minmax(0, 1fr); align-items: start; }
-    .ask-pdf-message-rail { width: 1px; height: 100%; min-height: 25px; margin-left: 3px; background: color-mix(in srgb, ${ASK_PDF_ACCENT} 62%, var(--vscode-panel-border)); }
-    .ask-pdf-message.user .ask-pdf-message-rail { background: var(--vscode-panel-border); }
-    .ask-pdf-role { padding-top: 2px; }
-    .ask-pdf-markdown { min-width: 0; font-size: 12.5px; line-height: 1.55; overflow-wrap: anywhere; }
-    .ask-pdf-markdown > :first-child { margin-top: 0; }
-    .ask-pdf-markdown > :last-child { margin-bottom: 0; }
-    .ask-pdf-markdown p { margin: 0 0 8px; }
-    .ask-pdf-markdown pre { overflow: auto; padding: 8px; background: var(--vscode-textCodeBlock-background); }
-    .ask-pdf-markdown code { font-family: var(--vscode-editor-font-family, monospace); }
-    .ask-pdf-markdown a { color: ${ASK_PDF_ACCENT}; }
-    .ask-pdf-message.streaming .ask-pdf-message-rail { animation: ask-pdf-stream 1.4s ease-in-out infinite; }
-    .ask-pdf-transcript-empty, .ask-pdf-status-note { margin: 0; color: var(--vscode-descriptionForeground); line-height: 1.45; }
-    .ask-pdf-consent { margin: 6px 0 12px; padding: 11px; border: 1px solid var(--vscode-panel-border); border-left: 2px solid ${ASK_PDF_ACCENT}; }
-    .ask-pdf-consent p { margin: 5px 0 10px; color: var(--vscode-descriptionForeground); line-height: 1.45; }
-    .ask-pdf-error { margin: 6px 0 10px; color: var(--vscode-errorForeground); line-height: 1.45; }
-    .ask-pdf-composer { margin-top: 8px; border-top: 1px solid var(--vscode-panel-border); padding-top: 12px; }
-    .ask-pdf-composer textarea { box-sizing: border-box; display: block; width: 100%; min-height: 72px; resize: vertical; border: 1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius: 2px; outline: 0; padding: 8px; background: var(--vscode-input-background); color: var(--vscode-input-foreground); font: inherit; line-height: 1.45; }
-    .ask-pdf-composer textarea::placeholder { color: var(--vscode-input-placeholderForeground, var(--vscode-descriptionForeground)); }
-    .ask-pdf-composer-footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 7px; }
-    .ask-pdf-composer-footer > span { color: var(--vscode-descriptionForeground); font-size: 10px; }
-    .ask-pdf-panel .ask-pdf-primary, .ask-pdf-panel .ask-pdf-danger, .ask-pdf-panel .ask-pdf-secondary { min-height: 27px; padding: 3px 10px; }
-    .ask-pdf-panel .ask-pdf-primary { background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
-    .ask-pdf-panel .ask-pdf-primary:hover { background: var(--vscode-button-hoverBackground, var(--vscode-button-background)); }
-    .ask-pdf-panel .ask-pdf-secondary { border-color: var(--vscode-button-border, var(--vscode-panel-border)); }
-    .ask-pdf-panel .ask-pdf-danger { border-color: color-mix(in srgb, var(--vscode-errorForeground) 55%, transparent); color: var(--vscode-errorForeground); }
-    .ask-pdf-panel button:disabled { cursor: default; opacity: .5; }
-    .ask-pdf-actions { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 11px; padding-top: 11px; border-top: 1px solid var(--vscode-panel-border); }
-    .ask-pdf-actions .ask-pdf-error { flex: 0 0 100%; margin: 0; }
-    .ask-pdf-overview { padding-top: 13px; }
-    .ask-pdf-section-heading { display: flex; justify-content: space-between; margin-bottom: 8px; }
-    .ask-pdf-section-heading strong { color: var(--vscode-descriptionForeground); font: inherit; letter-spacing: 0; }
-    .ask-pdf-overview-item { box-sizing: border-box; display: grid; width: 100%; grid-template-columns: 26px minmax(0, 1fr); gap: 8px; align-items: start; padding: 9px 5px; border-top: 1px solid var(--vscode-panel-border) !important; text-align: left; }
-    .ask-pdf-overview-item > span:last-child { display: flex; min-width: 0; flex-direction: column; gap: 3px; }
-    .ask-pdf-overview-item strong { overflow: hidden; font-size: 12px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
-    .ask-pdf-overview-number { box-sizing: border-box; display: inline-flex; width: 20px; height: 20px; align-items: center; justify-content: center; border: 1px solid ${ASK_PDF_ACCENT}; border-radius: 50%; color: ${ASK_PDF_ACCENT}; font: 600 10px var(--vscode-editor-font-family, monospace); }
-    .ask-pdf-overview-item.answered .ask-pdf-overview-number, .ask-pdf-overview-item.promoted .ask-pdf-overview-number { background: ${ASK_PDF_ACCENT}; color: #10212e; }
-    .ask-pdf-overview-item.failed .ask-pdf-overview-number { border-color: var(--vscode-errorForeground); color: var(--vscode-errorForeground); }
-    .ask-pdf-empty { display: grid; place-items: center; min-height: 220px; padding: 24px; color: var(--vscode-descriptionForeground); text-align: center; line-height: 1.55; }
-    .ask-pdf-index { color: ${ASK_PDF_ACCENT}; font-size: 20px; }
-    .highlight-layer .pdf-discussion-outline { position: absolute; z-index: 22; box-sizing: border-box; border: 1.5px solid ${ASK_PDF_ACCENT}; border-radius: 1px; padding: 0; background: transparent; pointer-events: none; }
-    .highlight-layer .pdf-discussion-outline:hover, .highlight-layer .pdf-discussion-outline.active { background: color-mix(in srgb, ${ASK_PDF_ACCENT} 9%, transparent); }
-    .highlight-layer .pdf-discussion-outline.failed { border-color: var(--vscode-errorForeground, #f48771); }
-    .highlight-layer .pdf-discussion-marker { position: absolute; z-index: 24; display: flex; width: 18px; height: 18px; min-width: 18px; align-items: center; justify-content: center; border: 1px solid ${ASK_PDF_ACCENT}; border-radius: 50%; padding: 0; background: var(--vscode-editor-background, #1e1e1e); color: ${ASK_PDF_ACCENT}; font: 650 9px var(--vscode-editor-font-family, monospace); pointer-events: auto; cursor: pointer; }
-    .highlight-layer .pdf-discussion-marker.answered, .highlight-layer .pdf-discussion-marker.active, .highlight-layer .pdf-discussion-marker.promoted { background: ${ASK_PDF_ACCENT}; color: #10212e; }
-    .highlight-layer .pdf-discussion-marker.running { animation: ask-pdf-marker 1.6s ease-in-out infinite; }
-    .highlight-layer .pdf-discussion-marker.failed { border-color: var(--vscode-errorForeground, #f48771); color: var(--vscode-errorForeground, #f48771); }
-    @keyframes ask-pdf-stream { 0%,100% { opacity: .42; } 50% { opacity: 1; } }
-    @keyframes ask-pdf-marker { 0%,100% { box-shadow: 0 0 0 0 color-mix(in srgb, ${ASK_PDF_ACCENT} 30%, transparent); } 50% { box-shadow: 0 0 0 4px transparent; } }
-    @media (max-width: 619px) { .ask-pdf-header { cursor: default; } .ask-pdf-resize-handle { cursor: default; } }
-    @media (prefers-reduced-motion: reduce) { .ask-pdf-message.streaming .ask-pdf-message-rail, .highlight-layer .pdf-discussion-marker.running { animation: none; } }
-  `;
-  document.head.appendChild(style);
-}
-
-function selectionFromAnnotation(annotation: PdfDiscussionAnnotationSnapshot): PdfAskSelection {
-  return {
-    page: annotation.anchor.page,
-    snippet: annotation.anchor.quote,
-    quote: annotation.anchor.quote,
-    prefix: annotation.anchor.prefix,
-    suffix: annotation.anchor.suffix,
-    rects: annotation.anchor.rects,
-    textItemIndex: annotation.anchor.textItemIndex,
-    charOffset: annotation.anchor.charOffset,
-    endTextItemIndex: annotation.anchor.endTextItemIndex,
-    endCharOffset: annotation.anchor.endCharOffset,
-  };
-}
-
-function sortAnnotations(annotations: PdfDiscussionAnnotationSnapshot[]): PdfDiscussionAnnotationSnapshot[] {
-  return [...annotations].sort((left, right) => (
-    left.anchor.page - right.anchor.page
-    || Date.parse(right.updatedAt) - Date.parse(left.updatedAt)
-    || left.id.localeCompare(right.id)
-  ));
-}
-
-function annotationVisualStatus(annotation: PdfDiscussionAnnotationSnapshot, turnStatus: PdfDiscussionTurnStatus): string {
-  if (annotation.promotion) return 'promoted';
-  if (turnStatus === 'running' || turnStatus === 'failed' || turnStatus === 'cancelled') return turnStatus;
-  return annotationHasAnswer(annotation) ? 'answered' : 'draft';
-}
-
-function annotationHasAnswer(annotation: PdfDiscussionAnnotationSnapshot): boolean {
-  return annotation.messages.some(message => message.role === 'assistant');
-}
-
 function sanitizedMarkdown(markdown: string): string {
   const html = marked.parse(markdown, { async: false }) as string;
   return DOMPurify.sanitize(html, {
@@ -1723,46 +1412,6 @@ function sanitizedMarkdown(markdown: string): string {
   });
 }
 
-function iconButton(label: string, text: string): HTMLButtonElement {
-  const button = document.createElement('button');
-  button.type = 'button';
-  button.ariaLabel = label;
-  button.title = label;
-  button.textContent = text;
-  return button;
-}
-
-function primaryButton(label: string): HTMLButtonElement {
-  return actionButton(label, 'ask-pdf-primary');
-}
-
-function secondaryButton(label: string): HTMLButtonElement {
-  return actionButton(label, 'ask-pdf-secondary');
-}
-
-function dangerButton(label: string): HTMLButtonElement {
-  return actionButton(label, 'ask-pdf-danger');
-}
-
-function actionButton(label: string, className: string): HTMLButtonElement {
-  const button = document.createElement('button');
-  button.type = 'button';
-  button.className = className;
-  button.textContent = label;
-  return button;
-}
-
-function validRects(value: unknown): PdfRect[] {
-  if (!Array.isArray(value)) return [];
-  return value.filter((rect): rect is PdfRect => (
-    Array.isArray(rect)
-    && rect.length === 4
-    && rect.every(coordinate => typeof coordinate === 'number' && Number.isFinite(coordinate))
-    && rect[2]! > rect[0]!
-    && rect[3]! > rect[1]!
-  ));
-}
-
 function positionRect(element: HTMLElement, rect: PdfRect, scale: number): void {
   element.style.left = `${rect[0] * scale}px`;
   element.style.top = `${rect[1] * scale}px`;
@@ -1770,61 +1419,11 @@ function positionRect(element: HTMLElement, rect: PdfRect, scale: number): void 
   element.style.height = `${Math.max(1, (rect[3] - rect[1]) * scale)}px`;
 }
 
-function normalizeTurnStatus(value: unknown): PdfDiscussionTurnStatus {
-  return value === 'running' || value === 'failed' || value === 'cancelled' ? value : 'idle';
-}
-
 function isTransientActionError(requestType: string, message: string): boolean {
   if (requestType !== 'pdfDiscussionSubmit'
     && requestType !== 'pdfDiscussionRetry'
     && requestType !== 'pdfDiscussionCancel') return false;
   return /\bactive turn\b|\bno (?:active|running) turn\b|\bturn (?:is )?not (?:currently )?running\b/i.test(message);
-}
-
-function stateRecord(value: unknown): AskPdfWebviewState {
-  return value && typeof value === 'object' ? value as AskPdfWebviewState : {};
-}
-
-function normalizeAskPdfWindows(value: unknown): Record<string, AskPdfWindowState> {
-  if (!value || typeof value !== 'object') return {};
-  const windows: Record<string, AskPdfWindowState> = {};
-  for (const [key, candidate] of Object.entries(value)) {
-    if (!candidate || typeof candidate !== 'object') continue;
-    const record = candidate as Partial<AskPdfWindowState>;
-    if (![record.left, record.top, record.width, record.height].every(number => (
-      typeof number === 'number' && Number.isFinite(number)
-    ))) continue;
-    windows[key] = {
-      left: record.left!,
-      top: record.top!,
-      width: record.width!,
-      height: record.height!,
-      detached: record.detached === true,
-      minimized: record.minimized === true,
-    };
-  }
-  return windows;
-}
-
-function normalizeAskPdfDrafts(value: unknown): Record<string, string> {
-  if (!value || typeof value !== 'object') return {};
-  return Object.fromEntries(
-    Object.entries(value).filter((entry): entry is [string, string] => typeof entry[1] === 'string'),
-  );
-}
-
-function isTransientWindowKey(key: string | undefined): boolean {
-  return Boolean(key?.startsWith('draft:') || key?.startsWith('selection:'));
-}
-
-function clampPanelWidth(value: unknown): number {
-  const number = typeof value === 'number' && Number.isFinite(value) ? value : ASK_PDF_DEFAULT_WIDTH;
-  return Math.round(clamp(number, ASK_PDF_MIN_WIDTH, ASK_PDF_MAX_WIDTH));
-}
-
-function base64ByteLength(value: string): number {
-  const padding = value.endsWith('==') ? 2 : value.endsWith('=') ? 1 : 0;
-  return Math.max(0, Math.floor(value.length * 3 / 4) - padding);
 }
 
 function clamp(value: number, minimum: number, maximum: number): number {
