@@ -1,5 +1,5 @@
 import { createHash } from 'crypto';
-import { Database } from '../db/connection';
+import { type Database } from '../db/connection';
 
 export const LOCAL_EMBEDDING_MODEL = 'hl-local-hash-v1';
 export const LOCAL_EMBEDDING_DIMENSIONS = 64;

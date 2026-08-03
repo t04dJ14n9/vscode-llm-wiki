@@ -196,7 +196,7 @@ export class PdfDiscussionControllerError extends Error {
       | 'cancel-failed'
       | 'storage-failed',
     message: string,
-    readonly cause?: unknown,
+    override readonly cause?: unknown,
   ) {
     super(message);
     this.name = 'PdfDiscussionControllerError';
@@ -1448,8 +1448,8 @@ export class PdfDiscussionController {
       dispose: () => {
         if (disposed) return;
         disposed = true;
-        this.trustedSnapshotPaths.delete(path!);
-        rmSync(path!, { force: true });
+        this.trustedSnapshotPaths.delete(path);
+        rmSync(path, { force: true });
       },
     };
   }

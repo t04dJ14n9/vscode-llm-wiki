@@ -1,9 +1,8 @@
 import { createHash } from 'crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
-import { Database } from '../db/connection';
-import { getBacklinks, getForwardLinks, LinkRecord } from '../links/graph';
-import { getSource } from '../sources/registry';
+import { type Database } from '../db/connection';
+import { getBacklinks, getForwardLinks, type LinkRecord } from '../links/graph';
 import { resolveAnchor } from '../anchors/pdf';
 
 export interface ExportContextOptions {
@@ -43,8 +42,7 @@ export function exportSourceContext(
   }
 
   const text = readFileSync(fullPath, 'utf8');
-  const source = getSource(db, sourcePath);
-  const sourceUri = options.uri ?? anchor?.uri ?? uriForSource(source?.kind ?? 'text', sourcePath);
+  const sourceUri = options.uri ?? anchor?.uri ?? sourcePath;
   const backlinks = getBacklinks(db, sourceUri);
   const forwardLinks = sourcePath.endsWith('.md') ? getForwardLinks(db, sourcePath) : [];
   const markdown = renderContextMarkdown({
@@ -92,10 +90,6 @@ function sourcePathForAnchor(db: Database, sourceId: string): string | null {
   if (!sourceId) return null;
   const row = db.prepare('SELECT path FROM sources WHERE id = ?').get(sourceId) as { path: string } | undefined;
   return row?.path ?? null;
-}
-
-function uriForSource(kind: string, sourcePath: string): string {
-  return sourcePath;
 }
 
 function renderContextMarkdown(input: {

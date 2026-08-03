@@ -25,6 +25,7 @@ test('shared PDF implementation and independent extension delivery surfaces exis
   assertPackageFile(sharedPdfRoot, 'src/webview/pdfLayout.ts');
   assertPackageFile(sharedPdfRoot, 'src/webview/domain/pdfAskState.ts');
   assertPackageFile(sharedPdfRoot, 'src/webview/domain/pdfNavigation.ts');
+  assertPackageFile(sharedPdfRoot, 'src/webview/domain/pdfOutline.ts');
   assertPackageFile(sharedPdfRoot, 'src/webview/domain/pdfSearch.ts');
   assertPackageFile(sharedPdfRoot, 'src/webview/domain/pdfSelection.ts');
   assertPackageFile(sharedPdfRoot, 'src/webview/domain/pdfTextExtraction.ts');
@@ -116,7 +117,7 @@ test('delivery packages do not duplicate the shared PDF webview implementation',
   assertNoFile(pdfFiles, /(^|\/)(markdown-editor|markdownClipboard|markdownPaste|markdownSpans|markdownFences)\.ts$/);
   assertNoSourceText(pdfRoot, pdfFiles, /@codemirror\/|from ['"].*markdownEditorProvider|markdown-editor/);
 
-  const sharedImplementationFiles = /(^|\/)(pdfAskPanel|pdfAskPanelStyles|pdfAskPanelView|pdfTextBands|pdfTextLayer|pdfLayout|pdfAskState|pdfNavigation|pdfSearch|pdfSelection|pdfTextExtraction)\.ts$/;
+  const sharedImplementationFiles = /(^|\/)(pdfAskPanel|pdfAskPanelStyles|pdfAskPanelView|pdfTextBands|pdfTextLayer|pdfLayout|pdfAskState|pdfNavigation|pdfOutline|pdfSearch|pdfSelection|pdfTextExtraction)\.ts$/;
   assertNoFile(combinedFiles, sharedImplementationFiles);
   assertNoFile(pdfFiles, sharedImplementationFiles);
 
@@ -165,9 +166,9 @@ test('source package dependencies are scoped to their owned implementation', () 
   assert.equal(sharedPdfDependencies.includes('marked'), true);
 });
 
-test('Ask PDF ships a Marked release compatible with the repository Node 18 floor', () => {
+test('Ask PDF keeps the vetted Marked major on the repository Node 20 floor', () => {
   const rootManifest = readJson(join(repoRoot, 'package.json'));
-  assert.equal(rootManifest.engines.node, '>=18.0.0');
+  assert.equal(rootManifest.engines.node, '>=20.19.0');
   for (const root of [extensionRoot, pdfRoot, sharedPdfRoot]) {
     const manifest = readJson(join(root, 'package.json'));
     const version = manifest.dependencies?.marked;
@@ -177,7 +178,7 @@ test('Ask PDF ships a Marked release compatible with the repository Node 18 floo
     const major = Number.parseInt(String(version).match(/\d+/)?.[0] ?? '', 10);
     assert.ok(
       Number.isFinite(major) && major <= 13,
-      `${manifest.name} must not require Marked's Node 20+ releases`,
+      `${manifest.name} must keep the vetted Marked major until its upgrade is reviewed`,
     );
   }
 });

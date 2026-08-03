@@ -22,7 +22,6 @@ import { fileURLToPath } from 'node:url';
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 const cli = join(packageRoot, 'cli', 'dist', 'main.js');
-const coreDist = join(packageRoot, 'core', 'dist', 'index.js');
 
 function runCli(args, cwd) {
   const output = execFileSync(process.execPath, [cli, ...args], {
@@ -71,7 +70,7 @@ function parseMarkdownLinks(text) {
 
 // ═══════════════════════════════════════════════════════════════════
 
-test('E2E: full bidirectional link pipeline', async (t) => {
+test('E2E: full bidirectional link pipeline', async () => {
   const root = makeVault('Bidirectional E2E');
 
   // ── 1. Create source files ──

@@ -4,24 +4,27 @@ import { fileURLToPath } from 'url';
 import { spawn } from 'child_process';
 import { mkdirSync, existsSync } from 'fs';
 import { findFreePort } from './debugPort.mjs';
+import { resolveVsCodeE2eTestDir } from './testDirectory.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const VSCODE_VERSION = 'stable';
 const FIXTURES = resolve(__dirname, 'fixtures', 'test-vault');
 const EXTENSION_PATH = resolve(__dirname, '..', '..');
+const TEST_DIR = resolveVsCodeE2eTestDir();
 
 async function main() {
   console.log('[vscode-runner] Downloading VS Code...');
-  const vscodePath = await downloadAndUnzipVSCode(VSCODE_VERSION);
+  const downloadedPath = await downloadAndUnzipVSCode(VSCODE_VERSION);
+  const vscodePath = resolveVsCodeExecutable(downloadedPath);
   console.log(`[vscode-runner] VS Code at: ${vscodePath}`);
 
   // Ensure user-data-dir exists
-  const userDataDir = resolve(__dirname, '.vscode-test', 'user-data');
+  const userDataDir = resolve(TEST_DIR, 'user-data');
   mkdirSync(userDataDir, { recursive: true });
 
   // Ensure extensions-dir exists
-  const extensionsDir = resolve(__dirname, '.vscode-test', 'extensions');
+  const extensionsDir = resolve(TEST_DIR, 'extensions');
   mkdirSync(extensionsDir, { recursive: true });
 
   const debugPort = await findFreePort();
@@ -84,6 +87,13 @@ async function main() {
 
   console.log(`[vscode-runner] VS Code exited with code ${code}`);
   process.exit(code);
+}
+
+function resolveVsCodeExecutable(downloadedPath) {
+  if (existsSync(downloadedPath)) return downloadedPath;
+  const macCodePath = resolve(dirname(downloadedPath), 'Code');
+  if (existsSync(macCodePath)) return macCodePath;
+  throw new Error(`VS Code executable does not exist: ${downloadedPath}`);
 }
 
 main().catch((err) => {

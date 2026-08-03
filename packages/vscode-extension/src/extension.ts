@@ -1,11 +1,8 @@
 import * as vscode from 'vscode';
-import * as path from 'path';
 import {
-  classifyReferenceTarget,
   closeDatabase,
   detectVaultRoot,
   getBacklinks,
-  getForwardLinks,
   ingestFile,
   openDatabase,
   rebuildAllLinks,
@@ -21,16 +18,10 @@ import { PdfEditorProvider } from './pdfEditorProvider';
 import { MarkdownEditorProvider } from './markdownEditorProvider';
 import { addSelectionToContext } from './agentContext';
 import { notePathToUri } from './wikiLinks';
-import { MarkdownOutlineTreeProvider, registerMarkdownOutlineProvider, registerMarkdownOutlineTreeProvider } from './markdownSymbols';
+import { type MarkdownOutlineTreeProvider, registerMarkdownOutlineProvider, registerMarkdownOutlineTreeProvider } from './markdownSymbols';
 import { WebBrowserProvider } from './webBrowserProvider';
 import { CodexAppServerClient } from './codexAppServerClient';
 import { PdfDiscussionController } from './pdfDiscussionController';
-import {
-  NavigationHistoryProvider,
-  type NavigationEntryInput,
-  type NavigationTarget,
-  type RevealSelection,
-} from './navigationHistory';
 
 let backlinksProvider: BacklinksProvider;
 let forwardLinksProvider: BacklinksProvider;
@@ -38,7 +29,6 @@ let pdfEditorProvider: PdfEditorProvider;
 let markdownEditorProvider: MarkdownEditorProvider;
 let markdownOutlineProvider: MarkdownOutlineTreeProvider;
 let webBrowserProvider: WebBrowserProvider;
-let navigationHistoryProvider: NavigationHistoryProvider;
 let codexClient: CodexAppServerClient | undefined;
 let pdfDiscussionController: PdfDiscussionController | undefined;
 let codexOutputChannel: vscode.OutputChannel | undefined;
@@ -59,9 +49,7 @@ export function activate(context: vscode.ExtensionContext) {
   // Register link provider for native markdown/Obsidian links
   registerLinkProvider(context);
   registerMarkdownOutlineProvider(context);
-  markdownOutlineProvider = registerMarkdownOutlineTreeProvider(context);
 
-  navigationHistoryProvider = new NavigationHistoryProvider();
   markdownEditorProvider = new MarkdownEditorProvider(context);
   pdfEditorProvider = new PdfEditorProvider(context, {
     vaultRoot,
@@ -69,10 +57,10 @@ export function activate(context: vscode.ExtensionContext) {
     globalStoragePath: context.globalStorageUri?.fsPath ?? context.extensionUri?.fsPath ?? vaultRoot,
     discussionController: pdfDiscussionController,
     markdownInsertTarget: markdownEditorProvider,
-    navigationRecorder: navigationHistoryProvider,
     annotationsEnabled: true,
   });
-  webBrowserProvider = new WebBrowserProvider(context, vaultRoot, markdownEditorProvider, navigationHistoryProvider);
+  markdownOutlineProvider = registerMarkdownOutlineTreeProvider(context, pdfEditorProvider);
+  webBrowserProvider = new WebBrowserProvider(context, vaultRoot, markdownEditorProvider);
   context.subscriptions.push(
     vscode.window.registerCustomEditorProvider(PdfEditorProvider.viewType, pdfEditorProvider, {
       webviewOptions: { retainContextWhenHidden: true },
@@ -91,7 +79,6 @@ export function activate(context: vscode.ExtensionContext) {
 
   vscode.window.registerTreeDataProvider('hl-backlinks', backlinksProvider);
   vscode.window.registerTreeDataProvider('hl-forward-links', forwardLinksProvider);
-  vscode.window.registerTreeDataProvider('hl-jump-stack', navigationHistoryProvider);
   context.subscriptions.push(
     vscode.window.onDidChangeActiveTextEditor(refreshAllViews),
     vscode.window.tabGroups.onDidChangeTabs(refreshAllViews),
@@ -116,11 +103,6 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.window.showErrorMessage('Missing PDF path');
         return;
       }
-      recordPdfJump({
-        pdfPath: args.pdfPath,
-        page: args.page,
-        textFragment: args.textFragment,
-      });
       await pdfEditorProvider.openPdfAtTarget(args.pdfPath, args.page, args.textFragment);
     }),
 
@@ -152,25 +134,6 @@ export function activate(context: vscode.ExtensionContext) {
       webBrowserProvider.open(url);
     }),
 
-    vscode.commands.registerCommand('human-learning.jumpBack', async () => {
-      const opened = await navigationHistoryProvider.back(openNavigationTarget);
-      if (!opened) {
-        vscode.window.showInformationMessage('Human Learning jump stack is empty.');
-      }
-    }),
-
-    vscode.commands.registerCommand('human-learning.retractToJump', async (entryId?: string) => {
-      if (!entryId) return;
-      const opened = await navigationHistoryProvider.retractTo(entryId, openNavigationTarget);
-      if (!opened) {
-        vscode.window.showWarningMessage('Human Learning jump was no longer available.');
-      }
-    }),
-
-    vscode.commands.registerCommand('human-learning.clearJumpStack', async () => {
-      navigationHistoryProvider.clear();
-    }),
-
     vscode.commands.registerCommand('human-learning.toggleVimMode', async () => {
       const enabled = await markdownEditorProvider.toggleVimMode();
       vscode.window.showInformationMessage(`Human Learning Vim mode ${enabled ? 'enabled' : 'disabled'}`);
@@ -188,8 +151,20 @@ export function activate(context: vscode.ExtensionContext) {
       const from = args.selection?.from;
       const to = args.selection?.to;
       if (typeof from !== 'number' || typeof to !== 'number') return;
-      recordMarkdownJump(args.uri, { from, to });
       await markdownEditorProvider.revealInEditor(args.uri, { from, to });
+    }),
+
+    vscode.commands.registerCommand('human-learning.revealInPdfOutline', async (args?: {
+      uri?: vscode.Uri;
+      destination?: unknown;
+      title?: string;
+    }) => {
+      if (!args?.uri) return;
+      await pdfEditorProvider.revealPdfOutlineDestination(
+        args.uri,
+        args.destination,
+        args.title,
+      );
     }),
 
     vscode.commands.registerCommand('human-learning.pdfPrevPage', () => {
@@ -319,11 +294,16 @@ function initializePdfCodexRuntime(context: vscode.ExtensionContext): void {
   codexOutputChannel = outputChannel;
   codexClient = new CodexAppServerClient({
     executable: codexCommand,
-    extensionVersion: String(context.extension?.packageJSON?.version ?? '0.1.0'),
+    extensionVersion: extensionPackageVersion(context),
     logger: message => outputChannel.appendLine(message),
   });
   pdfDiscussionController = new PdfDiscussionController({ client: codexClient });
   context.subscriptions.push(codexClient, pdfDiscussionController);
+}
+
+function extensionPackageVersion(context: vscode.ExtensionContext): string {
+  const packageJson = context.extension?.packageJSON as { version?: unknown } | undefined;
+  return typeof packageJson?.version === 'string' ? packageJson.version : '0.1.0';
 }
 
 function activatePdfWithoutVault(context: vscode.ExtensionContext, documentRoot: string): void {
@@ -334,6 +314,7 @@ function activatePdfWithoutVault(context: vscode.ExtensionContext, documentRoot:
     discussionController: pdfDiscussionController,
     annotationsEnabled: false,
   });
+  markdownOutlineProvider = registerMarkdownOutlineTreeProvider(context, pdfEditorProvider);
   context.subscriptions.push(
     vscode.window.registerCustomEditorProvider(PdfEditorProvider.viewType, pdfEditorProvider, {
       webviewOptions: { retainContextWhenHidden: true },
@@ -363,6 +344,18 @@ function activatePdfWithoutVault(context: vscode.ExtensionContext, documentRoot:
     }),
     vscode.commands.registerCommand('human-learning.pdfAskSelection', async () => {
       await pdfEditorProvider.openAskPdfForSelection();
+    }),
+    vscode.commands.registerCommand('human-learning.revealInPdfOutline', async (args?: {
+      uri?: vscode.Uri;
+      destination?: unknown;
+      title?: string;
+    }) => {
+      if (!args?.uri) return;
+      await pdfEditorProvider.revealPdfOutlineDestination(
+        args.uri,
+        args.destination,
+        args.title,
+      );
     }),
     vscode.commands.registerCommand('human-learning.pdfPrevPage', () => {
       pdfEditorProvider.getActiveWebview()?.postMessage({ type: 'navigate', direction: 'prev' });
@@ -413,135 +406,11 @@ export function deactivate() {
 }
 
 async function openLinkTarget(vaultRoot: string, uri: string): Promise<void> {
-  recordDispatchTarget(vaultRoot, uri);
   await dispatchUri(vaultRoot, uri, {
     openWebTarget: async url => {
       webBrowserProvider.open(url);
     },
   });
-}
-
-async function openNavigationTarget(target: NavigationTarget): Promise<void> {
-  switch (target.kind) {
-    case 'markdown': {
-      const uri = vscode.Uri.parse(target.uri);
-      await vscode.commands.executeCommand('vscode.openWith', uri, MarkdownEditorProvider.viewType);
-      if (target.selection) {
-        await vscode.commands.executeCommand('human-learning.revealInMarkdownEditor', {
-          uri,
-          selection: target.selection,
-        });
-      }
-      return;
-    }
-    case 'pdf':
-      await pdfEditorProvider.openPdfAtTarget(target.pdfPath, target.page, target.textFragment);
-      return;
-    case 'web':
-      webBrowserProvider.open(target.url);
-      return;
-    case 'file':
-      await vscode.commands.executeCommand('vscode.open', vscode.Uri.parse(target.uri));
-      return;
-    case 'uri':
-      await dispatchUri(detectVaultRoot(vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd()) ?? process.cwd(), target.uri, {
-        openWebTarget: async url => {
-          webBrowserProvider.open(url);
-        },
-      });
-      return;
-  }
-}
-
-function recordDispatchTarget(vaultRoot: string, uri: string): void {
-  if (typeof classifyReferenceTarget !== 'function') return;
-
-  const target = classifyReferenceTarget(uri);
-  switch (target.kind) {
-    case 'note':
-      if (!target.path || target.heading || target.lines) return;
-      recordMarkdownJump(vscode.Uri.file(path.join(vaultRoot, target.path)));
-      return;
-    case 'code':
-      if (!target.path) return;
-      recordNavigation({
-        kind: 'code',
-        label: path.basename(target.path),
-        description: target.path,
-        target: {
-          kind: 'file',
-          uri: vscode.Uri.file(path.join(vaultRoot, target.path)).toString(),
-        },
-      });
-      return;
-    case 'image':
-    case 'text':
-    case 'unknown':
-      if (!target.path) return;
-      recordNavigation({
-        kind: 'file',
-        label: path.basename(target.path),
-        description: target.path,
-        target: {
-          kind: 'file',
-          uri: vscode.Uri.file(path.join(vaultRoot, target.path)).toString(),
-        },
-      });
-      return;
-    case 'pdf':
-    case 'web':
-      return;
-  }
-}
-
-function recordMarkdownJump(uri: vscode.Uri, selection?: RevealSelection): void {
-  const relPath = vscode.workspace.asRelativePath(uri);
-  const line = lineDescriptionForSelection(uri, selection);
-  recordNavigation({
-    kind: selection ? 'outline' : 'markdown',
-    label: markdownLabelForUri(uri),
-    description: line ? `${relPath}:${line}` : relPath,
-    target: {
-      kind: 'markdown',
-      uri: uri.toString(),
-      ...(selection ? { selection } : {}),
-    },
-  });
-}
-
-function recordPdfJump(args: { pdfPath: string; page?: number; textFragment?: PdfTextFragment }): void {
-  recordNavigation({
-    kind: 'pdf',
-    label: `${path.basename(args.pdfPath)}${args.page ? ` p.${args.page}` : ''}`,
-    description: args.pdfPath,
-    target: {
-      kind: 'pdf',
-      pdfPath: args.pdfPath,
-      ...(args.page ? { page: args.page } : {}),
-      ...(args.textFragment ? { textFragment: args.textFragment } : {}),
-    },
-  });
-}
-
-function recordNavigation(entry: NavigationEntryInput): void {
-  navigationHistoryProvider?.record(entry);
-}
-
-function markdownLabelForUri(uri: vscode.Uri): string {
-  const basename = path.basename(uri.fsPath || uri.path || uri.toString());
-  return decodeURIComponent(basename.replace(/\.md$/i, '')) || basename || 'Markdown Note';
-}
-
-function lineDescriptionForSelection(uri: vscode.Uri, selection: RevealSelection | undefined): number | undefined {
-  if (!selection) return undefined;
-  const document = vscode.workspace.textDocuments?.find(doc => sameUri(doc.uri, uri));
-  if (!document) return undefined;
-  return document.positionAt(selection.from).line + 1;
-}
-
-function sameUri(a: vscode.Uri, b: vscode.Uri): boolean {
-  if (a.toString() === b.toString()) return true;
-  return Boolean(a.fsPath && b.fsPath && a.fsPath === b.fsPath);
 }
 
 function getActiveMarkdownUri(): vscode.Uri | undefined {

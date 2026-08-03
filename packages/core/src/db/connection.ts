@@ -1,4 +1,4 @@
-import initSqlJs, { Database as SqlJsDb, SqlJsStatic } from 'sql.js';
+import initSqlJs, { type Database as SqlJsDb, type SqlJsStatic } from 'sql.js';
 import { dirname, join } from 'path';
 import {
   closeSync,

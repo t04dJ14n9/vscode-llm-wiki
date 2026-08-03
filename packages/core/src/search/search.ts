@@ -1,4 +1,4 @@
-import { Database } from '../db/connection';
+import { type Database } from '../db/connection';
 import { cosineSimilarity, embedText, LOCAL_EMBEDDING_MODEL } from '../embeddings/local';
 import { codeHref, pdfHref } from '../links/reference-target';
 

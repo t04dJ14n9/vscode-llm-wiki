@@ -2,7 +2,7 @@ import { downloadAndUnzipVSCode } from '@vscode/test-electron';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { spawn } from 'child_process';
-import { mkdirSync, rmSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'fs';
 import { findFreePort } from './debugPort.mjs';
 import { listProcesses, selectStaleE2eProcesses, stopProcesses } from './processCleanup.mjs';
 import { resolveVsCodeE2eTestDir } from './testDirectory.mjs';
@@ -17,7 +17,8 @@ const TEST_DIR = resolveVsCodeE2eTestDir();
 
 export default async function globalSetup() {
   console.log('\n[global-setup] Downloading VS Code...');
-  const electronPath = await downloadAndUnzipVSCode(VSCODE_VERSION);
+  const downloadedPath = await downloadAndUnzipVSCode(VSCODE_VERSION);
+  const electronPath = resolveVsCodeExecutable(downloadedPath);
   console.log(`[global-setup] Electron binary: ${electronPath}`);
 
   const userDataDir = resolve(TEST_DIR, 'user-data');
@@ -124,6 +125,15 @@ export default async function globalSetup() {
   // Give the extension time to activate
   console.log('[global-setup] Waiting for extension activation...');
   await new Promise((r) => setTimeout(r, 5000));
+}
+
+function resolveVsCodeExecutable(downloadedPath) {
+  if (existsSync(downloadedPath)) return downloadedPath;
+  // VS Code 1.131 renamed the macOS bundle executable from Electron to Code
+  // while @vscode/test-electron still reports the former path.
+  const macCodePath = resolve(dirname(downloadedPath), 'Code');
+  if (existsSync(macCodePath)) return macCodePath;
+  throw new Error(`VS Code executable does not exist: ${downloadedPath}`);
 }
 
 async function killExistingTestProcesses(userDataDir) {

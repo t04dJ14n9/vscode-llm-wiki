@@ -86,7 +86,7 @@ export class InvalidPdfDiscussionSidecarError extends Error {
   readonly code = 'INVALID_PDF_DISCUSSION_SIDECAR';
   readonly recoverable = true;
   readonly sidecarPath: string;
-  readonly cause: unknown;
+  override readonly cause: unknown;
 
   constructor(sidecarPath: string, cause: unknown) {
     super(
@@ -130,7 +130,7 @@ export class InvalidPdfDiscussionSnapshotError extends Error {
   readonly code = 'INVALID_PDF_DISCUSSION_SNAPSHOT';
   readonly recoverable = true;
   readonly file: string;
-  readonly cause: unknown;
+  override readonly cause: unknown;
 
   constructor(file: string, reason: string, cause?: unknown) {
     super(`Invalid PDF discussion snapshot ${file}: ${reason}`);
@@ -222,7 +222,7 @@ function cachePdfHash(path: string, identity: PdfFileIdentity, sha256: string): 
   pdfHashCache.delete(path);
   pdfHashCache.set(path, { identity, sha256 });
   while (pdfHashCache.size > PDF_HASH_CACHE_MAX_ENTRIES) {
-    const oldest = pdfHashCache.keys().next().value as string | undefined;
+    const oldest = pdfHashCache.keys().next().value;
     if (oldest === undefined) break;
     pdfHashCache.delete(oldest);
   }

@@ -497,13 +497,6 @@ interface CalloutTableBlock {
   sourceTo: number;
 }
 
-function appendCalloutInlineMarkdown(container: HTMLElement, source: string): void {
-  source.split('\n').forEach((line, index) => {
-    if (index > 0) container.appendChild(document.createElement('br'));
-    appendCalloutInlineMarkdownLine(container, line);
-  });
-}
-
 function appendCalloutBodyMarkdown(
   container: HTMLElement,
   view: EditorView,
@@ -909,7 +902,7 @@ function calloutInlineElement(
     return calloutInlineLinkElement(match, classPrefix);
   }
 
-  const textKind = match.kind as Exclude<InlineTextMatch['kind'], 'math'>;
+  const textKind = match.kind;
   const element = document.createElement(calloutInlineTagName(textKind));
   element.className = `${classPrefix}-${calloutInlineClassSuffix(textKind)}`;
   element.textContent = (match as InlineTextMatch).text;
@@ -1157,8 +1150,6 @@ const linkTextMark = Decoration.mark({ class: 'cm-hybrid-link-text' });
 const tagMark = Decoration.mark({ class: 'cm-hybrid-tag' });
 const footnoteRefMark = Decoration.mark({ class: 'cm-hybrid-footnote-ref' });
 const footnoteDefLabelMark = Decoration.mark({ class: 'cm-hybrid-footnote-def-label' });
-const displayMathDelimiterMark = Decoration.mark({ class: 'cm-hybrid-math-delimiter' });
-const displayMathSourceMark = Decoration.mark({ class: 'cm-hybrid-math-source' });
 const blockquoteLine = Decoration.line({ class: 'cm-hybrid-blockquote-line' });
 const listLine = Decoration.line({ class: 'cm-hybrid-list-line' });
 const taskLine = Decoration.line({ class: 'cm-hybrid-task-list-line' });
@@ -1572,8 +1563,7 @@ function buildSpecialBlockDecorations(state: EditorState): DecorationSet {
         addCodeBlockDecorations(state, block, decorations, active);
         addCodeSyntaxDecorations(state, block, decorations);
       }
-    } else {
-      if (blockHasSelection) {
+    } else if (blockHasSelection) {
         const endLine = state.doc.line(block.endLine);
         decorations.push(Decoration.widget({
           widget: new MathBlockWidget(block.content, block.from, block.to, true),
@@ -1585,7 +1575,6 @@ function buildSpecialBlockDecorations(state: EditorState): DecorationSet {
       } else {
         addMultiLineMathDecorations(state, block, decorations);
       }
-    }
 
     lineNumber = block.endLine + 1;
   }
@@ -2076,7 +2065,7 @@ function renderFootnotes(
     const id = definition[2] ?? '';
     const idFrom = lineFrom + markerStart + 2;
     const idTo = idFrom + id.length;
-    const markerTo = lineFrom + definition[0]!.length;
+    const markerTo = lineFrom + definition[0].length;
     addReplace(decorations, reserved, lineFrom + markerStart, idFrom);
     addMark(decorations, reserved, idFrom, idTo, footnoteDefLabelMark);
     reserved.push({ from: idFrom, to: idTo });
@@ -2263,9 +2252,9 @@ function replaceImages(
   for (const match of text.matchAll(/!\[\[([^\]]+)\]\]/g)) {
     const image = parseObsidianImageEmbed(match[1] ?? '');
     if (!image) continue;
-    const from = lineFrom + match.index!;
+    const from = lineFrom + match.index;
     const to = from + match[0].length;
-    if (isEscapedAt(text, match.index!)) continue;
+    if (isEscapedAt(text, match.index)) continue;
     if (overlaps({ from, to }, codeSpans)) continue;
     addReplace(
       decorations,
@@ -2349,7 +2338,7 @@ function renderDelimited(
   reserved: Span[],
 ): void {
   for (const match of text.matchAll(pattern)) {
-    const from = lineFrom + match.index!;
+    const from = lineFrom + match.index;
     const to = from + match[0].length;
     const contentFrom = from + delimiterLength;
     const contentTo = to - delimiterLength;

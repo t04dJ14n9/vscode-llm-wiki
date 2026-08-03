@@ -1,4 +1,4 @@
-import { Decoration, EditorView, WidgetType } from '@codemirror/view';
+import { Decoration, type EditorView, WidgetType } from '@codemirror/view';
 import type { EditorState, Range } from '@codemirror/state';
 import Prism from 'prismjs';
 import 'prismjs/components/prism-bash.js';

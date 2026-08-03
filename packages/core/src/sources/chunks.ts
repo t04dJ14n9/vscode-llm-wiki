@@ -1,4 +1,4 @@
-import { Database } from '../db/connection';
+import { type Database } from '../db/connection';
 import { createHash } from 'crypto';
 import { readFileSync } from 'fs';
 import { join } from 'path';

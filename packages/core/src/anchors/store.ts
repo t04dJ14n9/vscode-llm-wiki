@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, mkdirSync, appendFileSync, writeFileSync } from 'fs';
+import { existsSync, readFileSync, mkdirSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import type { AnchorRecord } from './pdf';
 

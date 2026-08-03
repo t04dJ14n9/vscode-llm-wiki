@@ -1,4 +1,4 @@
-import { test as base, expect, chromium, type Page, type Browser, type BrowserContext } from '@playwright/test';
+import { test as base, expect, chromium, type Page, type BrowserContext } from '@playwright/test';
 import path from 'path';
 import fs from 'fs';
 import { resolveVsCodeE2eTestDir } from './testDirectory.mjs';
@@ -16,7 +16,7 @@ if (!fs.existsSync(SCREENSHOT_DIR)) {
 
 // Custom fixture that connects to VS Code via CDP
 const test = base.extend<{ vsCodePage: Page; vsCodeContext: BrowserContext }>({
-  vsCodePage: async ({}, use, testInfo) => {
+  vsCodePage: async ({}, use) => {
     const wsUrl = fs.readFileSync(WS_URL_FILE, 'utf-8').trim();
     console.log(`[fixture] Connecting to VS Code CDP: ${wsUrl}`);
 
@@ -86,6 +86,25 @@ async function openQuickFile(page: Page, query: string, waitMs = 4000): Promise<
   await page.waitForTimeout(1500);
   await page.keyboard.press('Enter');
   await page.waitForTimeout(waitMs);
+}
+
+async function openHumanLearningSidebar(page: Page): Promise<void> {
+  const target = page.locator([
+    '.activitybar [aria-label*="Human Learning" i]',
+    '.activitybar [title*="Human Learning" i]',
+    '.activity-bar [aria-label*="Human Learning" i]',
+    '.activity-bar [title*="Human Learning" i]',
+  ].join(', ')).first();
+  await expect(target).toBeVisible({ timeout: 10_000 });
+  await target.click();
+
+  const outlineHeader = page.locator('.sidebar .pane-header, .part.sidebar .pane-header')
+    .filter({ hasText: /^Outline$/i })
+    .last();
+  await expect(outlineHeader).toBeVisible({ timeout: 10_000 });
+  if (await outlineHeader.getAttribute('aria-expanded') === 'false') {
+    await outlineHeader.click();
+  }
 }
 
 async function runCommandFromPalette(page: Page, query: string, waitMs = 500): Promise<void> {
@@ -263,6 +282,54 @@ async function evaluateHumanLearningWebview<T>(
   throw new Error(`Human Learning markdown webview not found for ${JSON.stringify(docNeedle)}. Candidates: ${mismatches.join(' | ')}`);
 }
 
+async function evaluateHumanLearningPdfWebview<T>(body: string): Promise<T> {
+  const debugPort = Number(fs.readFileSync(DEBUG_PORT_FILE, 'utf-8').trim());
+  const deadline = Date.now() + 20_000;
+  let mismatches: string[] = [];
+
+  while (Date.now() < deadline) {
+    const response = await fetch(`http://127.0.0.1:${debugPort}/json/list`);
+    const targets = await response.json() as DevtoolsTarget[];
+    const webviews = targets.filter(target => (
+      target.type === 'iframe'
+      && typeof target.webSocketDebuggerUrl === 'string'
+      && (target.url ?? '').includes('extensionId=human-learning.human-learning-vscode')
+    ));
+
+    mismatches = [];
+    for (const target of webviews) {
+      const result = await cdpEvaluate<{
+        ok: boolean;
+        value?: T;
+        reason?: string;
+        preview?: string;
+      }>(target.webSocketDebuggerUrl!, `(async () => {
+        const hostFrame = document.getElementById('active-frame');
+        const doc = hostFrame?.contentDocument;
+        const win = hostFrame?.contentWindow;
+        const viewer = doc?.querySelector('#viewer-container');
+        if (!doc || !win || !viewer) {
+          return {
+            ok: false,
+            reason: 'missing PDF viewer',
+            preview: doc?.body?.textContent?.trim().slice(0, 160) ?? 'no document',
+          };
+        }
+        return { ok: true, value: await (async () => {
+          ${body}
+        })() };
+      })()`);
+
+      if (result.ok) return result.value as T;
+      mismatches.push(`${result.reason ?? 'unknown'}: ${result.preview ?? target.title ?? target.url ?? ''}`);
+    }
+
+    await new Promise(resolve => setTimeout(resolve, 250));
+  }
+
+  throw new Error(`Human Learning PDF webview not found. Candidates: ${mismatches.join(' | ')}`);
+}
+
 async function cdpEvaluate<T>(wsUrl: string, expression: string): Promise<T> {
   return new Promise((resolve, reject) => {
     const socket = new WebSocket(wsUrl);
@@ -425,16 +492,138 @@ test.describe('Human Learning — VS Code Extension E2E', () => {
     await closeQuickInput(page);
   });
 
-  test('can open a PDF file in custom viewer', async ({ vsCodePage: page }) => {
-    // Open PDF via Quick Open
-    await openQuickFile(page, 'flash-attention', 4000);
+  test('can open a real multi-page PDF with production controls and a prefetched neighbor', async ({ vsCodePage: page }) => {
+    await openQuickFile(page, 'raw/pdf/lecture_03.pdf', 8000);
+    await expect(page.locator('iframe.webview:visible').first()).toBeVisible({ timeout: 15_000 });
 
     await screenshot(page, '10-pdf-file-opened');
 
-    // Check for webview elements (PDF viewer runs in a webview)
-    const webviews = page.locator('webview, iframe[title*="PDF"], iframe[title*="Human"]');
-    const webviewCount = await webviews.count();
-    console.log(`[info] PDF webview elements: ${webviewCount}`);
+    await evaluateHumanLearningPdfWebview(`
+      if (!doc.querySelector('#page-container')?.classList.contains('paginated')) {
+        doc.querySelector('[data-display-action="presentation-single"]')?.click();
+      }
+      return true;
+    `);
+
+    await expect.poll(() => evaluateHumanLearningPdfWebview<{
+      pageInfo: string;
+      pageCount: number;
+      firstCanvasReady: boolean;
+      neighborCanvasReady: boolean;
+      neighborHidden: boolean;
+      reduceAnimationLabels: string[];
+      hasOutlineTab: boolean;
+      focusedOutlineStyle: string;
+    }>(`
+      const pageInfo = doc.querySelector('#page-info')?.textContent?.trim() ?? '';
+      const pageCount = doc.querySelectorAll('.page-wrapper').length;
+      const firstCanvas = doc.querySelector('#page-1 canvas.pdf-canvas');
+      const neighbor = doc.querySelector('#page-2');
+      const neighborCanvas = neighbor?.querySelector('canvas.pdf-canvas');
+      viewer.tabIndex = -1;
+      viewer.focus({ preventScroll: true });
+      return {
+        pageInfo,
+        pageCount,
+        firstCanvasReady: firstCanvas?.dataset.renderQuality === 'full'
+          && firstCanvas.width > 0
+          && firstCanvas.height > 0,
+        neighborCanvasReady: neighborCanvas?.dataset.renderQuality === 'full'
+          && neighborCanvas.width > 0
+          && neighborCanvas.height > 0,
+        neighborHidden: Boolean(neighbor)
+          && win.getComputedStyle(neighbor).display === 'none',
+        reduceAnimationLabels: [...doc.querySelectorAll(
+          '[data-display-action^="reduce-animation-"]',
+        )].map(element => element.textContent?.trim() ?? ''),
+        hasOutlineTab: Boolean(doc.querySelector('#sidebar-outline-tab')),
+        focusedOutlineStyle: win.getComputedStyle(viewer).outlineStyle,
+      };
+    `), { timeout: 30_000 }).toEqual({
+      pageInfo: expect.stringMatching(/^Page 1 \/ 67\b/),
+      pageCount: 67,
+      firstCanvasReady: true,
+      neighborCanvasReady: true,
+      neighborHidden: true,
+      reduceAnimationLabels: ['On', 'Off', 'System'],
+      hasOutlineTab: true,
+      focusedOutlineStyle: 'none',
+    });
+
+    const pageTurn = await evaluateHumanLearningPdfWebview<{
+      durationMs: number;
+      firstVisibleFrameHadBitmap: boolean;
+      targetCanvasReady: boolean;
+    }>(`
+      const target = doc.querySelector('#page-2');
+      let firstVisibleFrameHadBitmap;
+      let sampling = true;
+      const sample = () => {
+        if (!sampling || firstVisibleFrameHadBitmap !== undefined) return;
+        const styles = win.getComputedStyle(target);
+        if (
+          styles.display !== 'none'
+          && Number.parseFloat(styles.opacity || '1') > 0.01
+        ) {
+          const canvas = target.querySelector('canvas.pdf-canvas');
+          firstVisibleFrameHadBitmap = canvas?.dataset.renderQuality === 'full'
+            && canvas.width > 0
+            && canvas.height > 0;
+          return;
+        }
+        win.requestAnimationFrame(sample);
+      };
+      win.requestAnimationFrame(sample);
+      const startedAt = win.performance.now();
+      doc.querySelector('#next')?.click();
+      await new Promise((resolve, reject) => {
+        const deadline = win.performance.now() + 2_000;
+        const poll = () => {
+          const pageValue = doc.querySelector('#page-input')?.value;
+          if (pageValue === '2' && firstVisibleFrameHadBitmap !== undefined) {
+            resolve();
+          } else if (win.performance.now() >= deadline) {
+            reject(new Error('Timed out waiting for cached page turn'));
+          } else {
+            win.requestAnimationFrame(poll);
+          }
+        };
+        win.requestAnimationFrame(poll);
+      });
+      sampling = false;
+      const canvas = target.querySelector('canvas.pdf-canvas');
+      return {
+        durationMs: win.performance.now() - startedAt,
+        firstVisibleFrameHadBitmap: firstVisibleFrameHadBitmap === true,
+        targetCanvasReady: canvas?.dataset.renderQuality === 'full'
+          && canvas.width > 0
+          && canvas.height > 0,
+      };
+    `);
+    console.log(`[info] cached real-PDF page turn: ${pageTurn.durationMs.toFixed(1)} ms`);
+    expect(pageTurn.durationMs).toBeLessThan(750);
+    expect(pageTurn.firstVisibleFrameHadBitmap).toBe(true);
+    expect(pageTurn.targetCanvasReady).toBe(true);
+
+    await openHumanLearningSidebar(page);
+    const outlineTarget = page.getByText('Slide 3: Outline and goals', { exact: true }).last();
+    await expect(outlineTarget).toBeVisible({ timeout: 15_000 });
+    await outlineTarget.click();
+    await expect.poll(() => evaluateHumanLearningPdfWebview<{
+      pageInfo: string;
+      destinationFocusCount: number;
+      historyBackHidden: boolean;
+    }>(`
+      return {
+        pageInfo: doc.querySelector('#page-info')?.textContent?.trim() ?? '',
+        destinationFocusCount: doc.querySelectorAll('.pdf-destination-focus').length,
+        historyBackHidden: doc.querySelector('#pdf-history-back')?.hidden === true,
+      };
+    `), { timeout: 15_000 }).toEqual({
+      pageInfo: expect.stringMatching(/^Page 2 \/ 67\b/),
+      destinationFocusCount: 1,
+      historyBackHidden: true,
+    });
 
     await screenshot(page, '11-pdf-viewer-visible');
   });
@@ -1302,7 +1491,7 @@ test.describe('Human Learning — VS Code Extension E2E', () => {
         expectedOffset: 'Inserted'.length,
       },
     ];
-    let docNeedle = initialNeedle;
+    const docNeedle = initialNeedle;
 
     for (const testCase of cases) {
       await test.step(testCase.label, async () => {

@@ -322,7 +322,7 @@ test('persists a first question and snapshot before Codex, streams deltas, and c
   assert.equal(client.turnCalls[0].input[0].type, 'text');
   assert.match(client.turnCalls[0].input[0].text, /A selected passage\./);
   assert.match(client.turnCalls[0].input[0].text, /Context before: Before /);
-  assert.match(client.turnCalls[0].input[0].text, /Context after:  After/);
+  assert.match(client.turnCalls[0].input[0].text, /Context after: {2}After/);
   assert.equal(client.turnCalls[0].input[1].type, 'localImage');
   assert.notEqual(
     client.turnCalls[0].input[1].path,
@@ -1039,7 +1039,7 @@ test('promotion creates a clean non-ephemeral handoff, waits for completion, and
   assert.match(promotionInput[0].text, /Source/);
   assert.match(promotionInput[0].text, /A selected passage\./);
   assert.match(promotionInput[0].text, /Context before: Before /);
-  assert.match(promotionInput[0].text, /Context after:  After/);
+  assert.match(promotionInput[0].text, /Context after: {2}After/);
   assert.match(promotionInput[0].text, /Explain the evidence\./);
   assert.match(promotionInput[0].text, /A streamed fixture answer\./);
   assert.match(promotionInput[0].text, /Summary/);

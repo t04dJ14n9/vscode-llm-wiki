@@ -11,10 +11,10 @@ import { vim, Vim } from '@replit/codemirror-vim';
 import type { CodeMirrorV, InputStateInterface, MotionArgs, Pos, vimState } from '@replit/codemirror-vim';
 import {
   Decoration,
-  DecorationSet,
+  type DecorationSet,
   EditorView,
   ViewPlugin,
-  ViewUpdate,
+  type ViewUpdate,
   WidgetType,
   drawSelection,
   keymap,
@@ -1368,7 +1368,7 @@ function outdentNestedListItemOnBackspace(editorView: EditorView): boolean {
   const list = line.text.match(/^(\s+)((?:[-*+]|\d+[.)])\s+(?:\[[^\]]\]\s*)?)/);
   if (!list) return false;
 
-  const markerEnd = line.from + list[0]!.length;
+  const markerEnd = line.from + list[0].length;
   if (selection.from !== markerEnd) return false;
 
   const remove = listOutdentColumnCount(line.text);
@@ -1813,7 +1813,7 @@ function collectLineDecorations(
 
   const wikiLink = /\[\[([^\]]+)\]\]/g;
   while ((match = wikiLink.exec(text)) !== null) {
-    const raw = match[0]!;
+    const raw = match[0];
     const sourceFrom = lineFrom + match.index;
     const sourceTo = sourceFrom + raw.length;
     if (isEscapedAt(text, match.index)) continue;

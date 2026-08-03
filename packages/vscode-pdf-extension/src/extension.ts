@@ -22,7 +22,7 @@ export function activate(context: vscode.ExtensionContext) {
   codexOutputChannel = outputChannel;
   codexClient = new CodexAppServerClient({
     executable: codexCommand,
-    extensionVersion: String(context.extension?.packageJSON?.version ?? '0.1.0'),
+    extensionVersion: extensionPackageVersion(context),
     logger: message => outputChannel.appendLine(message),
   });
   pdfDiscussionController = new PdfDiscussionController({ client: codexClient });
@@ -100,6 +100,11 @@ export function activate(context: vscode.ExtensionContext) {
       ? `Human Learning PDF ready - vault at ${vaultRoot}`
       : `Human Learning PDF ready - document root at ${documentRoot}; annotations require \`hl init\``,
   );
+}
+
+function extensionPackageVersion(context: vscode.ExtensionContext): string {
+  const packageJson = context.extension?.packageJSON as { version?: unknown } | undefined;
+  return typeof packageJson?.version === 'string' ? packageJson.version : '0.1.0';
 }
 
 export function deactivate() {

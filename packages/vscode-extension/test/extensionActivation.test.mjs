@@ -34,21 +34,6 @@ function loadTsModule(relativePath, mocks = {}) {
         },
       };
     }
-    if (request === './navigationHistory') {
-      return {
-        NavigationHistoryProvider: class {
-          record() {}
-          refresh() {}
-          clear() {}
-          async back() {
-            return false;
-          }
-          async retractTo() {
-            return false;
-          }
-        },
-      };
-    }
     if (request === './codexAppServerClient') {
       return {
         CodexAppServerClient: class {
@@ -195,7 +180,6 @@ test('activation registers selection export command without Agent Context or Pro
   assert.deepEqual(treeProviderIds.sort(), [
     'hl-backlinks',
     'hl-forward-links',
-    'hl-jump-stack',
   ]);
   assert.deepEqual(calls, [{
     vaultRoot: '/vault',
@@ -1010,6 +994,7 @@ test('combined activation registers the standalone PDF Ask workflow without a va
   const customEditorRegistrations = [];
   const providerOptions = [];
   let askSelectionCount = 0;
+  let outlineRegistrationCount = 0;
   let vaultWorkCount = 0;
   const vscode = createVscodeMock({
     executeCommandCalls: [],
@@ -1070,18 +1055,12 @@ test('combined activation registers the standalone PDF Ask workflow without a va
         vaultWorkCount += 1;
       },
       registerMarkdownOutlineTreeProvider: () => {
-        vaultWorkCount += 1;
+        outlineRegistrationCount += 1;
+        return { refresh() {} };
       },
     },
     './webBrowserProvider': {
       WebBrowserProvider: class {
-        constructor() {
-          vaultWorkCount += 1;
-        }
-      },
-    },
-    './navigationHistory': {
-      NavigationHistoryProvider: class {
         constructor() {
           vaultWorkCount += 1;
         }
@@ -1117,6 +1096,7 @@ test('combined activation registers the standalone PDF Ask workflow without a va
   assert.equal(typeof vscode.__registeredCommands['human-learning.pdfAskSelection'], 'function');
   await vscode.__registeredCommands['human-learning.pdfAskSelection']();
   assert.equal(askSelectionCount, 1);
+  assert.equal(outlineRegistrationCount, 1);
   assert.equal(vaultWorkCount, 0);
 });
 

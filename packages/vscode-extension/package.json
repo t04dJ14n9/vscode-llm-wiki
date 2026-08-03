@@ -79,16 +79,6 @@
         "icon": "$(globe)"
       },
       {
-        "command": "human-learning.jumpBack",
-        "title": "Human Learning: Jump Back",
-        "icon": "$(debug-reverse-continue)"
-      },
-      {
-        "command": "human-learning.clearJumpStack",
-        "title": "Human Learning: Clear Jump Stack",
-        "icon": "$(clear-all)"
-      },
-      {
         "command": "human-learning.toggleVimMode",
         "title": "Human Learning: Toggle Vim Mode"
       },
@@ -282,18 +272,6 @@
           "when": "humanLearningPdfOpen && humanLearningPdfHasSelection",
           "group": "navigation@9"
         }
-      ],
-      "view/title": [
-        {
-          "command": "human-learning.jumpBack",
-          "when": "view == hl-jump-stack",
-          "group": "navigation@1"
-        },
-        {
-          "command": "human-learning.clearJumpStack",
-          "when": "view == hl-jump-stack",
-          "group": "navigation@2"
-        }
       ]
     },
     "views": {
@@ -311,11 +289,6 @@
         {
           "id": "hl-outline",
           "name": "Outline",
-          "type": "tree"
-        },
-        {
-          "id": "hl-jump-stack",
-          "name": "Jump Stack",
           "type": "tree"
         }
       ]

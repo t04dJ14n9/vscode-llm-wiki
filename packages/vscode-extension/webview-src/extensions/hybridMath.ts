@@ -1,4 +1,4 @@
-import { Decoration, EditorView, WidgetType } from '@codemirror/view';
+import { Decoration, type EditorView, WidgetType } from '@codemirror/view';
 import type { EditorState, Range } from '@codemirror/state';
 import { browserAdaptor } from '@mathjax/src/cjs/adaptors/browserAdaptor.js';
 import { RegisterHTMLHandler } from '@mathjax/src/cjs/handlers/html.js';

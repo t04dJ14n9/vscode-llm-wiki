@@ -297,7 +297,7 @@ function addFootnoteSyntaxSpans(
     const from = lineFrom + markerStart;
     const idFrom = from + 2;
     const idTo = idFrom + id.length;
-    const to = lineFrom + definition[0]!.length;
+    const to = lineFrom + definition[0].length;
     spans.push({
       from,
       to,

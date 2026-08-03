@@ -117,12 +117,9 @@ test.describe('Preview-compatible PDF text selection', () => {
 
   test('selection toolbar dismisses or remains attached to the selection while the viewer scrolls', async ({ page }) => {
     await openOutOfOrderFixture(page);
-    const zoom = page.getByRole('spinbutton', { name: 'Zoom' });
-    await zoom.fill('250');
-    await zoom.press('Enter');
-    await expect(zoom).toHaveValue('250');
-
-    const first = await lineBox(page, 0);
+    const firstText = page.locator('#page-1 .text-layer span[data-item-index="0"]');
+    await commitZoomAndWaitForTextLayer(page, 250, firstText);
+    const first = await requiredBox(firstText);
     await dragSelection(
       page,
       { x: first.x + 1, y: first.y + first.height / 2 },
@@ -196,14 +193,11 @@ test.describe('Preview-compatible PDF text selection', () => {
   test('selection autoscroll continues while the pointer is held at the viewer edge', async ({ page }) => {
     await page.goto(fourPageUrl);
     await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 4/, { timeout: 10_000 });
-    const zoom = page.getByRole('spinbutton', { name: 'Zoom' });
-    await zoom.fill('200');
-    await zoom.press('Enter');
-    await expect(zoom).toHaveValue('200');
-
-    const first = await requiredBox(
-      page.locator('#page-1 .text-layer span[data-item-index]').filter({ hasText: 'Page One' }),
-    );
+    const firstText = page
+      .locator('#page-1 .text-layer span[data-item-index]')
+      .filter({ hasText: 'Page One' });
+    await commitZoomAndWaitForTextLayer(page, 200, firstText);
+    const first = await requiredBox(firstText);
     const viewer = await requiredBox(page.locator('#viewer-container'));
     await page.mouse.move(first.x + 1, first.y + first.height / 2);
     await page.mouse.down();
@@ -283,6 +277,28 @@ async function pointInsideText(
 
 async function lineBox(page: Page, itemIndex: number): Promise<Box> {
   return requiredBox(page.locator(`#page-1 .text-layer span[data-item-index="${itemIndex}"]`));
+}
+
+async function commitZoomAndWaitForTextLayer(
+  page: Page,
+  percentage: number,
+  witness: ReturnType<Page['locator']>,
+): Promise<void> {
+  await expect(witness).toBeVisible();
+  await witness.evaluate(element => {
+    element.dataset.preZoomTextLayer = 'true';
+  });
+
+  const zoom = page.getByRole('spinbutton', { name: 'Zoom' });
+  await zoom.fill(String(percentage));
+  await zoom.press('Enter');
+  await expect(zoom).toHaveValue(String(percentage));
+
+  // Progressive zoom deliberately retains the old raster and text until the
+  // sharper render is ready. Wait for the reconstructed interactive layer,
+  // not merely for a visible node from the retiring generation.
+  await expect(witness).not.toHaveAttribute('data-pre-zoom-text-layer', 'true');
+  await expect(witness).toBeVisible();
 }
 
 async function requiredBox(locator: ReturnType<Page['locator']>): Promise<Box> {

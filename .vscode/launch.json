@@ -1,0 +1,27 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Launch Human Learning Extension",
+      "type": "extensionHost",
+      "request": "launch",
+      "args": [
+        "--extensionDevelopmentPath=${workspaceFolder}/packages/vscode-extension",
+        "${workspaceFolder}/demo-vault"
+      ],
+      "outFiles": [
+        "${workspaceFolder}/packages/vscode-extension/dist/**/*.js"
+      ],
+      "preLaunchTask": "Build HL Extension"
+    },
+    {
+      "name": "Run HL CLI",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/packages/cli/dist/main.js",
+      "args": ["status"],
+      "cwd": "${workspaceFolder}/demo-vault",
+      "preLaunchTask": "Build HL Packages"
+    }
+  ]
+}

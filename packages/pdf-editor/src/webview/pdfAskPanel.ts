@@ -587,7 +587,7 @@ class PdfAskPanelController implements PdfAskPanel {
       top += deltaY;
       height -= deltaY;
     }
-    let next = this.boundGeometry({
+    const next = this.boundGeometry({
       ...start,
       left,
       top,
@@ -844,7 +844,6 @@ class PdfAskPanelController implements PdfAskPanel {
         return;
       case 'resetPosition':
         this.reattachPanel();
-        return;
     }
   }
 
@@ -1346,7 +1345,7 @@ class PdfAskPanelController implements PdfAskPanel {
     const requestId = `ask-pdf-${++this.requestSequence}`;
     this.requestContexts.set(requestId, {
       revision: this.viewRevision,
-      type: String(message.type ?? ''),
+      type: typeof message.type === 'string' ? message.type : '',
       ...(typeof message.annotationId === 'string' ? { annotationId: message.annotationId } : {}),
       ...(this.activeAnnotation()?.selectionKey ?? this.currentSelectionKey
         ? { selectionKey: this.activeAnnotation()?.selectionKey ?? this.currentSelectionKey }

@@ -14,6 +14,13 @@ interface OrderedPdfTextItem {
   rect: { left: number; top: number; width: number; height: number };
 }
 
+interface OrderedPdfTextLane {
+  items: OrderedPdfTextItem[];
+  left: number;
+  leftBucket?: number;
+  coverageBuckets: number[];
+}
+
 export function finitePdfTextRect(
   value: any,
 ): { left: number; top: number; width: number; height: number } | undefined {
@@ -180,37 +187,292 @@ function approximatePdfSelectionGlyphs(
 
 function orderPdfTextItems(items: OrderedPdfTextItem[]): any[] {
   if (items.length < 2) return items.map(candidate => candidate.item);
-  const flows: OrderedPdfTextItem[][] = [];
-  let currentFlow: OrderedPdfTextItem[] = [];
+  const typicalHeight = median(items.map(item => item.rect.height));
+  const laneGap = Math.max(6, typicalHeight * 0.7);
+  const leftAlignmentTolerance = Math.max(8, typicalHeight * 2.25);
+  const bucketSize = Math.max(16, typicalHeight * 4);
+  const lanes: OrderedPdfTextLane[] = [];
+  const leftIndex = new Map<number, Set<OrderedPdfTextLane>>();
+  const coverageIndex = new Map<number, Set<OrderedPdfTextLane>>();
+  let previousLane: OrderedPdfTextLane | undefined;
+  let previousItem: OrderedPdfTextItem | undefined;
+
   for (const item of items) {
-    if (startsNewPdfTextColumn(currentFlow, item)) {
-      flows.push(currentFlow);
-      currentFlow = [];
+    let bestLane: OrderedPdfTextLane | undefined;
+    let bestScore = Number.NEGATIVE_INFINITY;
+    const candidates = pdfTextLaneCandidates(
+      item,
+      previousLane,
+      leftIndex,
+      coverageIndex,
+      bucketSize,
+      laneGap,
+      leftAlignmentTolerance,
+    );
+    for (const lane of candidates) {
+      const match = pdfTextLaneMatch(
+        lane,
+        item,
+        previousLane === lane ? previousItem : undefined,
+        typicalHeight,
+        laneGap,
+        leftAlignmentTolerance,
+      );
+      if (match !== undefined && match > bestScore) {
+        bestLane = lane;
+        bestScore = match;
+      }
     }
-    currentFlow.push(item);
+    if (!bestLane) {
+      bestLane = { items: [], left: item.rect.left, coverageBuckets: [] };
+      lanes.push(bestLane);
+    }
+    bestLane.items.push(item);
+    updatePdfTextLaneIndex(bestLane, leftIndex, coverageIndex, bucketSize);
+    previousLane = bestLane;
+    previousItem = item;
   }
-  if (currentFlow.length) flows.push(currentFlow);
-  return flows.flatMap(orderSinglePdfTextFlow).map(candidate => candidate.item);
+
+  return mergeSingleRowPdfTextLanes(lanes, typicalHeight, laneGap)
+    .flatMap(lane => orderSinglePdfTextFlow(lane.items))
+    .map(candidate => candidate.item);
 }
 
-function startsNewPdfTextColumn(flow: OrderedPdfTextItem[], candidate: OrderedPdfTextItem): boolean {
-  if (flow.length < 3) return false;
-  const recent = flow.slice(-16);
-  const recentBottom = Math.max(...recent.map(item => item.rect.top));
-  const typicalHeight = median(recent.map(item => item.rect.height));
-  if (candidate.rect.top + Math.max(2, typicalHeight * 1.25) >= recentBottom) return false;
+function pdfTextLaneCandidates(
+  candidate: OrderedPdfTextItem,
+  previousLane: OrderedPdfTextLane | undefined,
+  leftIndex: Map<number, Set<OrderedPdfTextLane>>,
+  coverageIndex: Map<number, Set<OrderedPdfTextLane>>,
+  bucketSize: number,
+  laneGap: number,
+  leftAlignmentTolerance: number,
+): OrderedPdfTextLane[] {
+  const result: OrderedPdfTextLane[] = [];
+  const seen = new Set<OrderedPdfTextLane>();
+  const add = (lane: OrderedPdfTextLane) => {
+    if (seen.size >= 256 || seen.has(lane)) return;
+    seen.add(lane);
+    result.push(lane);
+  };
+  if (previousLane) add(previousLane);
+  for (const key of pdfTextBucketKeys(
+    candidate.rect.left - leftAlignmentTolerance,
+    candidate.rect.left + leftAlignmentTolerance,
+    bucketSize,
+  )) {
+    leftIndex.get(key)?.forEach(add);
+  }
+  for (const key of pdfTextBucketKeys(
+    candidate.rect.left - laneGap,
+    candidate.rect.left + candidate.rect.width + laneGap,
+    bucketSize,
+  )) {
+    coverageIndex.get(key)?.forEach(add);
+  }
+  return result;
+}
 
-  // Use the bottom-local reading lane rather than the full recent envelope.
-  // A distant full-width header can otherwise bridge a margin caption into the
-  // body flow and make a drag appear to jump sideways between columns.
-  const localWindow = Math.max(24, typicalHeight * 12);
-  const laneItems = recent.filter(item => recentBottom - item.rect.top <= localWindow);
-  const recentLeft = Math.min(...laneItems.map(item => item.rect.left));
-  const recentRight = Math.max(...laneItems.map(item => item.rect.left + item.rect.width));
-  const candidateLeft = candidate.rect.left;
-  const candidateRight = candidate.rect.left + candidate.rect.width;
-  const columnGap = Math.max(6, typicalHeight * 0.7);
-  return candidateLeft > recentRight + columnGap || candidateRight < recentLeft - columnGap;
+function updatePdfTextLaneIndex(
+  lane: OrderedPdfTextLane,
+  leftIndex: Map<number, Set<OrderedPdfTextLane>>,
+  coverageIndex: Map<number, Set<OrderedPdfTextLane>>,
+  bucketSize: number,
+): void {
+  if (lane.leftBucket !== undefined) removePdfTextLaneIndexValue(leftIndex, lane.leftBucket, lane);
+  for (const key of lane.coverageBuckets) removePdfTextLaneIndexValue(coverageIndex, key, lane);
+
+  const recent = lane.items.slice(-64);
+  lane.left = median(recent.map(item => item.rect.left));
+  lane.leftBucket = Math.floor(lane.left / bucketSize);
+  lane.coverageBuckets = Array.from(new Set(recent.flatMap(item => pdfTextBucketKeys(
+    item.rect.left,
+    item.rect.left + item.rect.width,
+    bucketSize,
+  ))));
+  addPdfTextLaneIndexValue(leftIndex, lane.leftBucket, lane);
+  for (const key of lane.coverageBuckets) addPdfTextLaneIndexValue(coverageIndex, key, lane);
+}
+
+function addPdfTextLaneIndexValue(
+  index: Map<number, Set<OrderedPdfTextLane>>,
+  key: number,
+  lane: OrderedPdfTextLane,
+): void {
+  const values = index.get(key) ?? new Set<OrderedPdfTextLane>();
+  values.add(lane);
+  index.set(key, values);
+}
+
+function removePdfTextLaneIndexValue(
+  index: Map<number, Set<OrderedPdfTextLane>>,
+  key: number,
+  lane: OrderedPdfTextLane,
+): void {
+  const values = index.get(key);
+  values?.delete(lane);
+  if (values?.size === 0) index.delete(key);
+}
+
+function pdfTextBucketKeys(left: number, right: number, bucketSize: number): number[] {
+  const first = Math.floor(Math.min(left, right) / bucketSize);
+  const last = Math.floor(Math.max(left, right) / bucketSize);
+  if (last - first <= 128) {
+    return Array.from({ length: last - first + 1 }, (_, index) => first + index);
+  }
+  return [first, Math.floor((first + last) / 2), last];
+}
+
+function pdfTextLaneMatch(
+  lane: OrderedPdfTextLane,
+  candidate: OrderedPdfTextItem,
+  previousItem: OrderedPdfTextItem | undefined,
+  typicalHeight: number,
+  laneGap: number,
+  leftAlignmentTolerance: number,
+): number | undefined {
+  const recent = lane.items.slice(-64);
+  const leftDistance = Math.abs(candidate.rect.left - lane.left);
+  const aligned = leftDistance <= leftAlignmentTolerance;
+  const supportRows = pdfTextLaneSupportRows(recent, candidate, typicalHeight, laneGap);
+  const inlineGap = previousItem
+    ? pdfTextIntervalDistance(previousItem.rect, candidate.rect)
+    : Number.POSITIVE_INFINITY;
+  const continuesInlineRun = Boolean(
+    previousItem
+    && pdfTextItemsShareVisualLine(previousItem, candidate)
+    && (
+      inlineGap <= laneGap
+      // Some generators emit styled fragments on one line in reverse x order.
+      // Keep that local reversal together without letting a forward margin
+      // column bootstrap an otherwise multi-row body lane.
+      || (
+        candidate.rect.left < previousItem.rect.left
+        && inlineGap <= Math.max(laneGap, typicalHeight * 1.5)
+      )
+    )
+  );
+  if (!aligned && supportRows < 2 && !continuesInlineRun) return undefined;
+
+  // Repeated overlap on different rows is stronger evidence than one sparse,
+  // full-width header. Source-adjacent styled runs get the highest priority so
+  // a sentence split across font changes remains in one reading lane.
+  return (continuesInlineRun ? 10_000 : 0)
+    + supportRows * 100
+    + (aligned ? Math.max(0, 50 - leftDistance) : 0);
+}
+
+function mergeSingleRowPdfTextLanes(
+  lanes: OrderedPdfTextLane[],
+  typicalHeight: number,
+  laneGap: number,
+): OrderedPdfTextLane[] {
+  const itemBySourceOrder = new Map<number, OrderedPdfTextItem>();
+  const laneBySourceOrder = new Map<number, OrderedPdfTextLane>();
+  for (const lane of lanes) {
+    for (const item of lane.items) {
+      itemBySourceOrder.set(item.sourceOrder, item);
+      laneBySourceOrder.set(item.sourceOrder, lane);
+    }
+  }
+  const mergedInto = new Map<OrderedPdfTextLane, OrderedPdfTextLane>();
+  const resolveLane = (lane: OrderedPdfTextLane): OrderedPdfTextLane => {
+    let resolved = lane;
+    while (mergedInto.has(resolved)) resolved = mergedInto.get(resolved)!;
+    return resolved;
+  };
+
+  for (const lane of lanes) {
+    if (pdfTextVisualRowCount(lane.items, typicalHeight) > 1) continue;
+    const firstItem = lane.items.reduce((first, item) => (
+      item.sourceOrder < first.sourceOrder ? item : first
+    ));
+    const previousItem = itemBySourceOrder.get(firstItem.sourceOrder - 1);
+    const previousLane = laneBySourceOrder.get(firstItem.sourceOrder - 1);
+    if (!previousItem || !previousLane || previousLane === lane) continue;
+    const target = resolveLane(previousLane);
+    const heightRatio = Math.min(previousItem.rect.height, firstItem.rect.height)
+      / Math.max(previousItem.rect.height, firstItem.rect.height);
+    const itemGap = pdfTextIntervalDistance(previousItem.rect, firstItem.rect);
+    const hasSupportingTargetRow = pdfTextLaneSupportRows(
+      target.items,
+      firstItem,
+      typicalHeight,
+      laneGap,
+    ) >= 1;
+    const maximumInlineGap = Math.max(
+      laneGap,
+      typicalHeight * (hasSupportingTargetRow ? 3 : 1.5),
+    );
+    if (
+      heightRatio < 0.75
+      || !pdfTextItemsShareVisualLine(previousItem, firstItem)
+      || itemGap > maximumInlineGap
+    ) {
+      continue;
+    }
+    target.items.push(...lane.items);
+    mergedInto.set(lane, target);
+  }
+  return lanes.filter(lane => !mergedInto.has(lane));
+}
+
+function pdfTextVisualRowCount(items: OrderedPdfTextItem[], typicalHeight: number): number {
+  const centers = items
+    .map(item => item.rect.top + item.rect.height / 2)
+    .sort((left, right) => left - right);
+  const tolerance = Math.max(1, typicalHeight * 0.55);
+  let rows = 0;
+  let lastCenter: number | undefined;
+  for (const center of centers) {
+    if (lastCenter === undefined || center - lastCenter > tolerance) {
+      rows++;
+      lastCenter = center;
+    }
+  }
+  return rows;
+}
+
+function pdfTextLaneSupportRows(
+  items: OrderedPdfTextItem[],
+  candidate: OrderedPdfTextItem,
+  typicalHeight: number,
+  laneGap: number,
+): number {
+  const centers = items
+    .filter(item => pdfTextIntervalDistance(item.rect, candidate.rect) <= laneGap)
+    .map(item => item.rect.top + item.rect.height / 2)
+    .sort((left, right) => left - right);
+  const rowTolerance = Math.max(1, typicalHeight * 0.55);
+  let rows = 0;
+  let lastCenter: number | undefined;
+  for (const center of centers) {
+    if (lastCenter === undefined || center - lastCenter > rowTolerance) {
+      rows++;
+      lastCenter = center;
+    }
+  }
+  return rows;
+}
+
+function pdfTextItemsShareVisualLine(
+  left: OrderedPdfTextItem,
+  right: OrderedPdfTextItem,
+): boolean {
+  const leftCenter = left.rect.top + left.rect.height / 2;
+  const rightCenter = right.rect.top + right.rect.height / 2;
+  return Math.abs(leftCenter - rightCenter)
+    <= Math.max(1, Math.min(left.rect.height, right.rect.height) * 0.65);
+}
+
+function pdfTextIntervalDistance(
+  left: OrderedPdfTextItem['rect'],
+  right: OrderedPdfTextItem['rect'],
+): number {
+  const leftRight = left.left + left.width;
+  const rightRight = right.left + right.width;
+  if (leftRight < right.left) return right.left - leftRight;
+  if (rightRight < left.left) return left.left - rightRight;
+  return 0;
 }
 
 function orderSinglePdfTextFlow(items: OrderedPdfTextItem[]): OrderedPdfTextItem[] {

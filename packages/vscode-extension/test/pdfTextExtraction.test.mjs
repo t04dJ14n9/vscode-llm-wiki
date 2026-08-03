@@ -199,3 +199,221 @@ test('column detection keeps each PDF reading lane contiguous', () => {
     'right 3',
   ]);
 });
+
+test('column detection reconnects a body lane after vertically overlapping margin captions', () => {
+  const normalized = extraction.normalizeBasicPdfTextRects([
+    { content: 'body intro', rect: rect(0, 0, 60, 8) },
+    { content: 'body reference', rect: rect(0, 10, 60, 8) },
+    { content: 'caption 1', rect: rect(80, 16, 20, 8) },
+    { content: 'caption 2', rect: rect(80, 26, 20, 8) },
+    { content: 'caption 3', rect: rect(80, 36, 20, 8) },
+    { content: 'body line 3', rect: rect(0, 20, 60, 8) },
+    { content: 'body line 4', rect: rect(0, 30, 60, 8) },
+    { content: 'body line 5', rect: rect(0, 40, 60, 8) },
+  ]);
+
+  assert.deepEqual(normalized.map(item => item.content), [
+    'body intro',
+    'body reference',
+    'body line 3',
+    'body line 4',
+    'body line 5',
+    'caption 1',
+    'caption 2',
+    'caption 3',
+  ]);
+});
+
+test('a full-width heading does not bridge otherwise separate PDF text lanes', () => {
+  const normalized = extraction.normalizeBasicPdfTextRects([
+    { content: 'full-width heading', rect: rect(0, 0, 120, 8) },
+    { content: 'left 1', rect: rect(0, 20, 50, 8) },
+    { content: 'left 2', rect: rect(0, 30, 50, 8) },
+    { content: 'left 3', rect: rect(0, 40, 50, 8) },
+    { content: 'right 1', rect: rect(70, 20, 50, 8) },
+    { content: 'right 2', rect: rect(70, 30, 50, 8) },
+    { content: 'right 3', rect: rect(70, 40, 50, 8) },
+  ]);
+
+  assert.deepEqual(normalized.map(item => item.content), [
+    'full-width heading',
+    'left 1',
+    'left 2',
+    'left 3',
+    'right 1',
+    'right 2',
+    'right 3',
+  ]);
+});
+
+test('source-adjacent runs on one visual line stay together across a wide word gap', () => {
+  const normalized = extraction.normalizeBasicPdfTextRects([
+    { content: 'Page', rect: rect(0, 0, 10, 8) },
+    { content: 'Two', rect: rect(34, 0, 10, 8) },
+    { content: 'lower line', rect: rect(0, 20, 44, 8) },
+  ]);
+
+  assert.deepEqual(normalized.map(item => item.content), [
+    'Page',
+    'Two',
+    'lower line',
+  ]);
+});
+
+test('row-major source order still keeps neighboring PDF columns separate', () => {
+  const normalized = extraction.normalizeBasicPdfTextRects([
+    { content: 'left 1', rect: rect(0, 0, 50, 8) },
+    { content: 'right 1', rect: rect(70, 0, 50, 8) },
+    { content: 'left 2', rect: rect(0, 10, 50, 8) },
+    { content: 'right 2', rect: rect(70, 10, 50, 8) },
+    { content: 'left 3', rect: rect(0, 20, 50, 8) },
+    { content: 'right 3', rect: rect(70, 20, 50, 8) },
+  ]);
+
+  assert.deepEqual(normalized.map(item => item.content), [
+    'left 1',
+    'left 2',
+    'left 3',
+    'right 1',
+    'right 2',
+    'right 3',
+  ]);
+});
+
+test('a one-line neighboring caption does not rejoin a multi-line body lane', () => {
+  const normalized = extraction.normalizeBasicPdfTextRects([
+    { content: 'body 1', rect: rect(0, 0, 50, 8) },
+    { content: 'one-line caption', rect: rect(70, 0, 50, 8) },
+    { content: 'body 2', rect: rect(0, 10, 50, 8) },
+    { content: 'body 3', rect: rect(0, 20, 50, 8) },
+  ]);
+
+  assert.deepEqual(normalized.map(item => item.content), [
+    'body 1',
+    'body 2',
+    'body 3',
+    'one-line caption',
+  ]);
+});
+
+test('row-major source order keeps three neighboring PDF columns contiguous', () => {
+  const normalized = extraction.normalizeBasicPdfTextRects([
+    { content: 'left 1', rect: rect(0, 0, 30, 8) },
+    { content: 'middle 1', rect: rect(50, 0, 30, 8) },
+    { content: 'right 1', rect: rect(100, 0, 30, 8) },
+    { content: 'left 2', rect: rect(0, 10, 30, 8) },
+    { content: 'middle 2', rect: rect(50, 10, 30, 8) },
+    { content: 'right 2', rect: rect(100, 10, 30, 8) },
+    { content: 'left 3', rect: rect(0, 20, 30, 8) },
+    { content: 'middle 3', rect: rect(50, 20, 30, 8) },
+    { content: 'right 3', rect: rect(100, 20, 30, 8) },
+  ]);
+
+  assert.deepEqual(normalized.map(item => item.content), [
+    'left 1',
+    'left 2',
+    'left 3',
+    'middle 1',
+    'middle 2',
+    'middle 3',
+    'right 1',
+    'right 2',
+    'right 3',
+  ]);
+});
+
+test('a fragmented full-width heading stays ahead of row-major columns', () => {
+  const normalized = extraction.normalizeBasicPdfTextRects([
+    { content: 'Chapter', rect: rect(0, 0, 50, 14) },
+    { content: 'One', rect: rect(51, 0, 25, 14) },
+    { content: 'left 1', rect: rect(0, 24, 45, 8) },
+    { content: 'right 1', rect: rect(70, 24, 45, 8) },
+    { content: 'left 2', rect: rect(0, 34, 45, 8) },
+    { content: 'right 2', rect: rect(70, 34, 45, 8) },
+  ]);
+
+  assert.deepEqual(normalized.map(item => item.content), [
+    'Chapter',
+    'One',
+    'left 1',
+    'left 2',
+    'right 1',
+    'right 2',
+  ]);
+});
+
+test('column lanes tolerate small coordinate noise and mixed text heights', () => {
+  const normalized = extraction.normalizeBasicPdfTextRects([
+    { content: 'left 1', rect: rect(-0.3, 0, 50, 8) },
+    { content: 'right 1', rect: rect(70.2, 0, 50, 8) },
+    { content: 'left 2', rect: rect(1.5, 10.4, 49, 8.5) },
+    { content: 'right 2', rect: rect(68.8, 10.1, 51, 7.5) },
+    { content: 'left 3', rect: rect(0.2, 21, 50, 8) },
+    { content: 'right 3', rect: rect(70.4, 20.7, 50, 8) },
+  ]);
+
+  assert.deepEqual(normalized.map(item => item.content), [
+    'left 1',
+    'left 2',
+    'left 3',
+    'right 1',
+    'right 2',
+    'right 3',
+  ]);
+});
+
+test('touching and near-touching source runs remain in sentence order', () => {
+  const normalized = extraction.normalizeBasicPdfTextRects([
+    { content: 'Hello', rect: rect(0, 0, 20, 8) },
+    { content: ',', rect: rect(20, 0, 2, 8) },
+    { content: 'world', rect: rect(22.1, 0, 20, 8) },
+    { content: 'next line', rect: rect(0, 10, 42, 8) },
+  ]);
+
+  assert.deepEqual(normalized.map(item => item.content), [
+    'Hello',
+    ',',
+    'world',
+    'next line',
+  ]);
+});
+
+test('alternating body and caption source runs still form separate selection lanes', () => {
+  const normalized = extraction.normalizeBasicPdfTextRects([
+    { content: 'body 1', rect: rect(0, 0, 50, 8) },
+    { content: 'caption 1', rect: rect(75, 0, 20, 8) },
+    { content: 'body 2', rect: rect(0, 10, 50, 8) },
+    { content: 'caption 2', rect: rect(75, 10, 20, 8) },
+    { content: 'body 3', rect: rect(0, 20, 50, 8) },
+    { content: 'caption 3', rect: rect(75, 20, 20, 8) },
+  ]);
+
+  assert.deepEqual(normalized.map(item => item.content), [
+    'body 1',
+    'body 2',
+    'body 3',
+    'caption 1',
+    'caption 2',
+    'caption 3',
+  ]);
+});
+
+test('a tightly adjacent multi-line caption does not enter the body selection lane', () => {
+  const normalized = extraction.normalizeBasicPdfTextRects([
+    { content: 'body 1', rect: rect(0, 0, 50, 8) },
+    { content: 'caption 1', rect: rect(60, 0, 20, 8) },
+    { content: 'caption 2', rect: rect(60, 10, 20, 8) },
+    { content: 'caption 3', rect: rect(60, 20, 20, 8) },
+    { content: 'body 2', rect: rect(0, 10, 50, 8) },
+    { content: 'body 3', rect: rect(0, 20, 50, 8) },
+  ]);
+
+  assert.deepEqual(normalized.map(item => item.content), [
+    'body 1',
+    'body 2',
+    'body 3',
+    'caption 1',
+    'caption 2',
+    'caption 3',
+  ]);
+});

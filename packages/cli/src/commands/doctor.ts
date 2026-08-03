@@ -73,7 +73,7 @@ export function doctorCommand(): Command {
         }
 
         // Check WAL mode
-        const journalMode = db.pragma('journal_mode', { simple: true }) as string;
+        const journalMode = db.pragma('journal_mode', { simple: true });
         if (journalMode !== 'wal') {
           checks.push({
             check: 'database:journal_mode',

@@ -78,7 +78,6 @@ test('PDF editor provider exposes portable database-free agent context with norm
       openDatabase: () => { throw new Error('agent context must not open the anchor database'); },
       createPdfAnchorFromSelection: () => { throw new Error('agent context must not persist an anchor'); },
     },
-    './navigationHistory': {},
   });
 
   const pdfUri = {
@@ -168,7 +167,6 @@ test('PDF copy and insert link actions use portable URLs without persistence or 
       openDatabase: () => { throw new Error('link actions must not open the anchor database'); },
       createPdfAnchorFromSelection: () => { throw new Error('link actions must not persist an anchor'); },
     },
-    './navigationHistory': {},
   });
 
   const provider = new PdfEditorProvider(
@@ -252,7 +250,6 @@ test('direct PDF highlight persists normalized prefix and suffix annotation cont
       },
       pdfHref: portablePdfHref,
     },
-    './navigationHistory': {},
   });
 
   const provider = new PdfEditorProvider({ extensionUri: { fsPath: '/extension' } }, '/vault');
@@ -315,7 +312,6 @@ test('both PDF providers transport page-scoped text fragments without database r
         openDatabase: () => { throw new Error('portable navigation must not open the database'); },
         pdfHref: portablePdfHref,
       },
-      './navigationHistory': {},
     });
     const provider = new PdfEditorProvider({ extensionUri: { fsPath: '/extension' } }, '/vault');
     provider.webviews.set('file:///vault/raw/pdf/paper.pdf', {
@@ -740,7 +736,6 @@ test('PDF editor provider restores persisted highlight colors and rectangle geom
   const { locatorToWebviewAnchor } = loadTsModule('src/pdfEditorProvider.ts', {
     vscode,
     '@human-learning/core': {},
-    './navigationHistory': {},
   });
 
   const restored = locatorToWebviewAnchor(JSON.stringify({
@@ -783,7 +778,6 @@ test('PDF rectangle selection copies the exact PDF++ embed-link shape without pe
     '@human-learning/core': {
       openDatabase: () => { throw new Error('rectangle copy must not open the anchor database'); },
     },
-    './navigationHistory': {},
   });
 
   const relPath = 'Topics/AI/LLM/cs336/Resources/lectures/lecture_03.pdf';
@@ -813,13 +807,110 @@ test('PDF page links use the exact PDF++ wikilink shape', () => {
   const { formatPdfPageLink } = loadTsModule('src/pdfEditorProvider.ts', {
     vscode,
     '@human-learning/core': {},
-    './navigationHistory': {},
   });
 
   assert.equal(
     formatPdfPageLink('path/to/file.pdf', 3),
     '[[path/to/file.pdf#page=3|file, p.3]]',
   );
+});
+
+test('PDF outline payloads are bounded, normalized, and reveal the exact destination', async () => {
+  const posted = [];
+  const revealCalls = [];
+  const vscode = {
+    commands: {
+      executeCommand: async () => undefined,
+    },
+    Uri: {
+      joinPath: (...parts) => ({ parts }),
+    },
+  };
+  const {
+    PdfEditorProvider,
+    normalizePdfOutlineEntries,
+  } = loadTsModule('src/pdfEditorProvider.ts', {
+    vscode,
+    '@human-learning/core': {},
+  });
+  const entries = normalizePdfOutlineEntries([{
+    title: '  Section   12.2  ',
+    destination: {
+      pageIndex: 157,
+      zoom: { mode: 3 },
+      view: [462],
+    },
+    children: [{
+      title: '12.2.4.1 Light Transport',
+      destination: {
+        pageIndex: 164,
+        zoom: {
+          mode: 1,
+          params: { x: 72, y: 512, zoom: 0 },
+        },
+        view: [72, 512, 0],
+      },
+      children: [],
+    }],
+  }, {
+    title: 'Invalid destination remains a visible group',
+    destination: {
+      pageIndex: -1,
+      zoom: { mode: 99 },
+      view: [],
+    },
+    children: [],
+  }]);
+
+  assert.equal(entries[0].title, 'Section 12.2');
+  assert.equal(entries[0].destination.pageIndex, 157);
+  assert.equal(entries[0].children[0].destination.zoom.params.y, 512);
+  assert.equal(entries[1].destination, undefined);
+
+  const uri = {
+    fsPath: '/vault/rendering.pdf',
+    toString: () => 'file:///vault/rendering.pdf',
+  };
+  const provider = new PdfEditorProvider({ extensionUri: { fsPath: '/extension' } }, '/vault');
+  provider.webviews.set(uri.toString(), {
+    panel: {
+      reveal: (...args) => revealCalls.push(args),
+    },
+    pdfUri: uri,
+    outline: entries,
+    postMessage: message => posted.push(message),
+  });
+
+  assert.equal(
+    await provider.revealPdfOutlineDestination(
+      uri,
+      entries[0].children[0].destination,
+      entries[0].children[0].title,
+    ),
+    true,
+  );
+  assert.deepEqual(revealCalls, [[undefined, true]]);
+  assert.deepEqual(posted, [{
+    type: 'goToPdfDestination',
+    destination: {
+      pageIndex: 164,
+      zoom: {
+        mode: 1,
+        params: { x: 72, y: 512, zoom: 0 },
+      },
+      view: [72, 512, 0],
+    },
+    title: '12.2.4.1 Light Transport',
+  }]);
+  assert.equal(
+    await provider.revealPdfOutlineDestination(uri, {
+      pageIndex: Number.NaN,
+      zoom: { mode: 3 },
+      view: [],
+    }),
+    false,
+  );
+  assert.equal(provider.getPdfOutline(uri), entries);
 });
 
 function portablePdfHref(sourcePath, { page, textFragment } = {}) {

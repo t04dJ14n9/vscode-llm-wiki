@@ -4,6 +4,7 @@
 
 node_modules/
 **/node_modules/
+.pnpm-store/
 
 dist/
 **/dist/
@@ -12,11 +13,14 @@ dist-split/
 build/
 **/build/
 *.tsbuildinfo
+.cache/
 
 test-results/
 **/test-results/
 e2e-report/
 output/
+artifacts/
+.playwright-cli/
 .vscode-test/
 **/.vscode-test/
 
@@ -26,7 +30,9 @@ output/
 .cursor/
 .omc/
 .paperlink/
-.vscode/
+.vscode/*
+!.vscode/launch.json
+!.vscode/tasks.json
 
 demo-vault/
 demos/

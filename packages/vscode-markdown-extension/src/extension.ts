@@ -14,7 +14,7 @@ import { BacklinksProvider } from './backlinksProvider';
 import { dispatchStandaloneUri, dispatchUri } from './uriDispatcher';
 import { registerLinkProvider } from './linkProvider';
 import { MarkdownEditorProvider } from './markdownEditorProvider';
-import { MarkdownOutlineTreeProvider, registerMarkdownOutlineProvider, registerMarkdownOutlineTreeProvider } from './markdownSymbols';
+import { type MarkdownOutlineTreeProvider, registerMarkdownOutlineProvider, registerMarkdownOutlineTreeProvider } from './markdownSymbols';
 import { notePathToUri } from './wikiLinks';
 import { addSelectionToContext } from './agentContext';
 

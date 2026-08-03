@@ -15,6 +15,30 @@ type HeadingNode = HeadingEntry & {
   children: HeadingNode[];
 };
 
+export interface PdfOutlineDestination {
+  pageIndex: number;
+  zoom: {
+    mode: number;
+    params?: {
+      x: number;
+      y: number;
+      zoom: number;
+    };
+  };
+  view: number[];
+}
+
+export interface PdfOutlineEntry {
+  title: string;
+  destination?: PdfOutlineDestination;
+  children: PdfOutlineEntry[];
+}
+
+export interface PdfOutlineSource {
+  readonly onDidChangePdfOutline: vscode.Event<vscode.Uri>;
+  getPdfOutline(uri: vscode.Uri): readonly PdfOutlineEntry[] | undefined;
+}
+
 class MarkdownOutlineItem extends vscode.TreeItem {
   constructor(
     readonly node: HeadingNode,
@@ -42,6 +66,36 @@ class MarkdownOutlineItem extends vscode.TreeItem {
   readonly children: MarkdownOutlineItem[];
 }
 
+class PdfOutlineItem extends vscode.TreeItem {
+  readonly children: PdfOutlineItem[];
+
+  constructor(
+    readonly node: PdfOutlineEntry,
+    readonly uri: vscode.Uri,
+  ) {
+    super(
+      node.title,
+      node.children.length > 0
+        ? vscode.TreeItemCollapsibleState.Expanded
+        : vscode.TreeItemCollapsibleState.None,
+    );
+    this.children = node.children.map(child => new PdfOutlineItem(child, uri));
+    this.iconPath = new vscode.ThemeIcon('bookmark');
+    if (node.destination) {
+      this.description = `p. ${node.destination.pageIndex + 1}`;
+      this.command = {
+        command: 'human-learning.revealInPdfOutline',
+        title: 'Reveal PDF Section',
+        arguments: [{
+          uri,
+          destination: node.destination,
+          title: node.title,
+        }],
+      };
+    }
+  }
+}
+
 export class MarkdownOutlineProvider implements vscode.DocumentSymbolProvider {
   provideDocumentSymbols(document: vscode.TextDocument): vscode.DocumentSymbol[] {
     const headings = parseMarkdownHeadings(document.getText());
@@ -53,6 +107,8 @@ export class MarkdownOutlineTreeProvider implements vscode.TreeDataProvider<vsco
   private readonly _onDidChangeTreeData = new vscode.EventEmitter<void>();
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
 
+  constructor(private readonly pdfOutlineSource?: PdfOutlineSource) {}
+
   refresh(): void {
     this._onDidChangeTreeData.fire();
   }
@@ -63,9 +119,27 @@ export class MarkdownOutlineTreeProvider implements vscode.TreeDataProvider<vsco
 
   async getChildren(element?: vscode.TreeItem): Promise<vscode.TreeItem[]> {
     if (element instanceof MarkdownOutlineItem) return element.children;
+    if (element instanceof PdfOutlineItem) return element.children;
 
-    const document = await getActiveMarkdownDocument();
-    if (!document) return [new vscode.TreeItem('(no active markdown note)')];
+    const activeUri = getActiveOutlineUri();
+    if (activeUri && isPdfUri(activeUri)) {
+      if (!this.pdfOutlineSource) {
+        return [new vscode.TreeItem('(PDF outline unavailable)')];
+      }
+      const outline = this.pdfOutlineSource.getPdfOutline(activeUri);
+      if (outline === undefined) {
+        return [new vscode.TreeItem('(loading PDF outline…)')];
+      }
+      if (outline.length === 0) {
+        return [new vscode.TreeItem('(no PDF outline)')];
+      }
+      return outline.map(item => new PdfOutlineItem(item, activeUri));
+    }
+
+    const document = activeUri && isMarkdownUri(activeUri)
+      ? await vscode.workspace.openTextDocument(activeUri)
+      : undefined;
+    if (!document) return [new vscode.TreeItem('(no active PDF or markdown document)')];
 
     const roots = buildHeadingTree(parseMarkdownHeadings(document.getText()));
     if (roots.length === 0) return [new vscode.TreeItem('(no headings)')];
@@ -83,9 +157,12 @@ export function registerMarkdownOutlineProvider(context: vscode.ExtensionContext
   );
 }
 
-export function registerMarkdownOutlineTreeProvider(context: vscode.ExtensionContext): MarkdownOutlineTreeProvider {
-  const provider = new MarkdownOutlineTreeProvider();
-  context.subscriptions.push(
+export function registerMarkdownOutlineTreeProvider(
+  context: vscode.ExtensionContext,
+  pdfOutlineSource?: PdfOutlineSource,
+): MarkdownOutlineTreeProvider {
+  const provider = new MarkdownOutlineTreeProvider(pdfOutlineSource);
+  const subscriptions: vscode.Disposable[] = [
     vscode.window.registerTreeDataProvider('hl-outline', provider),
     vscode.window.onDidChangeActiveTextEditor(() => provider.refresh()),
     vscode.window.tabGroups.onDidChangeTabs(() => provider.refresh()),
@@ -95,7 +172,11 @@ export function registerMarkdownOutlineTreeProvider(context: vscode.ExtensionCon
         provider.refresh();
       }
     }),
-  );
+  ];
+  if (pdfOutlineSource) {
+    subscriptions.push(pdfOutlineSource.onDidChangePdfOutline(() => provider.refresh()));
+  }
+  context.subscriptions.push(...subscriptions);
   return provider;
 }
 
@@ -188,28 +269,30 @@ function buildHeadingTree(headings: HeadingEntry[]): HeadingNode[] {
   return roots;
 }
 
-async function getActiveMarkdownDocument(): Promise<vscode.TextDocument | undefined> {
-  const activeEditorDocument = vscode.window.activeTextEditor?.document;
-  if (activeEditorDocument && isMarkdownUri(activeEditorDocument.uri)) {
-    return activeEditorDocument;
-  }
-
-  const activeUri = getActiveMarkdownUri();
-  if (!activeUri) return undefined;
-  return vscode.workspace.openTextDocument(activeUri);
+function getActiveMarkdownUri(): vscode.Uri | undefined {
+  const activeUri = getActiveOutlineUri();
+  return activeUri && isMarkdownUri(activeUri) ? activeUri : undefined;
 }
 
-function getActiveMarkdownUri(): vscode.Uri | undefined {
-  const activeEditorUri = vscode.window.activeTextEditor?.document.uri;
-  if (activeEditorUri && isMarkdownUri(activeEditorUri)) return activeEditorUri;
-
+function getActiveOutlineUri(): vscode.Uri | undefined {
   const tabInput = vscode.window.tabGroups.activeTabGroup.activeTab?.input as { uri?: vscode.Uri } | undefined;
-  if (tabInput?.uri && isMarkdownUri(tabInput.uri)) return tabInput.uri;
+  if (tabInput?.uri && (isMarkdownUri(tabInput.uri) || isPdfUri(tabInput.uri))) {
+    return tabInput.uri;
+  }
+
+  const activeEditorUri = vscode.window.activeTextEditor?.document.uri;
+  if (activeEditorUri && (isMarkdownUri(activeEditorUri) || isPdfUri(activeEditorUri))) {
+    return activeEditorUri;
+  }
   return undefined;
 }
 
 function isMarkdownUri(uri: vscode.Uri): boolean {
   return uri.scheme === 'file' && uri.fsPath.toLowerCase().endsWith('.md');
+}
+
+function isPdfUri(uri: vscode.Uri): boolean {
+  return uri.scheme === 'file' && uri.fsPath.toLowerCase().endsWith('.pdf');
 }
 
 function toDocumentSymbol(document: vscode.TextDocument, node: HeadingNode): vscode.DocumentSymbol {

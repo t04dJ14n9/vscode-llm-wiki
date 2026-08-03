@@ -355,9 +355,11 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
           await vscode.commands.executeCommand('vscode.openWith', renamedUri, MarkdownEditorProvider.viewType);
           break;
         }
-        case 'error':
-          vscode.window.showErrorMessage(`Human Learning Markdown: ${message.message}`);
+        case 'error': {
+          const detail = typeof message.message === 'string' ? message.message : 'Unknown webview error';
+          vscode.window.showErrorMessage(`Human Learning Markdown: ${detail}`);
           break;
+        }
       }
     });
 
@@ -423,7 +425,7 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
 </head>
 <body>
   <div id="editor"></div>
-  <script nonce="${nonce}" src="${scriptUri}"></script>
+  <script nonce="${nonce}" src="${scriptUri.toString()}"></script>
 </body>
 </html>`;
   }

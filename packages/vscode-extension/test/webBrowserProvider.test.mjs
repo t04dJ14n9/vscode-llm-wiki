@@ -126,7 +126,7 @@ test('web browser provider renders fetched pages into a local web surface with a
     },
   });
   const originalFetch = globalThis.fetch;
-  globalThis.fetch = async url => ({
+  globalThis.fetch = async () => ({
     ok: true,
     status: 200,
     statusText: 'OK',
@@ -172,68 +172,6 @@ test('web browser provider renders fetched pages into a local web surface with a
       title: 'Props | Vue.js',
       html: '<!doctype html><html><head><title>Props | Vue.js</title></head><body><main><h1>Props</h1><p>Props declaration paragraph.</p><script>danger()</script></main></body></html>',
     });
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
-});
-
-test('web browser provider records each loaded page for the jump stack', async () => {
-  const postedMessages = [];
-  const panels = [];
-  const recorded = [];
-  let receiveMessage;
-  const vscode = createVscodeMock({
-    postedMessages,
-    panels,
-    onMessage: handler => {
-      receiveMessage = handler;
-    },
-  });
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = async () => ({
-    ok: true,
-    status: 200,
-    statusText: 'OK',
-    text: async () => '<!doctype html><html><head><title>Vue Props</title></head><body><main><h1>Props</h1><p>Loaded page body.</p></main></body></html>',
-  });
-
-  try {
-    const { WebBrowserProvider } = loadTsModule('src/webBrowserProvider.ts', {
-      vscode,
-      '@human-learning/core': {
-        openDatabase: async () => ({}),
-        closeDatabase: () => undefined,
-        runMigrations: () => undefined,
-        persistWebPageSnapshot: () => {
-          throw new Error('not used');
-        },
-      },
-    });
-
-    const provider = new WebBrowserProvider(
-      { extensionUri: createUri('/extension') },
-      '/vault',
-      undefined,
-      {
-        record: entry => recorded.push(entry),
-      },
-    );
-    provider.open('https://vuejs.org/guide/components/props.html');
-
-    await receiveMessage({
-      type: 'loadWebPage',
-      url: 'https://vuejs.org/guide/components/props.html',
-    });
-
-    assert.deepEqual(recorded, [{
-      kind: 'web',
-      label: 'Vue Props',
-      description: 'vuejs.org/guide/components/props.html',
-      target: {
-        kind: 'web',
-        url: 'https://vuejs.org/guide/components/props.html',
-      },
-    }]);
   } finally {
     globalThis.fetch = originalFetch;
   }

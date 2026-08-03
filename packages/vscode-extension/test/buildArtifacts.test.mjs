@@ -117,6 +117,16 @@ test('combined and standalone PDF bundles include the Ask PDF panel protocol', (
   }
 });
 
+test('combined and standalone extensions ship the same shared PDF runtime', () => {
+  for (const file of ['pdf-viewer.js', 'pdfium.wasm']) {
+    assert.deepEqual(
+      readFileSync(join(extensionRoot, 'dist', file)),
+      readFileSync(join(pdfExtensionRoot, 'dist', file)),
+      `${file} drifted between the combined and standalone PDF extensions`,
+    );
+  }
+});
+
 test('webview webpack entries use VS Code webview size budgets', () => {
   const configs = require('../webpack.config.js');
   const byName = new Map(configs.map(config => [config.name, config]));
@@ -154,7 +164,7 @@ test('manifest contributes a command palette toggle for markdown Vim mode', () =
   assert.equal(toggleVimCommand.title, 'Human Learning: Toggle Vim Mode');
 });
 
-test('manifest contributes a Human Learning outline view for custom markdown editor navigation', () => {
+test('manifest contributes a Human Learning outline view for custom PDF and markdown editor navigation', () => {
   const humanLearningViews = manifest.contributes.views['human-learning'] ?? [];
   const outlineView = humanLearningViews.find(view => view.id === 'hl-outline');
 
@@ -181,16 +191,12 @@ test('manifests expose selection export command while omitting Agent Context and
   assert.equal(commandIds.includes('human-learning.addSelectionToContext'), true);
 });
 
-test('manifest contributes a Human Learning jump stack view and retract commands', () => {
+test('manifest omits the redundant Human Learning jump stack view and commands', () => {
   const humanLearningViews = manifest.contributes.views['human-learning'] ?? [];
-  const jumpStackView = humanLearningViews.find(view => view.id === 'hl-jump-stack');
-  const commands = new Map(
-    (manifest.contributes.commands ?? []).map(command => [command.command, command]),
-  );
+  const commandIds = (manifest.contributes.commands ?? []).map(command => command.command);
 
-  assert.ok(jumpStackView, 'missing Human Learning jump stack view contribution');
-  assert.equal(jumpStackView.name, 'Jump Stack');
-  assert.equal(jumpStackView.type, 'tree');
-  assert.equal(commands.get('human-learning.jumpBack')?.title, 'Human Learning: Jump Back');
-  assert.equal(commands.get('human-learning.clearJumpStack')?.title, 'Human Learning: Clear Jump Stack');
+  assert.equal(humanLearningViews.some(view => view.id === 'hl-jump-stack'), false);
+  assert.equal(commandIds.includes('human-learning.jumpBack'), false);
+  assert.equal(commandIds.includes('human-learning.retractToJump'), false);
+  assert.equal(commandIds.includes('human-learning.clearJumpStack'), false);
 });

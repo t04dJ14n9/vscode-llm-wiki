@@ -93,9 +93,9 @@ export class BacklinksProvider implements vscode.TreeDataProvider<vscode.TreeIte
           return item;
         });
       }
-    } catch (e) {
+    } catch (error) {
       try { closeDatabase(db); } catch {}
-      return [new vscode.TreeItem(`(error: ${e})`)];
+      return [new vscode.TreeItem(`(error: ${errorMessage(error)})`)];
     }
   }
 
@@ -121,8 +121,8 @@ export class BacklinksProvider implements vscode.TreeDataProvider<vscode.TreeIte
         return [new vscode.TreeItem('(no backlinks)')];
       }
       return backlinks.map(link => backlinkTreeItem(link));
-    } catch (e) {
-      return [new vscode.TreeItem(`(error: ${e})`)];
+    } catch (error) {
+      return [new vscode.TreeItem(`(error: ${errorMessage(error)})`)];
     }
   }
 }
@@ -149,6 +149,12 @@ function noteTitleFromUri(uri: string): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+function errorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (typeof error === 'string') return error;
+  return 'Unknown error';
 }
 
 function getActiveMarkdownRelativePath(): string | undefined {

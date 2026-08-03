@@ -425,8 +425,17 @@ test('pdf viewer sidebar renders page thumbnails and navigates like PDF++', asyn
   await expect(sidebarToggle).toHaveAttribute('aria-expanded', 'false');
   await sidebarToggle.click();
   await expect(sidebarToggle).toHaveAttribute('aria-expanded', 'true');
-  await expect(page.getByRole('complementary', { name: 'PDF sidebar' })).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Thumbnails' })).toBeVisible();
+  const navigation = page.getByRole('complementary', { name: 'PDF navigation' });
+  await expect(navigation).toBeVisible();
+  const pagesTab = navigation.getByRole('tab', { name: 'Pages' });
+  const outlineTab = navigation.getByRole('tab', { name: 'Outline' });
+  await expect(pagesTab).toHaveAttribute('aria-selected', 'true');
+  await expect(outlineTab).toHaveAttribute('aria-selected', 'false');
+  await pagesTab.focus();
+  await pagesTab.press('ArrowRight');
+  await expect(outlineTab).toHaveAttribute('aria-selected', 'true');
+  await outlineTab.press('ArrowLeft');
+  await expect(pagesTab).toHaveAttribute('aria-selected', 'true');
 
   const thumbnails = page.getByRole('button', { name: /Page \d+ thumbnail/ });
   await expect(thumbnails).toHaveCount(2);
@@ -482,8 +491,8 @@ test('pdf viewer lays out Preview book spreads with a centered cover', async ({ 
   expect(coverOffset).toBeLessThanOrEqual(1);
 
   await page.getByRole('button', { name: 'Next page' }).click();
-  expect(await visiblePageIds(page)).toEqual(['page-2', 'page-3']);
   await expect(page.locator('#page-info')).toHaveText(/Page 3 \/ 4/);
+  expect(await visiblePageIds(page)).toEqual(['page-2', 'page-3']);
   const spread = await spreadGeometry(page);
   expect(spread[1].top).toBe(spread[2].top);
   expect(spread[1].left).toBeLessThan(spread[2].left);
@@ -1118,6 +1127,52 @@ test('pdf text layer cleans glyph artifacts and follows visual reading order', a
     return transfer.getData('text/plain');
   });
   expect(copiedText).toBe(expected);
+});
+
+test('pdf body selection skips a vertically overlapping margin-caption lane', async ({ page }) => {
+  await page.goto('http://localhost:8979/pdf-viewer.html?fixture=body-caption-selection');
+  await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 1/, { timeout: 10_000 });
+
+  const spans = page.locator('#page-1 .text-layer span[data-item-index]');
+  await expect(spans).toHaveCount(6);
+  await expect.poll(() => spans.evaluateAll(elements => elements.map(element => (element.textContent ?? '').trim())))
+    .toEqual([
+      'Body paragraph starts in the main column.',
+      'Its second line stays in that reading lane.',
+      'The third body line follows beside the caption.',
+      'The body paragraph ends here.',
+      'Figure side caption.',
+      'Do not select this.',
+    ]);
+
+  const boxes = await spans.evaluateAll(elements => elements.slice(0, 4).map(element => {
+    const rect = element.getBoundingClientRect();
+    return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+  }));
+  const first = boxes[0];
+  const last = boxes[3];
+  if (!first || !last) throw new Error('Expected four body text items');
+
+  await page.evaluate(() => {
+    window.__mockMessages = [];
+  });
+  await page.mouse.move(first.x + 1, first.y + first.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(last.x + last.width - 1, last.y + last.height / 2, { steps: 24 });
+  await page.mouse.up();
+
+  const expected = [
+    'Body paragraph starts in the main column.',
+    'Its second line stays in that reading lane.',
+    'The third body line follows beside the caption.',
+    'The body paragraph ends here.',
+  ].join(' ');
+  await expect.poll(() => page.evaluate(() => window.__mockMessages
+    ?.filter(message => message.type === 'selectionChanged' && message.anchor)
+    .at(-1)?.anchor?.snippet)).toBe(expected);
+  const nativeText = await page.evaluate(() => window.getSelection()?.toString().replace(/\s+/gu, ' ').trim());
+  expect(nativeText).toBe(expected);
+  expect(nativeText).not.toContain('Figure side caption');
 });
 
 test('pdf text selection keeps its focus at the nearest line edge while dragging into trailing whitespace', async ({ page }) => {
@@ -1998,7 +2053,12 @@ test('pdf viewer keeps the selectable text layer visually hidden', async ({ page
 async function visiblePageIds(page) {
   return page.locator('.page-wrapper').evaluateAll((wrappers: HTMLElement[]) =>
     wrappers
-      .filter(wrapper => window.getComputedStyle(wrapper).display !== 'none')
+      .filter(wrapper => {
+        const styles = window.getComputedStyle(wrapper);
+        return styles.display !== 'none'
+          && styles.visibility !== 'hidden'
+          && Number(styles.opacity) > 0;
+      })
       .map(wrapper => wrapper.id),
   );
 }

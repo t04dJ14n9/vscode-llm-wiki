@@ -1,4 +1,4 @@
-import { classifyReferenceTarget, noteHref, ReferenceTarget } from './reference-target';
+import { classifyReferenceTarget, noteHref, type ReferenceTarget } from './reference-target';
 
 export interface ParsedLink {
   /** The raw matched text */

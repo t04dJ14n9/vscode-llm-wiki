@@ -5,14 +5,9 @@ import {
   persistWebPageSnapshot,
   runMigrations,
 } from '@human-learning/core';
-import type { NavigationEntryInput } from './navigationHistory';
 
 export interface MarkdownInsertTarget {
   insertMarkdown(markdown: string): Promise<boolean>;
-}
-
-export interface NavigationRecorder {
-  record(entry: NavigationEntryInput): unknown;
 }
 
 type WebPersistAction = 'copyLink' | 'insertLink' | 'copyQuoteAndLink' | 'insertQuoteAndLink';
@@ -41,7 +36,6 @@ export class WebBrowserProvider {
     private readonly context: vscode.ExtensionContext,
     private readonly vaultRoot: string,
     private readonly markdownInsertTarget?: MarkdownInsertTarget,
-    private readonly navigationRecorder?: NavigationRecorder,
   ) {}
 
   open(initialUrl = 'https://example.com'): void {
@@ -94,15 +88,6 @@ export class WebBrowserProvider {
         url,
         title,
         html,
-      });
-      this.navigationRecorder?.record({
-        kind: 'web',
-        label: title,
-        description: describeUrl(url),
-        target: {
-          kind: 'web',
-          url,
-        },
       });
     } catch (error) {
       const messageText = error instanceof Error ? error.message : String(error);
@@ -655,14 +640,5 @@ function normalizedTitle(messageTitle: string | undefined, htmlTitle: string | u
     return new URL(url).hostname || 'Web Page';
   } catch {
     return 'Web Page';
-  }
-}
-
-function describeUrl(url: string): string {
-  try {
-    const parsed = new URL(url);
-    return `${parsed.host}${parsed.pathname}${parsed.search}`;
-  } catch {
-    return url;
   }
 }

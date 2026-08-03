@@ -178,7 +178,7 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
   }
 
   async openAskPdfForSelection(): Promise<void> {
-    await this.getActiveWebview()?.postMessage({ type: 'pdfDiscussionOpenForSelection' });
+    this.getActiveWebview()?.postMessage({ type: 'pdfDiscussionOpenForSelection' });
   }
 
   async getActiveSelectionContext(): Promise<SelectionContext | undefined> {
@@ -248,7 +248,9 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
     const active: ActivePdfWebview = {
       panel: webviewPanel,
       pdfUri,
-      postMessage: (message: unknown) => webviewPanel.webview.postMessage(message),
+      postMessage: (message: unknown) => {
+        void webviewPanel.webview.postMessage(message);
+      },
     };
     this.webviews.set(key, active);
     this.activeKey = key;
@@ -544,7 +546,6 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
           }
           const opened = await vscode.env.openExternal(target);
           if (!opened) throw new Error('VS Code could not open this link.');
-          return;
         }
       }
     } catch (cause) {
@@ -988,12 +989,30 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
     .pdf-search-settings-menu label:hover { background: var(--vscode-toolbar-hoverBackground, rgba(90,93,94,.31)); }
     .pdf-search .pdf-search-settings-menu input { width: 14px; min-width: 14px; height: 14px; margin: 0; padding: 0; border: 0; appearance: auto; accent-color: var(--vscode-focusBorder); }
     #viewer-shell { position: relative; display: flex; height: calc(100% - 38px); min-height: 0; }
-    #pdf-sidebar { box-sizing: border-box; flex: 0 0 184px; width: 184px; border-right: 1px solid var(--vscode-panel-border); background: var(--vscode-sideBar-background); color: var(--vscode-editor-foreground); }
+    #pdf-sidebar { box-sizing: border-box; flex: 0 0 240px; width: 240px; border-right: 1px solid var(--vscode-panel-border); background: var(--vscode-sideBar-background); color: var(--vscode-editor-foreground); }
     #pdf-sidebar[hidden] { display: none; }
-    .pdf-sidebar-header { box-sizing: border-box; display: flex; height: 34px; align-items: center; justify-content: space-between; padding: 0 8px 0 12px; border-bottom: 1px solid var(--vscode-panel-border); }
-    .pdf-sidebar-header h2 { margin: 0; font: 600 12px var(--vscode-font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif); }
-    .pdf-sidebar-header button { width: 24px; height: 24px; border: 0; border-radius: 3px; background: transparent; color: inherit; cursor: pointer; }
-    #thumbnail-list { box-sizing: border-box; height: calc(100% - 34px); overflow: auto; padding: 10px 8px; }
+    .pdf-sidebar-header { box-sizing: border-box; display: flex; height: 38px; align-items: stretch; justify-content: space-between; gap: 4px; padding: 0 6px 0 8px; border-bottom: 1px solid var(--vscode-panel-border); }
+    .pdf-sidebar-tabs { display: flex; min-width: 0; align-items: stretch; gap: 2px; }
+    .pdf-sidebar-tab { position: relative; min-width: 0; border: 0; padding: 0 8px; background: transparent; color: var(--vscode-descriptionForeground); font: 12px var(--vscode-font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif); cursor: pointer; }
+    .pdf-sidebar-tab:hover { color: var(--vscode-editor-foreground); background: var(--vscode-toolbar-hoverBackground, rgba(90,93,94,.22)); }
+    .pdf-sidebar-tab[aria-selected="true"] { color: var(--vscode-editor-foreground); }
+    .pdf-sidebar-tab[aria-selected="true"]::after { content: ""; position: absolute; right: 5px; bottom: 0; left: 5px; height: 2px; background: var(--vscode-focusBorder); }
+    .pdf-sidebar-tab:focus-visible, #close-sidebar:focus-visible, .pdf-outline-row:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
+    #close-sidebar { align-self: center; width: 24px; height: 24px; border: 0; border-radius: 3px; background: transparent; color: inherit; cursor: pointer; }
+    #close-sidebar:hover { background: var(--vscode-toolbar-hoverBackground, rgba(90,93,94,.22)); }
+    #thumbnail-list, #outline-list { box-sizing: border-box; height: calc(100% - 38px); overflow: auto; }
+    #thumbnail-list[hidden], #outline-list[hidden] { display: none; }
+    #thumbnail-list { padding: 10px 8px; }
+    #outline-list { padding: 6px 4px 14px; font: 12px var(--vscode-font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif); }
+    .pdf-outline-empty { margin: 10px 8px; color: var(--vscode-descriptionForeground); }
+    .pdf-outline-tree { margin: 0; padding: 0; list-style: none; }
+    .pdf-outline-tree .pdf-outline-tree { padding-left: 12px; }
+    .pdf-outline-row { box-sizing: border-box; display: flex; width: 100%; min-height: 26px; align-items: center; gap: 8px; border: 0; border-radius: 3px; padding: 4px 7px; background: transparent; color: var(--vscode-editor-foreground); font: inherit; text-align: left; cursor: pointer; }
+    .pdf-outline-row:hover { background: var(--vscode-list-hoverBackground, rgba(90,93,94,.22)); }
+    .pdf-outline-group { color: var(--vscode-descriptionForeground); cursor: default; }
+    .pdf-outline-group:hover { background: transparent; }
+    .pdf-outline-label { min-width: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .pdf-outline-page { flex: 0 0 auto; color: var(--vscode-descriptionForeground); font-variant-numeric: tabular-nums; }
     .pdf-thumbnail { display: flex; width: 100%; flex-direction: column; align-items: center; gap: 5px; margin: 0 0 10px; border: 1px solid transparent; border-radius: 4px; padding: 6px; background: transparent; color: var(--vscode-editor-foreground); cursor: pointer; }
     .pdf-thumbnail:hover { background: var(--vscode-list-hoverBackground, rgba(90,93,94,.22)); }
     .pdf-thumbnail[aria-current="page"] { border-color: var(--vscode-focusBorder); background: var(--vscode-list-activeSelectionBackground, rgba(0,127,212,.16)); }
@@ -1005,7 +1024,7 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
       filter: invert(.9) hue-rotate(180deg);
     }
     .pdf-thumbnail span { font: 11px var(--vscode-font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif); }
-    #viewer-container { flex: 1 1 auto; min-width: 0; height: 100%; overflow: auto; background: #303030; }
+    #viewer-container { flex: 1 1 auto; min-width: 0; height: 100%; overflow: auto; outline: none; background: #303030; }
     body.pdf-adapt-theme #viewer-container { background: #303030; }
     #pdf-history-back {
       position: absolute;
@@ -1031,13 +1050,14 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
       transition: left 120ms ease, background-color 80ms ease, border-color 80ms ease;
     }
     #pdf-history-back[hidden] { display: none; }
-    #pdf-sidebar:not([hidden]) ~ #pdf-history-back { left: 198px; }
+    #pdf-sidebar:not([hidden]) ~ #pdf-history-back { left: 254px; }
     #pdf-history-back:hover { background: var(--vscode-toolbar-hoverBackground, rgba(90,93,94,.31)); }
     #pdf-history-back:active { background: var(--vscode-toolbar-activeBackground, rgba(90,93,94,.48)); }
     #pdf-history-back:focus-visible { outline: 1px solid var(--vscode-focusBorder, #007fd4); outline-offset: 2px; }
     #pdf-history-back svg { display: block; pointer-events: none; }
+    body[data-reduce-animation="on"] #pdf-history-back { transition: none; }
     @media (prefers-reduced-motion: reduce) {
-      #pdf-history-back { transition: none; }
+      body[data-reduce-animation="system"] #pdf-history-back { transition: none; }
     }
     #page-container { display: flex; flex-direction: column; align-items: safe center; gap: 12px; padding: 12px; }
     #page-container.scroll-horizontal { width: max-content; min-width: 100%; min-height: 100%; flex-direction: row; align-items: flex-start; }
@@ -1046,6 +1066,7 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
     #page-container.two-page.paginated { gap: 0; }
     #page-container.paginated { min-height: calc(100% - 76px); padding: 38px 12px; justify-content: safe center; align-content: safe center; }
     .page-wrapper { position: relative; background: white; box-shadow: 0 1px 8px rgba(0,0,0,.24); }
+    .page-wrapper.page-turn-staging { position: absolute; opacity: 0; pointer-events: none; will-change: opacity; }
     .pdf-canvas, .text-layer, .highlight-layer { position: absolute; left: 0; top: 0; }
     .text-layer {
       right: 0;
@@ -1074,11 +1095,21 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
       -webkit-appearance: none;
       background: transparent;
       color: transparent;
+      overflow: visible;
+      pointer-events: none;
+    }
+    .text-layer .pdf-link-hit-fragment {
+      position: absolute;
+      box-sizing: border-box;
+      border-radius: 1px;
+      background: transparent;
       cursor: pointer;
+      pointer-events: auto;
       touch-action: manipulation;
     }
-    .pdf-link-overlay:hover { background: rgba(77, 171, 247, .10); }
-    .pdf-link-overlay:focus-visible {
+    .text-layer .pdf-link-hit-fragment:hover { background: rgba(77, 171, 247, .10); }
+    .pdf-link-overlay:focus-visible { outline: none; }
+    .pdf-link-overlay:focus-visible .pdf-link-hit-fragment {
       outline: 1px solid var(--vscode-focusBorder, #4dabf7);
       outline-offset: 1px;
       background: rgba(77, 171, 247, .08);
@@ -1108,10 +1139,29 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
     #page-container.rectangle-mode .text-layer { pointer-events: none; user-select: none; }
     .rectangle-selection-overlay { position: absolute; z-index: 15; box-sizing: border-box; border: 1px dashed var(--vscode-focusBorder); background: rgba(0, 127, 212, .16); pointer-events: none; }
     .annotation-highlight { position: absolute; pointer-events: auto; cursor: pointer; border-radius: 2px; transition: filter .12s, background-color .12s; }
+    body[data-reduce-animation="on"] .annotation-highlight { transition: none; }
+    @media (prefers-reduced-motion: reduce) {
+      body[data-reduce-animation="system"] .annotation-highlight { transition: none; }
+    }
     .annotation-highlight.referenced { background: rgba(58, 190, 110, .42); }
     .annotation-highlight.annotated { background: rgba(255, 218, 80, .38); }
     .annotation-highlight.hover-active { filter: brightness(1.25) saturate(1.2); }
     .anchor-highlight { position: absolute; background: rgba(0, 150, 255, .35); border-radius: 2px; pointer-events: none; }
+    .pdf-destination-focus {
+      position: absolute;
+      z-index: 13;
+      box-sizing: border-box;
+      border: 1px solid rgba(77, 171, 247, .38);
+      border-radius: 4px;
+      background: rgba(77, 171, 247, .12);
+      box-shadow: 0 0 0 2px rgba(77, 171, 247, .05);
+      pointer-events: none;
+    }
+    .pdf-destination-focus.animate { animation: pdf-destination-focus-fade 2400ms ease-out forwards; }
+    @keyframes pdf-destination-focus-fade {
+      0%, 72% { opacity: 1; }
+      100% { opacity: 0; }
+    }
     .pdf-search-match { position: absolute; border-radius: 2px; background: rgba(255, 214, 10, .40); outline: 1px solid rgba(255, 214, 10, .55); pointer-events: none; }
     .pdf-search-match.selected { background: rgba(177, 151, 252, .48); outline-color: rgba(177, 151, 252, .9); }
     .selection-toolbar { position: absolute; transform: translateX(-50%); z-index: 20; display: flex; gap: 4px; padding: 4px; border: 1px solid var(--vscode-panel-border); border-radius: 6px; background: var(--vscode-editorWidget-background); box-shadow: 0 4px 16px rgba(0,0,0,.3); }
@@ -1171,6 +1221,10 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
     <button type="button" role="menuitemradio" aria-checked="false" data-display-action="fit-page">Fit page</button>
     <div class="menu-section">Appearance</div>
     <button type="button" role="menuitemcheckbox" aria-checked="false" data-display-action="adapt-theme">Adapt to theme</button>
+    <div class="menu-section">Reduce Animation</div>
+    <button type="button" role="menuitemradio" aria-checked="false" data-display-action="reduce-animation-on">On</button>
+    <button type="button" role="menuitemradio" aria-checked="false" data-display-action="reduce-animation-off">Off</button>
+    <button type="button" role="menuitemradio" aria-checked="true" data-display-action="reduce-animation-system">System</button>
     <button type="button" role="menuitem" data-display-action="defaults">Defaults</button>
   </div>
   <div id="highlight-color-menu" class="toolbar-menu hidden" role="menu" aria-label="Highlight colors">
@@ -1198,9 +1252,16 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
     </div>
   </div>
   <div id="viewer-shell">
-    <aside id="pdf-sidebar" aria-label="PDF sidebar" hidden>
-      <div class="pdf-sidebar-header"><h2>Thumbnails</h2><button id="close-sidebar" type="button" aria-label="Close sidebar">×</button></div>
-      <div id="thumbnail-list"></div>
+    <aside id="pdf-sidebar" aria-label="PDF navigation" hidden>
+      <div class="pdf-sidebar-header">
+        <div class="pdf-sidebar-tabs" role="tablist" aria-label="PDF navigation">
+          <button id="sidebar-thumbnails-tab" class="pdf-sidebar-tab" type="button" role="tab" aria-controls="thumbnail-list" aria-selected="true">Pages</button>
+          <button id="sidebar-outline-tab" class="pdf-sidebar-tab" type="button" role="tab" aria-controls="outline-list" aria-selected="false" tabindex="-1">Outline</button>
+        </div>
+        <button id="close-sidebar" type="button" aria-label="Close sidebar">×</button>
+      </div>
+      <div id="thumbnail-list" role="tabpanel" aria-labelledby="sidebar-thumbnails-tab"></div>
+      <div id="outline-list" role="tabpanel" aria-labelledby="sidebar-outline-tab" hidden></div>
     </aside>
     <div id="viewer-container"><div id="page-container"></div></div>
     <button id="pdf-history-back" type="button" title="Go back to previous PDF location" aria-label="Go back to previous PDF location" hidden>
@@ -1209,8 +1270,8 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
       </svg>
     </button>
   </div>
-  <script nonce="${nonce}">window.__pdfiumWasmUrl = "${wasmUri}";</script>
-  <script nonce="${nonce}" src="${scriptUri}?v=${nonce}"></script>
+  <script nonce="${nonce}">window.__pdfiumWasmUrl = "${wasmUri.toString()}";</script>
+  <script nonce="${nonce}" src="${scriptUri.toString()}?v=${nonce}"></script>
 </body>
 </html>`;
   }
@@ -1449,7 +1510,7 @@ function normalizePdfRects(value: unknown): number[][] | undefined {
     if (!Array.isArray(rect) || rect.length !== 4) return [];
     const normalized = rect.map(numberValue);
     return normalized.every(coordinate => coordinate !== undefined)
-      ? [normalized as number[]]
+      ? [normalized]
       : [];
   });
   return rects.length > 0 ? rects : undefined;

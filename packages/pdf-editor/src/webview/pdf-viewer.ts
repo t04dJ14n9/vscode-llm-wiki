@@ -8,11 +8,13 @@ import {
   type PdfLinkAnnoObject,
 } from '@embedpdf/models';
 import {
+  alignPdfLinkRectsToTextLayer,
   canScrollPdfViewport,
   capturePdfViewportProgress,
   normalizePdfAnnotationRect,
   pdfDestinationViewerTarget,
   pdfInternalDestination,
+  pdfLinkHitRects,
   pdfNavigationTarget,
   pdfPresentationMode,
   pdfPresentationPolicy,
@@ -57,6 +59,11 @@ import {
   normalizePdfTextRuns,
   type PdfSelectionGlyph,
 } from './domain/pdfTextExtraction';
+import {
+  normalizePdfOutlineDestination,
+  pdfBookmarksToOutlineEntries,
+  type PdfOutlineEntry,
+} from './domain/pdfOutline';
 import { createPdfPageLayout, formatCssPx, type PdfPageLayout } from './pdfLayout';
 import {
   closestPdfTextSpan,
@@ -70,13 +77,16 @@ import { normalizePdfTextBands, type PdfRect } from './pdfTextBands';
 const vscode = acquireVsCodeApi();
 
 type HighlightColor = 'yellow' | 'red' | 'green' | 'purple';
+type PdfReduceAnimationSetting = 'on' | 'off' | 'system';
 
 const PDF_PAGE_GAP_PX = 12;
 const PDF_FIT_HORIZONTAL_PADDING_PX = 24;
 const PDF_FIT_VERTICAL_PADDING_PX = 76;
 const PDF_PINCH_COMMIT_DELAY_MS = 160;
-const PDF_PAGINATED_GESTURE_IDLE_MS = 160;
+const PDF_WHEEL_GESTURE_IDLE_MS = 160;
 const PDF_PAGINATED_AXIS_LOCK_THRESHOLD = 6;
+const PDF_PAGE_PREFETCH_DELAY_MS = 0;
+const PDF_SCALE_REUSE_EPSILON = 0.0001;
 
 const HIGHLIGHT_COLORS: Record<HighlightColor, string> = {
   yellow: 'rgba(255, 213, 79, 0.42)',
@@ -142,6 +152,7 @@ interface PdfViewerStateV1 {
   spreadParity: 'odd' | 'even';
   scrollMode: 'vertical' | 'horizontal' | 'wrapped';
   adaptToTheme: boolean;
+  reduceAnimation: PdfReduceAnimationSetting;
 }
 
 interface PageState {
@@ -156,7 +167,9 @@ interface PageState {
   selectionGlyphs: PdfSelectionGlyph[][];
   selectionLines: PdfSelectionLine[];
   renderGeneration: number;
+  renderPromise?: Promise<void>;
   rendered: boolean;
+  interactionScale: number;
   thumbnailButton: HTMLButtonElement;
   thumbnailCanvas: HTMLCanvasElement;
   thumbnailRendered: boolean;
@@ -196,6 +209,9 @@ class PdfViewer {
   private readonly searchSettingsMenu = document.getElementById('pdf-search-settings-menu') as HTMLElement;
   private readonly sidebar = document.getElementById('pdf-sidebar') as HTMLElement;
   private readonly thumbnailList = document.getElementById('thumbnail-list') as HTMLElement;
+  private readonly outlineList = document.getElementById('outline-list') as HTMLElement;
+  private readonly thumbnailTab = document.getElementById('sidebar-thumbnails-tab') as HTMLButtonElement;
+  private readonly outlineTab = document.getElementById('sidebar-outline-tab') as HTMLButtonElement;
   private readonly pageInput = document.getElementById('page-input') as HTMLInputElement;
   private readonly pageTotal = document.getElementById('page-total') as HTMLElement;
   private readonly zoomInput = document.getElementById('zoom-input') as HTMLInputElement;
@@ -210,6 +226,11 @@ class PdfViewer {
   private spreadParity: 'odd' | 'even' = 'even';
   private fitMode: 'custom' | 'width' | 'height' | 'page' = 'page';
   private adaptToTheme = false;
+  private reduceAnimation: PdfReduceAnimationSetting = 'system';
+  private sidebarMode: 'thumbnails' | 'outline' = 'thumbnails';
+  private pdfOutline: PdfOutlineEntry[] = [];
+  private pdfOutlineRendered = false;
+  private readonly systemReduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
   private intersectionObserver: IntersectionObserver | null = null;
   private readonly pageVisibilityRatios = new Map<number, number>();
   private thumbnailObserver: IntersectionObserver | null = null;
@@ -226,6 +247,9 @@ class PdfViewer {
   private searchRunId = 0;
   private pageNavigationRunId = 0;
   private rerenderRunId = 0;
+  private pagePrefetchRunId = 0;
+  private pagePrefetchTimer: number | undefined;
+  private lastPageTurnDirection: -1 | 1 = 1;
   private currentPageTrackingSequence = 0;
   private currentPageTrackingLock: number | undefined;
   private currentPageTrackingReleaseTimer: number | undefined;
@@ -265,6 +289,8 @@ class PdfViewer {
   private paginatedWheelStartScrollTop = 0;
   private paginatedWheelPannedWithinGesture = false;
   private paginatedWheelTurnedWithinGesture = false;
+  private wheelGestureMode: 'scroll' | 'pinch' | undefined;
+  private wheelGestureLastEventAt = 0;
   private pinchZoomTargetScale: number | undefined;
   private pinchZoomVisualScale: number | undefined;
   private pinchZoomAnchor: PdfPinchZoomAnchor | undefined;
@@ -284,12 +310,15 @@ class PdfViewer {
   private selectionAutoScrollFrame: number | undefined;
   private selectionToolbarPositionFrame: number | undefined;
   private readonly pdfNavigationHistory: PdfViewLocation[] = [];
+  private pdfDestinationRunId = 0;
+  private pendingPdfDestinationOrigin: PdfViewLocation | undefined;
   private readonly viewerResizeObserver: ResizeObserver | null;
   private readonly askPanel: PdfAskPanel;
 
   constructor() {
     this.restoreViewerState();
     document.body.classList.toggle('pdf-adapt-theme', this.adaptToTheme);
+    this.applyReduceAnimationSetting();
     this.askPanel = createPdfAskPanel({
       vscode,
       toolbar: document.getElementById('toolbar')!,
@@ -322,7 +351,11 @@ class PdfViewer {
         if (annotationId) {
           this.pages.get(page)?.highlightLayer
             .querySelector<HTMLElement>(`[data-annotation-id="${CSS.escape(annotationId)}"]`)
-            ?.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
+            ?.scrollIntoView({
+              behavior: this.navigationScrollBehavior(),
+              block: 'center',
+              inline: 'center',
+            });
         }
       },
       redrawMarkers: () => this.redrawAllDiscussionMarkers(),
@@ -385,6 +418,9 @@ class PdfViewer {
     if (!this.continuousScroll || this.twoPageView) this.scrollMode = 'vertical';
     if (this.twoPageView) this.spreadParity = 'even';
     if (typeof stored.adaptToTheme === 'boolean') this.adaptToTheme = stored.adaptToTheme;
+    if (stored.reduceAnimation === 'on' || stored.reduceAnimation === 'off' || stored.reduceAnimation === 'system') {
+      this.reduceAnimation = stored.reduceAnimation;
+    }
   }
 
   private persistViewerState(): void {
@@ -399,6 +435,7 @@ class PdfViewer {
       spreadParity: this.spreadParity,
       scrollMode: this.scrollMode,
       adaptToTheme: this.adaptToTheme,
+      reduceAnimation: this.reduceAnimation,
     };
     vscode.setState({ ...root, pdfViewer });
   }
@@ -416,6 +453,17 @@ class PdfViewer {
             textFragment: message.textFragment,
           });
           break;
+        case 'goToPdfDestination': {
+          const destination = normalizePdfOutlineDestination(message.destination);
+          if (destination) {
+            void this.followPdfDestination(
+              this.currentPage,
+              destination,
+              typeof message.title === 'string' ? message.title : undefined,
+            );
+          }
+          break;
+        }
         case 'navigate':
           void this.navigate(message.direction === 'prev' ? -1 : 1);
           break;
@@ -514,6 +562,17 @@ class PdfViewer {
     document.getElementById('search-open')?.addEventListener('click', () => this.openSearch());
     document.getElementById('toggle-sidebar')?.addEventListener('click', () => this.toggleSidebar());
     document.getElementById('close-sidebar')?.addEventListener('click', () => this.toggleSidebar(false));
+    this.thumbnailTab.addEventListener('click', () => this.setSidebarMode('thumbnails'));
+    this.outlineTab.addEventListener('click', () => this.setSidebarMode('outline'));
+    for (const tab of [this.thumbnailTab, this.outlineTab]) {
+      tab.addEventListener('keydown', event => {
+        if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+        event.preventDefault();
+        const showOutline = event.key === 'ArrowRight' || event.key === 'End';
+        this.setSidebarMode(showOutline ? 'outline' : 'thumbnails');
+        (showOutline ? this.outlineTab : this.thumbnailTab).focus();
+      });
+    }
 
     this.pageInput.addEventListener('keydown', event => {
       if (event.key !== 'Enter') return;
@@ -562,7 +621,7 @@ class PdfViewer {
     });
 
     const colorTrigger = document.getElementById('highlight-color') as HTMLButtonElement | null;
-    const colorMenu = document.getElementById('highlight-color-menu') as HTMLElement | null;
+    const colorMenu = document.getElementById('highlight-color-menu');
     const paletteButtons = Array.from(document.querySelectorAll<HTMLButtonElement>('[data-palette-highlight-color]'));
     const selectHighlightColor = (value: unknown): void => {
       this.selectedHighlightColor = normalizeHighlightColor(value) ?? 'yellow';
@@ -593,7 +652,7 @@ class PdfViewer {
     }
 
     const copyTrigger = document.getElementById('copy-link-format') as HTMLButtonElement | null;
-    const copyMenu = document.getElementById('copy-link-format-menu') as HTMLElement | null;
+    const copyMenu = document.getElementById('copy-link-format-menu');
     copyTrigger?.addEventListener('click', event => {
       event.preventDefault();
       event.stopPropagation();
@@ -713,7 +772,6 @@ class PdfViewer {
     // so two overlapping rerenders cannot tear down a selection restored by the
     // first one.
     if (this.fitMode === 'custom' && Math.abs(this.scale - nextScale) < 0.0001) {
-      this.updatePageInfo();
       return;
     }
     this.fitMode = 'custom';
@@ -727,12 +785,34 @@ class PdfViewer {
     const button = document.getElementById('toggle-sidebar');
     button?.setAttribute('aria-expanded', String(open));
     if (open) {
-      void this.renderThumbnail(this.currentPage);
-      void this.renderThumbnail(Math.min(this.pages.size, this.currentPage + 1));
-      this.pages.get(this.currentPage)?.thumbnailButton.scrollIntoView({ block: 'nearest' });
+      if (this.sidebarMode === 'thumbnails') {
+        void this.renderThumbnail(this.currentPage);
+        void this.renderThumbnail(Math.min(this.pages.size, this.currentPage + 1));
+        this.pages.get(this.currentPage)?.thumbnailButton.scrollIntoView({ block: 'nearest' });
+      } else if (!this.pdfOutlineRendered) {
+        this.renderPdfOutline();
+      }
     }
     if (this.fitMode !== 'custom') {
       requestAnimationFrame(() => void this.reapplyFitMode());
+    }
+  }
+
+  private setSidebarMode(mode: 'thumbnails' | 'outline'): void {
+    this.sidebarMode = mode;
+    const showThumbnails = mode === 'thumbnails';
+    this.thumbnailList.hidden = !showThumbnails;
+    this.outlineList.hidden = showThumbnails;
+    this.thumbnailTab.setAttribute('aria-selected', String(showThumbnails));
+    this.outlineTab.setAttribute('aria-selected', String(!showThumbnails));
+    this.thumbnailTab.tabIndex = showThumbnails ? 0 : -1;
+    this.outlineTab.tabIndex = showThumbnails ? -1 : 0;
+    if (showThumbnails && !this.sidebar.hidden) {
+      void this.renderThumbnail(this.currentPage);
+      void this.renderThumbnail(Math.min(this.pages.size, this.currentPage + 1));
+      this.pages.get(this.currentPage)?.thumbnailButton.scrollIntoView({ block: 'nearest' });
+    } else if (!showThumbnails && !this.pdfOutlineRendered) {
+      this.renderPdfOutline();
     }
   }
 
@@ -1237,6 +1317,9 @@ class PdfViewer {
     else if (action === 'spread-single') void this.setSpreadMode(false, this.spreadParity);
     else if (action === 'spread-odd') void this.setSpreadMode(true, 'odd');
     else if (action === 'spread-even') void this.setSpreadMode(true, 'even');
+    else if (action === 'reduce-animation-on') this.setReduceAnimation('on');
+    else if (action === 'reduce-animation-off') this.setReduceAnimation('off');
+    else if (action === 'reduce-animation-system') this.setReduceAnimation('system');
     else if (action === 'adapt-theme') {
       this.adaptToTheme = !this.adaptToTheme;
       document.body.classList.toggle('pdf-adapt-theme', this.adaptToTheme);
@@ -1248,10 +1331,36 @@ class PdfViewer {
       this.continuousScroll = true;
       this.twoPageView = false;
       this.spreadParity = 'even';
+      this.reduceAnimation = 'system';
       document.body.classList.remove('pdf-adapt-theme');
+      this.applyReduceAnimationSetting();
       this.applyViewMode();
       this.fitPage();
+      this.persistViewerState();
     }
+  }
+
+  private setReduceAnimation(setting: PdfReduceAnimationSetting): void {
+    this.reduceAnimation = setting;
+    this.applyReduceAnimationSetting();
+    this.updateToolbarState();
+    this.persistViewerState();
+  }
+
+  private applyReduceAnimationSetting(): void {
+    document.body.dataset.reduceAnimation = this.reduceAnimation;
+  }
+
+  private navigationScrollBehavior(): ScrollBehavior {
+    return this.shouldReduceAnimation() ? 'auto' : 'smooth';
+  }
+
+  private shouldReduceAnimation(): boolean {
+    // Chromium maps this media query to macOS Accessibility > Display >
+    // Reduce motion. Read the live MediaQueryList value for every transition so
+    // System reacts immediately when the OS preference changes.
+    return this.reduceAnimation === 'on'
+      || (this.reduceAnimation === 'system' && this.systemReduceMotion.matches);
   }
 
   private setupSearch(): void {
@@ -1465,6 +1574,7 @@ class PdfViewer {
         .openDocumentBuffer({ id: `doc-${Date.now()}`, content: bytes.buffer })
         .toPromise();
 
+      await this.loadPdfOutline();
       await this.layoutPages();
       this.currentPage = clamp(Math.round(this.currentPage), 1, Math.max(1, pdfDoc.pageCount));
       if (this.fitMode === 'custom') {
@@ -1489,7 +1599,81 @@ class PdfViewer {
     }
   }
 
+  private async loadPdfOutline(): Promise<void> {
+    this.pdfOutline = [];
+    this.pdfOutlineRendered = false;
+    try {
+      if (pdfDoc && typeof engine.getBookmarks === 'function') {
+        const result = await engine.getBookmarks(pdfDoc).toPromise();
+        this.pdfOutline = pdfBookmarksToOutlineEntries(
+          Array.isArray(result?.bookmarks) ? result.bookmarks : [],
+        );
+      }
+    } catch {
+      this.pdfOutline = [];
+    }
+    if (this.sidebarMode === 'outline') this.renderPdfOutline();
+    vscode.postMessage({ type: 'pdfOutline', items: this.pdfOutline });
+  }
+
+  private renderPdfOutline(): void {
+    this.pdfOutlineRendered = true;
+    this.outlineList.replaceChildren();
+    if (this.pdfOutline.length === 0) {
+      const empty = document.createElement('p');
+      empty.className = 'pdf-outline-empty';
+      empty.textContent = 'No document outline';
+      this.outlineList.appendChild(empty);
+      return;
+    }
+
+    const renderEntries = (entries: readonly PdfOutlineEntry[], depth: number): HTMLUListElement => {
+      const list = document.createElement('ul');
+      list.className = 'pdf-outline-tree';
+      list.setAttribute('role', depth === 0 ? 'tree' : 'group');
+      for (const entry of entries) {
+        const item = document.createElement('li');
+        item.setAttribute('role', 'treeitem');
+        if (entry.children.length > 0) {
+          item.setAttribute('aria-expanded', 'true');
+        }
+
+        const row = entry.destination
+          ? document.createElement('button')
+          : document.createElement('div');
+        row.className = 'pdf-outline-row';
+        row.title = entry.title;
+        const label = document.createElement('span');
+        label.className = 'pdf-outline-label';
+        label.textContent = entry.title;
+        row.appendChild(label);
+        if (entry.destination) {
+          if (row instanceof HTMLButtonElement) row.type = 'button';
+          const destination = entry.destination;
+          const page = document.createElement('span');
+          page.className = 'pdf-outline-page';
+          page.textContent = String(destination.pageIndex + 1);
+          row.appendChild(page);
+          row.addEventListener('click', () => {
+            void this.followPdfDestination(this.currentPage, destination, entry.title);
+          });
+        } else {
+          row.classList.add('pdf-outline-group');
+        }
+        item.appendChild(row);
+        if (entry.children.length > 0) {
+          item.appendChild(renderEntries(entry.children, depth + 1));
+        }
+        list.appendChild(item);
+      }
+      return list;
+    };
+
+    this.outlineList.appendChild(renderEntries(this.pdfOutline, 0));
+  }
+
   private async layoutPages(): Promise<void> {
+    this.cancelAdjacentPagePrefetch();
     this.pageContainer.innerHTML = '';
     this.thumbnailList.innerHTML = '';
     this.pages.clear();
@@ -1541,6 +1725,7 @@ class PdfViewer {
         selectionLines: [],
         renderGeneration: 0,
         rendered: false,
+        interactionScale: this.scale,
         thumbnailButton,
         thumbnailCanvas,
         thumbnailRendered: false,
@@ -1592,19 +1777,78 @@ class PdfViewer {
 
   private async renderPage(pageNum: number): Promise<void> {
     const state = this.pages.get(pageNum);
-    if (!state || state.rendered || !pdfDoc) return;
+    if (!state || !pdfDoc) return;
+    if (state.renderPromise) {
+      await state.renderPromise;
+      return;
+    }
+    if (state.rendered) return;
+
+    const renderPromise = this.renderPageNow(state);
+    state.renderPromise = renderPromise;
+    try {
+      await renderPromise;
+    } finally {
+      if (state.renderPromise === renderPromise) state.renderPromise = undefined;
+    }
+  }
+
+  private pageHasBitmap(state: PageState): boolean {
+    return state.canvas.dataset.renderQuality === 'full'
+      && state.canvas.width > 0
+      && state.canvas.height > 0;
+  }
+
+  private async waitForPageBitmap(
+    state: PageState,
+    renderPromise: Promise<void>,
+  ): Promise<boolean> {
+    if (this.pageHasBitmap(state)) return true;
+
+    return new Promise(resolve => {
+      let settled = false;
+      const finish = (ready: boolean): void => {
+        if (settled) return;
+        settled = true;
+        observer.disconnect();
+        resolve(ready);
+      };
+      const check = (): boolean => {
+        const ready = this.pageHasBitmap(state);
+        if (ready) finish(true);
+        return ready;
+      };
+      const observer = new MutationObserver(() => {
+        check();
+      });
+      observer.observe(state.wrapper, { childList: true });
+      if (check()) return;
+      void renderPromise.then(
+        () => finish(this.pageHasBitmap(state)),
+        () => finish(false),
+      );
+    });
+  }
+
+  private async renderPageNow(state: PageState): Promise<void> {
     const renderGeneration = ++state.renderGeneration;
-    state.rendered = true;
+    let sharpCanvasInstalled = false;
 
     try {
       const dpr = window.devicePixelRatio || 1;
       const layout = this.applyPageLayout(state, dpr);
+      this.retainInteractionLayerLayout(state);
       const blob: Blob = await engine
         .renderPage(pdfDoc, state.pageObj, { scaleFactor: layout.scale, dpr: layout.dpr, withAnnotations: true })
         .toPromise();
       if (renderGeneration !== state.renderGeneration) return;
       const url = URL.createObjectURL(blob);
       const image = new Image();
+      // Render into a detached back buffer. The current canvas remains a
+      // scaled, low-resolution preview until the replacement is completely
+      // decoded and drawn, so the compositor never exposes a cleared page.
+      const renderedCanvas = document.createElement('canvas');
+      renderedCanvas.className = 'pdf-canvas';
       try {
         await new Promise<void>((resolve, reject) => {
           image.onload = () => resolve();
@@ -1612,13 +1856,34 @@ class PdfViewer {
           image.src = url;
         });
         if (renderGeneration !== state.renderGeneration) return;
-        state.canvas.width = layout.bitmapWidth;
-        state.canvas.height = layout.bitmapHeight;
-        const context = state.canvas.getContext('2d')!;
+        renderedCanvas.width = layout.bitmapWidth;
+        renderedCanvas.height = layout.bitmapHeight;
+        renderedCanvas.style.width = formatCssPx(layout.cssWidth);
+        renderedCanvas.style.height = formatCssPx(layout.cssHeight);
+        const context = renderedCanvas.getContext('2d')!;
         context.clearRect(0, 0, layout.bitmapWidth, layout.bitmapHeight);
         context.drawImage(image, 0, 0, layout.bitmapWidth, layout.bitmapHeight);
       } finally {
         URL.revokeObjectURL(url);
+      }
+
+      // Publish the sharp bitmap before text extraction and annotation
+      // discovery. Those operations are important for interaction, but they
+      // must not keep a newly turned page visually blank.
+      const previousCanvas = state.canvas;
+      for (const property of ['transform-origin', 'transform', 'will-change']) {
+        const value = previousCanvas.style.getPropertyValue(property);
+        if (value) renderedCanvas.style.setProperty(property, value);
+      }
+      renderedCanvas.dataset.renderQuality = 'full';
+      previousCanvas.replaceWith(renderedCanvas);
+      state.canvas = renderedCanvas;
+      sharpCanvasInstalled = true;
+      if (state.pageNum === this.currentPage) {
+        // Start the neighboring bitmap cache as soon as the visible pixels are
+        // published. Text extraction and link discovery can finish in parallel
+        // instead of delaying the next page turn.
+        this.scheduleAdjacentPagePrefetch();
       }
 
       const rects = await this.loadTextRects(state);
@@ -1626,16 +1891,19 @@ class PdfViewer {
       state.textRects = rects;
       state.selectionGlyphs = rects.map(item => Array.isArray(item.selectionGlyphs) ? item.selectionGlyphs : []);
       state.selectionLines = buildPdfSelectionLines(state.selectionGlyphs);
+      this.publishInteractionLayerLayout(state, layout);
       renderPdfTextLayer(state.textLayer, rects, layout.scale);
+      state.highlightLayer.innerHTML = '';
       await this.drawPdfLinksForPage(state, layout, renderGeneration);
       if (renderGeneration !== state.renderGeneration) return;
-      this.drawHighlightsForPage(pageNum);
-      this.drawSearchHighlightsForPage(pageNum);
-      this.drawDiscussionMarkersForPage(pageNum);
-      this.restoreSelectionForPage(pageNum);
+      state.rendered = true;
+      this.drawHighlightsForPage(state.pageNum);
+      this.drawSearchHighlightsForPage(state.pageNum);
+      this.drawDiscussionMarkersForPage(state.pageNum);
+      this.restoreSelectionForPage(state.pageNum);
     } catch (error) {
-      console.error(`Failed to render page ${pageNum}`, error);
-      if (renderGeneration === state.renderGeneration) state.rendered = false;
+      console.error(`Failed to render page ${state.pageNum}`, error);
+      if (renderGeneration === state.renderGeneration) state.rendered = sharpCanvasInstalled;
     }
   }
 
@@ -1653,7 +1921,25 @@ class PdfViewer {
       return;
     }
     if (renderGeneration !== state.renderGeneration || !Array.isArray(annotations)) return;
+    const textLayerRects = state.textRects.flatMap(item => {
+      const textRect = finitePdfTextRect(item?.rect);
+      return textRect ? [textRect] : [];
+    });
+    const glyphRects = state.selectionGlyphs.flatMap(glyphs => glyphs.flatMap(glyph => {
+      const [left, top, right, bottom] = glyph.looseRect;
+      const width = right - left;
+      const height = bottom - top;
+      return [left, top, right, bottom].every(Number.isFinite)
+        && width > 0
+        && height > 0
+        ? [{ left, top, width, height }]
+        : [];
+    }));
 
+    const linkCandidates: Array<{
+      destination: PdfDestinationObject;
+      rect: { left: number; top: number; width: number; height: number };
+    }> = [];
     for (const value of annotations) {
       const annotation = value as PdfLinkAnnoObject;
       if (annotation?.type !== PdfAnnotationSubtype.LINK) continue;
@@ -1668,9 +1954,34 @@ class PdfViewer {
       }
       const rect = normalizePdfAnnotationRect(annotation.rect, state.pageObj.size);
       if (!rect) continue;
+      linkCandidates.push({ destination, rect });
+    }
 
+    const alignedRects = alignPdfLinkRectsToTextLayer(
+      linkCandidates.map(candidate => candidate.rect),
+      textLayerRects,
+      state.pageObj.size,
+    );
+    linkCandidates.forEach(({ destination }, index) => {
+      const alignedRect = alignedRects[index]!;
+      const hitRects = pdfLinkHitRects(alignedRect, glyphRects);
+      const hitBounds = hitRects.reduce((bounds, rect) => {
+        const right = rect.left + rect.width;
+        const bottom = rect.top + rect.height;
+        return {
+          left: Math.min(bounds.left, rect.left),
+          top: Math.min(bounds.top, rect.top),
+          right: Math.max(bounds.right, right),
+          bottom: Math.max(bounds.bottom, bottom),
+        };
+      }, {
+        left: Number.POSITIVE_INFINITY,
+        top: Number.POSITIVE_INFINITY,
+        right: Number.NEGATIVE_INFINITY,
+        bottom: Number.NEGATIVE_INFINITY,
+      });
       const targetPage = destination.pageIndex + 1;
-      const linkText = this.pdfLinkText(state, rect);
+      const linkText = this.pdfLinkText(state, alignedRect);
       const accessibleTarget = linkText || `PDF page ${targetPage}`;
       const button = document.createElement('button');
       button.type = 'button';
@@ -1679,18 +1990,33 @@ class PdfViewer {
       button.dataset.targetPage = String(targetPage);
       button.ariaLabel = `Go to ${accessibleTarget}, page ${targetPage}`;
       button.title = linkText ? `Go to ${linkText}` : `Go to PDF page ${targetPage}`;
-      button.style.left = formatCssPx(rect.left * layout.scale);
-      button.style.top = formatCssPx(rect.top * layout.scale);
-      button.style.width = formatCssPx(rect.width * layout.scale);
-      button.style.height = formatCssPx(rect.height * layout.scale);
-      button.addEventListener('pointerdown', event => event.stopPropagation());
+      button.style.left = formatCssPx(hitBounds.left * layout.scale);
+      button.style.top = formatCssPx(hitBounds.top * layout.scale);
+      button.style.width = formatCssPx((hitBounds.right - hitBounds.left) * layout.scale);
+      button.style.height = formatCssPx((hitBounds.bottom - hitBounds.top) * layout.scale);
+      for (const rect of hitRects) {
+        const fragment = document.createElement('span');
+        fragment.className = 'pdf-link-hit-fragment';
+        fragment.ariaHidden = 'true';
+        fragment.style.left = formatCssPx((rect.left - hitBounds.left) * layout.scale);
+        fragment.style.top = formatCssPx((rect.top - hitBounds.top) * layout.scale);
+        fragment.style.width = formatCssPx(rect.width * layout.scale);
+        fragment.style.height = formatCssPx(rect.height * layout.scale);
+        button.appendChild(fragment);
+      }
+      button.addEventListener('pointerdown', event => {
+        // Do not let the browser begin a native text selection underneath a
+        // link before the synthesized click reaches the overlay.
+        event.preventDefault();
+        event.stopPropagation();
+      });
       button.addEventListener('click', event => {
         event.preventDefault();
         event.stopPropagation();
-        void this.followPdfDestination(state.pageNum, destination);
+        void this.followPdfDestination(state.pageNum, destination, linkText);
       });
       state.textLayer.appendChild(button);
-    }
+    });
   }
 
   private pdfLinkText(
@@ -1750,7 +2076,7 @@ class PdfViewer {
         return rects;
       })();
     }
-    return state.textRectsPromise!;
+    return state.textRectsPromise;
   }
 
   private async loadPdfRunSourceCharacters(
@@ -2386,7 +2712,11 @@ class PdfViewer {
     if (!highlighted && anchor.textFragment) {
       page.highlightLayer.querySelectorAll('.anchor-highlight').forEach(element => element.remove());
     }
-    (highlighted ?? page.wrapper).scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
+    (highlighted ?? page.wrapper).scrollIntoView({
+      behavior: this.navigationScrollBehavior(),
+      block: 'center',
+      inline: 'center',
+    });
   }
 
   private flashAnchor(anchor: PdfAnchor, segments?: PdfSearchSegment[]): HTMLElement | undefined {
@@ -2721,6 +3051,26 @@ class PdfViewer {
   }
 
   private handlePaginatedWheel(event: WheelEvent): void {
+    const now = performance.now();
+    if (
+      this.wheelGestureLastEventAt === 0
+      || now - this.wheelGestureLastEventAt > PDF_WHEEL_GESTURE_IDLE_MS
+    ) {
+      this.wheelGestureMode = undefined;
+    }
+    this.wheelGestureLastEventAt = now;
+
+    // Chromium derives macOS pinch events from the wheel stream by toggling
+    // ctrlKey. Lock that interpretation for the duration of a wheel burst so a
+    // noisy modifier packet cannot turn inertial scrolling into a scale change.
+    const incomingMode = event.ctrlKey ? 'pinch' : 'scroll';
+    if (this.wheelGestureMode && this.wheelGestureMode !== incomingMode) {
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
+    this.wheelGestureMode = incomingMode;
+
     // Chromium represents a macOS trackpad pinch as a cancelable wheel event
     // with ctrlKey set. VS Code webviews do not apply the browser's native page
     // zoom, so consume that gesture and resize the PDF itself like Preview.
@@ -2737,10 +3087,9 @@ class PdfViewer {
       return;
     }
 
-    const now = performance.now();
     if (
       this.paginatedWheelLastEventAt === 0
-      || now - this.paginatedWheelLastEventAt > PDF_PAGINATED_GESTURE_IDLE_MS
+      || now - this.paginatedWheelLastEventAt > PDF_WHEEL_GESTURE_IDLE_MS
     ) {
       this.resetPaginatedWheelGesture();
       this.paginatedWheelStartScrollLeft = this.container.scrollLeft;
@@ -2818,6 +3167,12 @@ class PdfViewer {
     const pixelDelta = event.deltaY * deltaScale;
     if (!Number.isFinite(pixelDelta) || Math.abs(pixelDelta) < 0.01) return;
 
+    if (this.pinchZoomTargetScale === undefined) {
+      // A new pinch owns the visible zoom state immediately. Let any older
+      // rerender finish its detached canvas work, but prevent it from
+      // republishing stale scale/scroll state over the live gesture.
+      this.rerenderRunId++;
+    }
     const baseline = this.pinchZoomTargetScale ?? this.pinchZoomVisualScale ?? this.scale;
     const boundedDelta = clamp(pixelDelta, -60, 60);
     const nextScale = clamp(baseline * Math.exp(-boundedDelta * 0.006), 0.1, 3.5);
@@ -2871,7 +3226,6 @@ class PdfViewer {
     const targetScale = this.pinchZoomTargetScale;
     const anchor = this.pinchZoomAnchor;
     if (targetScale === undefined || !anchor) return;
-    const ratio = targetScale / Math.max(0.0001, this.scale);
     const previewPages = this.pinchZoomPreviewPageNumbers(anchor);
     for (const pageNumber of this.pinchZoomPreviewPages) {
       if (previewPages.has(pageNumber)) continue;
@@ -2879,6 +3233,7 @@ class PdfViewer {
       if (!page) continue;
       this.applyPageLayout(page);
       this.clearPinchZoomLayerTransforms(page);
+      this.retainInteractionLayerLayout(page);
     }
     for (const pageNumber of previewPages) {
       const page = this.pages.get(pageNumber);
@@ -2887,9 +3242,16 @@ class PdfViewer {
       const height = formatCssPx(Number(page.pageObj.size.height) * targetScale);
       page.wrapper.style.width = width;
       page.wrapper.style.height = height;
-      for (const layer of [page.canvas, page.textLayer, page.highlightLayer]) {
+      page.canvas.style.transformOrigin = '0 0';
+      page.canvas.style.transform = `scale(${targetScale / Math.max(0.0001, this.scale)})`;
+      page.canvas.style.willChange = 'transform';
+      const interactionWidth = formatCssPx(Number(page.pageObj.size.width) * page.interactionScale);
+      const interactionHeight = formatCssPx(Number(page.pageObj.size.height) * page.interactionScale);
+      for (const layer of [page.textLayer, page.highlightLayer]) {
+        layer.style.width = interactionWidth;
+        layer.style.height = interactionHeight;
         layer.style.transformOrigin = '0 0';
-        layer.style.transform = `scale(${ratio})`;
+        layer.style.transform = `scale(${targetScale / Math.max(0.0001, page.interactionScale)})`;
         layer.style.willChange = 'transform';
       }
     }
@@ -2959,7 +3321,10 @@ class PdfViewer {
   private clearPinchZoomPreview(): void {
     for (const pageNumber of this.pinchZoomPreviewPages) {
       const page = this.pages.get(pageNumber);
-      if (page) this.clearPinchZoomLayerTransforms(page);
+      if (page) {
+        this.clearPinchZoomLayerTransforms(page);
+        this.retainInteractionLayerLayout(page);
+      }
     }
     this.pinchZoomPreviewPages.clear();
     this.pinchZoomVisualScale = undefined;
@@ -3040,13 +3405,12 @@ class PdfViewer {
   ): Promise<void> {
     const viewportProgress = this.capturePaginatedViewportProgress();
     const target = this.navigationTarget(direction);
-    if (target === undefined || !await this.goToPage(target, {
+    if (target === undefined) return;
+    const navigated = await this.goToPage(target, {
       scrollCurrentView: false,
       behavior: 'auto',
-    })) {
-      return;
-    }
-    await nextAnimationFrame();
+    });
+    if (!navigated) return;
     this.restorePaginatedViewportProgress(viewportProgress, {
       x: axis === 'horizontal' ? (direction > 0 ? 0 : 1) : undefined,
       y: axis === 'vertical' ? (direction > 0 ? 0 : 1) : undefined,
@@ -3064,13 +3428,11 @@ class PdfViewer {
     // Preview keeps the same normalized viewport position when explicitly
     // turning a magnified page (toolbar or Option+Arrow), in both directions.
     const viewportProgress = this.capturePaginatedViewportProgress();
-    if (!await this.goToPage(target, {
+    const navigated = await this.goToPage(target, {
       scrollCurrentView: false,
       behavior: 'auto',
-    })) {
-      return;
-    }
-    await nextAnimationFrame();
+    });
+    if (!navigated) return;
     this.restorePaginatedViewportProgress(viewportProgress);
   }
 
@@ -3107,22 +3469,55 @@ class PdfViewer {
   private async followPdfDestination(
     sourcePage: number,
     destination: PdfDestinationObject,
+    label?: string,
   ): Promise<void> {
-    const sourceLocation = this.capturePdfViewLocation(sourcePage);
     const targetPage = destination.pageIndex + 1;
-    if (!sourceLocation || !await this.goToPage(targetPage, {
-      scrollCurrentView: false,
-      behavior: 'auto',
-    })) {
+    if (
+      !Number.isInteger(targetPage)
+      || targetPage < 1
+      || targetPage > Number(pdfDoc?.pageCount ?? 0)
+    ) {
       return;
     }
+    const runId = ++this.pdfDestinationRunId;
+    let sourceLocation = this.pendingPdfDestinationOrigin;
+    if (!sourceLocation && sourcePage !== targetPage) {
+      sourceLocation = this.capturePdfViewLocation(sourcePage);
+      if (sourceLocation) this.pendingPdfDestinationOrigin = sourceLocation;
+    }
+    const clearPendingOrigin = (): void => {
+      if (runId === this.pdfDestinationRunId) {
+        this.pendingPdfDestinationOrigin = undefined;
+      }
+    };
+
+    if (!sourceLocation && sourcePage === targetPage) {
+      const source = this.pages.get(sourcePage)?.wrapper;
+      if (!source || source.style.display === 'none') {
+        clearPendingOrigin();
+        return;
+      }
+    } else if (!sourceLocation || !await this.goToPage(targetPage, {
+        scrollCurrentView: false,
+        behavior: 'auto',
+      })) {
+        clearPendingOrigin();
+        return;
+      }
 
     await nextAnimationFrame();
+    if (runId !== this.pdfDestinationRunId) return;
     const trackingToken = this.beginCurrentPageTrackingLock();
     this.currentPage = targetPage;
     this.scrollToPdfDestination(destination);
-    this.pdfNavigationHistory.push(sourceLocation);
-    if (this.pdfNavigationHistory.length > 100) this.pdfNavigationHistory.shift();
+    this.flashPdfDestination(destination, label);
+    // A reference that merely reveals another location on the current page
+    // should not create a redundant "back to this same page" entry.
+    if (sourceLocation && sourceLocation.page !== targetPage) {
+      this.pdfNavigationHistory.push(sourceLocation);
+      if (this.pdfNavigationHistory.length > 100) this.pdfNavigationHistory.shift();
+    }
+    clearPendingOrigin();
     this.updatePdfHistoryButton();
     window.getSelection()?.removeAllRanges();
     this.clearSelection();
@@ -3179,6 +3574,235 @@ class PdfViewer {
       top: clamp(top, 0, Math.max(0, this.container.scrollHeight - this.container.clientHeight)),
       behavior: 'auto',
     });
+  }
+
+  private flashPdfDestination(destination: PdfDestinationObject, label?: string): void {
+    const targetPage = destination.pageIndex + 1;
+    const state = this.pages.get(targetPage);
+    if (!state) return;
+
+    for (const page of this.pages.values()) {
+      page.highlightLayer
+        .querySelectorAll('.pdf-destination-focus')
+        .forEach(element => element.remove());
+    }
+
+    const target = pdfDestinationViewerTarget(
+      destination,
+      state.pageObj,
+      Boolean(pdfDoc?.normalizedRotation),
+    );
+    const textItems = state.textRects.flatMap(item => {
+      const rect = finitePdfTextRect(item?.rect);
+      return rect ? [{
+        content: String(item?.content ?? '')
+          .replace(/[\u00ad\u200b\u2060\ufeff\ufffe\uffff]/gu, '')
+          .replace(/\s+/gu, ' ')
+          .trim(),
+        rect,
+      }] : [];
+    });
+    const textRects = textItems.map(item => item.rect);
+    const pageWidth = Math.max(1, Number(state.pageObj.size.width));
+    const pageHeight = Math.max(1, Number(state.pageObj.size.height));
+    const labelText = String(label ?? '')
+      .replace(/[\u00ad\u200b\u2060\ufeff\ufffe\uffff]/gu, '')
+      .replace(/\s+/gu, ' ')
+      .trim();
+    const referenceTokens = [...labelText.matchAll(/\b\d+(?:\.\d+)+\b/gu)]
+      .map(match => match[0])
+      .filter((token, index, tokens) => tokens.indexOf(token) === index);
+    const semanticTarget = referenceTokens.flatMap((token, tokenIndex) => {
+      const escaped = token.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+      const objectPrefix = new RegExp(`^(?:figure|table)\\s*${escaped}\\b`, 'iu');
+      const headingPrefix = new RegExp(`^(?:section\\s*)?${escaped}\\b`, 'iu');
+      return textItems.flatMap(item => {
+        if (!item.content.includes(token)) return [];
+        const bottom = item.rect.top + item.rect.height;
+        const verticalDistance = target.y < item.rect.top
+          ? item.rect.top - target.y
+          : target.y > bottom
+            ? target.y - bottom
+            : 0;
+        return [{
+          ...item,
+          tokenIndex,
+          rank: objectPrefix.test(item.content)
+            ? 0
+            : headingPrefix.test(item.content)
+              ? 1
+              : 2,
+          verticalDistance,
+          objectCaption: objectPrefix.test(item.content),
+        }];
+      });
+    }).sort((left, right) => (
+      left.tokenIndex - right.tokenIndex
+      || left.rank - right.rank
+      || left.verticalDistance - right.verticalDistance
+      || left.rect.left - right.rect.left
+    ))[0];
+
+    const nearestCandidate = textRects
+      .map(rect => {
+        const right = rect.left + rect.width;
+        const bottom = rect.top + rect.height;
+        const verticalDistance = target.y < rect.top
+          ? rect.top - target.y
+          : target.y > bottom
+            ? target.y - bottom
+            : 0;
+        const horizontalDistance = target.x < rect.left
+          ? rect.left - target.x
+          : target.x > right
+            ? target.x - right
+            : 0;
+        return {
+          rect,
+          verticalDistance,
+          distance: verticalDistance * 4 + (target.alignX ? horizontalDistance : 0),
+          centerDistance: Math.abs(target.y - (rect.top + rect.height / 2)),
+        };
+      })
+      .sort((left, right) => (
+        left.distance - right.distance
+        || left.centerDistance - right.centerDistance
+        || left.rect.left - right.rect.left
+      ))[0];
+    const nearest = nearestCandidate
+      && nearestCandidate.verticalDistance <= Math.max(
+        24,
+        Math.min(64, pageHeight * 0.08),
+      )
+      ? nearestCandidate.rect
+      : undefined;
+
+    let focusRect = semanticTarget
+      ? { ...semanticTarget.rect }
+      : nearest
+        ? { ...nearest }
+        : {
+          left: target.alignX ? target.x : pageWidth * 0.08,
+          top: target.y,
+          width: Math.min(48, pageWidth * 0.16),
+          height: 18,
+        };
+
+    if (semanticTarget || nearest) {
+      // PDF headings often split their number and title into separate text
+      // runs. Grow through nearby runs on the same visual line, while keeping
+      // an unrelated second column out of the focus box.
+      let expanded = true;
+      while (expanded) {
+        expanded = false;
+        for (const rect of textRects) {
+          const verticalOverlap = Math.min(
+            focusRect.top + focusRect.height,
+            rect.top + rect.height,
+          ) - Math.max(focusRect.top, rect.top);
+          const horizontalGap = Math.max(
+            focusRect.left - (rect.left + rect.width),
+            rect.left - (focusRect.left + focusRect.width),
+            0,
+          );
+          const maximumLineGap = semanticTarget?.objectCaption
+            ? Math.max(6, Math.max(focusRect.height, rect.height) * 0.9)
+            : Math.max(12, Math.max(focusRect.height, rect.height) * 2.5);
+          if (
+            verticalOverlap < Math.min(focusRect.height, rect.height) / 2
+            || horizontalGap > maximumLineGap
+          ) {
+            continue;
+          }
+          const left = Math.min(focusRect.left, rect.left);
+          const top = Math.min(focusRect.top, rect.top);
+          const right = Math.max(focusRect.left + focusRect.width, rect.left + rect.width);
+          const bottom = Math.max(focusRect.top + focusRect.height, rect.top + rect.height);
+          if (
+            left !== focusRect.left
+            || top !== focusRect.top
+            || right !== focusRect.left + focusRect.width
+            || bottom !== focusRect.top + focusRect.height
+          ) {
+            focusRect = { left, top, width: right - left, height: bottom - top };
+            expanded = true;
+          }
+        }
+      }
+    }
+
+    if (semanticTarget?.objectCaption) {
+      // Figure destinations commonly expose only a vertical point at the top
+      // of the artwork. The caption supplies the missing horizontal bounds.
+      // Grow through its wrapped lines, then extend upward to the destination
+      // so the visual object and its caption read as one referenced region.
+      const captionTop = focusRect.top;
+      const captionLimit = captionTop + Math.max(48, semanticTarget.rect.height * 8);
+      let expanded = true;
+      while (expanded) {
+        expanded = false;
+        for (const rect of textRects) {
+          const currentRight = focusRect.left + focusRect.width;
+          const currentBottom = focusRect.top + focusRect.height;
+          const horizontalOverlap = Math.min(currentRight, rect.left + rect.width)
+            - Math.max(focusRect.left, rect.left);
+          const horizontalGap = Math.max(
+            focusRect.left - (rect.left + rect.width),
+            rect.left - currentRight,
+            0,
+          );
+          const verticalGap = rect.top - currentBottom;
+          if (
+            rect.top < captionTop - semanticTarget.rect.height * 0.5
+            || rect.top > captionLimit
+            || verticalGap > Math.max(5, semanticTarget.rect.height * 0.9)
+            || (
+              horizontalOverlap < Math.min(focusRect.width, rect.width) * 0.2
+              && horizontalGap > Math.max(8, semanticTarget.rect.height * 1.5)
+            )
+          ) {
+            continue;
+          }
+          const left = Math.min(focusRect.left, rect.left);
+          const top = Math.min(focusRect.top, rect.top);
+          const right = Math.max(currentRight, rect.left + rect.width);
+          const bottom = Math.max(currentBottom, rect.top + rect.height);
+          if (
+            left !== focusRect.left
+            || top !== focusRect.top
+            || right !== currentRight
+            || bottom !== currentBottom
+          ) {
+            focusRect = { left, top, width: right - left, height: bottom - top };
+            expanded = true;
+          }
+        }
+      }
+      if (
+        target.y < focusRect.top
+        && focusRect.top - target.y <= pageHeight * 0.35
+      ) {
+        const bottom = focusRect.top + focusRect.height;
+        focusRect.top = target.y;
+        focusRect.height = bottom - target.y;
+      }
+    }
+
+    const padding = Math.max(3, Math.min(6, focusRect.height * 0.35));
+    const left = clamp(focusRect.left - padding, 0, Math.max(0, pageWidth - 1));
+    const top = clamp(focusRect.top - padding, 0, Math.max(0, pageHeight - 1));
+    const right = clamp(focusRect.left + focusRect.width + padding, left + 1, pageWidth);
+    const bottom = clamp(focusRect.top + focusRect.height + padding, top + 1, pageHeight);
+    const focus = document.createElement('div');
+    focus.className = 'pdf-destination-focus';
+    if (!this.shouldReduceAnimation()) focus.classList.add('animate');
+    focus.ariaHidden = 'true';
+    focus.style.left = formatCssPx(left * this.scale);
+    focus.style.top = formatCssPx(top * this.scale);
+    focus.style.width = formatCssPx((right - left) * this.scale);
+    focus.style.height = formatCssPx((bottom - top) * this.scale);
+    state.highlightLayer.appendChild(focus);
+    window.setTimeout(() => focus.remove(), 2400);
   }
 
   private async goBackInPdfHistory(): Promise<void> {
@@ -3251,22 +3875,82 @@ class PdfViewer {
     if (!pdfDoc) return false;
     const runId = ++this.pageNavigationRunId;
     const target = Math.max(1, Math.min(pdfDoc.pageCount, page));
+    if (target !== this.currentPage) {
+      this.lastPageTurnDirection = target > this.currentPage ? 1 : -1;
+    }
+    this.cancelAdjacentPagePrefetch();
     const trackingToken = this.beginCurrentPageTrackingLock();
     this.currentPage = target;
+
+    // Keep the outgoing page visible until the target canvas is ready. Usually
+    // this resolves immediately from the neighboring-page cache; when a user
+    // turns faster than prefetch can finish, it avoids exposing the target
+    // wrapper's white background for even one compositor frame.
+    const targetPages = this.continuousScroll ? [target] : this.visiblePageNumbers();
+    const stagedPages = targetPages.flatMap(pageNum => {
+      const state = this.pages.get(pageNum);
+      if (!state || state.wrapper.style.display !== 'none') return [];
+      const previousDisplay = state.wrapper.style.display;
+      state.wrapper.classList.add('page-turn-staging');
+      state.wrapper.style.display = '';
+      return [{ state, previousDisplay }];
+    });
+    const finishStaging = (commit: boolean): void => {
+      for (const { state, previousDisplay } of stagedPages) {
+        state.wrapper.classList.remove('page-turn-staging');
+        if (!commit) state.wrapper.style.display = previousDisplay;
+      }
+    };
+    const targetRenders = targetPages.flatMap(pageNum => {
+      const state = this.pages.get(pageNum);
+      if (!state) return [];
+      const renderPromise = this.renderPage(pageNum);
+      return [{
+        pageNum,
+        state,
+        renderPromise,
+        bitmapReady: this.waitForPageBitmap(state, renderPromise),
+      }];
+    });
+    for (const targetRender of targetRenders) {
+      const bitmapReady = await targetRender.bitmapReady;
+      if (runId !== this.pageNavigationRunId) {
+        finishStaging(false);
+        this.releaseCurrentPageTrackingLock(trackingToken, 'auto');
+        return false;
+      }
+      if (!bitmapReady) {
+        finishStaging(false);
+        this.releaseCurrentPageTrackingLock(trackingToken, 'auto');
+        return false;
+      }
+    }
+    if (stagedPages.length > 0) {
+      // Give Chromium one paint opportunity to upload the hidden target
+      // texture before the old and new spreads swap visibility.
+      await nextAnimationFrame();
+      if (runId !== this.pageNavigationRunId) {
+        finishStaging(false);
+        this.releaseCurrentPageTrackingLock(trackingToken, 'auto');
+        return false;
+      }
+    }
+
+    finishStaging(true);
     this.applyViewMode();
     this.updatePageInfo();
+    const behavior = options.behavior ?? this.navigationScrollBehavior();
     if (this.fitMode !== 'custom') {
-      await this.reapplyFitMode();
+      await this.reapplyFitMode({ reuseRenderedPagesWhenScaleUnchanged: true });
     } else {
+      if (options.scrollCurrentView !== false) {
+        this.scrollCurrentViewIntoView(behavior, this.continuousScroll ? 'center' : 'nearest');
+      }
       await this.renderVisiblePages();
     }
-    const behavior = options.behavior ?? 'smooth';
     if (runId !== this.pageNavigationRunId) {
       this.releaseCurrentPageTrackingLock(trackingToken, 'auto');
       return false;
-    }
-    if (this.fitMode === 'custom' && options.scrollCurrentView !== false) {
-      this.scrollCurrentViewIntoView(behavior, this.continuousScroll ? 'center' : 'nearest');
     }
     this.updatePageInfo();
     this.releaseCurrentPageTrackingLock(
@@ -3317,7 +4001,9 @@ class PdfViewer {
     void this.reapplyFitMode();
   }
 
-  private async reapplyFitMode(): Promise<void> {
+  private async reapplyFitMode(
+    options: { reuseRenderedPagesWhenScaleUnchanged?: boolean } = {},
+  ): Promise<void> {
     if (this.fitMode === 'custom') return;
     const targetPages = this.fitTargetPageNumbers()
       .map(page => this.pages.get(page))
@@ -3335,32 +4021,52 @@ class PdfViewer {
       : this.fitMode === 'height'
         ? heightScale
         : Math.min(widthScale, heightScale);
-    this.scale = clamp(nextScale, 0.1, 3.5);
+    const clampedScale = clamp(nextScale, 0.1, 3.5);
+    if (
+      options.reuseRenderedPagesWhenScaleUnchanged
+      && Math.abs(clampedScale - this.scale) < PDF_SCALE_REUSE_EPSILON
+    ) {
+      // Most documents use the same page box throughout. A page turn in fit
+      // mode therefore does not need to invalidate every cached bitmap.
+      this.applyViewMode();
+      this.scrollCurrentViewIntoView('auto', this.continuousScroll ? 'center' : 'nearest');
+      await this.renderVisiblePages();
+      this.updatePageInfo();
+      return;
+    }
+    this.scale = clampedScale;
     await this.rerender();
   }
 
   private async rerender(pinchAnchor?: PdfPinchZoomAnchor): Promise<void> {
+    this.cancelAdjacentPagePrefetch();
     const runId = ++this.rerenderRunId;
     const navigationRunId = this.pageNavigationRunId;
     const activePage = this.currentPage;
     const trackingToken = this.beginCurrentPageTrackingLock();
     for (const page of this.pages.values()) {
       page.renderGeneration++;
+      page.renderPromise = undefined;
       page.rendered = false;
       this.applyPageLayout(page);
-      page.textLayer.innerHTML = '';
-      page.highlightLayer.innerHTML = '';
+      this.retainInteractionLayerLayout(page);
     }
     this.applyViewMode();
+    // Keep every retained interaction layer aligned with the scaled
+    // low-resolution bitmap until its sharp replacement is ready.
+    this.scheduleSelectionToolbarPosition();
+    // Apply the zoom/navigation reposition as soon as the new layout exists.
+    // The sharper canvas can finish later; scrolling during that render must
+    // remain user-controlled instead of snapping back when image decoding ends.
+    if (!pinchAnchor || !this.restorePinchZoomAnchor(pinchAnchor)) {
+      this.scrollCurrentViewIntoView('auto', this.continuousScroll ? 'center' : 'nearest');
+    }
     await this.renderVisiblePages();
     if (runId !== this.rerenderRunId || navigationRunId !== this.pageNavigationRunId) {
       this.releaseCurrentPageTrackingLock(trackingToken, 'auto');
       return;
     }
     this.currentPage = activePage;
-    if (!pinchAnchor || !this.restorePinchZoomAnchor(pinchAnchor)) {
-      this.scrollCurrentViewIntoView('auto', this.continuousScroll ? 'center' : 'nearest');
-    }
     this.redrawAllHighlights();
     this.redrawAllSearchHighlights();
     this.redrawAllDiscussionMarkers();
@@ -3467,7 +4173,7 @@ class PdfViewer {
     this.applyViewMode();
     if (this.fitMode === 'custom') await this.renderVisiblePages();
     else await this.reapplyFitMode();
-    this.scrollCurrentViewIntoView('smooth', 'center');
+    this.scrollCurrentViewIntoView(this.navigationScrollBehavior(), 'center');
     this.updatePageInfo();
   }
 
@@ -3497,12 +4203,12 @@ class PdfViewer {
     this.resetPaginatedWheelGesture();
     if (this.fitMode !== 'custom') {
       await this.reapplyFitMode();
-      this.scrollCurrentViewIntoView('smooth', 'nearest');
+      this.scrollCurrentViewIntoView(this.navigationScrollBehavior(), 'nearest');
       return;
     }
     this.applyViewMode();
     await this.renderVisiblePages();
-    this.scrollCurrentViewIntoView('smooth', 'nearest');
+    this.scrollCurrentViewIntoView(this.navigationScrollBehavior(), 'nearest');
     this.updatePageInfo();
   }
 
@@ -3514,8 +4220,71 @@ class PdfViewer {
     const pagesToRender = this.continuousScroll
       ? [this.currentPage]
       : this.visiblePageNumbers();
-    for (const pageNum of pagesToRender) {
-      await this.renderPage(pageNum);
+    await Promise.all(pagesToRender.map(pageNum => this.renderPage(pageNum)));
+    this.scheduleAdjacentPagePrefetch();
+  }
+
+  private cancelAdjacentPagePrefetch(): void {
+    this.pagePrefetchRunId++;
+    if (this.pagePrefetchTimer === undefined) return;
+    window.clearTimeout(this.pagePrefetchTimer);
+    this.pagePrefetchTimer = undefined;
+  }
+
+  private scheduleAdjacentPagePrefetch(): void {
+    this.cancelAdjacentPagePrefetch();
+    if (
+      !pdfDoc
+      || (!this.loaded && !this.loading)
+    ) {
+      return;
+    }
+
+    const runId = this.pagePrefetchRunId;
+    const sourcePage = this.currentPage;
+    this.pagePrefetchTimer = window.setTimeout(() => {
+      this.pagePrefetchTimer = undefined;
+      void this.prefetchAdjacentPage(runId, sourcePage);
+    }, PDF_PAGE_PREFETCH_DELAY_MS);
+  }
+
+  private async prefetchAdjacentPage(runId: number, sourcePage: number): Promise<void> {
+    if (
+      runId !== this.pagePrefetchRunId
+      || this.currentPage !== sourcePage
+      || !pdfDoc
+    ) {
+      return;
+    }
+
+    const directions: Array<-1 | 1> = [
+      this.lastPageTurnDirection,
+      this.lastPageTurnDirection === 1 ? -1 : 1,
+    ];
+    const targets = directions.flatMap(direction => {
+      const target = pdfNavigationTarget(
+        sourcePage,
+        direction,
+        pdfDoc.pageCount,
+        this.twoPageView,
+        this.spreadParity,
+      );
+      return target === undefined ? [] : [target];
+    }).filter((target, index, values) => values.indexOf(target) === index);
+
+    for (const target of targets) {
+      const pagesToRender = this.twoPageView
+        ? pdfSpreadPageNumbers(target, pdfDoc.pageCount, this.spreadParity)
+        : [target];
+      for (const pageNum of pagesToRender) {
+        if (
+          runId !== this.pagePrefetchRunId
+          || this.currentPage !== sourcePage
+        ) {
+          return;
+        }
+        await this.renderPage(pageNum);
+      }
     }
   }
 
@@ -3644,6 +4413,7 @@ class PdfViewer {
     if (this.fitMode !== 'custom') checkedActions.add(`fit-${this.fitMode}`);
     checkedActions.add(`presentation-${this.presentationMode()}`);
     if (this.adaptToTheme) checkedActions.add('adapt-theme');
+    checkedActions.add(`reduce-animation-${this.reduceAnimation}`);
     for (const button of Array.from(this.displayMenu.querySelectorAll<HTMLButtonElement>('[data-display-action][aria-checked]'))) {
       button.setAttribute('aria-checked', String(checkedActions.has(button.dataset.displayAction ?? '')));
     }
@@ -3658,6 +4428,54 @@ class PdfViewer {
       element.style.height = height;
     }
     return layout;
+  }
+
+  private retainInteractionLayerLayout(state: PageState): void {
+    const interactionScale = Math.max(0.0001, state.interactionScale);
+    const ratio = this.scale / interactionScale;
+    if (Math.abs(ratio - 1) < 0.0001) {
+      for (const layer of [state.textLayer, state.highlightLayer]) {
+        layer.style.removeProperty('transform-origin');
+        layer.style.removeProperty('transform');
+        layer.style.removeProperty('will-change');
+      }
+      return;
+    }
+
+    const width = formatCssPx(Number(state.pageObj.size.width) * interactionScale);
+    const height = formatCssPx(Number(state.pageObj.size.height) * interactionScale);
+    for (const layer of [state.textLayer, state.highlightLayer]) {
+      layer.style.width = width;
+      layer.style.height = height;
+      layer.style.transformOrigin = '0 0';
+      layer.style.transform = `scale(${ratio})`;
+      layer.style.willChange = 'transform';
+    }
+  }
+
+  private publishInteractionLayerLayout(state: PageState, layout: PdfPageLayout): void {
+    state.interactionScale = this.scale;
+    const width = formatCssPx(layout.cssWidth);
+    const height = formatCssPx(layout.cssHeight);
+    const previewScale = this.pinchZoomPreviewPages.has(state.pageNum)
+      ? this.pinchZoomVisualScale
+      : undefined;
+    const ratio = previewScale === undefined
+      ? 1
+      : previewScale / Math.max(0.0001, state.interactionScale);
+    for (const layer of [state.textLayer, state.highlightLayer]) {
+      layer.style.width = width;
+      layer.style.height = height;
+      if (Math.abs(ratio - 1) < 0.0001) {
+        layer.style.removeProperty('transform-origin');
+        layer.style.removeProperty('transform');
+        layer.style.removeProperty('will-change');
+      } else {
+        layer.style.transformOrigin = '0 0';
+        layer.style.transform = `scale(${ratio})`;
+        layer.style.willChange = 'transform';
+      }
+    }
   }
 }
 

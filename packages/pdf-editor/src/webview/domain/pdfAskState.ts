@@ -148,7 +148,7 @@ export function normalizeTurnStatus(value: unknown): PdfDiscussionTurnStatus {
 }
 
 export function normalizeAskPdfState(value: unknown): AskPdfWebviewState {
-  return value && typeof value === 'object' ? value as AskPdfWebviewState : {};
+  return value && typeof value === 'object' ? value : {};
 }
 
 export function normalizeAskPdfWindows(value: unknown): Record<string, AskPdfWindowState> {

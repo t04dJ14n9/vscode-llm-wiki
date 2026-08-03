@@ -54,6 +54,11 @@ const server = createServer((_req, res) => {
     return;
   }
 
+  if (url.pathname === '/fixtures/body-caption-selection.pdf') {
+    serveBuffer(bodyCaptionSelectionPdfFixture(), 'application/pdf', res);
+    return;
+  }
+
   if (url.pathname === '/fixtures/mixed-style-selection.pdf') {
     serveBuffer(mixedStyleSelectionPdfFixture(), 'application/pdf', res);
     return;
@@ -66,6 +71,16 @@ const server = createServer((_req, res) => {
 
   if (url.pathname === '/fixtures/internal-destinations.pdf') {
     serveBuffer(internalDestinationsPdfFixture(), 'application/pdf', res);
+    return;
+  }
+
+  if (url.pathname === '/fixtures/shifted-contents-links.pdf') {
+    serveBuffer(shiftedContentsLinksPdfFixture(), 'application/pdf', res);
+    return;
+  }
+
+  if (url.pathname === '/fixtures/shifted-single-link.pdf') {
+    serveBuffer(shiftedSingleLinkPdfFixture(), 'application/pdf', res);
     return;
   }
 
@@ -223,6 +238,22 @@ function outOfOrderTextPdfFixture() {
   return pdfFixture(objects);
 }
 
+function bodyCaptionSelectionPdfFixture() {
+  const objects = [
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 520 320] /Resources << /Font << /F1 10 0 R >> >> /Contents [4 0 R 5 0 R 6 0 R 7 0 R 8 0 R 9 0 R] >>',
+    pdfStream('BT /F1 14 Tf 48 240 Td (Body paragraph starts in the main column.) Tj ET'),
+    pdfStream('BT /F1 14 Tf 48 220 Td (Its second line stays in that reading lane.) Tj ET'),
+    pdfStream('BT /F1 12 Tf 390 225 Td (Figure side caption.) Tj ET'),
+    pdfStream('BT /F1 12 Tf 390 205 Td (Do not select this.) Tj ET'),
+    pdfStream('BT /F1 14 Tf 48 200 Td (The third body line follows beside the caption.) Tj ET'),
+    pdfStream('BT /F1 14 Tf 48 180 Td (The body paragraph ends here.) Tj ET'),
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+  ];
+  return pdfFixture(objects);
+}
+
 function mixedStyleSelectionPdfFixture() {
   const objects = [
     '<< /Type /Catalog /Pages 2 0 R >>',
@@ -276,7 +307,7 @@ function unicodeSelectorPdfFixture() {
 
 function internalDestinationsPdfFixture() {
   const objects = [
-    '<< /Type /Catalog /Pages 2 0 R /Names << /Dests 12 0 R >> >>',
+    '<< /Type /Catalog /Pages 2 0 R /Names << /Dests 12 0 R >> /Outlines 14 0 R /PageMode /UseOutlines >>',
     '<< /Type /Pages /Kids [3 0 R 7 0 R 9 0 R] /Count 3 >>',
     '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 600] /Resources << /Font << /F1 11 0 R >> >> /Contents 4 0 R /Annots [5 0 R 6 0 R] >>',
     pdfStream([
@@ -287,10 +318,11 @@ function internalDestinationsPdfFixture() {
     ].join('\n')),
     '<< /Type /Annot /Subtype /Link /Rect [40 460 137 486] /Border [0 0 0] /Contents (Figure 11.1) /Dest [7 0 R /XYZ 42 302 0] >>',
     '<< /Type /Annot /Subtype /Link /Rect [40 410 140 436] /Border [0 0 0] /Contents (Section 12.2) /A << /S /GoTo /D (section.12.2) >> >>',
-    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 600] /Resources << /Font << /F1 11 0 R >> >> /Contents 8 0 R /Annots [13 0 R] >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 600] /Resources << /Font << /F1 11 0 R >> >> /Contents 8 0 R /Annots [13 0 R 17 0 R] >>',
     pdfStream([
       'BT /F1 18 Tf 42 286 Td (Figure 11.1 target) Tj ET',
       'BT /F1 12 Tf 42 260 Td (The direct destination should align the figure here.) Tj ET',
+      '0 0 1 rg BT /F1 14 Tf 42 360 Td (Figure 11.1 detail) Tj ET',
       '0 0 1 rg BT /F1 14 Tf 42 220 Td (Section 12.2) Tj ET',
     ].join('\n')),
     '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 600] /Resources << /Font << /F1 11 0 R >> >> /Contents 10 0 R >>',
@@ -301,6 +333,73 @@ function internalDestinationsPdfFixture() {
     '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
     '<< /Names [(section.12.2) [9 0 R /XYZ 42 516 0]] >>',
     '<< /Type /Annot /Subtype /Link /Rect [40 210 140 234] /Border [0 0 0] /Contents (Section 12.2) /Dest (section.12.2) >>',
+    '<< /Type /Outlines /First 15 0 R /Last 15 0 R /Count 2 >>',
+    '<< /Title (Internal destinations) /Parent 14 0 R /Dest [3 0 R /Fit] /First 16 0 R /Last 16 0 R /Count 1 >>',
+    '<< /Title (Section 12.2) /Parent 15 0 R /Dest (section.12.2) >>',
+    '<< /Type /Annot /Subtype /Link /Rect [40 350 174 374] /Border [0 0 0] /Contents (Figure 11.1 detail) /Dest [7 0 R /XYZ 42 302 0] >>',
+  ];
+  return pdfFixture(objects);
+}
+
+function shiftedContentsLinksPdfFixture() {
+  const shiftedPage = (contentsRef, annotationRefs = '') => (
+    `<< /Type /Page /Parent 2 0 R /MediaBox [36 36 336 636] /CropBox [36 36 336 636] `
+    + `/Resources << /Font << /F1 17 0 R >> >> /Contents ${contentsRef} 0 R`
+    + `${annotationRefs ? ` /Annots [${annotationRefs}]` : ''} >>`
+  );
+  const objects = [
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R 9 0 R 11 0 R 13 0 R 15 0 R] /Count 5 >>',
+    shiftedPage(4, '5 0 R 6 0 R 7 0 R 8 0 R'),
+    pdfStream([
+      'BT /F1 20 Tf 78 576 Td (Shifted contents) Tj ET',
+      '0 0 1 rg BT /F1 14 Tf 78 506 Td (12.1 Lighting Problem) Tj ET',
+      '0 0 1 rg BT /F1 14 Tf 250 506 Td (136) Tj ET',
+      '0 0 1 rg BT /F1 14 Tf 78 486 Td (12.2 Radiometry) Tj ET',
+      '0 0 1 rg BT /F1 14 Tf 250 486 Td (141) Tj ET',
+      '0 0 1 rg BT /F1 14 Tf 78 466 Td (12.3 Rendering Equation) Tj ET',
+      '0 0 1 rg BT /F1 14 Tf 250 466 Td (157) Tj ET',
+      '0 0 1 rg BT /F1 14 Tf 78 446 Td (12.4 Shading Equation) Tj ET',
+      '0 0 1 rg BT /F1 14 Tf 250 446 Td (168) Tj ET',
+    ].join('\n')),
+    // Deliberately out of visual order. With the engine's uncorrected box
+    // origin, the 12.4 rectangle lands over the visible 12.2 row.
+    '<< /Type /Annot /Subtype /Link /Rect [76 436 296 454] /Border [0 0 0] /Dest [15 0 R /FitH 536] >>',
+    '<< /Type /Annot /Subtype /Link /Rect [76 476 296 494] /Border [0 0 0] /Dest [11 0 R /FitH 536] >>',
+    '<< /Type /Annot /Subtype /Link /Rect [76 496 296 514] /Border [0 0 0] /Dest [9 0 R /FitH 536] >>',
+    '<< /Type /Annot /Subtype /Link /Rect [76 456 296 474] /Border [0 0 0] /Dest [13 0 R /FitH 536] >>',
+    shiftedPage(10),
+    pdfStream('BT /F1 18 Tf 78 536 Td (Section 12.1 target) Tj ET'),
+    shiftedPage(12),
+    pdfStream('BT /F1 18 Tf 78 536 Td (Section 12.2 target) Tj ET'),
+    shiftedPage(14),
+    pdfStream('BT /F1 18 Tf 78 536 Td (Section 12.3 target) Tj ET'),
+    shiftedPage(16),
+    pdfStream('BT /F1 18 Tf 78 536 Td (Section 12.4 target) Tj ET'),
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+  ];
+  return pdfFixture(objects);
+}
+
+function shiftedSingleLinkPdfFixture() {
+  const shiftedPage = (contentsRef, annotationRefs = '') => (
+    `<< /Type /Page /Parent 2 0 R /MediaBox [36 36 336 636] /CropBox [36 36 336 636] `
+    + `/Resources << /Font << /F1 8 0 R >> >> /Contents ${contentsRef} 0 R`
+    + `${annotationRefs ? ` /Annots [${annotationRefs}]` : ''} >>`
+  );
+  const objects = [
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R 6 0 R] /Count 2 >>',
+    shiftedPage(4, '5 0 R'),
+    pdfStream([
+      'BT /F1 14 Tf 91 486 Td (An unrelated line occupies the raw link rectangle.) Tj ET',
+      '0 0 1 rg BT /F1 14 Tf 103 450 Td (Section 12.2.4.1) Tj ET',
+      '0 g BT /F1 14 Tf 103 420 Td (The visible reference itself must receive the click.) Tj ET',
+    ].join('\n')),
+    '<< /Type /Annot /Subtype /Link /Rect [103 447 204.2 463] /Border [0 0 0] /Dest [6 0 R /FitH 536] >>',
+    shiftedPage(7),
+    pdfStream('BT /F1 18 Tf 78 536 Td (Section 12.2.4.1 target) Tj ET'),
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
   ];
   return pdfFixture(objects);
 }

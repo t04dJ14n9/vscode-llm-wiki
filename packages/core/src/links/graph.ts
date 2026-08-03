@@ -1,8 +1,8 @@
-import { Database } from '../db/connection';
+import { type Database } from '../db/connection';
 import { createHash } from 'crypto';
 import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
-import { parseMarkdownLinks, ParsedLink } from './link-parser';
+import { parseMarkdownLinks } from './link-parser';
 import { classifyReferenceTarget } from './reference-target';
 
 export interface LinkRecord {

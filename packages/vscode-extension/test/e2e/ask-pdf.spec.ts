@@ -507,7 +507,9 @@ test('Ask PDF separates the exact selected passage from explicitly labelled near
 
 test('Ask PDF omits nearby context when the anchor has no prefix or suffix', async ({ page }) => {
   await openPdf(page);
-  const { prefix: _prefix, suffix: _suffix, ...anchorWithoutContext } = baseAnchor();
+  const anchorWithoutContext = baseAnchor();
+  Reflect.deleteProperty(anchorWithoutContext, 'prefix');
+  Reflect.deleteProperty(anchorWithoutContext, 'suffix');
   const cited = annotation({ anchor: anchorWithoutContext });
   await postHost(page, {
     type: 'pdfDiscussionSnapshot',

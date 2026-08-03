@@ -163,6 +163,72 @@ test('real PDF page 56 keeps a margin caption out of the body selection', async 
   expect(selected).not.toMatch(/\bconnected line seg line segments\b/);
 });
 
+test('real PDF page 190 keeps the Figure 12.12 caption out of the spot-light paragraph selection', async ({ page }) => {
+  test.setTimeout(180_000);
+  if (!smokePdfPath) throw new Error('HL_PDF_SMOKE_PATH is required');
+  const pdf = prepareSinglePageSmokePdf(smokePdfPath, 190);
+  await page.route('**/fixtures/manual-smoke.pdf', async route => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/pdf',
+      body: pdf,
+    });
+  });
+
+  await page.goto('http://localhost:8979/pdf-viewer.html?fixture=manual-smoke');
+  await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 1/, { timeout: 30_000 });
+  await expect.poll(() => page.locator('#page-1 .text-layer span[data-item-index]').count(), {
+    timeout: 60_000,
+  }).toBeGreaterThan(40);
+
+  const drag = await page.locator('#page-1 .text-layer').evaluate((layer: HTMLElement) => {
+    const spans = Array.from(layer.querySelectorAll<HTMLElement>('span[data-item-index]'));
+    const texts = spans.map(span => (span.textContent ?? '').replace(/\s+/gu, ' ').trim());
+    const locate = (needle: string): number => {
+      for (let index = 0; index < texts.length; index++) {
+        if (texts.slice(index, index + 6).join(' ').startsWith(needle)) return index;
+      }
+      return -1;
+    };
+    const startIndex = locate('A spot light acts like a point light');
+    const endStart = locate('Figure 12.13 illustrates a spot light source');
+    if (startIndex < 0 || endStart < startIndex) {
+      throw new Error(`Could not locate page 190 spot-light paragraph: ${JSON.stringify(texts)}`);
+    }
+    let endIndex = endStart;
+    while (
+      endIndex + 1 < texts.length
+      && !texts.slice(endStart, endIndex + 1).join(' ').includes('Figure 12.13 illustrates a spot light source')
+    ) {
+      endIndex++;
+    }
+    const startRect = spans[startIndex]!.getBoundingClientRect();
+    const endRect = spans[endIndex]!.getBoundingClientRect();
+    return {
+      start: { x: startRect.left + 0.5, y: startRect.top + startRect.height / 2 },
+      end: { x: endRect.right + Math.max(4, endRect.height), y: endRect.top + endRect.height / 2 },
+    };
+  });
+
+  await page.evaluate(() => {
+    window.__mockMessages = [];
+  });
+  await page.mouse.move(drag.start.x, drag.start.y);
+  await page.mouse.down();
+  await page.mouse.move(drag.end.x, drag.end.y, { steps: 40 });
+  await page.mouse.up();
+
+  await expect.poll(() => latestSelectionSnippet(page), { timeout: 10_000 }).toMatch(
+    /^A spot light acts like a point light whose rays are restricted to a cone[‑-]shaped region\b/,
+  );
+  const selected = await latestSelectionSnippet(page);
+  expect(selected).toMatch(/Figure 12\.13 illustrates a spot light source\.$/);
+  expect(selected).not.toContain('Figure 12.12. Model of a point light source');
+  const nativeText = await page.evaluate(() => window.getSelection()?.toString().replace(/\s+/gu, ' ').trim() ?? '');
+  expect(nativeText).toMatch(/^A spot light acts like a point light\b/);
+  expect(nativeText).not.toContain('Figure 12.12. Model of a point light source');
+});
+
 test('real PDF page 2 restores a stripped join marker for whole-word selection', async ({ page }) => {
   test.setTimeout(180_000);
   if (!smokePdfPath) throw new Error('HL_PDF_SMOKE_PATH is required');

@@ -1,6 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 
 const viewerUrl = 'http://localhost:8979/pdf-viewer.html?fixture=four-page';
+const internalDestinationsViewerUrl = 'http://localhost:8979/pdf-viewer.html?fixture=internal-destinations';
 
 type PresentationMode =
   | 'single'
@@ -147,6 +148,7 @@ test('two-page navigation advances by Preview spreads and refits each spread', a
   await focusViewer(page);
   await page.keyboard.press('Alt+ArrowRight');
   await expectCurrentPage(page, 3);
+  await expect.poll(() => zoom.inputValue()).not.toBe(coverZoom);
   const spreadZoom = await zoom.inputValue();
   expect(spreadZoom).not.toBe(coverZoom);
   const spreadGeometry = await spreadAndViewerGeometry(page, 2, 3);
@@ -211,6 +213,37 @@ test('display menu exposes Preview four-mode labels and one active mode', async 
   await expect(menu.locator('[data-display-action="continuous"]')).toHaveCount(0);
   await expect(menu.locator('[data-display-action^="scroll-"]')).toHaveCount(0);
   await expect(menu.locator('[data-display-action^="spread-"]')).toHaveCount(0);
+});
+
+test('Reduce Animation controls continuous custom-zoom page-turn motion and follows the live system preference', async ({ page }) => {
+  await page.setViewportSize({ width: 1000, height: 760 });
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await openFourPageFixture(page);
+  await setPresentationMode(page, 'single-continuous');
+  await setCustomZoom(page, 125);
+  await expect.poll(() => canvasMatchesCssResolution(page, 1)).toBe(true);
+  await installPageWrapperScrollProbe(page);
+  await installReduceAnimationTransitionProbe(page);
+
+  await selectReduceAnimation(page, 'on');
+  await expectReduceAnimationTransitions(page, true);
+  await turnPageAndExpectScrollBehavior(page, 'next', 2, 'auto');
+
+  await selectReduceAnimation(page, 'off');
+  await expectReduceAnimationTransitions(page, false);
+  await turnPageAndExpectScrollBehavior(page, 'next', 3, 'smooth');
+
+  await selectReduceAnimation(page, 'system');
+  await expectReduceAnimationTransitions(page, false);
+  await turnPageAndExpectScrollBehavior(page, 'next', 4, 'smooth');
+
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await expectReduceAnimationTransitions(page, true);
+  await turnPageAndExpectScrollBehavior(page, 'previous', 3, 'auto');
+
+  await selectReduceAnimation(page, 'off');
+  await expectReduceAnimationTransitions(page, false);
+  await turnPageAndExpectScrollBehavior(page, 'previous', 2, 'smooth');
 });
 
 test('page background context menu mirrors Preview labels, active mode, and actions', async ({ page }) => {
@@ -789,6 +822,7 @@ test('smooth trackpad pinch burst previews every zoom without clearing content a
   await setPresentationMode(page, 'single');
   await setCustomZoom(page, 150);
   await expect(page.locator('#page-1 .text-layer span')).not.toHaveCount(0);
+  await expect.poll(() => canvasMatchesCssResolution(page, 1)).toBe(true);
 
   const focalPoint = await visiblePointOnPage(page, 1);
   const before = await pinchObservableGeometry(page, 1);
@@ -831,6 +865,101 @@ test('smooth trackpad pinch burst previews every zoom without clearing content a
     .toBe(1);
 });
 
+test('pinch zoom retains the low-resolution page until the sharper canvas is ready', async ({ page }) => {
+  await page.setViewportSize({ width: 720, height: 600 });
+  await page.goto(internalDestinationsViewerUrl);
+  await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 3/, { timeout: 10_000 });
+  await expect(page.locator('#page-1 .pdf-link-overlay')).not.toHaveCount(0);
+  await setPresentationMode(page, 'single');
+  await setCustomZoom(page, 150);
+  await expect(page.locator('#page-1 .text-layer span')).not.toHaveCount(0);
+  await expect.poll(() => canvasMatchesCssResolution(page, 1)).toBe(true);
+
+  const focalPoint = await visiblePointOnPage(page, 1);
+  await installRetainedZoomProbe(page, 1);
+  const before = await retainedZoomProbeSnapshot(page, 1);
+  await installPdfImageLoadGate(page);
+  await armNextPdfImageLoad(page);
+  await dispatchTrackpadPinchBurst(page, focalPoint, [-4, -4, -4]);
+  await expect.poll(() => pdfImageLoadGateSnapshot(page)).toEqual({
+    started: 1,
+    pending: true,
+    completed: 0,
+  });
+
+  const whileRendering = await retainedZoomProbeSnapshot(page, 1);
+  expect(whileRendering.sameCanvas).toBe(true);
+  expect(whileRendering.oldCanvasConnected).toBe(true);
+  expect(whileRendering.oldCanvasPixelsUnchanged).toBe(true);
+  expect(whileRendering.sameFirstTextNode).toBe(true);
+  expect(whileRendering.firstTextNodeConnected).toBe(true);
+  expect(whileRendering.textNodeCount).toBeGreaterThan(0);
+  expect(whileRendering.textLeftRatio).toBeCloseTo(before.textLeftRatio, 3);
+  expect(whileRendering.textWidthRatio).toBeCloseTo(before.textWidthRatio, 3);
+  expect(whileRendering.linkLeftRatio).toBeCloseTo(before.linkLeftRatio, 3);
+  expect(whileRendering.linkWidthRatio).toBeCloseTo(before.linkWidthRatio, 3);
+
+  await releasePdfImageLoadGate(page);
+  await expect.poll(() => pdfImageLoadGateSnapshot(page)).toEqual({
+    started: 1,
+    pending: false,
+    completed: 1,
+  });
+  await expect.poll(async () => (await retainedZoomProbeSnapshot(page, 1)).sameCanvas)
+    .toBe(false);
+
+  const settled = await retainedZoomProbeSnapshot(page, 1);
+  expect(settled.oldCanvasConnected).toBe(false);
+  expect(settled.atomicCanvasReplacements).toBe(1);
+  expect(settled.currentCanvasHasInk).toBe(true);
+  expect(settled.zoom).toBeGreaterThan(150);
+});
+
+test('manual zoom completion preserves viewport changes made while the sharper canvas renders', async ({ page }) => {
+  await page.setViewportSize({ width: 520, height: 520 });
+  await openFourPageFixture(page);
+  await setPresentationMode(page, 'single');
+  await setCustomZoom(page, 150);
+  await expect.poll(() => canvasMatchesCssResolution(page, 1)).toBe(true);
+
+  await installRetainedZoomProbe(page, 1);
+  await installPdfImageLoadGate(page);
+  await armNextPdfImageLoad(page);
+  await setCustomZoom(page, 250);
+  await expect.poll(() => pdfImageLoadGateSnapshot(page)).toEqual({
+    started: 1,
+    pending: true,
+    completed: 0,
+  });
+  const whileRendering = await retainedZoomProbeSnapshot(page, 1);
+  expect(whileRendering.sameCanvas).toBe(true);
+  expect(whileRendering.oldCanvasConnected).toBe(true);
+  expect(whileRendering.oldCanvasPixelsUnchanged).toBe(true);
+  expect(whileRendering.sameFirstTextNode).toBe(true);
+  expect(whileRendering.firstTextNodeConnected).toBe(true);
+  expect(whileRendering.currentCanvasHasInk).toBe(true);
+
+  const scrolledProgress = { x: 0.24, y: 0.68 };
+  await setViewerViewportProgress(page, scrolledProgress);
+
+  await releasePdfImageLoadGate(page);
+  await expect.poll(() => pdfImageLoadGateSnapshot(page)).toEqual({
+    started: 1,
+    pending: false,
+    completed: 1,
+  });
+  await expect.poll(async () => (await retainedZoomProbeSnapshot(page, 1)).sameCanvas)
+    .toBe(false);
+  const afterRendering = await retainedZoomProbeSnapshot(page, 1);
+  expect(afterRendering.sameCanvas).toBe(false);
+  expect(afterRendering.oldCanvasConnected).toBe(false);
+  expect(afterRendering.oldCanvasPixelsUnchanged).toBe(true);
+  expect(afterRendering.atomicCanvasReplacements).toBe(1);
+  expect(afterRendering.currentCanvasHasInk).toBe(true);
+  await expect.poll(() => canvasMatchesCssResolution(page, 1)).toBe(true);
+  await expectViewerViewportProgress(page, scrolledProgress);
+});
+
 test('trackpad pinch handling leaves ordinary two-finger wheel scrolling unchanged', async ({ page }) => {
   await page.setViewportSize({ width: 900, height: 500 });
   await openFourPageFixture(page);
@@ -854,6 +983,36 @@ test('trackpad pinch handling leaves ordinary two-finger wheel scrolling unchang
   await expect.poll(() => page.evaluate(() => (window as any).__ordinaryWheelDefaultPrevented))
     .toBe(false);
   await expect(page.getByRole('spinbutton', { name: 'Zoom' })).toHaveValue('150');
+});
+
+test('an active wheel scroll cannot drift into pinch zoom when the ctrl state flickers', async ({ page }) => {
+  await page.setViewportSize({ width: 900, height: 500 });
+  await openFourPageFixture(page);
+  await setPresentationMode(page, 'single-continuous');
+  await setCustomZoom(page, 150);
+  await page.evaluate(() => {
+    document.querySelector<HTMLElement>('#viewer-container')!.scrollTop = 0;
+  });
+
+  const before = await pinchObservableGeometry(page, 1);
+  const scroll = await dispatchViewerWheelVectorWithDefaultPan(page, { deltaX: 0, deltaY: 180 });
+  expect(scroll.defaultPrevented).toBe(false);
+  await expect.poll(() => viewerScrollTop(page)).toBeGreaterThan(0);
+
+  const focalPoint = await visiblePointOnPage(page, 1);
+  const ctrlTail = await dispatchTrackpadPinchBurst(page, focalPoint, [-2, -2, -2]);
+  expect(ctrlTail.every(event => event.defaultPrevented && !event.dispatchResult)).toBe(true);
+
+  await page.waitForTimeout(250);
+  const afterTail = await pinchObservableGeometry(page, 1);
+  expect(afterTail.zoom).toBe(before.zoom);
+  expect(Math.abs(afterTail.pageWidth - before.pageWidth)).toBeLessThanOrEqual(0.1);
+
+  await dispatchTrackpadPinchBurst(page, focalPoint, [-4, -4, -4]);
+  await expect.poll(async () => (await pinchObservableGeometry(page, 1)).pageWidth)
+    .toBeGreaterThan(before.pageWidth);
+  await expect.poll(async () => (await pinchObservableGeometry(page, 1)).zoom)
+    .toBeGreaterThan(before.zoom);
 });
 
 test('the non-page viewer canvas is dark while rendered PDF pages stay white', async ({ page }) => {
@@ -887,11 +1046,108 @@ async function chooseDisplayAction(page: Page, action: string): Promise<void> {
   await expect(menu).toBeHidden();
 }
 
+async function selectReduceAnimation(
+  page: Page,
+  setting: 'on' | 'off' | 'system',
+): Promise<void> {
+  await chooseDisplayAction(page, `reduce-animation-${setting}`);
+  await expect.poll(() => page.evaluate(() =>
+    (window as any).__mockState.pdfViewer?.reduceAnimation
+  )).toBe(setting);
+
+  await openDisplayMenu(page);
+  const menu = page.getByRole('menu', { name: 'Display options' });
+  for (const candidate of ['on', 'off', 'system'] as const) {
+    await expect(menu.locator(`[data-display-action="reduce-animation-${candidate}"]`))
+      .toHaveAttribute('aria-checked', String(candidate === setting));
+  }
+  await page.keyboard.press('Escape');
+  await expect(menu).toBeHidden();
+}
+
 async function openDisplayMenu(page: Page): Promise<void> {
   const trigger = page.getByRole('button', { name: 'Display options' });
   const menu = page.getByRole('menu', { name: 'Display options' });
   if (!(await menu.isVisible())) await trigger.click();
   await expect(menu).toBeVisible();
+}
+
+async function installPageWrapperScrollProbe(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const state = window as any;
+    state.__pageWrapperScrollCalls = [];
+    const original = HTMLElement.prototype.scrollIntoView;
+    HTMLElement.prototype.scrollIntoView = function (options?: boolean | ScrollIntoViewOptions) {
+      if (this.classList.contains('page-wrapper')) {
+        state.__pageWrapperScrollCalls.push({
+          id: this.id,
+          behavior: typeof options === 'object' ? options.behavior : undefined,
+        });
+        return;
+      }
+      original.call(this, options);
+    };
+  });
+}
+
+async function installReduceAnimationTransitionProbe(page: Page): Promise<void> {
+  await page.locator('#page-1 .highlight-layer').evaluate(layer => {
+    const probe = document.createElement('div');
+    probe.className = 'annotation-highlight';
+    probe.dataset.reduceAnimationTransitionProbe = 'true';
+    layer.appendChild(probe);
+  });
+}
+
+async function expectReduceAnimationTransitions(
+  page: Page,
+  reduced: boolean,
+): Promise<void> {
+  const transitions = await page.locator([
+    '#pdf-history-back',
+    '[data-reduce-animation-transition-probe="true"]',
+  ].join(', ')).evaluateAll(elements => elements.map(element => {
+    const durations = window.getComputedStyle(element).transitionDuration
+      .split(',')
+      .map(value => Number.parseFloat(value));
+    return {
+      element: element.id || element.className,
+      allDurationsZero: durations.every(duration => duration === 0),
+    };
+  }));
+
+  expect(transitions).toHaveLength(2);
+  for (const transition of transitions) {
+    expect(
+      transition.allDurationsZero,
+      `${transition.element} transition durations`,
+    ).toBe(reduced);
+  }
+}
+
+async function turnPageAndExpectScrollBehavior(
+  page: Page,
+  direction: 'next' | 'previous',
+  targetPage: number,
+  behavior: ScrollBehavior,
+): Promise<void> {
+  await page.evaluate(() => {
+    (window as any).__pageWrapperScrollCalls = [];
+  });
+  await page.getByRole('button', {
+    name: direction === 'next' ? 'Next page' : 'Previous page',
+  }).click();
+  await expectCurrentPage(page, targetPage);
+  await expect.poll(() => page.evaluate(() => {
+    const calls = (window as any).__pageWrapperScrollCalls as Array<{
+      id: string;
+      behavior?: ScrollBehavior;
+    }>;
+    return calls.at(-1);
+  })).toEqual({
+    id: `page-${targetPage}`,
+    behavior,
+  });
 }
 
 async function openPageContextMenu(page: Page, pageNumber: number) {
@@ -1358,12 +1614,15 @@ async function installPinchRenderProbe(page: Page, pageNumber: number): Promise<
       textLayer,
       firstTextNode: textLayer.firstChild,
       initialCanvasPixels: canvas.toDataURL(),
-      drawCalls: 0,
+      drawCallsByCanvas: new WeakMap<HTMLCanvasElement, number>(),
       canvasDimensionMutations: 0,
       textMutations: 0,
     };
     CanvasRenderingContext2D.prototype.drawImage = function (...args: any[]) {
-      if (this.canvas === canvas) probe.drawCalls++;
+      if (this.canvas.classList.contains('pdf-canvas')) {
+        const drawCalls = probe.drawCallsByCanvas.get(this.canvas) ?? 0;
+        probe.drawCallsByCanvas.set(this.canvas, drawCalls + 1);
+      }
       return Reflect.apply(originalDrawImage, this, args);
     } as typeof CanvasRenderingContext2D.prototype.drawImage;
     new MutationObserver(records => {
@@ -1397,7 +1656,7 @@ async function pinchRenderProbeSnapshot(
     return {
       wrapperWidth: document.querySelector<HTMLElement>(`#page-${number}`)!.getBoundingClientRect().width,
       zoom: Number(document.querySelector<HTMLInputElement>('#zoom-input')!.value),
-      drawCalls: probe.drawCalls,
+      drawCalls: probe.drawCallsByCanvas.get(canvas) ?? 0,
       canvasDimensionMutations: probe.canvasDimensionMutations,
       textMutations: probe.textMutations,
       sameCanvas: canvas === probe.canvas,
@@ -1406,6 +1665,152 @@ async function pinchRenderProbeSnapshot(
       canvasPixelsUnchanged: canvas.toDataURL() === probe.initialCanvasPixels,
     };
   }, pageNumber);
+}
+
+async function installRetainedZoomProbe(page: Page, pageNumber: number): Promise<void> {
+  await page.evaluate((number) => {
+    const canvas = document.querySelector<HTMLCanvasElement>(`#page-${number} .pdf-canvas`)!;
+    const textLayer = document.querySelector<HTMLElement>(`#page-${number} .text-layer`)!;
+    (window as any).__retainedZoomProbe = {
+      canvas,
+      firstTextNode: textLayer.firstChild,
+      initialCanvasPixels: canvas.toDataURL(),
+      atomicCanvasReplacements: 0,
+    };
+    new MutationObserver(records => {
+      for (const record of records) {
+        const removedBaseline = Array.from(record.removedNodes).includes(canvas);
+        const addedCanvas = Array.from(record.addedNodes)
+          .some(node => node instanceof HTMLCanvasElement && node.classList.contains('pdf-canvas'));
+        if (removedBaseline && addedCanvas) {
+          (window as any).__retainedZoomProbe.atomicCanvasReplacements++;
+        }
+      }
+    }).observe(canvas.parentElement!, { childList: true });
+  }, pageNumber);
+}
+
+async function retainedZoomProbeSnapshot(
+  page: Page,
+  pageNumber: number,
+): Promise<{
+  sameCanvas: boolean;
+  oldCanvasConnected: boolean;
+  oldCanvasPixelsUnchanged: boolean;
+  sameFirstTextNode: boolean;
+  firstTextNodeConnected: boolean;
+  textNodeCount: number;
+  atomicCanvasReplacements: number;
+  currentCanvasHasInk: boolean;
+  zoom: number;
+  textLeftRatio: number;
+  textWidthRatio: number;
+  linkLeftRatio: number;
+  linkWidthRatio: number;
+}> {
+  return page.evaluate((number) => {
+    const probe = (window as any).__retainedZoomProbe;
+    const currentCanvas = document.querySelector<HTMLCanvasElement>(`#page-${number} .pdf-canvas`)!;
+    const wrapper = document.querySelector<HTMLElement>(`#page-${number}`)!.getBoundingClientRect();
+    const textLayer = document.querySelector<HTMLElement>(`#page-${number} .text-layer`)!;
+    const text = textLayer.querySelector<HTMLElement>('span[data-item-index]')!.getBoundingClientRect();
+    const link = textLayer.querySelector<HTMLElement>('.pdf-link-hit-fragment')?.getBoundingClientRect();
+    const blankCanvas = document.createElement('canvas');
+    blankCanvas.width = currentCanvas.width;
+    blankCanvas.height = currentCanvas.height;
+    return {
+      sameCanvas: currentCanvas === probe.canvas,
+      oldCanvasConnected: probe.canvas.isConnected,
+      oldCanvasPixelsUnchanged: probe.canvas.toDataURL() === probe.initialCanvasPixels,
+      sameFirstTextNode: textLayer.firstChild === probe.firstTextNode,
+      firstTextNodeConnected: probe.firstTextNode?.isConnected === true,
+      textNodeCount: textLayer.childNodes.length,
+      atomicCanvasReplacements: probe.atomicCanvasReplacements,
+      currentCanvasHasInk: currentCanvas.toDataURL() !== blankCanvas.toDataURL(),
+      zoom: Number(document.querySelector<HTMLInputElement>('#zoom-input')!.value),
+      textLeftRatio: (text.left - wrapper.left) / wrapper.width,
+      textWidthRatio: text.width / wrapper.width,
+      linkLeftRatio: link ? (link.left - wrapper.left) / wrapper.width : Number.NaN,
+      linkWidthRatio: link ? link.width / wrapper.width : Number.NaN,
+    };
+  }, pageNumber);
+}
+
+async function canvasMatchesCssResolution(page: Page, pageNumber: number): Promise<boolean> {
+  return page.evaluate((number) => {
+    const canvas = document.querySelector<HTMLCanvasElement>(`#page-${number} .pdf-canvas`)!;
+    const bounds = canvas.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    return Math.abs(canvas.width - Math.round(bounds.width * dpr)) <= 1
+      && Math.abs(canvas.height - Math.round(bounds.height * dpr)) <= 1;
+  }, pageNumber);
+}
+
+async function installPdfImageLoadGate(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const state = window as any;
+    state.__pdfImageLoadGate = {
+      armed: false,
+      started: 0,
+      pending: false,
+      completed: 0,
+      release: undefined,
+    };
+    if (state.__pdfImageLoadGateInstalled) return;
+    state.__pdfImageLoadGateInstalled = true;
+
+    const imageSource = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, 'src');
+    if (!imageSource?.get || !imageSource.set) throw new Error('HTMLImageElement.src is unavailable');
+    Object.defineProperty(HTMLImageElement.prototype, 'src', {
+      configurable: imageSource.configurable,
+      enumerable: imageSource.enumerable,
+      get: imageSource.get,
+      set(value: string) {
+        const active = state.__pdfImageLoadGate;
+        if (active?.armed) {
+          active.armed = false;
+          active.started++;
+          const image = this as HTMLImageElement;
+          const onload = image.onload;
+          image.onload = event => {
+            active.pending = true;
+            active.release = () => {
+              active.release = undefined;
+              active.pending = false;
+              onload?.call(image, event);
+              active.completed++;
+            };
+          };
+        }
+        imageSource.set!.call(this, value);
+      },
+    });
+  });
+}
+
+async function armNextPdfImageLoad(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    (window as any).__pdfImageLoadGate.armed = true;
+  });
+}
+
+async function releasePdfImageLoadGate(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    (window as any).__pdfImageLoadGate.release?.();
+  });
+}
+
+async function pdfImageLoadGateSnapshot(
+  page: Page,
+): Promise<{ started: number; pending: boolean; completed: number }> {
+  return page.evaluate(() => {
+    const state = (window as any).__pdfImageLoadGate;
+    return {
+      started: Number(state?.started) || 0,
+      pending: state?.pending === true,
+      completed: Number(state?.completed) || 0,
+    };
+  });
 }
 
 async function nextAnimationFrame(page: Page): Promise<void> {

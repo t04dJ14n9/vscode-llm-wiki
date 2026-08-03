@@ -724,13 +724,13 @@ function yamlOffsetToDocumentLine(
 function yamlSequenceValues(value: unknown): string[] {
   if (!isSeq(value)) return [];
   return value.items
-    .map(item => isScalar(item) && item.value != null ? String(item.value) : '')
+    .map(item => isScalar(item) && item.value != null ? item.toString() : '')
     .filter(Boolean);
 }
 
 function yamlScalarValue(value: unknown): string {
   if (!value || !isScalar(value) || value.value == null) return '';
-  return String(value.value);
+  return value.toString();
 }
 
 function yamlNodeRange(value: unknown): [number, number, number] | undefined {

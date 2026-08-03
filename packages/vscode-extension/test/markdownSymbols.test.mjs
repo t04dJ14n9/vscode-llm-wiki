@@ -198,6 +198,91 @@ test('markdown outline tree provider reads the active custom markdown tab and re
   ]);
 });
 
+test('outline tree provider reads nested PDF bookmarks from the active custom PDF tab', async () => {
+  const uri = {
+    scheme: 'file',
+    fsPath: '/vault/books/rendering.pdf',
+    toString: () => 'file:///vault/books/rendering.pdf',
+  };
+  const revealCommands = [];
+  const vscode = createVscodeMock({
+    activeTabUri: uri,
+    executeCommandCalls: revealCommands,
+  });
+  const { MarkdownOutlineTreeProvider } = loadTsModule('src/markdownSymbols.ts', { vscode });
+  const pdfOutlineSource = {
+    getPdfOutline: requestedUri => {
+      assert.equal(requestedUri, uri);
+      return [{
+        title: 'Radiometry',
+        destination: {
+          pageIndex: 157,
+          zoom: { mode: 3 },
+          view: [462],
+        },
+        children: [{
+          title: 'Light Transport',
+          destination: {
+            pageIndex: 164,
+            zoom: { mode: 3 },
+            view: [512],
+          },
+          children: [],
+        }],
+      }];
+    },
+    onDidChangePdfOutline: () => ({ dispose() {} }),
+  };
+  const provider = new MarkdownOutlineTreeProvider(pdfOutlineSource);
+
+  const roots = await provider.getChildren();
+
+  assert.equal(roots.length, 1);
+  assert.equal(roots[0].label, 'Radiometry');
+  assert.equal(roots[0].description, 'p. 158');
+  assert.equal(roots[0].iconPath.id, 'bookmark');
+  assert.equal(roots[0].children.length, 1);
+  assert.equal(roots[0].children[0].label, 'Light Transport');
+  assert.equal(roots[0].children[0].description, 'p. 165');
+
+  await vscode.commands.executeCommand(
+    roots[0].children[0].command.command,
+    ...roots[0].children[0].command.arguments,
+  );
+
+  assert.deepEqual(revealCommands, [[
+    'human-learning.revealInPdfOutline',
+    {
+      uri,
+      destination: {
+        pageIndex: 164,
+        zoom: { mode: 3 },
+        view: [512],
+      },
+      title: 'Light Transport',
+    },
+  ]]);
+});
+
+test('outline tree provider distinguishes loading PDFs from PDFs without bookmarks', async () => {
+  const uri = {
+    scheme: 'file',
+    fsPath: '/vault/books/no-outline.pdf',
+    toString: () => 'file:///vault/books/no-outline.pdf',
+  };
+  const vscode = createVscodeMock({ activeTabUri: uri });
+  const { MarkdownOutlineTreeProvider } = loadTsModule('src/markdownSymbols.ts', { vscode });
+  let outline;
+  const provider = new MarkdownOutlineTreeProvider({
+    getPdfOutline: () => outline,
+    onDidChangePdfOutline: () => ({ dispose() {} }),
+  });
+
+  assert.equal((await provider.getChildren())[0].label, '(loading PDF outline…)');
+  outline = [];
+  assert.equal((await provider.getChildren())[0].label, '(no PDF outline)');
+});
+
 test('markdown outline tree provider refreshes when the active custom editor tab changes', () => {
   const tabChangeListeners = [];
   const vscode = createVscodeMock({ tabChangeListeners });

@@ -1,8 +1,8 @@
 import { createHash } from 'crypto';
 import { mkdirSync, writeFileSync } from 'fs';
 import { join } from 'path';
-import { Database } from '../db/connection';
-import { registerSource, SourceRecord } from '../sources/registry';
+import { type Database } from '../db/connection';
+import { registerSource, type SourceRecord } from '../sources/registry';
 import { appendAnchorToFile } from '../anchors/store';
 
 export interface WebTargetRecord {

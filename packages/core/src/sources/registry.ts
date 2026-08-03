@@ -1,6 +1,6 @@
-import { Database } from '../db/connection';
+import { type Database } from '../db/connection';
 import { createHash } from 'crypto';
-import { readFileSync, statSync } from 'fs';
+import { readFileSync } from 'fs';
 import { basename } from 'path';
 
 export interface SourceRecord {

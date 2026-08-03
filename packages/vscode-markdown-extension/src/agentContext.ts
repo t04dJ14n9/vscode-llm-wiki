@@ -102,7 +102,7 @@ ${text}
     anchor_uri: anchorUri,
     lines: { start: startLine, end: endLine },
     location: rangeLabel,
-    text: text,
+    text,
     text_hash: createHash('sha256').update(text).digest('hex'),
     exported_at: new Date().toISOString(),
     ...(metadata ? { metadata } : {}),

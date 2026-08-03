@@ -1,7 +1,7 @@
 import { createHash } from 'crypto';
 import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
-import { Database } from '../db/connection';
+import { type Database } from '../db/connection';
 import { pdfHref } from '../links/reference-target';
 import { getSource, registerSource } from '../sources/registry';
 import { appendAnchorToFile } from './store';
@@ -212,7 +212,13 @@ function validateHighlightColor(value: unknown): PdfHighlightColor | undefined {
   if (typeof value === 'string' && PDF_HIGHLIGHT_COLORS.has(value as PdfHighlightColor)) {
     return value as PdfHighlightColor;
   }
-  throw new Error(`Unsupported PDF highlight color: ${String(value)}`);
+  let description: string;
+  try {
+    description = JSON.stringify(value) ?? Object.prototype.toString.call(value);
+  } catch {
+    description = Object.prototype.toString.call(value);
+  }
+  throw new Error(`Unsupported PDF highlight color: ${description}`);
 }
 
 function inferPage(text: string, quote: string): number {
