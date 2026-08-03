@@ -4365,6 +4365,1482 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
     expect(linkStyles.fontWeight).toBe('500');
   });
 
+  test('active raw markdown lines render wikilinks with clean Obsidian labels', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+
+    const doc = [
+      'Prelude line',
+      '',
+      'Keep [[FlashAttention]] and [[Online Softmax|online softmax]] visible while editing.',
+      '',
+      'Tail line',
+    ].join('\n');
+
+    await page.evaluate((text) => {
+      window.postMessage({ type: 'setText', text }, '*');
+    }, doc);
+
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      const target = view.state.doc.line(3);
+      view.dispatch({ selection: { anchor: target.from + target.text.indexOf('visible') } });
+    });
+
+    const activeLineText = await page.locator('.cm-line').nth(2).evaluate(line => line.textContent);
+    expect(activeLineText).toBe('Keep FlashAttention and online softmax visible while editing.');
+    expect(activeLineText).not.toContain('[[');
+    expect(activeLineText).not.toContain(']]');
+    expect(activeLineText).not.toContain('|');
+
+    await expect(page.locator('.cm-active-link-label')).toContainText(['FlashAttention', 'online softmax']);
+  });
+
+  test('active raw markdown lines reveal source for the wikilink under the cursor only', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+
+    const doc = [
+      'Prelude line',
+      '',
+      'Keep [[FlashAttention]] and [[Online Softmax|online softmax]] visible while editing.',
+      '',
+      'Tail line',
+    ].join('\n');
+
+    await page.evaluate((text) => {
+      window.postMessage({ type: 'setText', text }, '*');
+    }, doc);
+
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      const target = view.state.doc.line(3);
+      view.dispatch({ selection: { anchor: target.from + target.text.indexOf('FlashAttention') + 2 } });
+    });
+
+    const activeLineText = await page.locator('.cm-line').nth(2).evaluate(line => line.textContent);
+    expect(activeLineText).toBe('Keep [[FlashAttention]] and online softmax visible while editing.');
+    expect(activeLineText).not.toContain('[[Online Softmax|online softmax]]');
+    expect(activeLineText).not.toContain('|');
+
+    await expect(page.locator('.cm-active-link-label').first()).toHaveText('[[FlashAttention]]');
+    const activeRawLinkStyles = await page.locator('.cm-active-link-label').first().evaluate((element) => {
+      const parentColor = getComputedStyle(element).color;
+      const childStyles = Array.from(element.querySelectorAll<HTMLElement>('*')).map(child => ({
+        text: child.textContent ?? '',
+        color: getComputedStyle(child).color,
+        opacity: getComputedStyle(child).opacity,
+      }));
+      return { parentColor, childStyles };
+    });
+    expect(activeRawLinkStyles.childStyles.every(style => style.color === activeRawLinkStyles.parentColor)).toBe(true);
+    expect(activeRawLinkStyles.childStyles.every(style => style.opacity === '1')).toBe(true);
+    await expect(page.locator('.cm-active-link-label')).toContainText(['FlashAttention', 'online softmax']);
+  });
+
+  test('typing an Obsidian wikilink opener shows a note selector and inserts the selected note', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+
+    await page.evaluate(() => {
+      window.postMessage({
+        type: 'setText',
+        text: '# Selector Test\n\n',
+        currentNotePath: 'notes/Concepts/Selector Test.md',
+        notePaths: [
+          'notes/Concepts/FlashAttention.md',
+          'notes/Concepts/Online Softmax.md',
+          'notes/Papers/FlashAttention Paper.md',
+        ],
+      }, '*');
+    });
+
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+    await page.locator('.cm-content').click();
+    await page.keyboard.type('[[On');
+
+    const selector = page.locator('.cm-tooltip-autocomplete');
+    await expect(selector).toBeVisible();
+    await expect(selector).toContainText('Online Softmax');
+    await expect(selector).not.toContainText('notes/Concepts/Online Softmax.md');
+
+    await page.keyboard.press('Enter');
+
+    const documentText = await page.evaluate(() => window.__cmView?.state.doc.toString());
+    expect(documentText).toContain('[[Online Softmax]]');
+  });
+
+  test('Vim mode types an Obsidian wikilink opener instead of jumping sections', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+
+    await page.evaluate(() => {
+      window.postMessage({
+        type: 'setText',
+        text: [
+          '# First',
+          '',
+          'Alpha beta',
+          '',
+          '# Second',
+          '',
+          'Tail line',
+        ].join('\n'),
+        notePaths: [
+          'notes/Concepts/Alpha.md',
+          'notes/Concepts/Online Softmax.md',
+        ],
+      }, '*');
+      window.postMessage({ type: 'setVimMode', enabled: true }, '*');
+    });
+
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      const line = view.state.doc.line(3);
+      view.dispatch({ selection: { anchor: line.to } });
+      view.focus();
+    });
+
+    await page.keyboard.press('[');
+    await page.keyboard.press('[');
+
+    const cursor = await page.evaluate(() => {
+      const view = window.__cmView;
+      const head = view.state.selection.main.head;
+      const line = view.state.doc.lineAt(head);
+      return {
+        text: view.state.doc.toString(),
+        lineNumber: line.number,
+        column: head - line.from,
+        lineText: line.text,
+      };
+    });
+
+    expect(cursor.lineNumber).toBe(3);
+    expect(cursor.lineText).toBe('Alpha beta[[');
+    expect(cursor.column).toBe('Alpha beta[['.length);
+    expect(cursor.text).toContain('Alpha beta[[');
+    await expect(page.locator('.cm-tooltip-autocomplete')).toBeVisible();
+  });
+
+  test('Vim mode starts in insert mode for ordinary typing', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+
+    await page.evaluate(() => {
+      window.postMessage({ type: 'setVimMode', enabled: true }, '*');
+      window.postMessage({
+        type: 'setText',
+        text: [
+          '# First',
+          '',
+          'Alpha beta',
+          '',
+          '# Second',
+          '',
+          'Tail line',
+        ].join('\n'),
+      }, '*');
+    });
+
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      const line = view.state.doc.line(3);
+      view.dispatch({ selection: { anchor: line.to } });
+      view.focus();
+    });
+
+    await page.keyboard.press('d');
+    await page.keyboard.press('d');
+
+    const cursor = await page.evaluate(() => {
+      const view = window.__cmView;
+      const head = view.state.selection.main.head;
+      const line = view.state.doc.lineAt(head);
+      return {
+        text: view.state.doc.toString(),
+        lineNumber: line.number,
+        column: head - line.from,
+        lineText: line.text,
+      };
+    });
+
+    expect(cursor.lineNumber).toBe(3);
+    expect(cursor.lineText).toBe('Alpha betadd');
+    expect(cursor.column).toBe('Alpha betadd'.length);
+    expect(cursor.text).toContain('Alpha betadd');
+  });
+
+  test('Vim mode remains insert mode after clicking into the editor', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+
+    await page.evaluate(() => {
+      window.postMessage({ type: 'setVimMode', enabled: true }, '*');
+      window.postMessage({
+        type: 'setText',
+        text: [
+          '# First',
+          '',
+          'Alpha beta',
+          '',
+          '# Second',
+          '',
+          'Tail line',
+        ].join('\n'),
+      }, '*');
+    });
+
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+    await page.locator('.cm-line').nth(2).click();
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      const line = view.state.doc.line(3);
+      view.dispatch({ selection: { anchor: line.to } });
+    });
+
+    await page.keyboard.press('i');
+    await page.keyboard.press('a');
+    await page.keyboard.press('s');
+    await page.keyboard.press('d');
+
+    let cursor = await page.evaluate(() => {
+      const view = window.__cmView;
+      const head = view.state.selection.main.head;
+      const line = view.state.doc.lineAt(head);
+      return {
+        text: view.state.doc.toString(),
+        lineNumber: line.number,
+        column: head - line.from,
+        lineText: line.text,
+      };
+    });
+
+    expect(cursor.lineNumber).toBe(3);
+    expect(cursor.lineText).toBe('Alpha betaiasd');
+    expect(cursor.column).toBe('Alpha betaiasd'.length);
+    expect(cursor.text).toContain('Alpha betaiasd');
+
+    await page.evaluate(() => {
+      window.postMessage({
+        type: 'setText',
+        text: [
+          '# First',
+          '',
+          'Alpha beta',
+          '',
+          '# Second',
+          '',
+          'Tail line',
+        ].join('\n'),
+      }, '*');
+    });
+    await page.waitForFunction(() => window.__cmView?.state.doc.line(3).text === 'Alpha beta');
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      const line = view.state.doc.line(3);
+      view.dispatch({ selection: { anchor: line.to } });
+    });
+
+    await page.keyboard.press('-');
+    await page.keyboard.press('Space');
+
+    cursor = await page.evaluate(() => {
+      const view = window.__cmView;
+      const head = view.state.selection.main.head;
+      const line = view.state.doc.lineAt(head);
+      return {
+        text: view.state.doc.toString(),
+        lineNumber: line.number,
+        column: head - line.from,
+        lineText: line.text,
+      };
+    });
+
+    expect(cursor.lineNumber).toBe(3);
+    expect(cursor.lineText).toBe('Alpha beta- ');
+    expect(cursor.column).toBe('Alpha beta- '.length);
+    expect(cursor.text).toContain('Alpha beta- ');
+  });
+
+  test('Vim mode remains insert mode after host focus requests', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+
+    await page.evaluate(() => {
+      window.postMessage({ type: 'setVimMode', enabled: true }, '*');
+      window.postMessage({
+        type: 'setText',
+        text: [
+          '# First',
+          '',
+          'Alpha beta',
+          '',
+          '# Second',
+          '',
+          'Tail line',
+        ].join('\n'),
+      }, '*');
+      window.postMessage({ type: 'focus' }, '*');
+    });
+
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+    await page.waitForFunction(() => document.querySelector('.cm-editor')?.classList.contains('cm-focused'));
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      const line = view.state.doc.line(3);
+      view.dispatch({ selection: { anchor: line.to } });
+    });
+
+    await page.keyboard.press('i');
+    await page.keyboard.press('a');
+    await page.keyboard.press('s');
+    await page.keyboard.press('d');
+
+    let cursor = await page.evaluate(() => {
+      const view = window.__cmView;
+      const head = view.state.selection.main.head;
+      const line = view.state.doc.lineAt(head);
+      return {
+        text: view.state.doc.toString(),
+        lineNumber: line.number,
+        column: head - line.from,
+        lineText: line.text,
+      };
+    });
+
+    expect(cursor.lineNumber).toBe(3);
+    expect(cursor.lineText).toBe('Alpha betaiasd');
+    expect(cursor.column).toBe('Alpha betaiasd'.length);
+    expect(cursor.text).toContain('Alpha betaiasd');
+
+    await page.evaluate(() => {
+      window.postMessage({
+        type: 'setText',
+        text: [
+          '# First',
+          '',
+          'Alpha beta',
+          '',
+          '# Second',
+          '',
+          'Tail line',
+        ].join('\n'),
+      }, '*');
+    });
+    await page.waitForFunction(() => window.__cmView?.state.doc.line(3).text === 'Alpha beta');
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      const line = view.state.doc.line(3);
+      view.dispatch({ selection: { anchor: line.to } });
+    });
+
+    await page.keyboard.press('-');
+    await page.keyboard.press('Space');
+
+    cursor = await page.evaluate(() => {
+      const view = window.__cmView;
+      const head = view.state.selection.main.head;
+      const line = view.state.doc.lineAt(head);
+      return {
+        text: view.state.doc.toString(),
+        lineNumber: line.number,
+        column: head - line.from,
+        lineText: line.text,
+      };
+    });
+
+    expect(cursor.lineNumber).toBe(3);
+    expect(cursor.lineText).toBe('Alpha beta- ');
+    expect(cursor.column).toBe('Alpha beta- '.length);
+    expect(cursor.text).toContain('Alpha beta- ');
+  });
+
+  test('Vim mode returns to insert mode after host reveal requests', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+
+    await page.evaluate(() => {
+      window.postMessage({ type: 'setVimMode', enabled: true }, '*');
+      window.postMessage({
+        type: 'setText',
+        text: [
+          '# First',
+          '',
+          'Alpha beta',
+          '',
+          '# Second',
+          '',
+          'Tail line',
+        ].join('\n'),
+      }, '*');
+    });
+
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+    await page.locator('.cm-content').click();
+    await page.keyboard.press('Escape');
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      const line = view.state.doc.line(3);
+      window.postMessage({
+        type: 'revealPosition',
+        anchor: line.to,
+        head: line.to,
+      }, '*');
+    });
+    await page.waitForFunction(() => {
+      const view = window.__cmView;
+      return view?.state.selection.main.head === view?.state.doc.line(3).to;
+    });
+
+    await page.keyboard.press('i');
+    await page.keyboard.press('a');
+    await page.keyboard.press('s');
+    await page.keyboard.press('d');
+
+    let cursor = await page.evaluate(() => {
+      const view = window.__cmView;
+      const head = view.state.selection.main.head;
+      const line = view.state.doc.lineAt(head);
+      return {
+        text: view.state.doc.toString(),
+        lineNumber: line.number,
+        column: head - line.from,
+        lineText: line.text,
+      };
+    });
+
+    expect(cursor.lineNumber).toBe(3);
+    expect(cursor.lineText).toBe('Alpha betaiasd');
+    expect(cursor.column).toBe('Alpha betaiasd'.length);
+    expect(cursor.text).toContain('Alpha betaiasd');
+
+    await page.evaluate(() => {
+      window.postMessage({
+        type: 'setText',
+        text: [
+          '# First',
+          '',
+          'Alpha beta',
+          '',
+          '# Second',
+          '',
+          'Tail line',
+        ].join('\n'),
+      }, '*');
+    });
+    await page.waitForFunction(() => window.__cmView?.state.doc.line(3).text === 'Alpha beta');
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      const line = view.state.doc.line(3);
+      window.postMessage({
+        type: 'revealPosition',
+        anchor: line.to,
+        head: line.to,
+      }, '*');
+    });
+    await page.waitForFunction(() => {
+      const view = window.__cmView;
+      return view?.state.selection.main.head === view?.state.doc.line(3).to;
+    });
+
+    await page.keyboard.press('-');
+    await page.keyboard.press('Space');
+
+    cursor = await page.evaluate(() => {
+      const view = window.__cmView;
+      const head = view.state.selection.main.head;
+      const line = view.state.doc.lineAt(head);
+      return {
+        text: view.state.doc.toString(),
+        lineNumber: line.number,
+        column: head - line.from,
+        lineText: line.text,
+      };
+    });
+
+    expect(cursor.lineNumber).toBe(3);
+    expect(cursor.lineText).toBe('Alpha beta- ');
+    expect(cursor.column).toBe('Alpha beta- '.length);
+    expect(cursor.text).toContain('Alpha beta- ');
+  });
+
+  test('Vim mode inserts on the current preview line after pressing i from normal mode', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+
+    await page.evaluate(() => {
+      window.postMessage({ type: 'setVimMode', enabled: true }, '*');
+      window.postMessage({
+        type: 'setText',
+        text: [
+          '# First',
+          '',
+          'Alpha beta',
+          '',
+          '# Second',
+          '',
+          'Tail line',
+        ].join('\n'),
+      }, '*');
+    });
+
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      const line = view.state.doc.line(3);
+      view.dispatch({ selection: { anchor: line.to } });
+      view.focus();
+    });
+
+    await page.keyboard.press('Escape');
+    await page.keyboard.press('i');
+    await page.keyboard.type('whoami');
+
+    const cursor = await page.evaluate(() => {
+      const view = window.__cmView;
+      const head = view.state.selection.main.head;
+      const line = view.state.doc.lineAt(head);
+      return {
+        text: view.state.doc.toString(),
+        lineNumber: line.number,
+        column: head - line.from,
+        lineText: line.text,
+      };
+    });
+
+    expect(cursor.lineNumber).toBe(3);
+    expect(cursor.lineText).toBe('Alpha betwhoamia');
+    expect(cursor.column).toBe('Alpha betwhoami'.length);
+    expect(cursor.text).toContain('Alpha betwhoamia');
+
+    const caret = await page.evaluate(() => {
+      const cursor = document.querySelector<HTMLElement>('.cm-cursor');
+      const activeLine = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+        .find(line => line.textContent === 'Alpha betwhoamia');
+      const cursorRect = cursor?.getBoundingClientRect();
+      const activeLineRect = activeLine?.getBoundingClientRect();
+      return {
+        cursorTop: cursorRect?.top ?? null,
+        cursorBottom: cursorRect?.bottom ?? null,
+        activeLineTop: activeLineRect?.top ?? null,
+        activeLineBottom: activeLineRect?.bottom ?? null,
+      };
+    });
+
+    expect(caret.cursorTop).not.toBeNull();
+    expect(caret.activeLineTop).not.toBeNull();
+    expect(caret.cursorTop!).toBeGreaterThanOrEqual(caret.activeLineTop! - 1);
+    expect(caret.cursorBottom!).toBeLessThanOrEqual(caret.activeLineBottom! + 1);
+  });
+
+  test('Vim mode keeps the caret on the paragraph after rendered Mermaid when pressing i', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+
+    await page.evaluate(() => {
+      window.postMessage({ type: 'setVimMode', enabled: true }, '*');
+      window.postMessage({
+        type: 'setText',
+        text: [
+          '# Diagram',
+          '',
+          '```mermaid',
+          'sequenceDiagram',
+          '  participant User',
+          '  participant Agent',
+          '  User->>Agent: Select paragraph',
+          '  Agent-->>User: Return link',
+          '```',
+          '',
+          'Target paragraph',
+          '',
+          'Tail line',
+        ].join('\n'),
+      }, '*');
+    });
+
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+    await expect(page.locator('.cm-hybrid-mermaid-block')).toBeVisible();
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      const line = view.state.doc.line(11);
+      view.dispatch({ selection: { anchor: line.to } });
+      view.focus();
+    });
+
+    await page.keyboard.press('Escape');
+    await page.keyboard.press('i');
+    await page.keyboard.type('whoami');
+
+    const cursor = await page.evaluate(() => {
+      const view = window.__cmView;
+      const head = view.state.selection.main.head;
+      const line = view.state.doc.lineAt(head);
+      return {
+        text: view.state.doc.toString(),
+        lineNumber: line.number,
+        column: head - line.from,
+        lineText: line.text,
+      };
+    });
+
+    expect(cursor.lineNumber).toBe(11);
+    expect(cursor.lineText).toBe('Target paragrapwhoamih');
+    expect(cursor.column).toBe('Target paragrapwhoami'.length);
+    expect(cursor.text).toContain('Target paragrapwhoamih');
+
+    const caret = await page.evaluate(() => {
+      const cursor = document.querySelector<HTMLElement>('.cm-cursor');
+      const activeLine = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+        .find(line => line.textContent === 'Target paragrapwhoamih');
+      const cursorRect = cursor?.getBoundingClientRect();
+      const activeLineRect = activeLine?.getBoundingClientRect();
+      return {
+        cursorTop: cursorRect?.top ?? null,
+        cursorBottom: cursorRect?.bottom ?? null,
+        activeLineTop: activeLineRect?.top ?? null,
+        activeLineBottom: activeLineRect?.bottom ?? null,
+      };
+    });
+
+    expect(caret.cursorTop).not.toBeNull();
+    expect(caret.activeLineTop).not.toBeNull();
+    expect(caret.cursorTop!).toBeGreaterThanOrEqual(caret.activeLineTop! - 1);
+    expect(caret.cursorBottom!).toBeLessThanOrEqual(caret.activeLineBottom! + 1);
+  });
+
+  test('Vim mode inserts on the clicked rendered preview line after pressing i', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+
+    await page.evaluate(() => {
+      window.postMessage({ type: 'setVimMode', enabled: true }, '*');
+      window.postMessage({
+        type: 'setText',
+        text: [
+          '# Diagram',
+          '',
+          '```mermaid',
+          'sequenceDiagram',
+          '  participant User',
+          '  participant Agent',
+          '  User->>Agent: Select paragraph',
+          '  Agent-->>User: Return link',
+          '```',
+          '',
+          'Target paragraph',
+          '',
+          'Tail line',
+        ].join('\n'),
+      }, '*');
+    });
+
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+    await expect(page.locator('.cm-hybrid-mermaid-block')).toBeVisible();
+    await page.locator('.cm-line').filter({ hasText: 'Target paragraph' }).click();
+
+    await page.keyboard.press('Escape');
+    await page.keyboard.press('i');
+    await page.keyboard.type('whoami');
+
+    const cursor = await page.evaluate(() => {
+      const view = window.__cmView;
+      const head = view.state.selection.main.head;
+      const line = view.state.doc.lineAt(head);
+      return {
+        text: view.state.doc.toString(),
+        lineNumber: line.number,
+        column: head - line.from,
+        lineText: line.text,
+      };
+    });
+
+    expect(cursor.lineNumber).toBe(11);
+    expect(cursor.lineText).toContain('whoami');
+
+    const caret = await page.evaluate(() => {
+      const cursor = document.querySelector<HTMLElement>('.cm-cursor');
+      const activeLine = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+        .find(line => line.textContent?.includes('whoami'));
+      const cursorRect = cursor?.getBoundingClientRect();
+      const activeLineRect = activeLine?.getBoundingClientRect();
+      return {
+        cursorTop: cursorRect?.top ?? null,
+        cursorBottom: cursorRect?.bottom ?? null,
+        activeLineTop: activeLineRect?.top ?? null,
+        activeLineBottom: activeLineRect?.bottom ?? null,
+      };
+    });
+
+    expect(caret.cursorTop).not.toBeNull();
+    expect(caret.activeLineTop).not.toBeNull();
+    expect(caret.cursorTop!).toBeGreaterThanOrEqual(caret.activeLineTop! - 1);
+    expect(caret.cursorBottom!).toBeLessThanOrEqual(caret.activeLineBottom! + 1);
+  });
+
+  test('Vim mode inserts on the clicked rendered code line after pressing i', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+
+    await page.evaluate(() => {
+      window.postMessage({ type: 'setVimMode', enabled: true }, '*');
+      window.postMessage({
+        type: 'setText',
+        text: [
+          'Intro',
+          '',
+          '```python',
+          'value = 1',
+          '```',
+          '',
+          'Outro',
+        ].join('\n'),
+      }, '*');
+    });
+
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+    await expect(page.locator('.cm-hybrid-codeblock')).toBeVisible();
+    await page.locator('.cm-hybrid-codeblock-content-line').filter({ hasText: 'value = 1' }).click();
+
+    await page.keyboard.press('Escape');
+    await page.keyboard.press('i');
+    await page.keyboard.type('whoami');
+
+    const cursor = await page.evaluate(() => {
+      const view = window.__cmView;
+      const head = view.state.selection.main.head;
+      const line = view.state.doc.lineAt(head);
+      return {
+        text: view.state.doc.toString(),
+        lineNumber: line.number,
+        column: head - line.from,
+        lineText: line.text,
+      };
+    });
+
+    expect(cursor.lineNumber).toBe(4);
+    expect(cursor.lineText).toContain('whoami');
+
+    const caret = await page.evaluate(() => {
+      const cursor = document.querySelector<HTMLElement>('.cm-cursor');
+      const activeLine = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+        .find(line => line.textContent?.includes('whoami'));
+      const cursorRect = cursor?.getBoundingClientRect();
+      const activeLineRect = activeLine?.getBoundingClientRect();
+      return {
+        cursorTop: cursorRect?.top ?? null,
+        cursorBottom: cursorRect?.bottom ?? null,
+        activeLineTop: activeLineRect?.top ?? null,
+        activeLineBottom: activeLineRect?.bottom ?? null,
+      };
+    });
+
+    expect(caret.cursorTop).not.toBeNull();
+    expect(caret.activeLineTop).not.toBeNull();
+    expect(caret.cursorTop!).toBeGreaterThanOrEqual(caret.activeLineTop! - 1);
+    expect(caret.cursorBottom!).toBeLessThanOrEqual(caret.activeLineBottom! + 1);
+  });
+
+  test('Vim mode inserts inside a clicked rendered wikilink line after pressing i', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+
+    await page.evaluate(() => {
+      window.postMessage({ type: 'setVimMode', enabled: true }, '*');
+      window.postMessage({
+        type: 'setText',
+        text: [
+          '# Diagram',
+          '',
+          '```mermaid',
+          'sequenceDiagram',
+          '  participant User',
+          '  participant Agent',
+          '  User->>Agent: Select paragraph',
+          '  Agent-->>User: Return link',
+          '```',
+          '',
+          'Without online softmax, the attention tiling would need to synchronize across all tiles.',
+          '',
+          'Related: [[CUDA Shared Memory]] explains how this maps to GPU hardware.',
+          '',
+          'Tail line',
+        ].join('\n'),
+        notePaths: [
+          'notes/Concepts/CUDA Shared Memory.md',
+        ],
+      }, '*');
+    });
+
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+    await expect(page.locator('.cm-hybrid-mermaid-block')).toBeVisible();
+    await page.locator('.cm-line').filter({ hasText: 'CUDA Shared Memory' }).click();
+
+    await page.keyboard.press('Escape');
+    await page.keyboard.press('i');
+    await page.keyboard.type('whoami');
+
+    const cursor = await page.evaluate(() => {
+      const view = window.__cmView;
+      const head = view.state.selection.main.head;
+      const line = view.state.doc.lineAt(head);
+      return {
+        text: view.state.doc.toString(),
+        lineNumber: line.number,
+        column: head - line.from,
+        lineText: line.text,
+      };
+    });
+
+    expect(cursor.lineNumber).toBe(13);
+    expect(cursor.lineText).toContain('whoami');
+
+    const caret = await page.evaluate(() => {
+      const cursor = document.querySelector<HTMLElement>('.cm-cursor');
+      const activeLine = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+        .find(line => line.textContent?.includes('whoami'));
+      const cursorRect = cursor?.getBoundingClientRect();
+      const activeLineRect = activeLine?.getBoundingClientRect();
+      return {
+        cursorTop: cursorRect?.top ?? null,
+        cursorBottom: cursorRect?.bottom ?? null,
+        activeLineTop: activeLineRect?.top ?? null,
+        activeLineBottom: activeLineRect?.bottom ?? null,
+      };
+    });
+
+    expect(caret.cursorTop).not.toBeNull();
+    expect(caret.activeLineTop).not.toBeNull();
+    expect(caret.cursorTop!).toBeGreaterThanOrEqual(caret.activeLineTop! - 1);
+    expect(caret.cursorBottom!).toBeLessThanOrEqual(caret.activeLineBottom! + 1);
+  });
+
+  test('host text refreshes preserve the current cursor line and column', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+
+    await page.evaluate(() => {
+      window.postMessage({
+        type: 'setText',
+        text: [
+          '# First',
+          '',
+          'Alpha beta',
+          '',
+          '# Second',
+          '',
+          'Tail line',
+        ].join('\n'),
+      }, '*');
+    });
+
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      const line = view.state.doc.line(3);
+      view.dispatch({ selection: { anchor: line.from + 'Alpha'.length } });
+      window.postMessage({
+        type: 'setText',
+        text: [
+          '# First changed externally',
+          '',
+          'Alpha beta',
+          '',
+          '# Second',
+          '',
+          'Tail line',
+        ].join('\n'),
+      }, '*');
+    });
+
+    await page.waitForFunction(() => window.__cmView?.state.doc.line(1).text === '# First changed externally');
+
+    const cursor = await page.evaluate(() => {
+      const view = window.__cmView;
+      const head = view.state.selection.main.head;
+      const line = view.state.doc.lineAt(head);
+      return {
+        lineNumber: line.number,
+        column: head - line.from,
+        lineText: line.text,
+      };
+    });
+
+    expect(cursor.lineNumber).toBe(3);
+    expect(cursor.lineText).toBe('Alpha beta');
+    expect(cursor.column).toBe('Alpha'.length);
+  });
+
+  test('Vim mode types markdown list markers instead of moving the cursor up', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+
+    await page.evaluate(() => {
+      window.postMessage({
+        type: 'setText',
+        text: [
+          '# First',
+          '',
+          'Alpha beta',
+          '',
+          '# Second',
+          '',
+          'Tail line',
+        ].join('\n'),
+      }, '*');
+      window.postMessage({ type: 'setVimMode', enabled: true }, '*');
+    });
+
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      const line = view.state.doc.line(3);
+      view.dispatch({ selection: { anchor: line.to } });
+      view.focus();
+    });
+
+    await page.keyboard.press('-');
+    await page.keyboard.press('Space');
+
+    const cursor = await page.evaluate(() => {
+      const view = window.__cmView;
+      const head = view.state.selection.main.head;
+      const line = view.state.doc.lineAt(head);
+      return {
+        text: view.state.doc.toString(),
+        lineNumber: line.number,
+        column: head - line.from,
+        lineText: line.text,
+      };
+    });
+
+    expect(cursor.lineNumber).toBe(3);
+    expect(cursor.lineText).toBe('Alpha beta- ');
+    expect(cursor.column).toBe('Alpha beta- '.length);
+    expect(cursor.text).toContain('Alpha beta- ');
+  });
+
+  test('Control+O does not transiently edit the document from insert mode', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+
+    const baseDoc = [
+      '# First',
+      '',
+      'Alpha beta',
+      '',
+      '# Second',
+      '',
+      'Tail line',
+    ].join('\n');
+
+    for (const vimEnabled of [false, true]) {
+      await page.evaluate(({ text, enabled }) => {
+        window.postMessage({ type: 'setText', text }, '*');
+        window.postMessage({ type: 'setVimMode', enabled }, '*');
+      }, { text: baseDoc, enabled: vimEnabled });
+
+      await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+      await page.evaluate(() => {
+        const view = window.__cmView;
+        const line = view.state.doc.line(3);
+        view.dispatch({ selection: { anchor: line.to } });
+        window.__mockMessages = [];
+        view.focus();
+      });
+
+      await page.keyboard.press('Control+O');
+      await page.waitForTimeout(200);
+
+      const state = await page.evaluate(() => {
+        const view = window.__cmView;
+        const head = view.state.selection.main.head;
+        const line = view.state.doc.lineAt(head);
+        return {
+          text: view.state.doc.toString(),
+          lineNumber: line.number,
+          column: head - line.from,
+          lineText: line.text,
+          editMessages: window.__mockMessages?.filter((message) => message.type === 'edit') ?? [],
+        };
+      });
+
+      expect(state.text, `vim=${vimEnabled}`).toBe(baseDoc);
+      expect(state.lineNumber, `vim=${vimEnabled}`).toBe(3);
+      expect(state.lineText, `vim=${vimEnabled}`).toBe('Alpha beta');
+      expect(state.column, `vim=${vimEnabled}`).toBe('Alpha beta'.length);
+      expect(state.editMessages, `vim=${vimEnabled}`).toEqual([]);
+    }
+  });
+
+  test('Vim mode keeps ordinary typed keys literal after Control+O from insert mode', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+
+    const baseDoc = [
+      '# First',
+      '',
+      'Alpha beta',
+      '',
+      'Tail line',
+    ].join('\n');
+
+    await page.evaluate((text) => {
+      window.postMessage({ type: 'setText', text, notePaths: [] }, '*');
+      window.postMessage({ type: 'setVimMode', enabled: true }, '*');
+      window.__mockMessages = [];
+    }, baseDoc);
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+
+    for (const key of ['i', 'o', 'd']) {
+      await page.evaluate((text) => {
+        window.postMessage({ type: 'setText', text, notePaths: [] }, '*');
+        window.__mockMessages = [];
+      }, baseDoc);
+      await page.waitForFunction(() => window.__cmView?.state.doc.toString() === '# First\n\nAlpha beta\n\nTail line');
+      await page.evaluate(() => {
+        const view = window.__cmView;
+        const line = view.state.doc.line(3);
+        view.dispatch({ selection: { anchor: line.to } });
+        view.focus();
+      });
+
+      await page.keyboard.press('Control+O');
+      await page.keyboard.press(key);
+      await page.waitForTimeout(100);
+
+      const state = await page.evaluate(() => {
+        const view = window.__cmView;
+        const head = view.state.selection.main.head;
+        const line = view.state.doc.lineAt(head);
+        return {
+          text: view.state.doc.toString(),
+          lineNumber: line.number,
+          column: head - line.from,
+          lineText: line.text,
+          editMessages: window.__mockMessages?.filter((message) => message.type === 'edit') ?? [],
+        };
+      });
+      const expectedText = baseDoc.replace('Alpha beta', `Alpha beta${key}`);
+
+      expect(state.text, key).toBe(expectedText);
+      expect(state.lineNumber, key).toBe(3);
+      expect(state.lineText, key).toBe(`Alpha beta${key}`);
+      expect(state.column, key).toBe(`Alpha beta${key}`.length);
+      expect(state.editMessages.map(message => message.text), key).toEqual([expectedText]);
+    }
+  });
+
+  test('markdown editor supports a scratch-note human workflow with preview toggles and cursor movement', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+    const modifier = process.platform === 'darwin' ? 'Meta' : 'Control';
+    const consoleErrors: string[] = [];
+    page.on('console', message => {
+      if (message.type() === 'error') consoleErrors.push(message.text());
+    });
+    page.on('pageerror', error => {
+      consoleErrors.push(`PageError: ${error.message}`);
+    });
+
+    await page.evaluate(() => {
+      window.postMessage({
+        type: 'setText',
+        text: '',
+        currentNotePath: 'notes/Scratch Production Note.md',
+        notePaths: [
+          'notes/Concepts/FlashAttention.md',
+          'notes/Concepts/Online Softmax.md',
+        ],
+      }, '*');
+      window.postMessage({ type: 'setVimMode', enabled: false }, '*');
+      window.__mockMessages = [];
+    });
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+
+    const expectedDoc = [
+      '# Scratch Production Note',
+      '',
+      'Today I tested [[FlashAttention]] with [paper](raw/pdf/flash-attention.pdf#page=7&anchor=anc).',
+      '',
+      '- [ ] draft input',
+      '- [x] check cursor stability',
+      '',
+      '| Operation | Result |',
+      '| --- | --- |',
+      '| Ctrl+O | stable |',
+      '| Table preview | matches Obsidian |',
+      '',
+      '```python',
+      'print("hello")',
+      '```',
+      '',
+      '> [!note] Summary',
+      '> Keep `m` and **d** stable.',
+      'Final line.',
+    ].join('\n');
+
+    await page.locator('.cm-content').click();
+    await page.keyboard.type('# Scratch Production Note', { delay: 1 });
+    await page.keyboard.press('Enter');
+    await page.keyboard.press('Enter');
+    await page.keyboard.type('Today I tested [[FlashAttention]] with [paper](raw/pdf/flash-attention.pdf#page=7&anchor=anc).', { delay: 1 });
+    await page.keyboard.press('Enter');
+    await page.keyboard.press('Enter');
+    await page.keyboard.type('- [ ] draft input', { delay: 1 });
+    await page.keyboard.press('Enter');
+    await page.keyboard.type('check cursor stability', { delay: 1 });
+    await page.keyboard.press(`${modifier}+L`);
+    await page.keyboard.press('Enter');
+    await page.keyboard.press('Enter');
+    await page.keyboard.press('Enter');
+    await page.keyboard.type('| Operation | Result |', { delay: 1 });
+    await page.keyboard.press('Enter');
+    await page.keyboard.type('| --- | --- |', { delay: 1 });
+    await page.keyboard.press('Enter');
+    await page.keyboard.type('| Ctrl+O | stable |', { delay: 1 });
+    await page.keyboard.press('Enter');
+    await page.keyboard.type('| Table preview | matches Obsidian |', { delay: 1 });
+    await page.keyboard.press('Enter');
+    await page.keyboard.press('Enter');
+    await page.keyboard.type('```python', { delay: 1 });
+    await page.keyboard.press('Enter');
+    await page.keyboard.type('print("hello")', { delay: 1 });
+    await page.keyboard.press('Enter');
+    await page.keyboard.type('```', { delay: 1 });
+    await page.keyboard.press('Enter');
+    await page.keyboard.press('Enter');
+    await page.keyboard.type('> [!note] Summary', { delay: 1 });
+    await page.keyboard.press('Enter');
+    await page.keyboard.type('Keep `m` and **d** stable.', { delay: 1 });
+    await page.keyboard.press('Enter');
+    await page.keyboard.press('Enter');
+    await page.keyboard.type('Final line.', { delay: 1 });
+
+    await expect.poll(() => page.evaluate(() => window.__cmView?.state.doc.toString())).toBe(expectedDoc);
+    await page.keyboard.press(`${modifier}+Home`);
+    await page.keyboard.press('ArrowDown');
+    await page.keyboard.press('ArrowDown');
+    await page.keyboard.press('ArrowDown');
+    await page.keyboard.press('End');
+    await page.keyboard.press('Control+O');
+    await page.waitForTimeout(100);
+    await expect.poll(() => page.evaluate(() => window.__cmView?.state.doc.toString())).toBe(expectedDoc);
+
+    await page.keyboard.press(`${modifier}+E`);
+    await expect(page.locator('.cm-hl-link').filter({ hasText: 'FlashAttention' })).toHaveCount(0);
+    await page.keyboard.press(`${modifier}+E`);
+
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      const lastLine = view.state.doc.line(view.state.doc.lines);
+      view.dispatch({ selection: { anchor: lastLine.from } });
+      view.focus();
+    });
+
+    await expect(page.locator('.cm-hl-link').filter({ hasText: 'FlashAttention' })).toBeVisible();
+    await expect(page.locator('.cm-hybrid-table')).toBeVisible();
+    await expect(page.locator('.cm-hybrid-codeblock')).toBeVisible();
+    await expect(page.locator('.cm-hybrid-callout')).toBeVisible();
+
+    await page.locator('.cm-hybrid-table td')
+      .filter({ hasText: 'matches Obsidian' })
+      .click({ position: { x: 2, y: 2 } });
+    await expect(page.locator('.cm-hybrid-table-widget')).toHaveCount(0);
+    await expect(page.locator('.cm-content')).toContainText('| Table preview | matches Obsidian |');
+
+    const finalState = await page.evaluate(() => {
+      const view = window.__cmView;
+      const head = view.state.selection.main.head;
+      const line = view.state.doc.lineAt(head);
+      return {
+        text: view.state.doc.toString(),
+        lineNumber: line.number,
+        lineText: line.text,
+        editMessages: window.__mockMessages?.filter((message) => message.type === 'edit') ?? [],
+      };
+    });
+
+    expect(finalState.text).toBe(expectedDoc);
+    expect(finalState.lineNumber).toBe(11);
+    expect(finalState.lineText).toBe('| Table preview | matches Obsidian |');
+    expect(finalState.editMessages.at(-1)?.text).toBe(expectedDoc);
+    expect(consoleErrors).toEqual([]);
+  });
+
+  test('Vim mode fuzzes markdown-like input without moving the cursor off the target line', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+
+    const baseDoc = [
+      '# First',
+      '',
+      'Alpha beta',
+      '',
+      '# Second',
+      '',
+      'Tail line',
+    ].join('\n');
+    const explicitSequences: string[][] = [
+      ['d', 'd'],
+      ['-', 'Space'],
+      ['[', '[', 'O', 'n'],
+      ['i', 'w', 'h', 'o', 'a', 'm', 'i'],
+      ['-', 'Space', '[', '[', 'x', ']', ']'],
+    ];
+    const fuzzKeys = ['d', 'i', 'w', 'h', 'o', 'a', 'm', '-', 'Space', '[', ']', 'x', '1'];
+    const generatedSequences = Array.from({ length: 12 }, (_value, caseIndex) => {
+      let state = caseIndex + 17;
+      const length = 4 + (caseIndex % 7);
+      return Array.from({ length }, () => {
+        state = (state * 1103515245 + 12345) & 0x7fffffff;
+        return fuzzKeys[state % fuzzKeys.length]!;
+      });
+    });
+    const sequences = [...explicitSequences, ...generatedSequences];
+    const keyText = (key: string) => key === 'Space' ? ' ' : key;
+
+    await page.evaluate((text) => {
+      window.postMessage({ type: 'setText', text, notePaths: [] }, '*');
+      window.postMessage({ type: 'setVimMode', enabled: true }, '*');
+    }, baseDoc);
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+
+    for (const [caseIndex, sequence] of sequences.entries()) {
+      await page.evaluate((text) => {
+        window.postMessage({ type: 'setText', text, notePaths: [] }, '*');
+      }, caseIndex % 3 === 0
+        ? baseDoc.replace('# First', `# First external refresh ${caseIndex}`)
+        : baseDoc);
+      await page.waitForFunction(() => window.__cmView?.state.doc.line(3).text === 'Alpha beta');
+      await page.evaluate(() => {
+        const view = window.__cmView;
+        const line = view.state.doc.line(3);
+        view.dispatch({ selection: { anchor: line.to } });
+        view.focus();
+      });
+
+      for (const key of sequence) {
+        await page.keyboard.press(key);
+      }
+
+      const expectedInsertedText = sequence.map(keyText).join('');
+      const cursor = await page.evaluate(() => {
+        const view = window.__cmView;
+        const head = view.state.selection.main.head;
+        const line = view.state.doc.lineAt(head);
+        return {
+          lineNumber: line.number,
+          column: head - line.from,
+          lineText: line.text,
+        };
+      });
+
+      expect(cursor.lineNumber, `case ${caseIndex}: ${sequence.join(' ')}`).toBe(3);
+      expect(cursor.lineText, `case ${caseIndex}: ${sequence.join(' ')}`).toBe(`Alpha beta${expectedInsertedText}`);
+      expect(cursor.column, `case ${caseIndex}: ${sequence.join(' ')}`).toBe(`Alpha beta${expectedInsertedText}`.length);
+    }
+  });
+
+  test('markdown editor fuzzes mixed input methods without cursor or document corruption', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+
+    const baseDoc = [
+      '# Mixed Input Fuzz',
+      '',
+      'Alpha beta',
+      '',
+      '| Key | Value |',
+      '| --- | --- |',
+      '| row | target |',
+      '',
+      'Tail [[FlashAttention]]',
+    ].join('\n');
+    type FuzzOperation =
+      | { kind: 'press'; key: string; text: string }
+      | { kind: 'type'; text: string }
+      | { kind: 'paste'; text: string }
+      | { kind: 'hostInsert'; text: string }
+      | { kind: 'move'; key: 'ArrowLeft' | 'ArrowRight' | 'Home' | 'End' }
+      | { kind: 'backspace' }
+      | { kind: 'delete' }
+      | { kind: 'replace'; needle: string; text: string }
+      | { kind: 'ctrlO' };
+    const cases: FuzzOperation[][] = [
+      [
+        { kind: 'press', key: 'i', text: 'i' },
+        { kind: 'press', key: 'o', text: 'o' },
+        { kind: 'press', key: 'd', text: 'd' },
+        { kind: 'move', key: 'ArrowLeft' },
+        { kind: 'press', key: '[', text: '[' },
+        { kind: 'press', key: '[', text: '[' },
+        { kind: 'type', text: 'Wiki' },
+        { kind: 'press', key: ']', text: ']' },
+        { kind: 'press', key: ']', text: ']' },
+        { kind: 'ctrlO' },
+        { kind: 'press', key: 'o', text: 'o' },
+      ],
+      [
+        { kind: 'type', text: ' quick' },
+        { kind: 'move', key: 'ArrowLeft' },
+        { kind: 'move', key: 'ArrowLeft' },
+        { kind: 'press', key: '-', text: '-' },
+        { kind: 'press', key: 'Space', text: ' ' },
+        { kind: 'press', key: 'i', text: 'i' },
+        { kind: 'press', key: 'o', text: 'o' },
+        { kind: 'move', key: 'End' },
+        { kind: 'paste', text: ' pasted[[FlashAttention]]' },
+        { kind: 'hostInsert', text: ' host' },
+      ],
+      [
+        { kind: 'replace', needle: 'beta', text: 'BETA' },
+        { kind: 'ctrlO' },
+        { kind: 'press', key: 'i', text: 'i' },
+        { kind: 'move', key: 'Home' },
+        { kind: 'type', text: 'Start ' },
+        { kind: 'move', key: 'End' },
+        { kind: 'backspace' },
+        { kind: 'delete' },
+        { kind: 'type', text: '!' },
+      ],
+    ];
+    const insertAt = (source: string, column: number, text: string) => (
+      source.slice(0, column) + text + source.slice(column)
+    );
+    const lineAtPosition = (source: string, position: number) => {
+      let lineNumber = 1;
+      let from = 0;
+      while (from <= source.length) {
+        const newline = source.indexOf('\n', from);
+        const to = newline === -1 ? source.length : newline;
+        if (position <= to || newline === -1) {
+          return {
+            number: lineNumber,
+            from,
+            to,
+            text: source.slice(from, to),
+          };
+        }
+        lineNumber++;
+        from = newline + 1;
+      }
+      return {
+        number: lineNumber,
+        from: source.length,
+        to: source.length,
+        text: '',
+      };
+    };
+    const lineStartOffset = (source: string, lineNumber: number) => {
+      let from = 0;
+      for (let number = 1; number < lineNumber; number++) {
+        const newline = source.indexOf('\n', from);
+        if (newline === -1) return source.length;
+        from = newline + 1;
+      }
+      return from;
+    };
+
+    await page.waitForSelector('body');
+    for (const vimEnabled of [false, true]) {
+      for (const [caseIndex, operations] of cases.entries()) {
+        let expectedDoc = baseDoc;
+        let expectedHead = lineStartOffset(expectedDoc, 3) + 'Alpha beta'.length;
+        await page.evaluate(({ text, enabled }) => {
+          window.postMessage({
+            type: 'setText',
+            text,
+            notePaths: ['notes/Concepts/FlashAttention.md'],
+          }, '*');
+          window.postMessage({ type: 'setVimMode', enabled }, '*');
+          window.__mockMessages = [];
+        }, { text: baseDoc, enabled: vimEnabled });
+        await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+        await page.waitForFunction(() => window.__cmView?.state.doc.line(3).text === 'Alpha beta');
+        await page.evaluate(() => {
+          const view = window.__cmView;
+          const line = view.state.doc.line(3);
+          view.dispatch({ selection: { anchor: line.to } });
+          view.focus();
+        });
+
+        for (const [operationIndex, operation] of operations.entries()) {
+          const label = `vim=${vimEnabled} case=${caseIndex} op=${operationIndex} ${operation.kind}`;
+          if (operation.kind === 'press') {
+            await page.keyboard.press(operation.key);
+            expectedDoc = insertAt(expectedDoc, expectedHead, operation.text);
+            expectedHead += operation.text.length;
+          } else if (operation.kind === 'type') {
+            await page.keyboard.type(operation.text, { delay: 1 });
+            expectedDoc = insertAt(expectedDoc, expectedHead, operation.text);
+            expectedHead += operation.text.length;
+          } else if (operation.kind === 'paste') {
+            await page.locator('.cm-content').evaluate((element, text) => {
+              const event = new Event('paste', { bubbles: true, cancelable: true }) as ClipboardEvent;
+              Object.defineProperty(event, 'clipboardData', {
+                value: {
+                  getData: (type: string) => type === 'text/plain' ? text : '',
+                },
+              });
+              element.dispatchEvent(event);
+            }, operation.text);
+            expectedDoc = insertAt(expectedDoc, expectedHead, operation.text);
+            expectedHead += operation.text.length;
+          } else if (operation.kind === 'hostInsert') {
+            await page.evaluate((text) => {
+              window.postMessage({ type: 'insertText', text }, '*');
+            }, operation.text);
+            expectedDoc = insertAt(expectedDoc, expectedHead, operation.text);
+            expectedHead += operation.text.length;
+          } else if (operation.kind === 'move') {
+            await page.keyboard.press(operation.key);
+            const line = lineAtPosition(expectedDoc, expectedHead);
+            if (operation.key === 'ArrowLeft') expectedHead = Math.max(0, expectedHead - 1);
+            if (operation.key === 'ArrowRight') expectedHead = Math.min(expectedDoc.length, expectedHead + 1);
+            if (operation.key === 'Home') expectedHead = line.from;
+            if (operation.key === 'End') expectedHead = line.to;
+          } else if (operation.kind === 'backspace') {
+            await page.keyboard.press('Backspace');
+            if (expectedHead > 0) {
+              expectedDoc = expectedDoc.slice(0, expectedHead - 1) + expectedDoc.slice(expectedHead);
+              expectedHead--;
+            }
+          } else if (operation.kind === 'delete') {
+            await page.keyboard.press('Delete');
+            if (expectedHead < expectedDoc.length) {
+              expectedDoc = expectedDoc.slice(0, expectedHead) + expectedDoc.slice(expectedHead + 1);
+            }
+          } else if (operation.kind === 'replace') {
+            const line = lineAtPosition(expectedDoc, expectedHead);
+            const fromColumn = line.text.indexOf(operation.needle);
+            expect(fromColumn, label).toBeGreaterThanOrEqual(0);
+            await page.evaluate(({ lineNumber, fromColumn, length }) => {
+              const view = window.__cmView;
+              const line = view.state.doc.line(lineNumber);
+              view.dispatch({
+                selection: {
+                  anchor: line.from + fromColumn,
+                  head: line.from + fromColumn + length,
+                },
+              });
+              view.focus();
+            }, { lineNumber: line.number, fromColumn, length: operation.needle.length });
+            await page.keyboard.type(operation.text, { delay: 1 });
+            const absoluteFrom = line.from + fromColumn;
+            expectedDoc = expectedDoc.slice(0, absoluteFrom) + operation.text + expectedDoc.slice(absoluteFrom + operation.needle.length);
+            expectedHead = absoluteFrom + operation.text.length;
+          } else {
+            await page.keyboard.press('Control+O');
+          }
+
+          const expectedLine = lineAtPosition(expectedDoc, expectedHead);
+          await expect.poll(async () => page.evaluate(() => {
+            const view = window.__cmView;
+            const head = view.state.selection.main.head;
+            const line = view.state.doc.lineAt(head);
+            return {
+              fullText: view.state.doc.toString(),
+              lineNumber: line.number,
+              lineText: line.text,
+              column: head - line.from,
+            };
+          }), { message: label }).toEqual({
+            fullText: expectedDoc,
+            lineNumber: expectedLine.number,
+            lineText: expectedLine.text,
+            column: expectedHead - expectedLine.from,
+          });
+        }
+      }
+    }
+  });
+
   test('Cmd+click on an active raw-line link follows it like Obsidian live preview', async ({ page, browserName }) => {
     test.skip(browserName !== 'chromium', 'Meta-click modifier assertions are only stable in chromium');
 
@@ -7334,6 +8810,43 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
     ]);
   });
 
+  test('clicking rendered table cell padding enters the matching raw row like Obsidian live preview', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+
+    const testDoc = [
+      'Before table',
+      '',
+      '| Term | Detail |',
+      '| --- | --- |',
+      '| Online softmax | Running max and denominator |',
+      '',
+      'After table',
+    ].join('\n');
+
+    await page.evaluate((text) => {
+      window.postMessage({ type: 'setText', text }, '*');
+    }, testDoc);
+
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      view.dispatch({ selection: { anchor: view.state.doc.length } });
+    });
+
+    await expect(page.locator('.cm-hybrid-table-widget')).toBeVisible();
+    await page.locator('.cm-hybrid-table td')
+      .filter({ hasText: 'Online softmax' })
+      .click({ position: { x: 2, y: 2 } });
+
+    await expect.poll(() => page.evaluate(() => {
+      const view = window.__cmView;
+      return view.state.doc.lineAt(view.state.selection.main.head).number;
+    })).toBe(5);
+    await page.keyboard.type('edited ');
+    await expect.poll(() => page.evaluate(() => window.__cmView.state.doc.line(5).text))
+      .toBe('| edited Online softmax | Running max and denominator |');
+  });
+
   test('hybrid rendering renders inline Markdown inside table cells like Obsidian', async ({ page }) => {
     await page.goto('http://localhost:8979/test.html');
 
@@ -7493,6 +9006,74 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
     await expect(bodyCells.nth(0)).toHaveText('online softmax | tiled');
     await expect(bodyCells.nth(1)).toContainText('keeps code a|b in one cell');
     await expect(bodyCells.nth(1).locator('.cm-hybrid-table-inline-code')).toContainText('a|b');
+  });
+
+  test('hybrid rendering switches tables between rendered preview and raw source like Obsidian live preview', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+
+    const testDoc = [
+      'Before table',
+      '',
+      '| Term | Detail |',
+      '| --- | --- |',
+      '| Online softmax | Keep `m` and [[FlashAttention]] stable |',
+      '',
+      'After table',
+    ].join('\n');
+
+    await page.evaluate((text) => {
+      window.postMessage({ type: 'setText', text }, '*');
+    }, testDoc);
+
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      view.dispatch({ selection: { anchor: view.state.doc.line(7).from } });
+    });
+
+    const table = page.locator('.cm-hybrid-table');
+    await expect(table).toBeVisible();
+    await expect(table).toContainText('Online softmax');
+    await expect(table.locator('.cm-hybrid-table-inline-code')).toContainText('m');
+    await expect(table.getByRole('button', { name: 'FlashAttention' })).toBeVisible();
+    await expect(page.locator('.cm-content')).not.toContainText('| --- | --- |');
+
+    for (const lineNumber of [3, 4, 5]) {
+      await page.evaluate((line) => {
+        const view = window.__cmView;
+        const target = view.state.doc.line(line);
+        view.dispatch({ selection: { anchor: target.from } });
+      }, lineNumber);
+      await expect(page.locator('.cm-hybrid-table-widget')).toHaveCount(0);
+      await expect(page.locator('.cm-content')).toContainText('| Term | Detail |');
+      await expect(page.locator('.cm-content')).toContainText('| --- | --- |');
+      await expect(page.locator('.cm-content'))
+        .toContainText('| Online softmax | Keep m and FlashAttention stable |');
+    }
+
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      const target = view.state.doc.line(5);
+      view.dispatch({ selection: { anchor: target.from + target.text.indexOf('`m`') + 1 } });
+    });
+    await expect(page.locator('.cm-hybrid-table-widget')).toHaveCount(0);
+    await expect(page.locator('.cm-content')).toContainText('| Online softmax | Keep `m` and FlashAttention stable |');
+
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      const target = view.state.doc.line(5);
+      view.dispatch({ selection: { anchor: target.from + target.text.indexOf('FlashAttention') + 2 } });
+    });
+    await expect(page.locator('.cm-hybrid-table-widget')).toHaveCount(0);
+    await expect(page.locator('.cm-content')).toContainText('| Online softmax | Keep m and [[FlashAttention]] stable |');
+
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      view.dispatch({ selection: { anchor: view.state.doc.line(7).from } });
+    });
+
+    await expect(table).toBeVisible();
+    await expect(page.locator('.cm-content')).not.toContainText('| --- | --- |');
   });
 
   test('clicking a rendered image enters raw image editing like Obsidian live preview', async ({ page }) => {

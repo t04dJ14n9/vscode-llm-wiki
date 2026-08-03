@@ -1,5 +1,7 @@
 import { createHash } from 'crypto';
 import { type Database } from '../db/connection';
+import type { HlConfig } from '../workspace';
+import { embedTextRemote } from './remote';
 
 export const LOCAL_EMBEDDING_MODEL = 'hl-local-hash-v1';
 export const LOCAL_EMBEDDING_DIMENSIONS = 64;
@@ -38,12 +40,27 @@ export function cosineSimilarity(a: number[], b: number[]): number {
   return dot;
 }
 
-export function refreshEmbeddings(
+export async function refreshEmbeddings(
   db: Database,
-  options: { changedOnly?: boolean; modelId?: string; dimensions?: number } = {},
-): EmbeddingRefreshResult {
-  const modelId = options.modelId ?? LOCAL_EMBEDDING_MODEL;
-  const dimensions = options.dimensions ?? LOCAL_EMBEDDING_DIMENSIONS;
+  options: { changedOnly?: boolean; modelId?: string; dimensions?: number; config?: HlConfig } = {},
+): Promise<EmbeddingRefreshResult> {
+  const embCfg = options.config?.embeddings;
+  const remoteConfig = embCfg?.mode === 'remote' &&
+    (embCfg.provider === 'ollama' || embCfg.provider === 'openai-compatible') &&
+    embCfg.model &&
+    embCfg.base_url
+    ? {
+        provider: embCfg.provider,
+        model: embCfg.model,
+        base_url: embCfg.base_url,
+        api_key: embCfg.api_key,
+        dimensions: embCfg.dimensions,
+      }
+    : undefined;
+
+  const modelId = options.modelId ?? remoteConfig?.model ?? LOCAL_EMBEDDING_MODEL;
+  const dimensions = options.dimensions ?? embCfg?.dimensions ?? LOCAL_EMBEDDING_DIMENSIONS;
+
   const chunks = db.prepare(`
     SELECT id, text, content_hash
     FROM chunks
@@ -60,27 +77,35 @@ export function refreshEmbeddings(
   let embedded = 0;
   let skipped = 0;
 
-  const txn = db.transaction(() => {
-    for (const chunk of chunks) {
-      if (options.changedOnly) {
-        const existing = db.prepare(`
-          SELECT content_hash
-          FROM chunk_embeddings
-          WHERE chunk_id = ? AND model_id = ?
-        `).get(chunk.id, modelId) as { content_hash: string } | undefined;
-        if (existing?.content_hash === chunk.content_hash) {
-          skipped++;
-          continue;
-        }
+  for (const chunk of chunks) {
+    if (options.changedOnly) {
+      const existing = db.prepare(`
+        SELECT content_hash
+        FROM chunk_embeddings
+        WHERE chunk_id = ? AND model_id = ?
+      `).get(chunk.id, modelId) as { content_hash: string } | undefined;
+      if (existing?.content_hash === chunk.content_hash) {
+        skipped++;
+        continue;
       }
-
-      const vector = embedText(chunk.text, dimensions);
-      upsert.run(chunk.id, modelId, dimensions, chunk.content_hash, JSON.stringify(vector));
-      embedded++;
     }
-  });
 
-  txn();
+    let vector: number[];
+    if (remoteConfig) {
+      try {
+        vector = await embedTextRemote(chunk.text, remoteConfig);
+      } catch {
+        process.stderr.write(`[hl] embedding failed for chunk ${chunk.id}, skipping\n`);
+        skipped++;
+        continue;
+      }
+    } else {
+      vector = embedText(chunk.text, dimensions);
+    }
+
+    upsert.run(chunk.id, modelId, dimensions, chunk.content_hash, JSON.stringify(vector));
+    embedded++;
+  }
 
   return {
     model_id: modelId,

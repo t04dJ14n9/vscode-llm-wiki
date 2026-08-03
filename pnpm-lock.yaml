@@ -85,6 +85,19 @@ importers:
         specifier: ^5.4.0
         version: 5.9.3
 
+  packages/mcp-server:
+    dependencies:
+      '@human-learning/core':
+        specifier: workspace:*
+        version: link:../core
+    devDependencies:
+      '@types/node':
+        specifier: ^20.0.0
+        version: 20.19.41
+      typescript:
+        specifier: ^5.4.0
+        version: 5.9.3
+
   packages/pdf-editor:
     dependencies:
       '@embedpdf/engines':

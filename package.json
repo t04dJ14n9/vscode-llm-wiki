@@ -16,7 +16,7 @@
     "lint": "eslint . --cache --cache-location .cache/eslint/.eslintcache --max-warnings=0",
     "lint:fix": "eslint . --cache --cache-location .cache/eslint/.eslintcache --fix --max-warnings=0",
     "lint:staged": "node scripts/lint-staged.mjs",
-    "typecheck": "tsc -b packages/core packages/cli packages/vscode-extension packages/vscode-markdown-extension packages/vscode-pdf-extension --pretty false && tsc -p packages/pdf-editor/tsconfig.webview.json --noEmit --pretty false",
+    "typecheck": "tsc -b packages/core packages/cli packages/mcp-server packages/vscode-extension packages/vscode-markdown-extension packages/vscode-pdf-extension --pretty false && tsc -p packages/pdf-editor/tsconfig.webview.json --noEmit --pretty false",
     "check": "pnpm lint && pnpm typecheck && pnpm test",
     "clean": "pnpm -r clean",
     "prepare": "husky"

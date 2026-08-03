@@ -121,3 +121,22 @@ export type {
   PdfDiscussionUpdate,
   PdfPathLike,
 } from './pdf-discussions/store';
+
+// Activity
+export { recordActivity } from './activity/record';
+export type { ActivityEvent } from './activity/record';
+
+// Review / Spaced Repetition
+export {
+  createLearningObject,
+  getLearningObject,
+  listLearningObjects,
+  updateLearningObject,
+  suspendLearningObject,
+  retireLearningObject,
+} from './review/cards';
+export type { LearningObjectRecord, CreateLearningObjectInput } from './review/cards';
+export { computeNextReview, getDueCards, getLastReview } from './review/scheduler';
+export type { Sm2State, ScheduleResult, ReviewHistoryRow } from './review/scheduler';
+export { recordReview, getReviewHistory } from './review/session';
+export type { RecordReviewInput, ReviewHistoryRecord } from './review/session';

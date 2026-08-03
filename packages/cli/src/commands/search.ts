@@ -2,6 +2,7 @@ import { Command } from 'commander';
 import {
   detectVaultRoot, openDatabase, closeDatabase,
   searchLexical, searchNotes, searchSemantic, searchHybrid, runMigrations,
+  recordActivity,
 } from '@human-learning/core';
 
 export function searchCommand(): Command {
@@ -33,6 +34,11 @@ export function searchCommand(): Command {
       } else {
         results = searchLexical(db, query, limit);
       }
+
+      recordActivity(db, {
+        event_type: 'select_text',
+        metadata: { query, mode: options.mode, result_count: results.length },
+      });
 
       closeDatabase(db);
 

@@ -60,6 +60,8 @@ class TableWidget extends WidgetType {
       const tr = document.createElement('tr');
       for (const [cellIndex, cell] of row.entries()) {
         const element = document.createElement(rowIndex === 0 ? 'th' : 'td');
+        element.dataset.sourceFrom = String(cell.from);
+        element.dataset.sourceTo = String(cell.to);
         applyTableCellAlignment(element, this.alignments[cellIndex]);
         const display = document.createElement('span');
         display.className = 'cm-hybrid-table-cell-display';
@@ -112,7 +114,23 @@ class TableWidget extends WidgetType {
         changes: { from: this.blockFrom, to: this.blockTo, insert: source },
       });
     });
-    wrapper.addEventListener('mousedown', event => event.stopPropagation());
+    wrapper.addEventListener('mousedown', event => {
+      event.stopPropagation();
+      if (
+        event.target instanceof Element
+        && event.target.closest('.cm-hybrid-table-cell-input')
+      ) {
+        return;
+      }
+      event.preventDefault();
+      const cell = event.target instanceof Element
+        ? event.target.closest<HTMLElement>('th,td')
+        : null;
+      const sourceFrom = cell?.dataset.sourceFrom ? Number(cell.dataset.sourceFrom) : this.blockFrom;
+      const anchor = Number.isFinite(sourceFrom) ? sourceFrom : this.blockFrom;
+      view.dispatch({ selection: { anchor } });
+      view.focus();
+    });
     wrapper.addEventListener('keydown', event => event.stopPropagation());
     wrapper.addEventListener('input', event => event.stopPropagation());
 

@@ -4,6 +4,7 @@ import {
   openDatabase,
   persistWebPageSnapshot,
   runMigrations,
+  upsertWebTarget,
 } from '@human-learning/core';
 
 export interface MarkdownInsertTarget {
@@ -39,9 +40,12 @@ export class WebBrowserProvider {
   ) {}
 
   open(initialUrl = 'https://example.com'): void {
+    const url = normalizeUrl(initialUrl);
+    void this.saveTarget(url);
+
     if (this.panel) {
       this.panel.reveal(vscode.ViewColumn.Beside);
-      void this.panel.webview.postMessage({ type: 'navigate', url: normalizeUrl(initialUrl) });
+      void this.panel.webview.postMessage({ type: 'navigate', url });
       return;
     }
 
@@ -66,7 +70,21 @@ export class WebBrowserProvider {
         await this.persistWebPage(panel.webview, message as PersistWebPageMessage);
       }
     });
-    panel.webview.html = this.getHtml(panel.webview, normalizeUrl(initialUrl));
+    panel.webview.html = this.getHtml(panel.webview, url);
+  }
+
+  private async saveTarget(url: string): Promise<void> {
+    try {
+      const db = await openDatabase(this.vaultRoot);
+      try {
+        runMigrations(db);
+        upsertWebTarget(db, { url });
+      } finally {
+        closeDatabase(db);
+      }
+    } catch {
+      // Browsing remains available if activity persistence fails.
+    }
   }
 
   private async loadWebPage(webview: vscode.Webview, message: LoadWebPageMessage): Promise<void> {

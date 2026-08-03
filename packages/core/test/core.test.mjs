@@ -261,7 +261,7 @@ test('refreshes deterministic embeddings and supports semantic and hybrid search
       ingestFile(db, root, rel, source.id);
     }
 
-    const refreshed = refreshEmbeddings(db, { changedOnly: true });
+    const refreshed = await refreshEmbeddings(db, { changedOnly: true });
     assert.equal(refreshed.model_id, 'hl-local-hash-v1');
     assert.equal(refreshed.embedded, 2);
 
@@ -601,7 +601,7 @@ test('PDF search results emit portable page links without chunk IDs', async () =
       'hash-semantic',
       JSON.stringify({ page_start: 7, page_end: 7, source_path: 'raw/pdf/paper.pdf' }),
     );
-    refreshEmbeddings(db, { changedOnly: true });
+    await refreshEmbeddings(db, { changedOnly: true });
 
     const result = searchSemantic(db, 'memory traffic', 1)[0];
     assert.equal(result.anchor_uri, 'raw/pdf/paper.pdf#page=7');

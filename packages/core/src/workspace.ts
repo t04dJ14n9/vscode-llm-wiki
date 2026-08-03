@@ -7,10 +7,13 @@ export const HlConfigSchema = z.object({
   version: z.number().default(1),
   name: z.string().optional(),
   embeddings: z.object({
-    mode: z.enum(['disabled', 'remote', 'local']).default('disabled'),
+    mode: z.enum(['disabled', 'local', 'remote']).default('local'),
     provider: z.enum(['openai-compatible', 'ollama', 'sentence-transformers', 'custom']).optional(),
     model: z.string().optional(),
+    base_url: z.string().optional(),
     endpoint: z.string().optional(),
+    api_key: z.string().optional(),
+    dimensions: z.number().int().positive().optional(),
   }).default({}),
   security: z.object({
     activity_tracking: z.boolean().default(false),
@@ -34,7 +37,7 @@ export const DEFAULT_VAULT_LAYOUT = {
     '.claude/commands',
   ],
   files: {
-    '.hl/config.yaml': '# Human Learning vault configuration\nversion: 1\n',
+    '.hl/config.yaml': '# Human Learning vault configuration\nversion: 1\nembeddings:\n  mode: local\n',
   },
 };
 

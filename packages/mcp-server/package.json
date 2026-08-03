@@ -1,0 +1,21 @@
+{
+  "name": "@human-learning/mcp-server",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Human Learning — MCP server (JSON-RPC 2.0 over stdio)",
+  "main": "dist/main.js",
+  "bin": { "hl-mcp": "dist/main.js" },
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc --watch",
+    "clean": "rm -rf dist",
+    "test": "pnpm --filter @human-learning/core build && pnpm build && node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "@human-learning/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.4.0"
+  }
+}

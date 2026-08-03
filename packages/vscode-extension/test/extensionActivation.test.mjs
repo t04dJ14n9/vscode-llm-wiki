@@ -1151,6 +1151,7 @@ function createActivationMocks({ vscode, core = {} }) {
       rebuildAllLinks: () => undefined,
       registerSource: () => ({ id: 1 }),
       ingestFile: async () => undefined,
+      recordActivity: () => undefined,
       runMigrations: () => undefined,
       ...core,
     },
