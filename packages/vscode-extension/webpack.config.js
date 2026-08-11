@@ -7,7 +7,19 @@ const webviewBundleBudget = 7 * 1024 * 1024;
 const tsRule = (configFile = 'tsconfig.json') => ({
   test: /\.ts$/,
   exclude: /node_modules/,
-  use: [{ loader: 'ts-loader', options: { configFile } }],
+  use: [{
+    loader: 'ts-loader',
+    options: {
+      configFile,
+      onlyCompileBundledFiles: true,
+      compilerOptions: {
+        composite: false,
+        declaration: false,
+        declarationMap: false,
+        incremental: false,
+      },
+    },
+  }],
 });
 
 const resolveFromPackage = (anchorPackage, request = anchorPackage) => (
@@ -50,10 +62,12 @@ module.exports = [
     },
     externals: {
       vscode: 'commonjs vscode',
-      'sql.js': 'commonjs sql.js',
     },
     resolve: {
       extensions: ['.ts', '.js'],
+      alias: {
+        '@human-learning/core$': path.resolve(__dirname, '../core/dist/lite.js'),
+      },
     },
     module: {
       rules: [tsRule()],
@@ -92,11 +106,6 @@ module.exports = [
             from: 'node_modules/@embedpdf/pdfium/dist/pdfium.wasm',
             to: 'pdfium.wasm',
           },
-          {
-            from: require.resolve('sql.js/dist/sql-wasm.wasm'),
-            to: 'sql-wasm.wasm',
-            noErrorOnMissing: true,
-          },
         ],
       }),
     ],
@@ -119,6 +128,28 @@ module.exports = [
     resolve: {
       extensions: ['.ts', '.js'],
       alias: markdownEditorAliases,
+    },
+    module: {
+      rules: [tsRule()],
+    },
+    performance: webviewPerformance,
+    devtool: 'source-map',
+  },
+  {
+    name: 'experimental-owned-browser',
+    target: 'web',
+    entry: './webview-src/experimental-owned-browser.ts',
+    output: {
+      path: dist,
+      filename: 'experimental-owned-browser.js',
+      chunkLoading: false,
+      publicPath: '',
+    },
+    optimization: {
+      splitChunks: false,
+    },
+    resolve: {
+      extensions: ['.ts', '.js'],
     },
     module: {
       rules: [tsRule()],

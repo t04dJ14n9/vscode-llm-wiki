@@ -11,31 +11,129 @@ const extractionSource = join(
   packageRoot,
   '../pdf-editor/src/webview/domain/pdfTextExtraction.ts',
 );
+const searchSource = join(
+  packageRoot,
+  '../pdf-editor/src/webview/domain/pdfSearch.ts',
+);
 
-function loadExtractionModule() {
-  const source = readFileSync(extractionSource, 'utf8');
+function loadTypeScriptModule(filename) {
+  const source = readFileSync(filename, 'utf8');
   const { outputText } = ts.transpileModule(source, {
     compilerOptions: {
       module: ts.ModuleKind.CommonJS,
       target: ts.ScriptTarget.ES2022,
       esModuleInterop: true,
     },
-    fileName: extractionSource,
+    fileName: filename,
   });
-  const mod = new Module(extractionSource);
-  mod.filename = extractionSource;
-  mod.paths = Module._nodeModulePaths(dirname(extractionSource));
-  mod._compile(outputText, extractionSource);
+  const mod = new Module(filename);
+  mod.filename = filename;
+  mod.paths = Module._nodeModulePaths(dirname(filename));
+  mod._compile(outputText, filename);
   return mod.exports;
 }
 
-const extraction = loadExtractionModule();
+const extraction = loadTypeScriptModule(extractionSource);
+const pdfSearch = loadTypeScriptModule(searchSource);
 
 function rect(left, top, width = 10, height = 8) {
   return {
     origin: { x: left, y: top },
     size: { width, height },
   };
+}
+
+function terminalGhostGlyph(runRect, {
+  looseWidth = 3,
+  looseHeight = runRect.size.height,
+  looseRight = runRect.origin.x + runRect.size.width,
+  tightWidth = 2,
+  tightHeight = 1,
+  tightRight = runRect.origin.x + runRect.size.width,
+} = {}) {
+  return {
+    origin: { x: looseRight - looseWidth, y: runRect.origin.y },
+    size: { width: looseWidth, height: looseHeight },
+    tightOrigin: {
+      x: tightRight - tightWidth,
+      y: runRect.origin.y + (runRect.size.height - tightHeight) / 2,
+    },
+    tightSize: { width: tightWidth, height: tightHeight },
+  };
+}
+
+function terminalGhostFixture({
+  stem = 'representa',
+  continuation = 'tion',
+  charIndex = 100,
+  nextCharIndex,
+  runRect = rect(40, 100, 80, 10),
+  nextRect = rect(40, 110, 60, 10),
+  sourceCharacters,
+  terminalGhost = true,
+  ghostGeometry,
+  ghostGlyphState = 'present',
+} = {}) {
+  const stemCharacters = Array.from(stem);
+  const continuationCharacters = Array.from(continuation);
+  const charCount = stemCharacters.length + (terminalGhost ? 1 : 0);
+  const resolvedNextCharIndex = nextCharIndex ?? charIndex + charCount;
+  const glyphs = [];
+  if (terminalGhost && ghostGlyphState !== 'missing') {
+    const glyph = terminalGhostGlyph(runRect, ghostGeometry);
+    if (ghostGlyphState === 'empty') glyph.isEmpty = true;
+    if (ghostGlyphState === 'no-tight') {
+      delete glyph.tightOrigin;
+      delete glyph.tightSize;
+    }
+    glyphs[charIndex + charCount - 1] = glyph;
+  }
+  const runSourceCharacters = sourceCharacters ?? [
+    ...stemCharacters,
+    ...(terminalGhost ? [''] : []),
+  ];
+  return {
+    runs: [
+      {
+        text: stem,
+        charIndex,
+        charCount,
+        rect: runRect,
+        fontSize: runRect.size.height,
+      },
+      {
+        text: continuation,
+        charIndex: resolvedNextCharIndex,
+        charCount: continuationCharacters.length,
+        rect: nextRect,
+        fontSize: nextRect.size.height,
+      },
+    ],
+    glyphs,
+    sourceCharacters: new Map([
+      [0, runSourceCharacters],
+    ]),
+  };
+}
+
+function normalizedGhostFixture(options) {
+  const fixture = terminalGhostFixture(options);
+  return extraction.normalizePdfTextRuns(
+    fixture.runs,
+    fixture.glyphs,
+    fixture.sourceCharacters,
+  );
+}
+
+function searchText(items) {
+  return pdfSearch
+    .buildPdfSearchIndex(items, 'geometry', false, false, true)
+    .map(character => character.value)
+    .join('');
+}
+
+function hasInferredWordJoin(items) {
+  return items.some(item => item.wordJoinAfter === true);
 }
 
 test('PDF text rectangles accept finite numeric coordinates and reject malformed geometry', () => {
@@ -164,6 +262,70 @@ test('missing glyph data falls back to evenly partitioned run geometry', () => {
   ]);
 });
 
+test('whitespace artifacts cannot split word-joined rows with an italic fragment', () => {
+  const normalized = extraction.normalizePdfTextRuns([
+    { text: ' \r\n', charIndex: 54, charCount: 3, rect: rect(456, 586, 3, 17) },
+    {
+      text: ' \r\n',
+      charIndex: 57,
+      charCount: 3,
+      rect: rect(456, 614, 3, 15),
+      font: { italic: true },
+    },
+    {
+      text: 'Many cities further report that, rather than help allevi',
+      charIndex: 117,
+      charCount: 56,
+      rect: rect(167, 154, 285, 16),
+    },
+    { text: '', charIndex: 173, charCount: 1, rect: rect(452, 154, 4, 16) },
+    {
+      text: 'ate the homelessness crisis, ',
+      charIndex: 174,
+      charCount: 29,
+      rect: rect(156, 167, 145, 17),
+    },
+    {
+      text: 'Martin',
+      charIndex: 203,
+      charCount: 6,
+      rect: rect(302, 168, 36, 16),
+      font: { italic: true },
+    },
+    {
+      text: ' injunctions have inad',
+      charIndex: 209,
+      charCount: 22,
+      rect: rect(338, 167, 114, 17),
+    },
+    { text: '', charIndex: 231, charCount: 1, rect: rect(452, 167, 4, 17) },
+    {
+      text: 'vertently contributed to it. The numbers of “[u]nsheltered\r\n',
+      charIndex: 232,
+      charCount: 60,
+      rect: rect(156, 180, 300, 17),
+    },
+  ]);
+
+  assert.deepEqual(normalized.map(item => item.content), [
+    'Many cities further report that, rather than help allevi',
+    'ate the homelessness crisis, ',
+    'Martin',
+    ' injunctions have inad',
+    'vertently contributed to it. The numbers of “[u]nsheltered',
+  ]);
+  assert.equal(normalized[0].wordJoinAfter, true);
+  assert.equal(normalized[2].font.italic, true);
+  assert.equal(normalized[3].wordJoinAfter, true);
+  assert.equal(
+    searchText(normalized),
+    [
+      'many cities further report that, rather than help alleviate the homelessness crisis, ',
+      'martin injunctions have inadvertently contributed to it. the numbers of “[u]nsheltered',
+    ].join(''),
+  );
+});
+
 test('word-join artifacts survive as non-selectable soft-hyphen markers', () => {
   const normalized = extraction.normalizePdfTextRuns([
     { text: '', charCount: 1, rect: rect(0, 0) },
@@ -179,6 +341,151 @@ test('word-join artifacts survive as non-selectable soft-hyphen markers', () => 
   assert.equal(extraction.endsWithPdfWordJoinMarker(`word\u00ad`), true);
   assert.equal(extraction.endsWithPdfWordJoinMarker('word'), false);
 });
+
+test('an internal soft hyphen does not suppress the gap after its text run', () => {
+  const first = 'co\u00adoperate';
+  const second = 'well';
+  const normalized = extraction.normalizePdfTextRuns([
+    {
+      text: first,
+      charIndex: 0,
+      charCount: Array.from(first).length,
+      rect: rect(0, 0, 60, 10),
+    },
+    {
+      text: second,
+      charIndex: Array.from(first).length,
+      charCount: second.length,
+      rect: rect(80, 0, 30, 10),
+    },
+  ], [], new Map([
+    [0, Array.from(first)],
+    [1, Array.from(second)],
+  ]));
+
+  assert.deepEqual(normalized.map(item => item.content), ['cooperate', 'well']);
+  assert.equal(normalized[0].wordJoinAfter, undefined);
+  assert.equal(searchText(normalized), 'cooperate well');
+});
+
+for (const [stem, continuation, joined] of [
+  ['representa', 'tion model', 'representation model'],
+  ['qual', 'ity to reduce', 'quality to reduce'],
+]) {
+  test(`terminal ghost recovers ${stem}|${continuation.split(' ')[0]} as a metadata-only word join`, () => {
+    const normalized = normalizedGhostFixture({ stem, continuation });
+
+    assert.equal(normalized[0].content, stem);
+    assert.equal(normalized[1].content, continuation);
+    assert.equal(normalized[0].wordJoinAfter, true);
+    assert.equal(normalized[0].content.includes('\u00ad'), false);
+    assert.equal(searchText(normalized), joined);
+    assert.equal(
+      normalized[0].selectionGlyphs.some(glyph => glyph.offsetEnd > stem.length),
+      false,
+    );
+  });
+}
+
+test('ordinary wrapped lines without a terminal ghost remain separate words', () => {
+  const normalized = normalizedGhostFixture({
+    stem: 'ordinary',
+    continuation: 'wrapped',
+    terminalGhost: false,
+  });
+
+  assert.deepEqual(normalized.map(item => item.content), ['ordinary', 'wrapped']);
+  assert.equal(hasInferredWordJoin(normalized), false);
+  assert.equal(searchText(normalized), 'ordinary wrapped');
+});
+
+test('terminal ghosts do not join text into a later column', () => {
+  const normalized = normalizedGhostFixture({
+    nextRect: rect(180, 110, 60, 10),
+  });
+
+  assert.deepEqual(normalized.map(item => item.content), ['representa', 'tion']);
+  assert.equal(hasInferredWordJoin(normalized), false);
+  assert.equal(searchText(normalized), 'representa tion');
+});
+
+for (const [name, options] of [
+  ['the terminal ghost glyph is missing', { ghostGlyphState: 'missing' }],
+  ['the terminal ghost glyph is marked empty', { ghostGlyphState: 'empty' }],
+  ['the terminal ghost has no tight geometry', { ghostGlyphState: 'no-tight' }],
+]) {
+  test(`terminal ghost is not inferred when ${name}`, () => {
+    const normalized = normalizedGhostFixture(options);
+
+    assert.deepEqual(normalized.map(item => item.content), ['representa', 'tion']);
+    assert.equal(hasInferredWordJoin(normalized), false);
+    assert.equal(searchText(normalized), 'representa tion');
+  });
+}
+
+test('an empty source character before the terminal ghost is not inferred as a word join', () => {
+  const sourceCharacters = [...Array.from('representa'), ''];
+  sourceCharacters[4] = '';
+  const normalized = normalizedGhostFixture({ sourceCharacters });
+
+  assert.equal(hasInferredWordJoin(normalized), false);
+  assert.equal(searchText(normalized), 'reprsenta tion');
+});
+
+for (const [name, options] of [
+  [
+    'the preceding character is not alphanumeric',
+    { stem: 'representa.', continuation: 'tion' },
+  ],
+  [
+    'the following character is not alphanumeric',
+    { stem: 'representa', continuation: '.tion' },
+  ],
+]) {
+  test(`terminal ghost is not inferred when ${name}`, () => {
+    const normalized = normalizedGhostFixture(options);
+
+    assert.equal(hasInferredWordJoin(normalized), false);
+  });
+}
+
+for (const [name, ghostGeometry] of [
+  ['loose glyph is too wide', { looseWidth: 6 }],
+  ['tight glyph is too wide', { tightWidth: 6 }],
+  ['tight glyph is too tall', { tightHeight: 3 }],
+  ['loose glyph is not flush with the run end', { looseRight: 117 }],
+  ['tight glyph is not flush with the run end', { tightRight: 117 }],
+]) {
+  test(`terminal ghost is not inferred when its ${name}`, () => {
+    const normalized = normalizedGhostFixture({ ghostGeometry });
+
+    assert.deepEqual(normalized.map(item => item.content), ['representa', 'tion']);
+    assert.equal(hasInferredWordJoin(normalized), false);
+    assert.equal(searchText(normalized), 'representa tion');
+  });
+}
+
+test('terminal ghost is not inferred across noncontiguous source indices', () => {
+  const normalized = normalizedGhostFixture({ nextCharIndex: 114 });
+
+  assert.deepEqual(normalized.map(item => item.content), ['representa', 'tion']);
+  assert.equal(hasInferredWordJoin(normalized), false);
+  assert.equal(searchText(normalized), 'representa tion');
+});
+
+for (const [name, nextTop] of [
+  ['too close', 104],
+  ['too far away', 118],
+]) {
+  test(`terminal ghost is not inferred when the following line is ${name}`, () => {
+    const normalized = normalizedGhostFixture({
+      nextRect: rect(40, nextTop, 60, 10),
+    });
+
+    assert.deepEqual(normalized.map(item => item.content), ['representa', 'tion']);
+    assert.equal(hasInferredWordJoin(normalized), false);
+  });
+}
 
 test('column detection keeps each PDF reading lane contiguous', () => {
   const normalized = extraction.normalizeBasicPdfTextRects([

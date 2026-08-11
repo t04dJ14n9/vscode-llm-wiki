@@ -30,10 +30,12 @@ import { fileURLToPath } from 'url';
 import {
   PdfDiscussionDocumentV1Schema,
   type PdfDiscussionDocumentV1,
+  type PdfDiscussionRectV1,
   PdfDiscussionSnapshotV1Schema,
   type PdfDiscussionSnapshotV1,
   pdfDiscussionSnapshotFile,
 } from './schema';
+import { toPortablePdfAnnotation } from './portable';
 
 export type PdfDiscussionLayout = 'vault' | 'global';
 export type PdfPathLike = string | URL;
@@ -70,6 +72,12 @@ export interface PdfDiscussionStoreOptions {
   pdfPath: PdfPathLike;
   sourceUri?: string;
   portableSourceUrl?: string;
+}
+
+export interface PdfDiscussionSnapshotCapture {
+  cropRect: PdfDiscussionRectV1;
+  padding: number;
+  unit: 'pt';
 }
 
 export interface PdfDiscussionSelectionKeyInput {
@@ -436,6 +444,36 @@ function pathIsWithin(root: string, candidate: string): boolean {
     || (!isAbsolute(fromRoot) && fromRoot !== '..' && !fromRoot.startsWith(`..${sep}`));
 }
 
+function pathSafetyIssue(
+  storageRoot: string,
+  path: string,
+): { reason: string; cause?: unknown } | undefined {
+  if (!pathIsWithin(storageRoot, path)) {
+    return { reason: 'path resolves outside its storage root' };
+  }
+  const parts = relative(storageRoot, path).split(sep).filter(Boolean);
+  let current = storageRoot;
+  let canonicalRoot: string | undefined;
+  for (let index = -1; index < parts.length; index += 1) {
+    if (index >= 0) current = join(current, parts[index]!);
+    try {
+      const entry = lstatSync(current);
+      if (entry.isSymbolicLink()) return { reason: 'path contains a symbolic link' };
+      if (index < parts.length - 1 && !entry.isDirectory()) {
+        return { reason: 'path contains a non-directory ancestor' };
+      }
+      canonicalRoot ??= realpathSync(storageRoot);
+      if (!pathIsWithin(canonicalRoot, realpathSync(current))) {
+        return { reason: 'path resolves outside its storage root' };
+      }
+    } catch (cause) {
+      if (errnoCode(cause) === 'ENOENT') break;
+      return { reason: 'path metadata could not be inspected safely', cause };
+    }
+  }
+  return undefined;
+}
+
 function pngDimensions(input: Uint8Array): { width: number; height: number } {
   const bytes = Buffer.from(input);
   const signature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
@@ -468,6 +506,7 @@ export class PdfDiscussionStore {
   readonly pdfSha256: string;
   readonly sidecarPath: string;
   readonly assetsPath: string;
+  readonly portableAnnotationsPath: string | undefined;
   private invalidSidecarError: InvalidPdfDiscussionSidecarError | undefined;
   private observedSidecarState: string | undefined;
 
@@ -483,10 +522,14 @@ export class PdfDiscussionStore {
       const discussionRoot = join(this.rootPath, '.hl', 'annotations', 'pdf');
       this.sidecarPath = join(discussionRoot, `${this.pdfSha256}.json`);
       this.assetsPath = join(discussionRoot, 'assets');
+      this.portableAnnotationsPath = pathIsWithin(this.rootPath, this.pdfPath)
+        ? join(discussionRoot, this.pdfSha256)
+        : undefined;
     } else if (this.layout === 'global') {
       const discussionRoot = join(this.rootPath, 'pdf-annotations', this.pdfSha256);
       this.sidecarPath = join(discussionRoot, 'annotations.json');
       this.assetsPath = join(discussionRoot, 'assets');
+      this.portableAnnotationsPath = undefined;
     } else {
       throw new Error(`Unsupported PDF discussion layout: ${String(this.layout)}`);
     }
@@ -495,6 +538,7 @@ export class PdfDiscussionStore {
   load(): PdfDiscussionDocumentV1 {
     const loaded = this.readDocumentUnlocked();
     this.observedSidecarState = loaded.state;
+    this.backfillPortableAnnotations(loaded.document);
     return loaded.document;
   }
 
@@ -528,7 +572,11 @@ export class PdfDiscussionStore {
     });
   }
 
-  writeSnapshot(annotationId: string, png: Uint8Array): PdfDiscussionSnapshotV1 {
+  writeSnapshot(
+    annotationId: string,
+    png: Uint8Array,
+    capture?: PdfDiscussionSnapshotCapture,
+  ): PdfDiscussionSnapshotV1 {
     if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(annotationId)) {
       throw new Error('PDF discussion annotation IDs must be safe path segments');
     }
@@ -546,9 +594,33 @@ export class PdfDiscussionStore {
       width,
       height,
       mimeType: 'image/png',
+      ...capture,
     });
     this.withLock(() => this.writeSnapshotBytes(snapshot.file, png));
     return snapshot;
+  }
+
+  writePortableAnnotation(
+    annotation: PdfDiscussionDocumentV1['annotations'][number],
+    learningNotePath?: string,
+  ): string | undefined {
+    const path = this.portableAnnotationPath(annotation.id);
+    if (!path) return undefined;
+    const repositoryPath = (value: string) =>
+      relative(this.rootPath, value).split(sep).join('/');
+    const portable = toPortablePdfAnnotation({
+      annotation,
+      pdfSha256: this.pdfSha256,
+      sourcePath: repositoryPath(this.pdfPath),
+      annotationPath: repositoryPath(path),
+      ...(learningNotePath ? { learningNotePath } : {}),
+    });
+    this.assertPortablePathSafe(path);
+    mkdirSync(dirname(path), { recursive: true });
+    this.assertPortablePathSafe(path);
+    atomicWriteFile(path, `${JSON.stringify(portable, null, 2)}\n`);
+    this.assertPortablePathSafe(path);
+    return path;
   }
 
   readSnapshot(file: string): Buffer {
@@ -688,7 +760,37 @@ export class PdfDiscussionStore {
     const serialized = `${JSON.stringify(parsed, null, 2)}\n`;
     atomicWriteFile(this.sidecarPath, serialized);
     this.observedSidecarState = sidecarState(serialized);
+    this.backfillPortableAnnotations(parsed);
     return parsed;
+  }
+
+  private portableAnnotationPath(annotationId: string): string | undefined {
+    if (!this.portableAnnotationsPath) return undefined;
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(annotationId)) {
+      throw new Error('PDF discussion annotation IDs must be safe path segments');
+    }
+    return join(this.portableAnnotationsPath, `${annotationId}.jsonld`);
+  }
+
+  private backfillPortableAnnotations(document: PdfDiscussionDocumentV1): void {
+    for (const annotation of document.annotations) {
+      try {
+        const path = this.portableAnnotationPath(annotation.id);
+        if (!path || existsSync(path)) continue;
+        this.writePortableAnnotation(annotation);
+      } catch {
+        // Portable JSON-LD is derived state. The canonical v1 sidecar remains
+        // readable and a later load/write can retry a missing mirror.
+      }
+    }
+  }
+
+  private assertPortablePathSafe(path: string): void {
+    const issue = pathSafetyIssue(this.rootPath, path);
+    if (!issue) return;
+    const error = new Error(`Unsafe portable annotation ${issue.reason}`);
+    if (issue.cause !== undefined) error.cause = issue.cause;
+    throw error;
   }
 
   private readVerifiedSnapshotUnlocked(
@@ -853,63 +955,13 @@ export class PdfDiscussionStore {
   }
 
   private assertSnapshotPathSafe(file: string, path: string): void {
-    const storageRoot = this.rootPath;
-    if (!pathIsWithin(storageRoot, path)) {
+    const issue = pathSafetyIssue(this.rootPath, path);
+    if (issue) {
       throw new InvalidPdfDiscussionSnapshotError(
         file,
-        'snapshot path resolves outside its storage root',
+        `snapshot ${issue.reason}`,
+        issue.cause,
       );
-    }
-
-    const fromRoot = relative(storageRoot, path);
-    const parts = fromRoot === '' ? [] : fromRoot.split(sep);
-    let current = storageRoot;
-    let canonicalRoot: string | undefined;
-    for (let index = -1; index < parts.length; index += 1) {
-      if (index >= 0) current = join(current, parts[index]!);
-      let entry;
-      try {
-        entry = lstatSync(current);
-      } catch (cause) {
-        if (errnoCode(cause) === 'ENOENT') break;
-        throw new InvalidPdfDiscussionSnapshotError(
-          file,
-          'snapshot path metadata could not be inspected safely',
-          cause,
-        );
-      }
-      if (entry.isSymbolicLink()) {
-        throw new InvalidPdfDiscussionSnapshotError(
-          file,
-          'snapshot path contains a symbolic link',
-        );
-      }
-      if (index < parts.length - 1 && !entry.isDirectory()) {
-        throw new InvalidPdfDiscussionSnapshotError(
-          file,
-          'snapshot path contains a non-directory ancestor',
-        );
-      }
-
-      try {
-        canonicalRoot ??= realpathSync(storageRoot);
-        const canonicalCurrent = realpathSync(current);
-        if (!pathIsWithin(canonicalRoot, canonicalCurrent)) {
-          throw new InvalidPdfDiscussionSnapshotError(
-            file,
-            'snapshot path resolves outside its storage root',
-          );
-        }
-      } catch (cause) {
-        if (cause instanceof InvalidPdfDiscussionSnapshotError) throw cause;
-        if (errnoCode(cause) !== 'ENOENT') {
-          throw new InvalidPdfDiscussionSnapshotError(
-            file,
-            'snapshot path could not be resolved safely',
-            cause,
-          );
-        }
-      }
     }
   }
 }

@@ -45,6 +45,7 @@ function loadTsModule(relativePath, mocks = {}) {
         },
       };
     }
+    if (request === './cursorCrop') return cursorCrop;
     return originalLoad.call(this, request, parent, isMain);
   };
   try {
@@ -54,6 +55,12 @@ function loadTsModule(relativePath, mocks = {}) {
     Module._load = originalLoad;
   }
 }
+
+const cursorCrop = loadTsModule('src/cursorCrop.ts', {
+  './pdfDiscussionController': {
+    PDF_DISCUSSION_MAX_PNG_BYTES: 5 * 1024 * 1024,
+  },
+});
 
 test('PDF editor provider exposes portable database-free agent context with normalized selection context', async () => {
   const pdfHrefCalls = [];
@@ -133,6 +140,163 @@ test('PDF editor provider exposes portable database-free agent context with norm
       textFragment,
     },
   }]);
+});
+
+test('PDF Cursor handoff routes exact selection and an optional validated crop through one command', async () => {
+  const commands = [];
+  const vscode = {
+    workspace: {
+      asRelativePath: uri => uri.fsPath.replace('/vault/', ''),
+    },
+    commands: {
+      executeCommand: async (...args) => { commands.push(args); },
+    },
+    Uri: {
+      joinPath: (...parts) => ({ parts }),
+    },
+  };
+  const {
+    ADD_SELECTION_TO_CURSOR_CHAT_COMMAND,
+    PdfEditorProvider,
+  } = loadTsModule('src/pdfEditorProvider.ts', {
+    vscode,
+    '@human-learning/core': { pdfHref: portablePdfHref },
+  });
+  const provider = new PdfEditorProvider(
+    { extensionUri: { fsPath: '/extension' } },
+    '/vault',
+  );
+  const pdfUri = { fsPath: '/vault/raw/pdf/paper.pdf' };
+  const anchor = {
+    page: 3,
+    textItemIndex: 4,
+    charOffset: 2,
+    endTextItemIndex: 5,
+    endCharOffset: 8,
+    rects: [[12, 24, 180, 40]],
+    prefix: 'before context',
+    suffix: 'after context',
+    snippet: 'Selected PDF passage',
+  };
+  const png = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+    'base64',
+  );
+
+  await provider.handleSelectionAction(
+    pdfUri,
+    'addToCursorChat',
+    anchor,
+    png.toString('base64'),
+  );
+  await provider.handleSelectionAction(
+    pdfUri,
+    'addToCursorChat',
+    anchor,
+    'not canonical base64',
+  );
+
+  const selection = {
+    uri: pdfUri,
+    text: 'Selected PDF passage',
+    startLine: 3,
+    endLine: 3,
+    sourceLabel: 'raw/pdf/paper.pdf',
+    rangeLabel: 'page 3',
+    anchorUri: 'raw/pdf/paper.pdf#page=3:~:text=before%20context-,Selected%20PDF%20passage,-after%20context',
+    metadata: {
+      kind: 'pdf',
+      page: 3,
+      textFragment: {
+        textStart: 'Selected PDF passage',
+        prefix: 'before context',
+        suffix: 'after context',
+      },
+    },
+  };
+  assert.equal(ADD_SELECTION_TO_CURSOR_CHAT_COMMAND, 'human-learning.addSelectionToCursorChat');
+  assert.equal(commands.length, 2);
+  assert.equal(commands[0][0], ADD_SELECTION_TO_CURSOR_CHAT_COMMAND);
+  assert.deepEqual(commands[0][1].selection, selection);
+  assert.deepEqual(Buffer.from(commands[0][1].snapshotPng), png);
+  assert.deepEqual(commands[1], [
+    ADD_SELECTION_TO_CURSOR_CHAT_COMMAND,
+    { selection },
+  ]);
+});
+
+test('combined PDF context keys clear on deactivation and restore with its selection', async () => {
+  const commands = [];
+  let onDidChangeViewState;
+  const vscode = {
+    workspace: {
+      asRelativePath: uri => uri.fsPath.replace('/vault/', ''),
+    },
+    commands: {
+      executeCommand: async (...args) => { commands.push(args); },
+    },
+    Uri: {
+      joinPath: () => ({ toString: () => 'vscode-resource' }),
+    },
+  };
+  const { PdfEditorProvider } = loadTsModule('src/pdfEditorProvider.ts', {
+    vscode,
+    '@human-learning/core': { pdfHref: portablePdfHref },
+  });
+  const provider = new PdfEditorProvider(
+    { extensionUri: { fsPath: '/extension' }, subscriptions: [] },
+    '/vault',
+  );
+  const pdfUri = {
+    fsPath: '/vault/raw/pdf/paper.pdf',
+    toString: () => 'file:///vault/raw/pdf/paper.pdf',
+  };
+  const webview = {
+    cspSource: 'vscode-webview:',
+    asWebviewUri: uri => uri,
+    onDidReceiveMessage: () => ({ dispose() {} }),
+    postMessage: async () => true,
+  };
+  const panel = {
+    active: true,
+    webview,
+    onDidChangeViewState(listener) {
+      onDidChangeViewState = listener;
+      return { dispose() {} };
+    },
+    onDidDispose: () => ({ dispose() {} }),
+  };
+  const originalSetTimeout = globalThis.setTimeout;
+  globalThis.setTimeout = () => 0;
+  try {
+    await provider.resolveCustomEditor({ uri: pdfUri }, panel, {});
+  } finally {
+    globalThis.setTimeout = originalSetTimeout;
+  }
+  await provider.updateActiveSelection(pdfUri.toString(), {
+    page: 4,
+    snippet: 'Selected text',
+  });
+
+  commands.length = 0;
+  panel.active = false;
+  await onDidChangeViewState();
+
+  assert.equal(provider.getActiveWebview(), undefined);
+  assert.deepEqual(commands, [
+    ['setContext', 'humanLearningPdfOpen', false],
+    ['setContext', 'humanLearningPdfHasSelection', false],
+  ]);
+
+  commands.length = 0;
+  panel.active = true;
+  await onDidChangeViewState();
+
+  assert.equal(provider.getActiveWebview()?.pdfUri, pdfUri);
+  assert.deepEqual(commands, [
+    ['setContext', 'humanLearningPdfOpen', true],
+    ['setContext', 'humanLearningPdfHasSelection', true],
+  ]);
 });
 
 test('PDF copy and insert link actions use portable URLs without persistence or highlight refreshes', async () => {
@@ -222,62 +386,6 @@ test('PDF copy and insert link actions use portable URLs without persistence or 
       },
     },
   ]);
-});
-
-test('direct PDF highlight persists normalized prefix and suffix annotation context', async () => {
-  const persistedSelections = [];
-  let closeCalls = 0;
-  const vscode = {
-    workspace: {
-      asRelativePath: uri => uri.fsPath.replace('/vault/', ''),
-    },
-    window: {
-      showInformationMessage: () => undefined,
-    },
-    Uri: {
-      joinPath: (...parts) => ({ parts }),
-    },
-  };
-  const { PdfEditorProvider } = loadTsModule('src/pdfEditorProvider.ts', {
-    vscode,
-    '@human-learning/core': {
-      openDatabase: async () => ({ id: 'db' }),
-      closeDatabase: () => { closeCalls += 1; },
-      runMigrations: () => undefined,
-      createPdfAnchorFromSelection: (_db, vaultRoot, sourcePath, selection) => {
-        persistedSelections.push({ vaultRoot, sourcePath, selection });
-        return { id: 'anc_pdf_context', uri: 'portable-uri' };
-      },
-      pdfHref: portablePdfHref,
-    },
-  });
-
-  const provider = new PdfEditorProvider({ extensionUri: { fsPath: '/extension' } }, '/vault');
-  await provider.handleSelectionAction(
-    { fsPath: '/vault/raw/pdf/paper.pdf', toString: () => 'file:///vault/raw/pdf/paper.pdf' },
-    'highlight',
-    {
-      page: 4,
-      prefix: ' before   context ',
-      suffix: ' after\ncontext ',
-      snippet: ' Selected   text ',
-      highlightColor: 'purple',
-    },
-  );
-
-  assert.equal(closeCalls, 1);
-  assert.deepEqual(persistedSelections, [{
-    vaultRoot: '/vault',
-    sourcePath: 'raw/pdf/paper.pdf',
-    selection: {
-      quote: 'Selected text',
-      page: 4,
-      prefix: 'before context',
-      suffix: 'after context',
-      highlightColor: 'purple',
-      createdBy: 'user',
-    },
-  }]);
 });
 
 test('both PDF providers transport page-scoped text fragments without database resolution', async () => {
@@ -433,7 +541,7 @@ test('standalone PDF provider skips annotation reads and rejects highlights with
   ]);
 });
 
-test('combined PDF provider loads global Ask PDF state outside a vault without opening the anchor database', async () => {
+test('combined PDF provider loads global Ask PDF state outside a vault', async () => {
   const tempRoot = mkdtempSync(join(tmpdir(), 'hl-combined-pdf-no-vault-'));
   const pdfPath = join(tempRoot, 'paper.pdf');
   writeFileSync(pdfPath, Buffer.from('%PDF-no-vault', 'utf8'));
@@ -442,7 +550,6 @@ test('combined PDF provider loads global Ask PDF state outside a vault without o
   const warnings = [];
   const errors = [];
   const discussionRoutes = [];
-  let databaseOpenCount = 0;
   const fakeStore = { pdfPath };
   const annotation = {
     id: 'ann-global-1',
@@ -493,16 +600,7 @@ test('combined PDF provider loads global Ask PDF state outside a vault without o
   const { PdfEditorProvider } = loadTsModule('src/pdfEditorProvider.ts', {
     vscode,
     '@human-learning/core': {
-      closeDatabase: () => undefined,
-      createPdfAnchorFromSelection: () => {
-        throw new Error('highlight must not create an implicit vault');
-      },
-      openDatabase: () => {
-        databaseOpenCount += 1;
-        throw new Error('database must remain unopened without a vault');
-      },
       pdfHref: portablePdfHref,
-      runMigrations: () => undefined,
     },
     './pdfDiscussionController': {
       createPdfDiscussionStoreForDocument(options) {
@@ -523,7 +621,6 @@ test('combined PDF provider loads global Ask PDF state outside a vault without o
     documentRoot: tempRoot,
     globalStoragePath: join(tempRoot, 'global-storage'),
     discussionController,
-    annotationsEnabled: false,
   });
   const pdfUri = {
     scheme: 'file',
@@ -544,18 +641,7 @@ test('combined PDF provider loads global Ask PDF state outside a vault without o
   provider.activeKey = pdfUri.toString();
 
   await provider.loadPdf(webview, pdfUri);
-  await provider.refreshOpenPdfHighlights(pdfUri);
-  await provider.sendReferencesForAnchor(webview, {
-    id: 'anc_pdf_internal',
-    page: 1,
-    snippet: 'Selected text',
-  });
-  await provider.handleSelectionAction(pdfUri, 'highlight', {
-    page: 1,
-    snippet: 'Selected text',
-  });
 
-  assert.equal(databaseOpenCount, 0);
   assert.equal(discussionRoutes.length, 1);
   assert.equal(discussionRoutes[0].vaultRoot, undefined);
   assert.equal(discussionRoutes[0].globalStoragePath, join(tempRoot, 'global-storage'));
@@ -568,19 +654,8 @@ test('combined PDF provider loads global Ask PDF state outside a vault without o
     message.type === 'pdfDiscussionHighlights'
     && message.highlights[0]?.annotationId === 'ann-global-1'
   )));
-  assert.deepEqual(posted.at(-1), {
-    type: 'referencesForAnchor',
-    anchor: {
-      id: 'anc_pdf_internal',
-      page: 1,
-      snippet: 'Selected text',
-    },
-    items: [],
-  });
   assert.deepEqual(errors, []);
-  assert.deepEqual(warnings, [
-    'Human Learning PDF highlights require an initialized Human Learning vault. Run `hl init` first.',
-  ]);
+  assert.deepEqual(warnings, []);
 });
 
 test('standalone PDF extension activates from the workspace root and rejects selection export when no vault exists', async () => {
@@ -657,6 +732,84 @@ test('standalone PDF extension activates from the workspace root and rejects sel
   ]);
 });
 
+test('standalone Ask PDF stays inert until the workspace is trusted', async () => {
+  const commands = new Map();
+  const warnings = [];
+  let askSelectionCount = 0;
+  let controllerOptions;
+  const vscode = {
+    workspace: {
+      isTrusted: false,
+      workspaceFolders: [{ uri: { fsPath: '/workspace' } }],
+    },
+    window: {
+      createOutputChannel: () => ({ appendLine() {}, dispose() {} }),
+      registerCustomEditorProvider: () => ({ dispose() {} }),
+      showInformationMessage: () => undefined,
+      showWarningMessage: message => {
+        warnings.push(message);
+        return undefined;
+      },
+      showErrorMessage: () => undefined,
+    },
+    commands: {
+      registerCommand: (name, callback) => {
+        commands.set(name, callback);
+        return { dispose() {} };
+      },
+    },
+  };
+  const { activate } = loadTsModule('../vscode-pdf-extension/src/extension.ts', {
+    vscode,
+    '@human-learning/core': {
+      detectVaultRoot: () => '/vault',
+    },
+    './uriDispatcher': { dispatchUri: async () => undefined },
+    './pdfEditorProvider': {
+      PdfEditorProvider: class {
+        static viewType = 'human-learning.pdfViewer';
+        async openAskPdfForSelection() {
+          askSelectionCount += 1;
+        }
+      },
+    },
+    './agentContext': { addSelectionToContext: async () => false },
+    './codexAppServerClient': {
+      CodexAppServerClient: class {
+        dispose() {}
+      },
+    },
+    './pdfDiscussionController': {
+      PDF_DISCUSSION_WORKSPACE_TRUST_MESSAGE:
+        'Trust this workspace before using Ask PDF with Codex.',
+      PdfDiscussionController: class {
+        constructor(options) {
+          controllerOptions = options;
+        }
+        dispose() {}
+      },
+    },
+  });
+
+  activate({
+    subscriptions: [],
+    extensionUri: { fsPath: '/extension' },
+    globalStorageUri: { fsPath: '/global-storage' },
+  });
+
+  assert.equal(controllerOptions.isWorkspaceTrusted(), false);
+  await commands.get('human-learning.pdfAskSelection')();
+  assert.equal(askSelectionCount, 0);
+  assert.deepEqual(warnings, [
+    'Trust this workspace before using Ask PDF with Codex.',
+  ]);
+
+  vscode.workspace.isTrusted = true;
+  assert.equal(controllerOptions.isWorkspaceTrusted(), true);
+  await commands.get('human-learning.pdfAskSelection')();
+  assert.equal(askSelectionCount, 1);
+});
+
 test('standalone PDF activation owns a dedicated Codex output channel and passes its logger', () => {
   const outputChannels = [];
   const clientOptions = [];
@@ -726,32 +879,6 @@ test('standalone PDF activation owns a dedicated Codex output channel and passes
   deactivate();
   assert.equal(clientDisposeCount, 1);
   assert.equal(outputChannels[0].disposeCount, 1);
-});
-
-test('PDF editor provider restores persisted highlight colors and rectangle geometry', () => {
-  const vscode = {
-    workspace: { asRelativePath: uri => uri.fsPath },
-    Uri: { joinPath: (...parts) => ({ parts }) },
-  };
-  const { locatorToWebviewAnchor } = loadTsModule('src/pdfEditorProvider.ts', {
-    vscode,
-    '@human-learning/core': {},
-  });
-
-  const restored = locatorToWebviewAnchor(JSON.stringify({
-    page: 4,
-    rects: [[12, 34, 156, 278]],
-    textItemIndex: 7,
-    charOffset: 2,
-    endTextItemIndex: 8,
-    endCharOffset: 11,
-    highlightColor: 'purple',
-  }), 'Selected text');
-
-  assert.equal(restored.page, 4);
-  assert.deepEqual(restored.rects, [[12, 34, 156, 278]]);
-  assert.equal(restored.highlightColor, 'purple');
-  assert.equal(restored.snippet, 'Selected text');
 });
 
 test('PDF rectangle selection copies the exact PDF++ embed-link shape without persisting a text anchor', async () => {

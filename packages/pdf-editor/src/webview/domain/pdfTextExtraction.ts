@@ -48,11 +48,11 @@ export function normalizePdfTextRuns(
       rawText,
       Number.isFinite(sourceCharIndex) ? sourceCharIndex : 0,
       pageGlyphs,
-      sourceCharactersByRun?.get(sourceOrder),
+      pdfRunSourceCharacters(value, sourceOrder, pageGlyphs, sourceCharactersByRun?.get(sourceOrder)),
     );
     const sanitized = normalized.content;
     const content = sanitized || (isEmptyPdfWordJoinRun(run, rawText) ? '\u00ad' : '');
-    if (!content) return [];
+    if (!content.trim()) return [];
     const declaredSize = Number(run?.fontSize);
     const family = typeof run?.font?.familyName === 'string' && run.font.familyName.trim()
       ? run.font.familyName.trim()
@@ -72,6 +72,7 @@ export function normalizePdfTextRuns(
         },
         sourceCharIndex: Number.isFinite(sourceCharIndex) ? sourceCharIndex : undefined,
         sourceCharCount: Number.isFinite(Number(run?.charCount)) ? Number(run.charCount) : undefined,
+        ...(normalized.wordJoinAfter ? { wordJoinAfter: true } : {}),
         selectionGlyphs: isPdfWordJoinMarker(content)
           ? []
           : normalized.glyphs.length > 0
@@ -85,7 +86,82 @@ export function normalizePdfTextRuns(
       rect,
     }];
   });
-  return orderPdfTextItems(items);
+  return orderPdfTextItems(foldPdfWordJoinItems(items));
+}
+
+function foldPdfWordJoinItems(items: OrderedPdfTextItem[]): OrderedPdfTextItem[] {
+  const result: OrderedPdfTextItem[] = [];
+  let previous: OrderedPdfTextItem | undefined;
+  for (const candidate of items) {
+    if (isPdfWordJoinMarker(String(candidate.item?.content ?? '')) && previous) {
+      previous.item.wordJoinAfter = true;
+      continue;
+    }
+    result.push(candidate);
+    if (!isPdfWordJoinMarker(String(candidate.item?.content ?? ''))) previous = candidate;
+  }
+  return result;
+}
+
+function pdfRunSourceCharacters(
+  runs: any[],
+  sourceOrder: number,
+  pageGlyphs: any[],
+  sourceCharacters: string[] | undefined,
+): string[] | undefined {
+  const run = runs[sourceOrder];
+  const nextRun = runs[sourceOrder + 1];
+  const rawCharacters: string[] = Array.from(typeof run?.text === 'string' ? run.text : '');
+  const nextCharacters: string[] = Array.from(typeof nextRun?.text === 'string' ? nextRun.text : '');
+  const charIndex = Number(run?.charIndex);
+  const charCount = Number(run?.charCount);
+  const nextCharIndex = Number(nextRun?.charIndex);
+  const runRect = finitePdfTextRect(run?.rect);
+  const nextRect = finitePdfTextRect(nextRun?.rect);
+  if (
+    !sourceCharacters
+    || sourceCharacters.length !== charCount
+    || charCount !== rawCharacters.length + 1
+    || sourceCharacters[charCount - 1] !== ''
+    || sourceCharacters.slice(0, -1).some(character => character === '')
+    || !/[\p{L}\p{N}]$/u.test(rawCharacters.at(-1) ?? '')
+    || !/^[\p{L}\p{N}]/u.test(nextCharacters[0] ?? '')
+    || !Number.isInteger(charIndex)
+    || !Number.isInteger(nextCharIndex)
+    || nextCharIndex !== charIndex + charCount
+    || !runRect
+    || !nextRect
+  ) {
+    return sourceCharacters;
+  }
+
+  const glyph = pageGlyphs[charIndex + charCount - 1];
+  const looseRect = pdfGlyphRect(glyph, false);
+  const tightRect = glyph?.tightOrigin && glyph?.tightSize
+    ? pdfGlyphRect(glyph, true)
+    : undefined;
+  if (!looseRect || !tightRect || glyph?.isEmpty === true) return sourceCharacters;
+
+  const looseWidth = looseRect[2] - looseRect[0];
+  const looseHeight = looseRect[3] - looseRect[1];
+  const tightWidth = tightRect[2] - tightRect[0];
+  const tightHeight = tightRect[3] - tightRect[1];
+  const runRight = runRect.left + runRect.width;
+  const nextLineOffset = nextRect.top - runRect.top;
+  if (
+    tightWidth <= 0
+    || tightWidth > looseHeight * 0.5
+    || tightHeight > Math.max(1.5, looseHeight * 0.22)
+    || Math.abs(looseRect[2] - runRight) > 1.25
+    || Math.abs(tightRect[2] - runRight) > 1.25
+    || looseWidth > looseHeight * 0.5
+    || nextLineOffset < runRect.height * 0.5
+    || nextLineOffset > runRect.height * 1.75
+    || nextRect.left >= runRight
+  ) {
+    return sourceCharacters;
+  }
+  return [...sourceCharacters.slice(0, -1), '\u00ad'];
 }
 
 export function normalizeBasicPdfTextRects(value: unknown): any[] {
@@ -94,7 +170,7 @@ export function normalizeBasicPdfTextRects(value: unknown): any[] {
     const rect = finitePdfTextRect(item?.rect);
     if (!rect) return [];
     const content = sanitizePdfTextContent(String(item?.content ?? ''));
-    if (!content) return [];
+    if (!content.trim()) return [];
     return [{
       sourceOrder,
       item: {
@@ -113,15 +189,19 @@ function normalizePdfRunCharacters(
   sourceCharIndex: number,
   pageGlyphs: any[],
   sourceCharacters?: string[],
-): { content: string; glyphs: PdfSelectionGlyph[] } {
+): { content: string; glyphs: PdfSelectionGlyph[]; wordJoinAfter: boolean } {
   let content = '';
+  let wordJoinAfter = false;
   const glyphs: PdfSelectionGlyph[] = [];
   const characters = sourceCharacters?.length ? sourceCharacters : Array.from(rawText);
   for (let sourceOffset = 0; sourceOffset < characters.length; sourceOffset++) {
     const sourceCharacter = String(characters[sourceOffset] ?? '');
-    const sanitized = isPdfSourceWordJoinMarker(sourceCharacter)
-      ? '\u00ad'
-      : sanitizePdfTextContent(sourceCharacter);
+    if (isPdfSourceWordJoinMarker(sourceCharacter)) {
+      wordJoinAfter = true;
+      continue;
+    }
+    const sanitized = sanitizePdfTextContent(sourceCharacter);
+    if (sanitized) wordJoinAfter = false;
     const glyph = pageGlyphs[sourceCharIndex + sourceOffset];
     const offsetStart = content.length;
     content += sanitized;
@@ -140,7 +220,7 @@ function normalizePdfRunCharacters(
       }
     }
   }
-  return { content, glyphs };
+  return { content, glyphs, wordJoinAfter };
 }
 
 function isPdfSourceWordJoinMarker(text: string): boolean {
@@ -413,6 +493,7 @@ function mergeSingleRowPdfTextLanes(
     target.items.push(...lane.items);
     mergedInto.set(lane, target);
   }
+
   return lanes.filter(lane => !mergedInto.has(lane));
 }
 

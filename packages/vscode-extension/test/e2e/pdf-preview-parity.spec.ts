@@ -2,6 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 
 const viewerUrl = 'http://localhost:8979/pdf-viewer.html?fixture=four-page';
 const internalDestinationsViewerUrl = 'http://localhost:8979/pdf-viewer.html?fixture=internal-destinations';
+const selectionViewerUrl = 'http://localhost:8979/pdf-viewer.html?fixture=out-of-order-text';
 
 type PresentationMode =
   | 'single'
@@ -223,7 +224,6 @@ test('Reduce Animation controls continuous custom-zoom page-turn motion and foll
   await setCustomZoom(page, 125);
   await expect.poll(() => canvasMatchesCssResolution(page, 1)).toBe(true);
   await installPageWrapperScrollProbe(page);
-  await installReduceAnimationTransitionProbe(page);
 
   await selectReduceAnimation(page, 'on');
   await expectReduceAnimationTransitions(page, true);
@@ -455,6 +455,9 @@ for (const scenario of [
     await openFourPageFixture(page);
     await setPresentationMode(page, scenario.mode);
     await setCustomZoom(page, 250);
+    await expect.poll(() => canvasMatchesCssResolution(page, 1)).toBe(true);
+    await expect(page.locator('#page-1 canvas.pdf-canvas'))
+      .toHaveAttribute('data-render-quality', 'full');
 
     const panPosition = await positionViewerBeforeRightEdge(page, 80);
     expect(panPosition.maxScrollLeft).toBeGreaterThan(80);
@@ -960,6 +963,82 @@ test('manual zoom completion preserves viewport changes made while the sharper c
   await expectViewerViewportProgress(page, scrolledProgress);
 });
 
+test('selection overlay stays aligned while zoom retains the previous interaction layer', async ({ page }) => {
+  await page.setViewportSize({ width: 720, height: 600 });
+  await page.goto(selectionViewerUrl);
+  await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 1/, { timeout: 10_000 });
+  await setCustomZoom(page, 150);
+  const text = page.locator('#page-1 .text-layer span[data-item-index]').filter({
+    hasText: 'First line starts the paragraph.',
+  });
+  await expect(text).toHaveCount(1);
+  await expect(text).toBeVisible();
+  const endpoints = await text.evaluate((element) => {
+    const textNode = element.querySelector('.pdf-text-glyphs')?.firstChild;
+    const content = textNode?.textContent ?? '';
+    if (!textNode || textNode.nodeType !== Node.TEXT_NODE || content.length === 0) {
+      throw new Error('Expected a selectable first-line text node');
+    }
+    const characterPoint = (offset: number, bias: number) => {
+      const range = document.createRange();
+      range.setStart(textNode, offset);
+      range.setEnd(textNode, offset + 1);
+      const rect = range.getBoundingClientRect();
+      return {
+        x: rect.left + rect.width * bias,
+        y: rect.top + rect.height / 2,
+      };
+    };
+    return {
+      start: characterPoint(0, 0.25),
+      end: characterPoint(content.length - 1, 0.75),
+    };
+  });
+  await page.mouse.move(endpoints.start.x, endpoints.start.y);
+  await page.mouse.down();
+  await page.mouse.move(endpoints.end.x, endpoints.end.y, { steps: 12 });
+  await page.mouse.up();
+  await expect(page.locator('#page-1 .pdf-selection-rect')).toBeVisible();
+  const before = await selectionOverlaySnapshot(page, 1);
+  expect(before.nativeText).toBe('First line starts the paragraph.');
+
+  await installPdfImageLoadGate(page);
+  await armNextPdfImageLoad(page);
+  await setCustomZoom(page, 250);
+  await expect.poll(() => pdfImageLoadGateSnapshot(page)).toEqual({
+    started: 1,
+    pending: true,
+    completed: 0,
+  });
+
+  const whileRendering = await selectionOverlaySnapshot(page, 1);
+  expect(whileRendering.overlayCount).toBe(1);
+  expect(whileRendering.highlightTransform).toBe(whileRendering.textTransform);
+  expect(whileRendering.highlightTransform).not.toBe('none');
+  expect(whileRendering.leftRatio).toBeCloseTo(before.leftRatio, 3);
+  expect(whileRendering.topRatio).toBeCloseTo(before.topRatio, 3);
+  expect(whileRendering.widthRatio).toBeCloseTo(before.widthRatio, 3);
+  expect(whileRendering.heightRatio).toBeCloseTo(before.heightRatio, 3);
+  expect(whileRendering.textLeftDeltaRatio).toBeCloseTo(before.textLeftDeltaRatio, 3);
+  expect(whileRendering.textRightDeltaRatio).toBeCloseTo(before.textRightDeltaRatio, 3);
+
+  await releasePdfImageLoadGate(page);
+  await expect.poll(() => pdfImageLoadGateSnapshot(page)).toEqual({
+    started: 1,
+    pending: false,
+    completed: 1,
+  });
+  await expect.poll(async () => (await selectionOverlaySnapshot(page, 1)).textTransform)
+    .toBe('none');
+  const settled = await selectionOverlaySnapshot(page, 1);
+  expect(settled.nativeText).toBe('First line starts the paragraph.');
+  expect(settled.overlayCount).toBe(1);
+  expect(settled.leftRatio).toBeCloseTo(before.leftRatio, 3);
+  expect(settled.topRatio).toBeCloseTo(before.topRatio, 3);
+  expect(settled.widthRatio).toBeCloseTo(before.widthRatio, 3);
+  expect(settled.heightRatio).toBeCloseTo(before.heightRatio, 3);
+});
+
 test('trackpad pinch handling leaves ordinary two-finger wheel scrolling unchanged', async ({ page }) => {
   await page.setViewportSize({ width: 900, height: 500 });
   await openFourPageFixture(page);
@@ -1090,23 +1169,11 @@ async function installPageWrapperScrollProbe(page: Page): Promise<void> {
   });
 }
 
-async function installReduceAnimationTransitionProbe(page: Page): Promise<void> {
-  await page.locator('#page-1 .highlight-layer').evaluate(layer => {
-    const probe = document.createElement('div');
-    probe.className = 'annotation-highlight';
-    probe.dataset.reduceAnimationTransitionProbe = 'true';
-    layer.appendChild(probe);
-  });
-}
-
 async function expectReduceAnimationTransitions(
   page: Page,
   reduced: boolean,
 ): Promise<void> {
-  const transitions = await page.locator([
-    '#pdf-history-back',
-    '[data-reduce-animation-transition-probe="true"]',
-  ].join(', ')).evaluateAll(elements => elements.map(element => {
+  const transitions = await page.locator('#pdf-history-back').evaluateAll(elements => elements.map(element => {
     const durations = window.getComputedStyle(element).transitionDuration
       .split(',')
       .map(value => Number.parseFloat(value));
@@ -1116,7 +1183,7 @@ async function expectReduceAnimationTransitions(
     };
   }));
 
-  expect(transitions).toHaveLength(2);
+  expect(transitions).toHaveLength(1);
   for (const transition of transitions) {
     expect(
       transition.allDurationsZero,
@@ -1732,6 +1799,43 @@ async function retainedZoomProbeSnapshot(
       textWidthRatio: text.width / wrapper.width,
       linkLeftRatio: link ? (link.left - wrapper.left) / wrapper.width : Number.NaN,
       linkWidthRatio: link ? link.width / wrapper.width : Number.NaN,
+    };
+  }, pageNumber);
+}
+
+async function selectionOverlaySnapshot(
+  page: Page,
+  pageNumber: number,
+): Promise<{
+  nativeText: string;
+  overlayCount: number;
+  highlightTransform: string;
+  textTransform: string;
+  leftRatio: number;
+  topRatio: number;
+  widthRatio: number;
+  heightRatio: number;
+  textLeftDeltaRatio: number;
+  textRightDeltaRatio: number;
+}> {
+  return page.evaluate((number) => {
+    const wrapper = document.querySelector<HTMLElement>(`#page-${number}`)!.getBoundingClientRect();
+    const textLayer = document.querySelector<HTMLElement>(`#page-${number} .text-layer`)!;
+    const highlightLayer = document.querySelector<HTMLElement>(`#page-${number} .highlight-layer`)!;
+    const text = textLayer.querySelector<HTMLElement>('span[data-item-index]')!.getBoundingClientRect();
+    const overlays = highlightLayer.querySelectorAll<HTMLElement>('.pdf-selection-rect');
+    const overlay = overlays[0]!.getBoundingClientRect();
+    return {
+      nativeText: window.getSelection()?.toString().replace(/\s+/gu, ' ').trim() ?? '',
+      overlayCount: overlays.length,
+      highlightTransform: getComputedStyle(highlightLayer).transform,
+      textTransform: getComputedStyle(textLayer).transform,
+      leftRatio: (overlay.left - wrapper.left) / wrapper.width,
+      topRatio: (overlay.top - wrapper.top) / wrapper.height,
+      widthRatio: overlay.width / wrapper.width,
+      heightRatio: overlay.height / wrapper.height,
+      textLeftDeltaRatio: (overlay.left - text.left) / wrapper.width,
+      textRightDeltaRatio: (overlay.right - text.right) / wrapper.width,
     };
   }, pageNumber);
 }

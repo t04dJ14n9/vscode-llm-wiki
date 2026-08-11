@@ -104,6 +104,378 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
     expect(lastSelection).toEqual(selection);
   });
 
+  test('learning annotations explain the previous question on hover and keyboard focus', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+    await waitForEditorBootstrap(page);
+
+    const text = 'Alpha selected passage Omega';
+    const question = 'What does the selected passage mean?';
+    const summary = 'It names the invariant preserved by the online update.';
+    await page.evaluate((documentText) => {
+      window.postMessage({ type: 'setText', text: documentText }, '*');
+    }, text);
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+
+    await page.evaluate(({ question: previousQuestion, summary: answer }) => {
+      window.__mockMessages = [];
+      window.postMessage({
+        type: 'setLearningAnnotations',
+        annotations: [{
+          discussionId: 'discussion-1',
+          notePath: 'wiki/learning/selected-passage.md',
+          quote: 'selected passage',
+          question: previousQuestion,
+          questionCount: 1,
+          summary: answer,
+          from: 6,
+          to: 22,
+        }],
+      }, '*');
+    }, { question, summary });
+
+    const annotation = page.locator('.cm-learning-annotation');
+    const tooltip = page.locator('.cm-learning-note-popover[role="tooltip"]');
+    const noteLink = page.locator('.cm-learning-note-link');
+    await expect(annotation).toHaveText('selected passage');
+    await expect(noteLink).toBeVisible();
+    await expect(noteLink).not.toHaveAttribute('title');
+    await expect(tooltip).toBeHidden();
+
+    await annotation.hover();
+    await expect(tooltip).toBeVisible();
+    await expect(tooltip).toContainText('Previous question');
+    await expect(tooltip).toContainText(question);
+    await expect(tooltip).toContainText(summary);
+    await expect(tooltip).toContainText('Open ✦ Note for the full discussion');
+    await expect.poll(() => page.evaluate(() =>
+      window.__mockMessages?.filter(message => message.type === 'openLearningNote').length ?? 0
+    )).toBe(0);
+
+    await page.mouse.move(0, 0);
+    await expect(tooltip).toBeHidden();
+    await noteLink.focus();
+    await expect(tooltip).toBeVisible();
+    const tooltipId = await tooltip.getAttribute('id');
+    expect(tooltipId).toBeTruthy();
+    await expect(noteLink).toHaveAttribute('aria-describedby', tooltipId!);
+
+    await page.keyboard.press('Escape');
+    await expect(tooltip).toBeHidden();
+    await expect(noteLink).not.toHaveAttribute('aria-describedby', /.+/u);
+    await expect(noteLink).toBeFocused();
+    expect(await page.evaluate(() =>
+      window.__mockMessages?.filter(message => message.type === 'openLearningNote').length ?? 0
+    )).toBe(0);
+
+    await page.keyboard.press('Enter');
+
+    await page.waitForFunction(() =>
+      window.__mockMessages?.some((message) =>
+        message.type === 'openLearningNote'
+        && message.notePath === 'wiki/learning/selected-passage.md'
+        && message.discussionId === 'discussion-1'
+      ),
+      { timeout: 5000 },
+    );
+  });
+
+  test('learning annotation caret activation uses exclusive ranges and exact repeated-quote offsets', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+    await waitForEditorBootstrap(page);
+
+    const text = 'X same quote middle same quote Z';
+    const quote = 'same quote';
+    const firstFrom = text.indexOf(quote);
+    const secondFrom = text.lastIndexOf(quote);
+    const annotations = [
+      {
+        discussionId: 'discussion-first',
+        notePath: 'wiki/learning/first.md',
+        quote,
+        question: 'What is the first occurrence?',
+        questionCount: 1,
+        summary: 'The first occurrence is the earlier anchored explanation.',
+        from: firstFrom,
+        to: firstFrom + quote.length,
+      },
+      {
+        discussionId: 'discussion-second',
+        notePath: 'wiki/learning/second.md',
+        quote,
+        question: 'What is the second occurrence?',
+        questionCount: 2,
+        summary: 'The second occurrence has its own later explanation.',
+        from: secondFrom,
+        to: secondFrom + quote.length,
+      },
+    ];
+    await page.evaluate(({ text: documentText, annotations: learningAnnotations }) => {
+      window.postMessage({ type: 'setText', text: documentText }, '*');
+      window.postMessage({
+        type: 'setLearningAnnotations',
+        annotations: learningAnnotations,
+      }, '*');
+    }, { text, annotations });
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+    await expect(page.locator('.cm-learning-annotation')).toHaveCount(2);
+    await page.mouse.move(0, 0);
+
+    const tooltip = page.locator('.cm-learning-note-popover[role="tooltip"]');
+    const moveCaret = async (position: number) => {
+      await page.evaluate((anchor) => {
+        window.__cmView.focus();
+        window.__cmView.dispatch({ selection: { anchor } });
+      }, position);
+    };
+
+    await moveCaret(firstFrom - 1);
+    await expect(tooltip).toBeHidden();
+    for (const position of [firstFrom, firstFrom + quote.length - 1]) {
+      await moveCaret(position);
+      await expect(tooltip).toBeVisible();
+      await expect(tooltip).toContainText('Previous question');
+      await expect(tooltip).toContainText(annotations[0].question);
+      await expect(tooltip).toContainText(annotations[0].summary);
+      await expect(tooltip).not.toContainText(annotations[1].question);
+    }
+    await moveCaret(firstFrom + quote.length);
+    await expect(tooltip).toBeHidden();
+
+    await moveCaret(secondFrom);
+    await expect(tooltip).toBeVisible();
+    await expect(tooltip).toContainText('2 previous questions');
+    await expect(tooltip).toContainText(annotations[1].question);
+    await expect(tooltip).toContainText(annotations[1].summary);
+    await expect(tooltip).not.toContainText(annotations[0].question);
+    await moveCaret(secondFrom + quote.length);
+    await expect(tooltip).toBeHidden();
+  });
+
+  test('learning annotation popovers clamp to a narrow viewport without shifting editor layout', async ({ page }) => {
+    await page.setViewportSize({ width: 480, height: 260 });
+    await page.goto('http://localhost:8979/test.html');
+    await waitForEditorBootstrap(page);
+
+    const quote = 'anchored passage near the edge';
+    const text = [
+      ...Array.from({ length: 12 }, (_, index) => `Preamble line ${index + 1}`),
+      `A deliberately long wrapping line puts the ${quote} beside the narrow viewport boundary.`,
+      'Following line sentinel',
+    ].join('\n');
+    const from = text.indexOf(quote);
+    await page.evaluate(({ text: documentText, quote: selectedQuote, from: start }) => {
+      window.postMessage({ type: 'setText', text: documentText }, '*');
+      window.postMessage({
+        type: 'setLearningAnnotations',
+        annotations: [{
+          discussionId: 'discussion-edge',
+          notePath: 'wiki/learning/edge.md',
+          quote: selectedQuote,
+          question: 'Why is this annotation near the edge?',
+          questionCount: 1,
+          summary: 'It verifies that the floating explanation stays inside the viewport.',
+          from: start,
+          to: start + selectedQuote.length,
+        }],
+      }, '*');
+    }, { text, quote, from });
+
+    const annotation = page.locator('.cm-learning-annotation');
+    const tooltip = page.locator('.cm-learning-note-popover[role="tooltip"]');
+    await expect(annotation).toBeVisible();
+    await annotation.scrollIntoViewIfNeeded();
+    await page.evaluate(() => {
+      const scroller = document.querySelector<HTMLElement>('.cm-scroller');
+      if (scroller) scroller.scrollTop = scroller.scrollHeight;
+    });
+
+    const measure = () => page.evaluate(() => {
+      const annotation = document.querySelector<HTMLElement>('.cm-learning-annotation');
+      const line = annotation?.closest<HTMLElement>('.cm-line');
+      const following = line?.nextElementSibling as HTMLElement | null;
+      const content = document.querySelector<HTMLElement>('.cm-content');
+      if (!annotation || !line || !following || !content) {
+        throw new Error('Missing annotation layout elements');
+      }
+      const style = getComputedStyle(line);
+      const lineRect = line.getBoundingClientRect();
+      const followingRect = following.getBoundingClientRect();
+      const textRange = document.createRange();
+      textRange.selectNodeContents(line);
+      return {
+        line: [lineRect.left, lineRect.top, lineRect.width, lineRect.height],
+        followingTop: followingRect.top,
+        scrollHeight: content.scrollHeight,
+        textRows: textRange.getClientRects().length,
+        font: [
+          style.fontFamily,
+          style.fontSize,
+          style.fontStyle,
+          style.fontWeight,
+          style.lineHeight,
+          style.letterSpacing,
+        ],
+      };
+    });
+    const baseline = await measure();
+
+    await annotation.hover();
+    await expect(tooltip).toBeVisible();
+    const hoverLayout = await measure();
+    expect(hoverLayout).toEqual(baseline);
+
+    const placement = await tooltip.evaluate(element => {
+      const rect = element.getBoundingClientRect();
+      const style = getComputedStyle(element);
+      return {
+        left: rect.left,
+        top: rect.top,
+        right: rect.right,
+        bottom: rect.bottom,
+        position: style.position,
+        insideLine: Boolean(element.closest('.cm-line')),
+        viewportWidth: window.innerWidth,
+        viewportHeight: window.innerHeight,
+      };
+    });
+    expect(placement.left).toBeGreaterThanOrEqual(-1);
+    expect(placement.top).toBeGreaterThanOrEqual(-1);
+    expect(placement.right).toBeLessThanOrEqual(placement.viewportWidth + 1);
+    expect(placement.bottom).toBeLessThanOrEqual(placement.viewportHeight + 1);
+    expect(['absolute', 'fixed']).toContain(placement.position);
+    expect(placement.insideLine).toBe(false);
+
+    await page.mouse.move(0, 0);
+    await expect(tooltip).toBeHidden();
+    await page.evaluate((anchor) => {
+      window.__cmView.focus();
+      window.__cmView.dispatch({ selection: { anchor } });
+    }, from);
+    await expect(tooltip).toBeVisible();
+    expect(await measure()).toEqual(baseline);
+  });
+
+  test('selected Markdown can be added to Cursor Chat without submitting', async ({ page }) => {
+    await page.setViewportSize({ width: 240, height: 320 });
+    await page.goto('http://localhost:8979/test.html');
+    await waitForEditorBootstrap(page);
+
+    await page.evaluate(() => {
+      window.postMessage({ type: 'setText', text: 'alpha beta gamma' }, '*');
+    });
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+
+    await page.evaluate(() => {
+      window.__mockMessages = [];
+      const view = window.__cmView;
+      const from = view.state.doc.toString().indexOf('beta');
+      view.dispatch({ selection: { anchor: from, head: from + 'beta'.length } });
+    });
+
+    const prompt = page.locator('.hl-cursor-selection-prompt');
+    await expect(prompt).toBeVisible();
+    await expect(prompt.locator('.add-to-chat-label')).toHaveText('Add to Chat');
+    await expect(prompt.locator('.add-to-chat-shortcut')).toHaveText(/^(?:⌘L|Ctrl\+L)$/);
+    const promptLayout = await prompt.evaluate((element) => {
+      const label = element.querySelector('.add-to-chat-label')?.getBoundingClientRect();
+      const shortcut = element.querySelector('.add-to-chat-shortcut')?.getBoundingClientRect();
+      const rect = element.getBoundingClientRect();
+      return {
+        childTags: Array.from(element.children, child => child.tagName),
+        labelRight: label?.right ?? 0,
+        shortcutLeft: shortcut?.left ?? 0,
+        left: rect.left,
+        top: rect.top,
+        right: rect.right,
+        bottom: rect.bottom,
+        width: rect.width,
+        height: rect.height,
+        viewportWidth: window.innerWidth,
+        viewportHeight: window.innerHeight,
+      };
+    });
+    expect(promptLayout.childTags).toEqual(['SPAN', 'SPAN']);
+    expect(promptLayout.shortcutLeft).toBeGreaterThanOrEqual(promptLayout.labelRight);
+    expect(promptLayout.width).toBeLessThanOrEqual(140);
+    expect(promptLayout.height).toBeLessThanOrEqual(36);
+    expect(promptLayout.left).toBeGreaterThanOrEqual(7);
+    expect(promptLayout.top).toBeGreaterThanOrEqual(7);
+    expect(promptLayout.right).toBeLessThanOrEqual(promptLayout.viewportWidth - 7);
+    expect(promptLayout.bottom).toBeLessThanOrEqual(promptLayout.viewportHeight - 7);
+
+    await prompt.click();
+    await expect.poll(() => page.evaluate(() =>
+      window.__mockMessages?.filter((message) =>
+        message.type === 'addSelectionToCursorChat'
+        && Object.keys(message).length === 1
+      ).length ?? 0
+    )).toBe(1);
+    await page.waitForTimeout(50);
+    expect(await page.evaluate(() =>
+      window.__mockMessages?.filter(message => message.type === 'addSelectionToCursorChat').length ?? 0
+    )).toBe(1);
+  });
+
+  test('native rendered-text selections show the Cursor prompt and use Mod-L', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+    await waitForEditorBootstrap(page);
+
+    await page.evaluate(() => {
+      window.postMessage({ type: 'setText', text: 'alpha beta gamma' }, '*');
+    });
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+
+    await page.evaluate(() => {
+      window.__mockMessages = [];
+      const line = document.querySelector<HTMLElement>('.cm-line');
+      if (!line?.firstChild) throw new Error('Missing rendered text');
+      const from = (line.textContent ?? '').indexOf('beta');
+      const range = document.createRange();
+      range.setStart(line.firstChild, from);
+      range.setEnd(line.firstChild, from + 'beta'.length);
+      const nativeSelection = window.getSelection();
+      nativeSelection?.removeAllRanges();
+      nativeSelection?.addRange(range);
+      line.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+    });
+
+    await expect.poll(() => page.evaluate(() => {
+      const range = window.__cmView.state.selection.main;
+      return window.__cmView.state.sliceDoc(range.from, range.to);
+    })).toBe('beta');
+
+    await page.evaluate(() => {
+      window.__mockMessages = [];
+      window.postMessage({ type: 'requestSelection', requestId: 'selection-1' }, '*');
+    });
+    await page.waitForFunction(() =>
+      window.__mockMessages?.some((message) =>
+        message.type === 'selectionResponse'
+        && message.requestId === 'selection-1'
+        && message.selection?.from === 6
+        && message.selection?.to === 10
+      ),
+      { timeout: 5000 },
+    );
+
+    await expect(page.locator('.hl-cursor-selection-prompt')).toBeVisible();
+    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+L' : 'Control+L');
+    await page.waitForFunction(() =>
+      window.__mockMessages?.some((message) =>
+        message.type === 'addSelectionToCursorChat'
+        && Object.keys(message).length === 1
+      ),
+      { timeout: 5000 },
+    );
+    await expect(page.locator('.hl-cursor-selection-prompt')).toBeVisible();
+
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      view.dispatch({ selection: { anchor: view.state.selection.main.head } });
+    });
+    await expect(page.locator('.hl-cursor-selection-prompt')).toHaveCount(0);
+  });
+
   test('markdown editor defaults to Obsidian\'s 16px prose rhythm and heading scale', async ({ page }) => {
     await page.goto('http://localhost:8979/test.html');
 
@@ -170,12 +542,15 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
     await page.waitForFunction(() => {
       const scroller = document.querySelector('.cm-scroller');
       const content = document.querySelector('.cm-content');
+      const sourceLine = document.querySelector('.cm-hybrid-source-line');
       const inlineCode = document.querySelector('.cm-hybrid-inline-code');
-      if (!scroller || !content || !inlineCode) return false;
+      if (!scroller || !content || !sourceLine || !inlineCode) return false;
       const scrollerStyle = getComputedStyle(scroller);
       const contentStyle = getComputedStyle(content);
+      const sourceLineStyle = getComputedStyle(sourceLine);
       const inlineCodeStyle = getComputedStyle(inlineCode);
       return !scrollerStyle.fontFamily.includes('Fira Code')
+        && sourceLineStyle.fontFamily === scrollerStyle.fontFamily
         && inlineCodeStyle.fontFamily.includes('Fira Code')
         && scrollerStyle.fontSize === '17px'
         && scrollerStyle.fontWeight === '500'
@@ -186,12 +561,15 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
     const styles = await page.evaluate(() => {
       const scroller = document.querySelector('.cm-scroller');
       const content = document.querySelector('.cm-content');
+      const sourceLine = document.querySelector('.cm-hybrid-source-line');
       const inlineCode = document.querySelector('.cm-hybrid-inline-code');
       const scrollerStyle = scroller ? getComputedStyle(scroller) : null;
       const contentStyle = content ? getComputedStyle(content) : null;
+      const sourceLineStyle = sourceLine ? getComputedStyle(sourceLine) : null;
       const inlineCodeStyle = inlineCode ? getComputedStyle(inlineCode) : null;
       return {
         fontFamily: scrollerStyle?.fontFamily ?? '',
+        sourceLineFontFamily: sourceLineStyle?.fontFamily ?? '',
         inlineCodeFontFamily: inlineCodeStyle?.fontFamily ?? '',
         fontSize: scrollerStyle?.fontSize ?? '',
         fontWeight: scrollerStyle?.fontWeight ?? '',
@@ -201,11 +579,273 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
     });
 
     expect(styles.fontFamily).not.toContain('Fira Code');
+    expect(styles.sourceLineFontFamily).toBe(styles.fontFamily);
     expect(styles.inlineCodeFontFamily).toContain('Fira Code');
     expect(styles.fontSize).toBe('17px');
     expect(styles.fontWeight).toBe('500');
     expect(styles.lineHeight).toBe('29px');
     expect(styles.letterSpacing).toBe('1.25px');
+  });
+
+  test('moving the caret into prose preserves its typography and wrapping', async ({ page }) => {
+    await page.setViewportSize({ width: 820, height: 600 });
+    await page.goto('http://localhost:8979/test.html');
+    await waitForEditorBootstrap(page);
+
+    const paragraph = 'Moving the caret through this deliberately long paragraph must not change its font, apparent size, or wrapping across the available editor width.';
+    await page.evaluate(({ paragraph: text }) => {
+      window.postMessage({
+        type: 'setText',
+        text: `# Stable prose\n\n${text}\n\nTail`,
+      }, '*');
+    }, { paragraph });
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      view.dispatch({ selection: { anchor: view.state.doc.line(5).from } });
+    });
+
+    const measure = async () => page.evaluate((text) => {
+      const line = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+        .find(candidate => candidate.textContent === text);
+      if (!line) throw new Error('Missing target paragraph');
+      const style = getComputedStyle(line);
+      const range = document.createRange();
+      range.selectNodeContents(line);
+      const lineRect = line.getBoundingClientRect();
+      const textRect = range.getBoundingClientRect();
+      return {
+        fontFamily: style.fontFamily,
+        fontSize: style.fontSize,
+        fontStyle: style.fontStyle,
+        fontWeight: style.fontWeight,
+        lineHeight: style.lineHeight,
+        letterSpacing: style.letterSpacing,
+        lineHeightPx: lineRect.height,
+        textWidthPx: textRect.width,
+        textHeightPx: textRect.height,
+        textRowCount: range.getClientRects().length,
+        isActiveSourceLine: line.classList.contains('cm-hybrid-source-line'),
+      };
+    }, paragraph);
+
+    const inactive = await measure();
+    expect(inactive.isActiveSourceLine).toBe(false);
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      view.dispatch({ selection: { anchor: view.state.doc.line(3).from + 8 } });
+    });
+    await page.waitForFunction(() => {
+      const target = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+        .find(line => line.textContent?.startsWith('Moving the caret'));
+      return target?.classList.contains('cm-hybrid-source-line');
+    });
+    const active = await measure();
+    expect(active.isActiveSourceLine).toBe(true);
+
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      view.dispatch({ selection: { anchor: view.state.doc.line(5).from } });
+    });
+    await page.waitForFunction(() => {
+      const target = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+        .find(line => line.textContent?.startsWith('Moving the caret'));
+      return target && !target.classList.contains('cm-hybrid-source-line');
+    });
+    const restored = await measure();
+    expect(restored.isActiveSourceLine).toBe(false);
+
+    for (const current of [active, restored]) {
+      expect({
+        fontFamily: current.fontFamily,
+        fontSize: current.fontSize,
+        fontStyle: current.fontStyle,
+        fontWeight: current.fontWeight,
+        lineHeight: current.lineHeight,
+        letterSpacing: current.letterSpacing,
+        textRowCount: current.textRowCount,
+      }).toEqual({
+        fontFamily: inactive.fontFamily,
+        fontSize: inactive.fontSize,
+        fontStyle: inactive.fontStyle,
+        fontWeight: inactive.fontWeight,
+        lineHeight: inactive.lineHeight,
+        letterSpacing: inactive.letterSpacing,
+        textRowCount: inactive.textRowCount,
+      });
+      expect(Math.abs(current.lineHeightPx - inactive.lineHeightPx)).toBeLessThanOrEqual(0.25);
+      expect(Math.abs(current.textWidthPx - inactive.textWidthPx)).toBeLessThanOrEqual(0.25);
+      expect(Math.abs(current.textHeightPx - inactive.textHeightPx)).toBeLessThanOrEqual(0.25);
+    }
+  });
+
+  test('inline code and footnote labels keep their metrics while editing', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+    await waitForEditorBootstrap(page);
+    await page.evaluate(() => {
+      window.postMessage({
+        type: 'setText',
+        text: 'Plain caret beside `inline code`, ==highlight==, ~~strike~~, #topic, and [^note].\n\n[^note]: Footnote body\n\nTail',
+      }, '*');
+      window.postMessage({
+        type: 'updateSettings',
+        settings: {
+          fontFamily: 'Fira Code',
+          fontSize: '17px',
+          fontWeight: '400',
+          lineHeight: '27px',
+          letterSpacing: '0.5px',
+        },
+      }, '*');
+    });
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      view.dispatch({ selection: { anchor: view.state.doc.line(5).from } });
+    });
+    await page.waitForSelector('.cm-hybrid-inline-code');
+    await page.waitForSelector('.cm-hybrid-footnote-def-label');
+
+    const measure = async (selector: string) => page.locator(selector).first().evaluate(element => {
+      const style = getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      return {
+        fontFamily: style.fontFamily,
+        fontSize: style.fontSize,
+        fontStyle: style.fontStyle,
+        fontWeight: style.fontWeight,
+        lineHeight: style.lineHeight,
+        letterSpacing: style.letterSpacing,
+        verticalAlign: style.verticalAlign,
+        opacity: style.opacity,
+        paddingLeft: style.paddingLeft,
+        paddingRight: style.paddingRight,
+        width: rect.width,
+        height: rect.height,
+      };
+    });
+
+    const inactiveCode = await measure('.cm-hybrid-inline-code');
+    const inactiveFootnote = await measure('.cm-hybrid-footnote-def-label');
+    const preservedSelectors = [
+      '.cm-hybrid-inline-code',
+      '.cm-hybrid-highlight',
+      '.cm-hybrid-strikethrough',
+      '.cm-hybrid-tag',
+      '.cm-hybrid-footnote-ref',
+    ];
+    const inactiveFormatted = await Promise.all(preservedSelectors.map(measure));
+
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      view.dispatch({ selection: { anchor: view.state.doc.line(1).from + 2 } });
+    });
+    await page.waitForFunction(() => document.querySelector('.cm-line')?.classList.contains('cm-hybrid-source-line'));
+    const sameLineFormatted = await Promise.all(preservedSelectors.map(measure));
+    expect(await page.locator([
+      '.cm-active-inline-code',
+      '.cm-active-highlight',
+      '.cm-active-strikethrough',
+      '.cm-active-tag',
+      '.cm-active-footnote-ref',
+    ].join(',')).count()).toBe(0);
+    expect(sameLineFormatted).toEqual(inactiveFormatted);
+
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      view.dispatch({ selection: { anchor: view.state.doc.line(1).from + 22 } });
+    });
+    await page.waitForSelector('.cm-active-inline-code');
+    const activeCode = await measure('.cm-active-inline-code');
+
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      view.dispatch({ selection: { anchor: view.state.doc.line(3).from + 3 } });
+    });
+    await page.waitForSelector('.cm-active-footnote-def-label');
+    const activeFootnote = await measure('.cm-active-footnote-def-label');
+
+    for (const [active, inactive] of [
+      [activeCode, inactiveCode],
+      [activeFootnote, inactiveFootnote],
+    ]) {
+      expect({
+        fontFamily: active.fontFamily,
+        fontSize: active.fontSize,
+        fontStyle: active.fontStyle,
+        fontWeight: active.fontWeight,
+        lineHeight: active.lineHeight,
+        letterSpacing: active.letterSpacing,
+        verticalAlign: active.verticalAlign,
+        opacity: active.opacity,
+        paddingLeft: active.paddingLeft,
+        paddingRight: active.paddingRight,
+      }).toEqual({
+        fontFamily: inactive.fontFamily,
+        fontSize: inactive.fontSize,
+        fontStyle: inactive.fontStyle,
+        fontWeight: inactive.fontWeight,
+        lineHeight: inactive.lineHeight,
+        letterSpacing: inactive.letterSpacing,
+        verticalAlign: inactive.verticalAlign,
+        opacity: inactive.opacity,
+        paddingLeft: inactive.paddingLeft,
+        paddingRight: inactive.paddingRight,
+      });
+      expect(Math.abs(active.width - inactive.width)).toBeLessThanOrEqual(0.25);
+      expect(Math.abs(active.height - inactive.height)).toBeLessThanOrEqual(0.25);
+    }
+  });
+
+  test('selection backgrounds follow the active VS Code editor theme', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+    await waitForEditorBootstrap(page);
+
+    await page.evaluate(() => {
+      document.documentElement.style.setProperty('--vscode-editor-selectionBackground', '#123456');
+      document.documentElement.style.setProperty('--vscode-editor-inactiveSelectionBackground', '#654321');
+      window.postMessage({
+        type: 'setText',
+        text: 'First selected line.\nSecond selected line.\nThird selected line.',
+      }, '*');
+    });
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      view.dispatch({ selection: { anchor: 2, head: view.state.doc.length - 2 } });
+      view.focus();
+    });
+
+    const selections = page.locator('.cm-selectionLayer .cm-selectionBackground');
+    await expect(selections.first()).toBeVisible();
+    expect(await selections.count()).toBeGreaterThan(1);
+    const colors = async () => selections.evaluateAll(elements =>
+      [...new Set(elements.map(element => getComputedStyle(element).backgroundColor))],
+    );
+    await expect.poll(colors).toEqual(['rgb(18, 52, 86)']);
+
+    await page.evaluate(() => {
+      document.querySelector<HTMLElement>('#tab-editor')?.focus();
+    });
+    await page.waitForFunction(() => !document.querySelector('.cm-editor')?.classList.contains('cm-focused'));
+    await expect.poll(colors).toEqual(['rgb(101, 67, 33)']);
+
+    await page.evaluate(() => window.__cmView.focus());
+    await page.waitForFunction(() => document.querySelector('.cm-editor')?.classList.contains('cm-focused'));
+    await expect.poll(colors).toEqual(['rgb(18, 52, 86)']);
+
+    await page.evaluate(() => {
+      document.documentElement.style.setProperty('--vscode-editor-selectionBackground', 'initial');
+    });
+    await expect.poll(colors).toEqual(['rgba(38, 79, 120, 0.65)']);
+    await page.evaluate(() => {
+      document.documentElement.style.setProperty('--vscode-editor-inactiveSelectionBackground', 'initial');
+      document.querySelector<HTMLElement>('#tab-editor')?.focus();
+    });
+    await page.waitForFunction(() => !document.querySelector('.cm-editor')?.classList.contains('cm-focused'));
+    await expect.poll(colors).toEqual(['rgba(127, 127, 127, 0.24)']);
+    expect(await page.evaluate(() => window.__cmView.state.selection.main.empty)).toBe(false);
   });
 
   test('markdown editor search panel uses compact VS Code find-widget layout', async ({ page }) => {
@@ -433,6 +1073,52 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
 
     expect(gutterState.activeLineGutterCount).toBe(0);
     expect(gutterState.activeLineNumber).toBeNull();
+  });
+
+  test('markdown line numbers use the built-in editor typography and theme color', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+
+    await page.evaluate(() => {
+      const root = document.documentElement.style;
+      root.setProperty('--vscode-editorLineNumber-foreground', 'rgb(101, 102, 103)');
+      root.setProperty('--vscode-editor-font-family', '"Courier New", monospace');
+      root.setProperty('--vscode-editor-font-size', '13px');
+      root.setProperty('--vscode-editor-font-weight', '500');
+      root.setProperty('--hl-editor-letter-spacing', '1.25px');
+    });
+    await page.evaluate((text) => {
+      window.postMessage({ type: 'setText', text }, '*');
+    }, '# Native gutter\n\nBody copy\n\nLast line');
+
+    await page.waitForFunction(() => (
+      [...document.querySelectorAll<HTMLElement>('#editor .cm-lineNumbers .cm-gutterElement')]
+        .some(element => element.textContent?.trim() === '3' && element.getBoundingClientRect().height > 0)
+    ), { timeout: 10_000 });
+    const styles = await page.evaluate(() => {
+      const lineNumber = [...document.querySelectorAll<HTMLElement>('.cm-lineNumbers .cm-gutterElement')]
+        .find(element => element.textContent?.trim() === '3');
+      if (!lineNumber) throw new Error('Missing line-number row');
+      const computed = getComputedStyle(lineNumber);
+      return {
+        color: computed.color,
+        cursor: computed.cursor,
+        fontFamily: computed.fontFamily,
+        fontSize: computed.fontSize,
+        fontVariantNumeric: computed.fontVariantNumeric,
+        fontWeight: computed.fontWeight,
+        letterSpacing: computed.letterSpacing,
+        lineHeight: computed.lineHeight,
+      };
+    });
+
+    expect(styles.color).toBe('rgb(101, 102, 103)');
+    expect(styles.cursor).toBe('default');
+    expect(styles.fontFamily).toContain('Courier New');
+    expect(styles.fontSize).toBe('13px');
+    expect(styles.fontVariantNumeric).toContain('tabular-nums');
+    expect(styles.fontWeight).toBe('500');
+    expect(styles.letterSpacing).toBe('1.25px');
+    expect(styles.lineHeight).toBe('24px');
   });
 
   test('markdown editor does not paint an active-line row background', async ({ page }) => {
@@ -2815,6 +3501,10 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
       }, true);
     });
     await page.keyboard.press('Escape');
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      view.dispatch({ selection: { anchor: view.state.doc.line(1).from + 'alpha '.length } });
+    });
     await page.keyboard.press('i');
     await page.keyboard.press('Backquote');
     await page.keyboard.press('Backquote');
@@ -3115,7 +3805,7 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
       .toEqual([]);
   });
 
-  test('active fenced code blocks reveal both raw fence markers like Obsidian', async ({ page }) => {
+  test('active fenced code content keeps both rendered fence edges like Obsidian', async ({ page }) => {
     await page.goto('http://localhost:8979/test.html');
 
     const doc = [
@@ -3146,7 +3836,9 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
       view.dispatch({ selection: { anchor: view.state.doc.line(4).from + 2 } });
     });
 
-    await expect.poll(visibleFenceLines).toEqual(['```python', '```']);
+    await expect.poll(visibleFenceLines).toEqual(['```python']);
+    await expect(page.locator('.cm-hybrid-codeblock')).toHaveCount(1);
+    await expect(page.locator('.cm-hybrid-codeblock-footer')).toHaveCount(1);
   });
 
   test('Vim normal mode moves into rendered display math instead of skipping it', async ({ page }) => {
@@ -5985,7 +6677,9 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
         .find(element => element.textContent?.includes('Use '));
       return {
         text: activeLine?.textContent ?? '',
-        italicTexts: Array.from(activeLine?.querySelectorAll<HTMLElement>('.cm-active-italic') ?? [])
+        italicTexts: Array.from(
+          activeLine?.querySelectorAll<HTMLElement>('.cm-active-italic, .cm-hybrid-italic') ?? [],
+        )
           .map(element => element.textContent ?? ''),
       };
     });
@@ -6032,8 +6726,10 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
       view.dispatch({ selection: { anchor: view.state.doc.line(1).from + 8 } });
     });
 
-    await expect(page.locator('.cm-active-tag')).toContainText(['#flash-attention', '#gpu/memory']);
-    await expect(page.locator('.cm-active-tag')).not.toContainText(['C#', '#123']);
+    await expect(page.locator('.cm-active-tag, .cm-hybrid-tag'))
+      .toContainText(['#flash-attention', '#gpu/memory']);
+    await expect(page.locator('.cm-active-tag')).toHaveText('#flash-attention');
+    await expect(page.locator('.cm-hybrid-tag')).toHaveText('#gpu/memory');
 
     const rawLine = await page.locator('.cm-line').first().evaluate(line => line.textContent);
     expect(rawLine).toBe('Tags #flash-attention and #gpu/memory stay visible.');
@@ -7282,6 +7978,7 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
     await page.goto('http://localhost:8979/test.html');
     await page.evaluate(() => {
       document.documentElement.style.setProperty('--vscode-descriptionForeground', '#808080');
+      document.documentElement.style.setProperty('--vscode-textCodeBlock-background', '#252526');
     });
 
     const doc = [
@@ -7314,28 +8011,79 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
         .find(line => line.textContent?.includes('const greet'));
       const consoleLine = Array.from(document.querySelectorAll<HTMLElement>('.cm-hybrid-codeblock-content-line'))
         .find(line => line.textContent?.includes('console.log'));
-      const tokenColor = (root: HTMLElement | undefined, selector: string): string => {
+      const nativeHighlightProbeStyle = document.createElement('style');
+      nativeHighlightProbeStyle.textContent = '.cm-native-highlight-color-probe { color: rgb(119, 0, 136); }';
+      document.head.appendChild(nativeHighlightProbeStyle);
+      const tokenColors = (
+        root: HTMLElement | undefined,
+        selector: string,
+      ): { outer: string; painted: string } => {
         const token = root?.querySelector<HTMLElement>(selector);
-        return token ? getComputedStyle(token).color : '';
+        if (!token || !root) return { outer: '', painted: '' };
+        const probe = token.cloneNode(false) as HTMLElement;
+        const nativeHighlight = document.createElement('span');
+        nativeHighlight.className = 'cm-native-highlight-color-probe';
+        nativeHighlight.textContent = token.textContent;
+        probe.appendChild(nativeHighlight);
+        probe.style.position = 'absolute';
+        probe.style.visibility = 'hidden';
+        root.appendChild(probe);
+        const colors = {
+          outer: getComputedStyle(probe).color,
+          painted: getComputedStyle(nativeHighlight).color,
+        };
+        probe.remove();
+        return colors;
       };
+      const keywordColors = tokenColors(codeLine, '.cm-hybrid-prism-token.token.keyword');
+      const functionColors = tokenColors(codeLine, '.cm-hybrid-prism-token.token.function');
+      const typeColors = tokenColors(codeLine, '.cm-hybrid-prism-token.token.builtin');
+      const punctuationColors = tokenColors(codeLine, '.cm-hybrid-prism-token.token.punctuation');
+      const stringColors = tokenColors(consoleLine, '.cm-hybrid-prism-token.token.string');
+      const plainNativeHighlight = document.createElement('span');
+      plainNativeHighlight.className = 'cm-native-highlight-color-probe';
+      plainNativeHighlight.textContent = 'name';
+      plainNativeHighlight.style.position = 'absolute';
+      plainNativeHighlight.style.visibility = 'hidden';
+      codeLine?.appendChild(plainNativeHighlight);
+      const plainIdentifierColor = getComputedStyle(plainNativeHighlight).color;
+      plainNativeHighlight.remove();
+      nativeHighlightProbeStyle.remove();
       return {
         editorBackground: rootStyle.getPropertyValue('--vscode-editor-background').trim(),
+        codeBlockBackground: rootStyle.getPropertyValue('--vscode-textCodeBlock-background').trim(),
         lineBackground: codeLine ? getComputedStyle(codeLine).backgroundColor : '',
         surfaceBackground: codeBlock ? getComputedStyle(codeBlock).backgroundColor : '',
         lineColor: codeLine ? getComputedStyle(codeLine).color : '',
         dimDescriptionColor: rootStyle.getPropertyValue('--vscode-descriptionForeground').trim(),
-        keywordColor: tokenColor(codeLine, '.cm-hybrid-prism-token.token.keyword'),
-        functionColor: tokenColor(codeLine, '.cm-hybrid-prism-token.token.function'),
-        punctuationColor: tokenColor(codeLine, '.cm-hybrid-prism-token.token.punctuation'),
-        stringColor: tokenColor(consoleLine, '.cm-hybrid-prism-token.token.string'),
+        keywordOuterColor: keywordColors.outer,
+        keywordColor: keywordColors.painted,
+        functionOuterColor: functionColors.outer,
+        functionColor: functionColors.painted,
+        typeOuterColor: typeColors.outer,
+        typeColor: typeColors.painted,
+        punctuationOuterColor: punctuationColors.outer,
+        punctuationColor: punctuationColors.painted,
+        stringOuterColor: stringColors.outer,
+        stringColor: stringColors.painted,
+        plainIdentifierColor,
       };
     });
-    expect(codeTheme.surfaceBackground).toBe('rgb(30, 30, 30)');
-    expect(codeTheme.lineBackground).toBe('rgb(30, 30, 30)');
-    expect(codeTheme.keywordColor).toBe('rgb(197, 134, 192)');
+    expect(codeTheme.codeBlockBackground).toBe('#252526');
+    expect(codeTheme.surfaceBackground).toBe('rgb(37, 37, 38)');
+    expect(codeTheme.lineBackground).toBe(codeTheme.surfaceBackground);
+    expect(codeTheme.surfaceBackground).not.toBe('rgb(30, 30, 30)');
+    expect(codeTheme.keywordColor).toBe('rgb(86, 156, 214)');
     expect(codeTheme.functionColor).toBe('rgb(220, 220, 170)');
+    expect(codeTheme.typeColor).toBe('rgb(78, 201, 176)');
     expect(codeTheme.stringColor).toBe('rgb(206, 145, 120)');
     expect(codeTheme.punctuationColor).toBe(codeTheme.lineColor);
+    expect(codeTheme.plainIdentifierColor).toBe(codeTheme.lineColor);
+    expect(codeTheme.keywordColor).toBe(codeTheme.keywordOuterColor);
+    expect(codeTheme.functionColor).toBe(codeTheme.functionOuterColor);
+    expect(codeTheme.typeColor).toBe(codeTheme.typeOuterColor);
+    expect(codeTheme.punctuationColor).toBe(codeTheme.punctuationOuterColor);
+    expect(codeTheme.stringColor).toBe(codeTheme.stringOuterColor);
     expect(codeTheme.punctuationColor).not.toBe('rgb(128, 128, 128)');
     expect(new Set([
       codeTheme.lineColor,
@@ -7346,25 +8094,48 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
     const headerLayout = await page.locator('.cm-hybrid-codeblock-header').evaluate((header) => {
       const label = header.querySelector('.cm-hybrid-codeblock-language');
       const copy = header.querySelector('.cm-hybrid-codeblock-copy');
+      const codeLine = document.querySelector('.cm-hybrid-codeblock-content-line');
       const headerRect = header.getBoundingClientRect();
       const labelRect = label?.getBoundingClientRect();
       const copyRect = copy?.getBoundingClientRect();
+      const labelStyle = label ? getComputedStyle(label) : null;
       const copyStyle = copy ? getComputedStyle(copy) : null;
+      const codeStyle = codeLine ? getComputedStyle(codeLine) : null;
       return {
-        labelStartsOnRightHalf: labelRect ? labelRect.left > headerRect.left + headerRect.width / 2 : false,
-        labelRightGap: labelRect ? Math.round(headerRect.right - labelRect.right) : Number.POSITIVE_INFINITY,
-        copyStaysLeftOfLanguage: copyRect && labelRect ? copyRect.right <= labelRect.left : false,
-        copyOpacity: copyStyle?.opacity ?? '',
+        labelLeftGap: labelRect ? Math.round(labelRect.left - headerRect.left) : Number.POSITIVE_INFINITY,
+        labelFontFamily: labelStyle?.fontFamily ?? '',
+        labelFontSize: labelStyle?.fontSize ?? '',
+        labelFontWeight: labelStyle?.fontWeight ?? '',
+        labelLineHeight: labelStyle?.lineHeight ?? '',
+        codeFontFamily: codeStyle?.fontFamily ?? '',
+        codeFontSize: codeStyle?.fontSize ?? '',
+        codeFontWeight: codeStyle?.fontWeight ?? '',
+        codeLineHeight: codeStyle?.lineHeight ?? '',
+        copyText: copy?.textContent?.trim() ?? '',
+        copyAriaLabel: copy?.getAttribute('aria-label') ?? '',
+        copyPosition: copyStyle?.position ?? '',
+        copyWidth: copyRect?.width ?? 0,
+        copyHeight: copyRect?.height ?? 0,
       };
     });
-    expect(headerLayout.labelStartsOnRightHalf).toBe(true);
-    expect(headerLayout.labelRightGap).toBeLessThan(24);
-    expect(headerLayout.copyStaysLeftOfLanguage).toBe(true);
-    expect(headerLayout.copyOpacity).toBe('0');
+    expect(headerLayout.labelLeftGap).toBeGreaterThanOrEqual(0);
+    expect(headerLayout.labelLeftGap).toBeLessThan(24);
+    expect(headerLayout.labelFontFamily).toBe(headerLayout.codeFontFamily);
+    expect(headerLayout.labelFontSize).toBe(headerLayout.codeFontSize);
+    expect(headerLayout.labelFontWeight).toBe(headerLayout.codeFontWeight);
+    expect(headerLayout.labelLineHeight).toBe(headerLayout.codeLineHeight);
+    expect(headerLayout.copyText).toBe('');
+    expect(headerLayout.copyAriaLabel).toBe('Copy code');
+    expect(headerLayout.copyPosition).toBe('absolute');
+    expect(headerLayout.copyWidth).toBeGreaterThan(0);
+    expect(headerLayout.copyHeight).toBeGreaterThan(0);
+    const headerRectBeforeHover = await page.locator('.cm-hybrid-codeblock-header').boundingBox();
     await page.locator('.cm-hybrid-codeblock').hover();
     await expect.poll(() => page.locator('.cm-hybrid-codeblock-copy').evaluate(element => (
       getComputedStyle(element).opacity
     ))).toBe('1');
+    const headerRectAfterHover = await page.locator('.cm-hybrid-codeblock-header').boundingBox();
+    expect(headerRectAfterHover).toEqual(headerRectBeforeHover);
     const codeLineFont = await page.locator('.cm-hybrid-codeblock-content-line').first().evaluate(element => (
       getComputedStyle(element).fontFamily
     ));
@@ -7392,6 +8163,7 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
     expect(Math.abs(codeBlockLineHeights.header - codeBlockLineHeights.normalLine)).toBeLessThanOrEqual(1);
     expect(Math.abs(codeBlockLineHeights.headerRow - codeBlockLineHeights.normalLine)).toBeLessThanOrEqual(1);
     expect(Math.abs(codeBlockLineHeights.footerRow - codeBlockLineHeights.normalLine)).toBeLessThanOrEqual(1);
+    expect(Math.abs(codeBlockLineHeights.codeLine - codeBlockLineHeights.normalLine)).toBeLessThanOrEqual(1);
 
     const lineNumbers = await page.locator('.cm-lineNumbers .cm-gutterElement').evaluateAll(elements => (
       elements
@@ -7400,26 +8172,10 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
     ));
     expect(lineNumbers).toEqual(expect.arrayContaining(['3', '4', '5', '6']));
 
-    const codeSurface = await page.locator('.cm-hybrid-codeblock-inner').evaluate((element) => {
-      const style = getComputedStyle(element);
-      return {
-        borderLeftStyle: style.borderLeftStyle,
-        borderLeftWidth: style.borderLeftWidth,
-        borderTopColor: style.borderTopColor,
-        borderTopStyle: style.borderTopStyle,
-        borderTopWidth: style.borderTopWidth,
-        boxShadow: style.boxShadow,
-      };
-    });
-    expect(codeSurface.borderTopWidth).toBe('0px');
-    expect(codeSurface.borderLeftStyle).toBe('solid');
-    expect(codeSurface.borderLeftWidth).toBe('1px');
-    expect(codeSurface.boxShadow).not.toBe('none');
-    expect(codeSurface.boxShadow).toContain('inset');
-
-    const codeFrameGeometry = await page.evaluate(() => {
+    const codeSurface = await page.evaluate(() => {
       const elements = [
         document.querySelector<HTMLElement>('.cm-hybrid-codeblock-inner'),
+        document.querySelector<HTMLElement>('.cm-hybrid-codeblock-header'),
         ...Array.from(document.querySelectorAll<HTMLElement>('.cm-hybrid-codeblock-content-line')),
         document.querySelector<HTMLElement>('.cm-hybrid-codeblock-footer'),
       ].filter((element): element is HTMLElement => Boolean(element));
@@ -7430,22 +8186,33 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
           className: element.className,
           left: rect.left,
           right: rect.right,
-          borderLeftColor: style.borderLeftColor,
-          borderRightColor: style.borderRightColor,
-          borderTopColor: style.borderTopColor,
-          borderBottomColor: style.borderBottomColor,
+          backgroundColor: style.backgroundColor,
+          borderLeftWidth: style.borderLeftWidth,
+          borderRightWidth: style.borderRightWidth,
+          borderTopWidth: style.borderTopWidth,
+          borderBottomWidth: style.borderBottomWidth,
+          boxShadow: style.boxShadow,
         };
       });
       const lefts = rects.map(rect => rect.left);
       const rights = rects.map(rect => rect.right);
       return {
         rects,
+        backgrounds: [...new Set(rects.map(rect => rect.backgroundColor))],
         maxLeftDelta: Math.max(...lefts) - Math.min(...lefts),
         maxRightDelta: Math.max(...rights) - Math.min(...rights),
       };
     });
-    expect(codeFrameGeometry.maxLeftDelta).toBeLessThanOrEqual(1);
-    expect(codeFrameGeometry.maxRightDelta).toBeLessThanOrEqual(1);
+    expect(codeSurface.backgrounds).toEqual(['rgb(37, 37, 38)']);
+    expect(codeSurface.maxLeftDelta).toBeLessThanOrEqual(1);
+    expect(codeSurface.maxRightDelta).toBeLessThanOrEqual(1);
+    for (const surface of codeSurface.rects) {
+      expect(surface.borderLeftWidth).toBe('0px');
+      expect(surface.borderRightWidth).toBe('0px');
+      expect(surface.borderTopWidth).toBe('0px');
+      expect(surface.borderBottomWidth).toBe('0px');
+      expect(surface.boxShadow).toBe('none');
+    }
 
     await page.evaluate(() => {
       window.__copiedText = null;
@@ -7490,6 +8257,8 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
 
     const renderedText = await page.locator('.cm-content').textContent();
     expect(renderedText).not.toContain('```ts');
+    const inactiveTailTop = await page.locator('.cm-line').filter({ hasText: 'Tail line' })
+      .evaluate(element => element.getBoundingClientRect().top);
 
     const inactiveCodeLayout = await page.evaluate(() => {
       const line = Array.from(document.querySelectorAll<HTMLElement>('.cm-hybrid-codeblock-content-line'))
@@ -7509,13 +8278,15 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
     await page.evaluate(() => {
       const view = window.__cmView;
       const line = view.state.doc.line(4);
-      view.dispatch({ selection: { anchor: line.from + 8 } });
+      view.dispatch({ selection: { anchor: line.from + 9 } });
     });
 
-    await expect(page.locator('.cm-hybrid-codeblock')).toHaveCount(0);
+    await expect(page.locator('.cm-hybrid-codeblock')).toHaveCount(1);
+    await expect(page.locator('.cm-hybrid-codeblock-language')).toHaveText('```typescript');
+    await expect(page.locator('.cm-hybrid-codeblock-footer')).toHaveCount(1);
     expect(await page.locator('.cm-line').evaluateAll(lines => lines
       .map(line => line.textContent?.trim() ?? '')
-      .filter(text => text.startsWith('```')))).toEqual(['```ts', '```']);
+      .filter(text => text.startsWith('```')))).toEqual(['```typescript']);
     await expect(page.locator('.cm-hybrid-codeblock-content-line').filter({ hasText: 'const greet' })).toBeVisible();
     await expect(page.locator('.cm-hybrid-codeblock-content-line .cm-hybrid-prism-token.token.keyword').filter({ hasText: 'const' })).toBeVisible();
     const activeCodeLayout = await page.evaluate(() => {
@@ -7536,6 +8307,16 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
     expect(Math.abs(activeCodeLayout.lineLeft - inactiveCodeLayout.lineLeft)).toBeLessThanOrEqual(1);
     expect(activeCodeLayout.keywordText).toBe(inactiveCodeLayout.keywordText);
     expect(activeCodeLayout.keywordColor).toBe(inactiveCodeLayout.keywordColor);
+    expect(Math.abs(
+      await page.locator('.cm-line').filter({ hasText: 'Tail line' })
+        .evaluate(element => element.getBoundingClientRect().top)
+      - inactiveTailTop,
+    )).toBeLessThanOrEqual(0.5);
+
+    await page.keyboard.insertText('!');
+    await expect(page.locator('.cm-hybrid-codeblock-content-line').filter({ hasText: 'const gre!et' })).toBeVisible();
+    await expect(page.locator('.cm-hybrid-codeblock')).toHaveCount(1);
+    await expect(page.locator('.cm-hybrid-codeblock-footer')).toHaveCount(1);
     expect(await page.evaluate(() => [
       window.__cmView.state.doc.line(3).text,
       window.__cmView.state.doc.line(4).text,
@@ -7543,15 +8324,18 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
       window.__cmView.state.doc.line(6).text,
     ])).toEqual([
       '```ts',
-      'const greet = (user_name: string) => `hi ${user_name}`;',
+      'const gre!et = (user_name: string) => `hi ${user_name}`;',
       'console.log(greet("world_name"));',
       '```',
     ]);
   });
 
-  test('active opening fenced code line keeps a complete Obsidian-like frame', async ({ page }) => {
+  test('only the active fence edge reveals source while code content keeps the styled header and footer', async ({ page }) => {
     await page.goto('http://localhost:8979/test.html');
     await expect(page.getByText('Test fixture ready')).toBeVisible();
+    await page.evaluate(() => {
+      document.documentElement.style.setProperty('--vscode-textCodeBlock-background', '#252526');
+    });
 
     const doc = [
       'Prelude line',
@@ -7569,97 +8353,102 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
     }, doc);
 
     await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
-    await page.evaluate(() => {
-      const view = window.__cmView;
-      const openingLine = view.state.doc.line(3);
-      view.dispatch({ selection: { anchor: openingLine.from + 1 }, scrollIntoView: true });
-      view.focus();
-    });
+    const setSelection = async (anchorLine: number, headLine = anchorLine) => page.evaluate(
+      ({ anchorLine, headLine }) => {
+        const view = window.__cmView;
+        const anchor = view.state.doc.line(anchorLine);
+        const head = view.state.doc.line(headLine);
+        view.dispatch({
+          selection: {
+            anchor: anchor.from + Math.min(1, anchor.length),
+            head: head.from + Math.min(1, head.length),
+          },
+          scrollIntoView: true,
+        });
+        view.focus();
+      },
+      { anchorLine, headLine },
+    );
 
-    await expect(page.locator('.cm-line').filter({ hasText: '```ts' })).toBeVisible();
-    await expect(page.locator('.cm-hybrid-codeblock-content-line').filter({ hasText: 'const greet' })).toBeVisible();
-
-    const activeFrame = await page.evaluate(() => {
-      const openingLine = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
-        .find(line => line.textContent?.includes('```ts'));
-      const contentLines = Array.from(document.querySelectorAll<HTMLElement>('.cm-hybrid-codeblock-content-line'));
-      const closingLine = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
-        .find(line => line.textContent?.trim() === '```');
-      const elements = [
-        openingLine,
-        ...contentLines,
-        closingLine,
-      ].filter((element): element is HTMLElement => Boolean(element));
-      const rects = elements.map((element) => {
-        const rect = element.getBoundingClientRect();
-        const style = getComputedStyle(element);
-        return {
-          className: element.className,
-          text: element.textContent ?? '',
-          left: rect.left,
-          right: rect.right,
-          borderLeftColor: style.borderLeftColor,
-          borderLeftStyle: style.borderLeftStyle,
-          borderLeftWidth: style.borderLeftWidth,
-          borderRightColor: style.borderRightColor,
-          borderTopColor: style.borderTopColor,
-          borderTopStyle: style.borderTopStyle,
-          borderTopWidth: style.borderTopWidth,
-          boxShadow: style.boxShadow,
-          backgroundColor: style.backgroundColor,
-        };
-      });
-      const lefts = rects.map(rect => rect.left);
-      const rights = rects.map(rect => rect.right);
+    const snapshot = async () => page.evaluate(() => {
+      const lines = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'));
+      const tail = lines.find(line => line.textContent?.includes('Tail line'));
+      const codeLines = Array.from(document.querySelectorAll<HTMLElement>('.cm-hybrid-codeblock-content-line'));
       return {
-        rects,
-        opening: rects[0],
-        maxLeftDelta: Math.max(...lefts) - Math.min(...lefts),
-        maxRightDelta: Math.max(...rights) - Math.min(...rights),
+        headerCount: document.querySelectorAll('.cm-hybrid-codeblock').length,
+        headerLabel: document.querySelector('.cm-hybrid-codeblock-language')?.textContent ?? '',
+        footerCount: document.querySelectorAll('.cm-hybrid-codeblock-footer').length,
+        rawFences: lines
+          .map(line => line.textContent?.trim() ?? '')
+          .filter(text => text.startsWith('```')),
+        tailTop: tail?.getBoundingClientRect().top ?? 0,
+        codeLineTops: codeLines.map(line => line.getBoundingClientRect().top),
       };
     });
 
-    expect(activeFrame.opening.text).toContain('```ts');
-    expect(activeFrame.opening.borderTopWidth).toBe('0px');
-    expect(activeFrame.opening.boxShadow).not.toBe('none');
-    expect(activeFrame.opening.boxShadow).toContain('inset');
-    expect(activeFrame.opening.borderLeftStyle).toBe('solid');
-    expect(activeFrame.opening.borderLeftWidth).toBe('1px');
-    expect(activeFrame.opening.borderLeftColor).toBe('rgb(62, 62, 62)');
-    expect(activeFrame.maxLeftDelta).toBeLessThanOrEqual(1);
-    expect(activeFrame.maxRightDelta).toBeLessThanOrEqual(1);
+    await setSelection(1);
+    const inactive = await snapshot();
+    expect(inactive.headerCount).toBe(1);
+    expect(inactive.headerLabel).toBe('TypeScript');
+    expect(inactive.footerCount).toBe(1);
+    expect(inactive.rawFences).toEqual([]);
 
-    const contentTopsWithOpeningActive = await page.evaluate(() => Array.from(
-      document.querySelectorAll<HTMLElement>('.cm-hybrid-codeblock-content-line'),
-      line => ({ text: line.textContent ?? '', top: line.getBoundingClientRect().top }),
-    ));
+    await setSelection(4);
+    const contentActive = await snapshot();
+    expect(contentActive.headerCount).toBe(1);
+    expect(contentActive.headerLabel).toBe('```typescript');
+    expect(contentActive.footerCount).toBe(1);
+    expect(contentActive.rawFences).toEqual(['```typescript']);
 
-    await page.evaluate(() => {
-      const view = window.__cmView;
-      const firstContentLine = view.state.doc.line(4);
-      view.dispatch({ selection: { anchor: firstContentLine.from + 1 } });
-    });
-    await expect(page.locator('.cm-hybrid-codeblock')).toHaveCount(0);
-    expect(await page.locator('.cm-line').evaluateAll(lines => lines
-      .map(line => line.textContent?.trim() ?? '')
-      .filter(text => text.startsWith('```')))).toEqual(['```ts', '```']);
+    await setSelection(3);
+    const openingActive = await snapshot();
+    expect(openingActive.headerCount).toBe(0);
+    expect(openingActive.headerLabel).toBe('');
+    expect(openingActive.footerCount).toBe(1);
+    expect(openingActive.rawFences).toEqual(['```ts']);
 
-    const contentTopsWithFirstContentActive = await page.evaluate(() => Array.from(
-      document.querySelectorAll<HTMLElement>('.cm-hybrid-codeblock-content-line'),
-      line => ({ text: line.textContent ?? '', top: line.getBoundingClientRect().top }),
-    ));
+    await setSelection(6);
+    const closingActive = await snapshot();
+    expect(closingActive.headerCount).toBe(1);
+    expect(closingActive.headerLabel).toBe('```typescript');
+    expect(closingActive.footerCount).toBe(0);
+    expect(closingActive.rawFences).toEqual(['```typescript', '```']);
 
-    expect(contentTopsWithFirstContentActive).toHaveLength(contentTopsWithOpeningActive.length);
-    for (const before of contentTopsWithOpeningActive) {
-      const after = contentTopsWithFirstContentActive.find(line => line.text === before.text);
-      expect(after?.top).toBeDefined();
-      expect(Math.abs((after?.top ?? 0) - before.top)).toBeLessThanOrEqual(0.5);
+    await setSelection(3, 4);
+    const openingSelected = await snapshot();
+    expect(openingSelected.headerCount).toBe(0);
+    expect(openingSelected.headerLabel).toBe('');
+    expect(openingSelected.footerCount).toBe(1);
+    expect(openingSelected.rawFences).toEqual(['```ts']);
+
+    await setSelection(4, 6);
+    const closingSelected = await snapshot();
+    expect(closingSelected.headerCount).toBe(1);
+    expect(closingSelected.headerLabel).toBe('```typescript');
+    expect(closingSelected.footerCount).toBe(0);
+    expect(closingSelected.rawFences).toEqual(['```typescript', '```']);
+
+    for (const state of [
+      contentActive,
+      openingActive,
+      closingActive,
+      openingSelected,
+      closingSelected,
+    ]) {
+      expect(Math.abs(state.tailTop - inactive.tailTop)).toBeLessThanOrEqual(0.5);
+      expect(state.codeLineTops).toHaveLength(inactive.codeLineTops.length);
+      state.codeLineTops.forEach((top, index) => {
+        expect(Math.abs(top - (inactive.codeLineTops[index] ?? 0))).toBeLessThanOrEqual(0.5);
+      });
     }
   });
 
-  test('code block frame strokes do not add vertical height to rendered or active fence rows', async ({ page }) => {
+  test('subtle code surface stays continuous and adds no stroke or height to any fence row', async ({ page }) => {
     await page.goto('http://localhost:8979/test.html');
     await expect(page.getByText('Test fixture ready')).toBeVisible();
+    await page.evaluate(() => {
+      document.documentElement.style.setProperty('--vscode-textCodeBlock-background', '#252526');
+    });
 
     const doc = [
       'Normal before',
@@ -7691,6 +8480,9 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
           className: element.className,
           text: element.textContent ?? '',
           height: rect.height,
+          backgroundColor: style.backgroundColor,
+          borderLeftWidth: style.borderLeftWidth,
+          borderRightWidth: style.borderRightWidth,
           borderTopWidth: style.borderTopWidth,
           borderBottomWidth: style.borderBottomWidth,
           boxShadow: style.boxShadow,
@@ -7700,19 +8492,24 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
       return {
         selectedLine: view.state.doc.lineAt(view.state.selection.main.head).number,
         normal: measure(lines.find(element => element.textContent?.includes('Normal before')) ?? null),
+        normalAfter: measure(lines.find(element => element.textContent?.includes('Normal after')) ?? null),
         headerLine: measure(document.querySelector('.cm-line:has(.cm-hybrid-codeblock)')),
+        headerSurface: measure(document.querySelector('.cm-hybrid-codeblock-header')),
         codeContentLine: measure(lines.find(element => element.textContent?.includes('m = -inf')) ?? null),
         openingLine: measure(lines.find(element => element.textContent?.includes('```python')) ?? null),
         footerLine: measure(document.querySelector('.cm-line:has(.cm-hybrid-codeblock-footer)')),
+        footerSurface: measure(document.querySelector('.cm-hybrid-codeblock-footer')),
         closingLine: measure(lines.find(element => element.textContent === '```') ?? null),
       };
     }, lineNumber);
 
     const inactiveRows = await measureRows(1);
+    const activeContentRows = await measureRows(4);
     const activeOpeningRows = await measureRows(3);
     const activeClosingRows = await measureRows(6);
     const codeContentHeight = inactiveRows.codeContentLine?.height ?? 0;
 
+    expect(inactiveRows.normal?.height).toBeDefined();
     expect(inactiveRows.headerLine?.height).toBeDefined();
     expect(inactiveRows.codeContentLine?.height).toBeDefined();
     expect(inactiveRows.footerLine?.height).toBeDefined();
@@ -7720,12 +8517,39 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
     expect(activeClosingRows.closingLine?.height).toBeDefined();
 
     for (const row of [
+      inactiveRows.normal,
+      inactiveRows.normalAfter,
       inactiveRows.headerLine,
       inactiveRows.footerLine,
+      activeContentRows.headerLine,
+      activeContentRows.footerLine,
       activeOpeningRows.openingLine,
       activeClosingRows.closingLine,
     ]) {
       expect(Math.abs((row?.height ?? 0) - codeContentHeight)).toBeLessThanOrEqual(0.5);
+    }
+
+    for (const surface of [
+      inactiveRows.headerSurface,
+      inactiveRows.codeContentLine,
+      inactiveRows.footerSurface,
+      activeContentRows.headerSurface,
+      activeContentRows.codeContentLine,
+      activeContentRows.footerSurface,
+      activeOpeningRows.openingLine,
+      activeOpeningRows.codeContentLine,
+      activeOpeningRows.footerSurface,
+      activeClosingRows.headerSurface,
+      activeClosingRows.codeContentLine,
+      activeClosingRows.closingLine,
+    ]) {
+      expect(surface).not.toBeNull();
+      expect(surface?.backgroundColor).toBe('rgb(37, 37, 38)');
+      expect(surface?.borderLeftWidth).toBe('0px');
+      expect(surface?.borderRightWidth).toBe('0px');
+      expect(surface?.borderTopWidth).toBe('0px');
+      expect(surface?.borderBottomWidth).toBe('0px');
+      expect(surface?.boxShadow).toBe('none');
     }
   });
 
@@ -7865,6 +8689,128 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
     expect(measurements.activeOpeningFence!.lineHeight).toBe(measurements.codeContentLine!.lineHeight);
     expect(measurements.activeClosingFence!.fontSize).toBe(measurements.codeContentLine!.fontSize);
     expect(measurements.activeClosingFence!.lineHeight).toBe(measurements.codeContentLine!.lineHeight);
+  });
+
+  test('moving the caret between Math Code Rendering lines 18 and 19 keeps line 18 geometry stable', async ({ page }) => {
+    await page.setViewportSize({ width: 500, height: 700 });
+    await page.goto('http://localhost:8979/test.html');
+    await waitForEditorBootstrap(page);
+
+    const doc = [
+      '# Math Code Rendering',
+      '',
+      'Inline math should render like live preview: $e^{i\\pi} + 1 = 0$.',
+      '',
+      'Display math should render as a block:',
+      '',
+      '$$',
+      '\\int_0^1 x^2 \\, dx = \\frac{1}{3}',
+      '$$',
+      '',
+      'Fenced code should render as a preview card:',
+      '',
+      '```ts',
+      'const greet = (name: string) => `hi ${name}`;',
+      'console.log(greet("world"));',
+      '```',
+      '',
+      'See also [[FlashAttention]] and [OpenAI](https://openai.com).',
+      '',
+    ].join('\n');
+
+    await page.evaluate((text) => {
+      window.postMessage({ type: 'setText', text, title: 'Math Code Rendering' }, '*');
+    }, doc);
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+
+    const measurements = await page.evaluate(async () => {
+      const view = window.__cmView;
+      const frame = () => new Promise<void>(resolve => (
+        window.requestAnimationFrame(() => window.requestAnimationFrame(() => resolve()))
+      ));
+      const select = async (lineNumber: number, column = 0) => {
+        const line = view.state.doc.line(lineNumber);
+        view.dispatch({ selection: { anchor: line.from + Math.min(column, line.length) } });
+        view.focus();
+        await frame();
+      };
+      const measure = () => {
+        const lines = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'));
+        const line = lines
+          .find(element => element.textContent?.includes('See also'));
+        const followingLine = line?.nextElementSibling;
+        if (
+          !(line instanceof HTMLElement)
+          || !(followingLine instanceof HTMLElement)
+        ) {
+          throw new Error('Missing line 18 or line 19');
+        }
+        const rect = line.getBoundingClientRect();
+        const followingRect = followingLine.getBoundingClientRect();
+        const style = getComputedStyle(line);
+        return {
+          normalHeight: followingRect.height,
+          height: rect.height,
+          bottom: rect.bottom,
+          followingTop: followingRect.top,
+          fontFamily: style.fontFamily,
+          fontSize: style.fontSize,
+          lineHeight: style.lineHeight,
+          letterSpacing: style.letterSpacing,
+        };
+      };
+
+      await select(19);
+      const inactive = measure();
+      await select(18);
+      const activeStart = measure();
+      await select(18, 'See also [[Flash'.length);
+      const activeWikiLink = measure();
+      await select(18, 'See also [[FlashAttention]] and [Open'.length);
+      const activeExternalLink = measure();
+      const destinationColumn = view.state.doc.line(18).text.indexOf('openai.com') + 2;
+      await select(18, destinationColumn);
+      const destinationSourceVisible = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+        .find(element => element.textContent?.includes('See also'))
+        ?.textContent?.includes('(https://openai.com)') ?? false;
+      await select(19);
+      const restored = measure();
+      return {
+        inactive,
+        activeStart,
+        activeWikiLink,
+        activeExternalLink,
+        destinationSourceVisible,
+        restored,
+      };
+    });
+
+    expect(measurements.destinationSourceVisible).toBe(true);
+    expect(Math.abs(
+      measurements.inactive.height - measurements.inactive.normalHeight,
+    )).toBeLessThanOrEqual(0.25);
+
+    for (const measurement of [
+      measurements.activeStart,
+      measurements.activeWikiLink,
+      measurements.activeExternalLink,
+      measurements.restored,
+    ]) {
+      expect({
+        fontFamily: measurement.fontFamily,
+        fontSize: measurement.fontSize,
+        lineHeight: measurement.lineHeight,
+        letterSpacing: measurement.letterSpacing,
+      }).toEqual({
+        fontFamily: measurements.inactive.fontFamily,
+        fontSize: measurements.inactive.fontSize,
+        lineHeight: measurements.inactive.lineHeight,
+        letterSpacing: measurements.inactive.letterSpacing,
+      });
+      expect(Math.abs(measurement.height - measurements.inactive.height)).toBeLessThanOrEqual(0.25);
+      expect(Math.abs(measurement.bottom - measurements.inactive.bottom)).toBeLessThanOrEqual(0.25);
+      expect(Math.abs(measurement.followingTop - measurements.inactive.followingTop)).toBeLessThanOrEqual(0.25);
+    }
   });
 
   test('mouse click can select the Online Softmax opening code fence line', async ({ page }) => {
@@ -8031,10 +8977,12 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
       view.dispatch({ selection: { anchor: line.from + 6 } });
     });
 
-    await expect(page.locator('.cm-hybrid-codeblock')).toHaveCount(0);
+    await expect(page.locator('.cm-hybrid-codeblock')).toHaveCount(1);
+    await expect(page.locator('.cm-hybrid-codeblock-language')).toHaveText('```python');
+    await expect(page.locator('.cm-hybrid-codeblock-footer')).toHaveCount(1);
     expect(await page.locator('.cm-line').evaluateAll(lines => lines
       .map(line => line.textContent?.trim() ?? '')
-      .filter(text => text.startsWith('```')))).toEqual(['```python', '```']);
+      .filter(text => text.startsWith('```')))).toEqual(['```python']);
     await expect(page.locator('.cm-hybrid-codeblock-content-line').filter({ hasText: 'm_new = max' })).toBeVisible();
     const activeLayout = await page.evaluate(() => {
       const line = Array.from(document.querySelectorAll<HTMLElement>('.cm-hybrid-codeblock-content-line'))
@@ -8183,10 +9131,12 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
       view.dispatch({ selection: { anchor: line.from + 2 } });
     });
 
-    await expect(page.locator('.cm-hybrid-codeblock')).toHaveCount(0);
+    await expect(page.locator('.cm-hybrid-codeblock')).toHaveCount(1);
+    await expect(page.locator('.cm-hybrid-codeblock-language')).toHaveText('```python');
+    await expect(page.locator('.cm-hybrid-codeblock-footer')).toHaveCount(1);
     expect(await page.locator('.cm-line').evaluateAll(lines => lines
       .map(line => line.textContent?.trim() ?? '')
-      .filter(text => text.startsWith('```')))).toEqual(['```python', '```']);
+      .filter(text => text.startsWith('```')))).toEqual(['```python']);
     await expect(page.locator('.cm-hybrid-codeblock-content-line .cm-hybrid-prism-token.token.keyword').filter({ hasText: 'for' })).toBeVisible();
 
     const activeLayout = await page.evaluate((mathSource) => {
@@ -8272,6 +9222,7 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
       view.dispatch({ selection: { anchor: line.from + line.text.indexOf('online') + 2 } });
     });
 
+    await expect(page.locator('.cm-hybrid-codeblock-language')).toHaveText('```python');
     const activeCodeLine = await page.evaluate(() => {
       const line = Array.from(document.querySelectorAll<HTMLElement>('.cm-hybrid-codeblock-content-line'))
         .find(element => element.textContent?.includes('online_softmax') || element.textContent?.includes('onlinesoftmax'));
@@ -9847,6 +10798,7 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
     await expect(menu).toHaveCount(1);
     await expect(menu).toBeVisible();
     await expect(menu.getByRole('menuitem')).toHaveText([
+      /(?:⌘L|Ctrl\+L)  Add to Chat/,
       'Copy',
       'Bold',
       'Italic',
@@ -9956,6 +10908,7 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
     const menu = page.getByRole('menu');
     await expect(menu).toBeVisible();
     await expect(menu.getByRole('menuitem')).toHaveText([
+      /(?:⌘L|Ctrl\+L)  Add to Chat/,
       'Copy',
       'Bold',
       'Italic',
@@ -10597,7 +11550,7 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
       view.dispatch({ selection: { anchor: linkPos } });
     });
     await page.keyboard.press('Escape');
-    await page.keyboard.press('Meta+Enter');
+    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+Enter' : 'Control+Enter');
 
     const openMessages = await page.evaluate(() => window.__mockMessages.filter((m) => m.type === 'openUri'));
     expect(openMessages).toEqual([{ type: 'openUri', uri: 'raw/paper.pdf#page=7' }]);
@@ -10622,7 +11575,7 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
       view.dispatch({ selection: { anchor: linkPos } });
     });
     await page.keyboard.press('Escape');
-    await page.keyboard.press('Meta+Enter');
+    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+Enter' : 'Control+Enter');
 
     const openMessages = await page.evaluate(() => window.__mockMessages.filter((m) => m.type === 'openUri'));
     expect(openMessages).toEqual([{ type: 'openUri', uri: 'https://example.com/docs' }]);
@@ -10655,17 +11608,9 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
       window.postMessage({ type: 'insertText', text: md }, '*');
     }, insertMd);
 
-    // Wait for the change to propagate
-    await page.waitForFunction((expected) => {
-      const el = document.querySelector('.cm-content');
-      return el?.textContent?.includes(expected);
-    }, insertMd, { timeout: 5000 });
-
-    const content = await page.evaluate(() => {
-      const el = document.querySelector('.cm-content');
-      return el?.textContent ?? '';
-    });
-
-    expect(content).toContain('[PDF](raw/paper.pdf#page=7)');
+    const expectedText = initialText.replace('some', insertMd);
+    await expect.poll(() => page.evaluate(() =>
+      window.__cmView?.state.doc.toString()
+    )).toBe(expectedText);
   });
 });

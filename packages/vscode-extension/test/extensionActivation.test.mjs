@@ -27,13 +27,6 @@ function loadTsModule(relativePath, mocks = {}) {
     if (Object.prototype.hasOwnProperty.call(mocks, request)) {
       return mocks[request];
     }
-    if (request === './webBrowserProvider') {
-      return {
-        WebBrowserProvider: class {
-          open() {}
-        },
-      };
-    }
     if (request === './codexAppServerClient') {
       return {
         CodexAppServerClient: class {
@@ -43,9 +36,76 @@ function loadTsModule(relativePath, mocks = {}) {
     }
     if (request === './pdfDiscussionController') {
       return {
+        PDF_DISCUSSION_MAX_PNG_BYTES: 5 * 1024 * 1024,
+        PDF_DISCUSSION_WORKSPACE_TRUST_MESSAGE:
+          'Trust this workspace before using Ask PDF with Codex.',
         PdfDiscussionController: class {
           dispose() {}
         },
+      };
+    }
+    if (request === './agentHandoff') {
+      return {
+        handoffSelectionToAgent: async () => undefined,
+        handoffSelectionToCursor: async () => false,
+      };
+    }
+    if (request === './cursorCrop') {
+      return {
+        validateCursorCropPng: value => value instanceof Uint8Array
+          ? value
+          : undefined,
+      };
+    }
+    if (request === './cursorBrowserSelection') {
+      return {
+        captureActiveCursorBrowserSelection: async () => undefined,
+        cursorBrowserCaptureToSelectionContext: capture => capture,
+      };
+    }
+    if (request === './experimentalOwnedBrowser') {
+      return {
+        registerExperimentalOwnedBrowser: () => ({ dispose() {} }),
+      };
+    }
+    if (request === './learningNoteStore') {
+      return {
+        LearningNoteStore: class {},
+      };
+    }
+    if (request === './dailyNotes') {
+      return {
+        generateDailyNote: async () => ({
+          absolutePath: '/vault/wiki/daily/2026-01-01.md',
+          relativePath: 'wiki/daily/2026-01-01.md',
+          dueReviews: [],
+          carriedTodos: [],
+        }),
+      };
+    }
+    if (request === './filesystemWiki') {
+      return {
+        loadFilesystemWiki: async () => ({ documents: [], links: [] }),
+        getConceptGraph: () => ({ nodes: [], edges: [] }),
+      };
+    }
+    if (request === './knowledgeGraphPanel') {
+      return {
+        KnowledgeGraphPanel: class {
+          show() {}
+          dispose() {}
+        },
+      };
+    }
+    if (request === './repositorySync') {
+      return {
+        syncRepository: async () => ({
+          status: 'up-to-date',
+          before: {},
+          after: {},
+          changed: false,
+          requiresConfirmation: false,
+        }),
       };
     }
     return originalLoad.call(this, request, parent, isMain);
@@ -86,9 +146,6 @@ test('activation reopens an already-open markdown vault note in the custom edito
       },
     },
     './agentContext': {
-      AgentContextProvider: class {
-        refresh() {}
-      },
       addSelectionToContext: async () => undefined,
     },
     './uriDispatcher': { dispatchUri: () => undefined },
@@ -134,30 +191,50 @@ test('activation reopens an already-open markdown vault note in the custom edito
   assert.equal(outlineRegisterCount, 1);
 });
 
-test('activation registers selection export command without Agent Context or Problems tree views', async () => {
+test('selection export follows the active Markdown or PDF tab and opens an agent handoff', async () => {
   const treeProviderIds = [];
   const calls = [];
+  const handoffs = [];
   const pdfSelection = {
-    uri: { fsPath: '/vault/raw/papers/attention.pdf' },
+    uri: { fsPath: '/vault/raw/papers/attention.pdf', scheme: 'file' },
     text: 'FlashAttention uses tiling',
     startLine: 2,
     endLine: 2,
   };
+  const markdownSelection = {
+    uri: { fsPath: '/vault/notes/attention.md', scheme: 'file' },
+    text: 'Markdown passage',
+    startLine: 4,
+    endLine: 4,
+  };
   const vscode = createVscodeMock({
     executeCommandCalls: [],
     activeDocumentUri: undefined,
+    activeTabUri: markdownSelection.uri,
+    activeTabViewType: 'human-learning.markdownEditor',
     treeProviderIds,
   });
 
   const mocks = createActivationMocks({ vscode });
   mocks['./agentContext'] = {
     addSelectionToContext: async (vaultRoot, options) => {
+      const selection = await options.getActiveSelectionContext();
       calls.push({
         vaultRoot,
-        selection: await options.getActiveSelectionContext(),
+        selection,
       });
-      return true;
+      return selection === undefined
+        ? false
+        : {
+            directoryPath: `/vault/.hl/agent/exports/export-${calls.length}`,
+            markdownPath: `/vault/.hl/agent/exports/export-${calls.length}/selection.md`,
+            jsonPath: `/vault/.hl/agent/exports/export-${calls.length}/selection.json`,
+          };
     },
+    syncSelectionExportAttachment: async () => undefined,
+  };
+  mocks['./agentHandoff'] = {
+    handoffSelectionToAgent: async uri => handoffs.push(uri.fsPath),
   };
   mocks['./pdfEditorProvider'] = {
     PdfEditorProvider: class {
@@ -171,19 +248,546 @@ test('activation registers selection export command without Agent Context or Pro
       }
     },
   };
+  mocks['./markdownEditorProvider'] = {
+    MarkdownEditorProvider: class {
+      static viewType = 'human-learning.markdownEditor';
+      async captureActiveSelectionContext() {
+        return markdownSelection;
+      }
+    },
+  };
 
   const { activate } = loadTsModule('src/extension.ts', mocks);
 
   activate({ subscriptions: [] });
+  await vscode.__registeredCommands['human-learning.addSelectionToContext']();
+  vscode.window.tabGroups.activeTabGroup.activeTab.input.viewType = undefined;
+  await vscode.__registeredCommands['human-learning.addSelectionToContext']();
+  vscode.window.tabGroups.activeTabGroup.activeTab.input.uri = pdfSelection.uri;
+  vscode.window.tabGroups.activeTabGroup.activeTab.input.viewType =
+    'human-learning.pdfViewer';
   await vscode.__registeredCommands['human-learning.addSelectionToContext']();
 
   assert.deepEqual(treeProviderIds.sort(), [
     'hl-backlinks',
     'hl-forward-links',
   ]);
-  assert.deepEqual(calls, [{
-    vaultRoot: '/vault',
+  assert.deepEqual(calls, [
+    { vaultRoot: '/vault', selection: markdownSelection },
+    { vaultRoot: '/vault', selection: undefined },
+    { vaultRoot: '/vault', selection: pdfSelection },
+  ]);
+  assert.deepEqual(handoffs, [
+    '/vault/.hl/agent/exports/export-1/selection.md',
+    '/vault/.hl/agent/exports/export-3/selection.md',
+  ]);
+});
+
+test('selection exports use the workspace folder that owns each selected document', async () => {
+  const exports = [];
+  const agentHandoffs = [];
+  let markdownCaptureCount = 0;
+  let pdfCaptureCount = 0;
+  let nativeGetTextCount = 0;
+  const markdownSelection = {
+    uri: { fsPath: '/vault-b/notes/attention.md', scheme: 'file' },
+    text: 'Markdown passage',
+    startLine: 4,
+    endLine: 4,
+  };
+  const pdfSelection = {
+    uri: { fsPath: '/vault-a/raw/papers/attention.pdf', scheme: 'file' },
+    text: 'Custom PDF passage',
+    startLine: 2,
+    endLine: 2,
+  };
+  const suppliedPdfSelection = {
+    uri: { fsPath: '/vault-b/raw/papers/supplied.pdf', scheme: 'file' },
+    text: 'Supplied PDF passage',
+    startLine: 3,
+    endLine: 3,
+  };
+  const nativeUri = { fsPath: '/vault-b/notes/native.md', scheme: 'file' };
+  const vscode = createVscodeMock({
+    executeCommandCalls: [],
+    activeDocumentUri: undefined,
+    activeTabUri: markdownSelection.uri,
+    activeTabViewType: 'human-learning.markdownEditor',
+  });
+  vscode.workspace.workspaceFolders = [
+    { uri: { fsPath: '/vault-a' } },
+    { uri: { fsPath: '/vault-b' } },
+  ];
+  vscode.workspace.getWorkspaceFolder = uri =>
+    vscode.workspace.workspaceFolders.find(folder =>
+      uri.fsPath === folder.uri.fsPath
+      || uri.fsPath.startsWith(`${folder.uri.fsPath}/`)
+    );
+
+  const mocks = createActivationMocks({ vscode });
+  mocks['./agentContext'] = {
+    addSelectionToContext: async (vaultRoot, options) => {
+      const selection = await options.getActiveSelectionContext();
+      exports.push({ vaultRoot, selection });
+      const directoryPath = `${vaultRoot}/.hl/agent/exports/export-${exports.length}`;
+      return {
+        directoryPath,
+        markdownPath: `${directoryPath}/selection.md`,
+        jsonPath: `${directoryPath}/selection.json`,
+      };
+    },
+    syncSelectionExportAttachment: async () => undefined,
+  };
+  mocks['./agentHandoff'] = {
+    handoffSelectionToAgent: async uri => {
+      agentHandoffs.push(uri.fsPath);
+      return 'codex';
+    },
+  };
+  mocks['./markdownEditorProvider'] = {
+    MarkdownEditorProvider: class {
+      static viewType = 'human-learning.markdownEditor';
+      async captureActiveSelectionContext() {
+        markdownCaptureCount += 1;
+        return markdownSelection;
+      }
+    },
+  };
+  mocks['./pdfEditorProvider'] = {
+    PdfEditorProvider: class {
+      static viewType = 'human-learning.pdfViewer';
+      getActiveWebview() {
+        return undefined;
+      }
+      async getActiveSelectionContext() {
+        pdfCaptureCount += 1;
+        return pdfSelection;
+      }
+    },
+  };
+
+  const { activate } = loadTsModule('src/extension.ts', mocks);
+  activate({ subscriptions: [] });
+
+  await vscode.__registeredCommands['human-learning.addSelectionToContext']();
+  vscode.window.tabGroups.activeTabGroup.activeTab.input = {
+    uri: pdfSelection.uri,
+    viewType: 'human-learning.pdfViewer',
+  };
+  await vscode.__registeredCommands['human-learning.addSelectionToContext']();
+  await vscode.__registeredCommands['human-learning.addSelectionToChat']({
+    selection: suppliedPdfSelection,
+  });
+  vscode.window.tabGroups.activeTabGroup.activeTab.input = {
+    uri: nativeUri,
+    viewType: undefined,
+  };
+  vscode.window.activeTextEditor = {
+    document: {
+      uri: nativeUri,
+      getText() {
+        nativeGetTextCount += 1;
+        return 'Native passage';
+      },
+    },
+    selection: {
+      isEmpty: false,
+      start: { line: 6 },
+      end: { line: 7 },
+    },
+  };
+  await vscode.__registeredCommands['human-learning.addSelectionToContext']();
+
+  assert.deepEqual(
+    exports.map(({ vaultRoot, selection }) => ({
+      vaultRoot,
+      source: selection.uri.fsPath,
+      text: selection.text,
+    })),
+    [
+      {
+        vaultRoot: '/vault-b',
+        source: '/vault-b/notes/attention.md',
+        text: 'Markdown passage',
+      },
+      {
+        vaultRoot: '/vault-a',
+        source: '/vault-a/raw/papers/attention.pdf',
+        text: 'Custom PDF passage',
+      },
+      {
+        vaultRoot: '/vault-b',
+        source: '/vault-b/raw/papers/supplied.pdf',
+        text: 'Supplied PDF passage',
+      },
+      {
+        vaultRoot: '/vault-b',
+        source: '/vault-b/notes/native.md',
+        text: 'Native passage',
+      },
+    ],
+  );
+  assert.equal(markdownCaptureCount, 1);
+  assert.equal(pdfCaptureCount, 1);
+  assert.equal(nativeGetTextCount, 1);
+  assert.deepEqual(agentHandoffs, [
+    '/vault-b/.hl/agent/exports/export-1/selection.md',
+    '/vault-a/.hl/agent/exports/export-2/selection.md',
+    '/vault-b/.hl/agent/exports/export-3/selection.md',
+    '/vault-b/.hl/agent/exports/export-4/selection.md',
+  ]);
+});
+
+test('Add to Chat exports the exact selection and routes an optional PDF crop', async () => {
+  const exports = [];
+  const handoffs = [];
+  const attachmentSyncs = [];
+  const markdownSelection = {
+    uri: { fsPath: '/vault/notes/attention.md', scheme: 'file' },
+    text: 'Markdown passage',
+    startLine: 4,
+    endLine: 4,
+  };
+  const pdfSelection = {
+    uri: { fsPath: '/vault/raw/papers/attention.pdf', scheme: 'file' },
+    text: 'FlashAttention uses tiling',
+    startLine: 2,
+    endLine: 2,
+    sourceLabel: 'raw/papers/attention.pdf',
+    rangeLabel: 'page 2',
+  };
+  const snapshotPng = Uint8Array.from([10, 20, 30]);
+  const vscode = createVscodeMock({
+    executeCommandCalls: [],
+    activeDocumentUri: undefined,
+    activeTabUri: markdownSelection.uri,
+    activeTabViewType: 'human-learning.markdownEditor',
+  });
+  const mocks = createActivationMocks({ vscode });
+  mocks['./agentContext'] = {
+    addSelectionToContext: async (vaultRoot, options) => {
+      exports.push({
+        vaultRoot,
+        selection: await options.getActiveSelectionContext(),
+      });
+      const directoryPath = `/vault/.hl/agent/exports/export-${exports.length}`;
+      return {
+        directoryPath,
+        markdownPath: `${directoryPath}/selection.md`,
+        jsonPath: `${directoryPath}/selection.json`,
+      };
+    },
+    syncSelectionExportAttachment: async (exported, fileName, bytes) => {
+      attachmentSyncs.push({ exported, fileName, bytes });
+      return bytes ? `${exported.directoryPath}/${fileName}` : undefined;
+    },
+  };
+  mocks['./cursorCrop'] = {
+    validateCursorCropPng: value => value === snapshotPng
+      ? snapshotPng
+      : undefined,
+  };
+  mocks['./agentHandoff'] = {
+    handoffSelectionToAgent: async (contextUri, attachments) => {
+      handoffs.push({
+        contextPath: contextUri.fsPath,
+        attachmentPaths: attachments.map(uri => uri.fsPath),
+      });
+      return 'codex';
+    },
+  };
+  mocks['./pdfEditorProvider'] = {
+    PdfEditorProvider: class {
+      static viewType = 'human-learning.pdfViewer';
+      constructor() {}
+      getActiveWebview() {
+        return undefined;
+      }
+    },
+  };
+  mocks['./markdownEditorProvider'] = {
+    MarkdownEditorProvider: class {
+      static viewType = 'human-learning.markdownEditor';
+      async captureActiveSelectionContext() {
+        return markdownSelection;
+      }
+    },
+  };
+
+  const { activate } = loadTsModule('src/extension.ts', mocks);
+  activate({ subscriptions: [] });
+
+  await vscode.__registeredCommands['human-learning.addSelectionToChat']();
+  await vscode.__registeredCommands['human-learning.addSelectionToChat']({
     selection: pdfSelection,
+    snapshotPng,
+  });
+  // Older webview bundles still send the legacy command id.
+  await vscode.__registeredCommands['human-learning.addSelectionToCursorChat']({
+    selection: pdfSelection,
+    snapshotPng: Uint8Array.from([1, 2, 3]),
+  });
+
+  assert.deepEqual(exports, [
+    { vaultRoot: '/vault', selection: markdownSelection },
+    { vaultRoot: '/vault', selection: pdfSelection },
+    { vaultRoot: '/vault', selection: pdfSelection },
+  ]);
+  assert.deepEqual(handoffs, [
+    {
+      contextPath: '/vault/.hl/agent/exports/export-1/selection.md',
+      attachmentPaths: [],
+    },
+    {
+      contextPath: '/vault/.hl/agent/exports/export-2/selection.md',
+      attachmentPaths: ['/vault/.hl/agent/exports/export-2/selection.png'],
+    },
+    {
+      contextPath: '/vault/.hl/agent/exports/export-3/selection.md',
+      attachmentPaths: [],
+    },
+  ]);
+  assert.deepEqual(
+    attachmentSyncs.map(({ exported, fileName, bytes }) => ({
+      directoryPath: exported.directoryPath,
+      fileName,
+      bytes,
+    })),
+    [
+      {
+        directoryPath: '/vault/.hl/agent/exports/export-1',
+        fileName: 'selection.png',
+        bytes: undefined,
+      },
+      {
+        directoryPath: '/vault/.hl/agent/exports/export-2',
+        fileName: 'selection.png',
+        bytes: snapshotPng,
+      },
+      {
+        directoryPath: '/vault/.hl/agent/exports/export-3',
+        fileName: 'selection.png',
+        bytes: undefined,
+      },
+    ],
+  );
+});
+
+test('PDF Cmd-L asks the active webview for the same crop-aware agent handoff', async () => {
+  let requested = 0;
+  const pdfUri = { fsPath: '/vault/raw/papers/attention.pdf', scheme: 'file' };
+  const vscode = createVscodeMock({
+    executeCommandCalls: [],
+    activeDocumentUri: undefined,
+    activeTabUri: pdfUri,
+    activeTabViewType: 'human-learning.pdfViewer',
+  });
+  const mocks = createActivationMocks({ vscode });
+  mocks['./agentContext'] = {
+    addSelectionToContext: async () => assert.fail('Host must let the PDF webview capture its crop'),
+  };
+  mocks['./pdfEditorProvider'] = {
+    PdfEditorProvider: class {
+      static viewType = 'human-learning.pdfViewer';
+      async addSelectionToCursorChat() {
+        requested += 1;
+      }
+      getActiveWebview() {
+        return undefined;
+      }
+    },
+  };
+
+  const { activate } = loadTsModule('src/extension.ts', mocks);
+  activate({ subscriptions: [] });
+  await vscode.__registeredCommands['human-learning.addSelectionToChat']();
+
+  assert.equal(requested, 1);
+});
+
+test('Add to Chat falls back to immutable text when crop persistence fails', async () => {
+  const handoffs = [];
+  const warningMessages = [];
+  const selection = {
+    uri: { fsPath: '/vault/raw/papers/attention.pdf', scheme: 'file' },
+    text: 'FlashAttention uses tiling',
+    startLine: 2,
+    endLine: 2,
+  };
+  const vscode = createVscodeMock({
+    executeCommandCalls: [],
+    activeDocumentUri: undefined,
+    warningMessages,
+  });
+  const mocks = createActivationMocks({ vscode });
+  mocks['./agentContext'] = {
+    addSelectionToContext: async () => ({
+      directoryPath: '/vault/.hl/agent/exports/export-1',
+      markdownPath: '/vault/.hl/agent/exports/export-1/selection.md',
+      jsonPath: '/vault/.hl/agent/exports/export-1/selection.json',
+    }),
+    syncSelectionExportAttachment: async () => {
+      throw new Error('read-only filesystem');
+    },
+  };
+  mocks['./cursorCrop'] = {
+    validateCursorCropPng: value => value,
+  };
+  mocks['./agentHandoff'] = {
+    handoffSelectionToAgent: async (contextUri, attachments) => {
+      handoffs.push({
+        contextPath: contextUri.fsPath,
+        attachmentPaths: attachments.map(uri => uri.fsPath),
+      });
+      return 'codex';
+    },
+  };
+
+  const { activate } = loadTsModule('src/extension.ts', mocks);
+  activate({ subscriptions: [] });
+  await vscode.__registeredCommands['human-learning.addSelectionToChat']({
+    selection,
+    snapshotPng: Uint8Array.from([10, 20, 30]),
+  });
+
+  assert.deepEqual(handoffs, [{
+    contextPath: '/vault/.hl/agent/exports/export-1/selection.md',
+    attachmentPaths: [],
+  }]);
+  assert.ok(warningMessages.includes(
+    'The selection crop could not be saved; the active agent will use text context only.',
+  ));
+});
+
+test('Cursor Browser selection is exported with its crop and routed to the active agent', async () => {
+  const exports = [];
+  const attachments = [];
+  const handoffs = [];
+  const snapshotPng = Uint8Array.from([137, 80, 78, 71]);
+  const selection = {
+    uri: { scheme: 'https', fsPath: '', toString: () => 'https://example.com/guide' },
+    text: 'UNTRUSTED WEB CONTENT\n\nSelected passage:\n│ Browser passage',
+    startLine: 1,
+    endLine: 1,
+    sourceLabel: 'https://example.com/guide',
+    rangeLabel: 'web selection on example.com',
+  };
+  const capture = { snapshotPng, selectedText: 'Browser passage' };
+  const vscode = createVscodeMock({
+    executeCommandCalls: [],
+    activeDocumentUri: undefined,
+  });
+  const mocks = createActivationMocks({ vscode });
+  mocks['./cursorBrowserSelection'] = {
+    captureActiveCursorBrowserSelection: async () => capture,
+    cursorBrowserCaptureToSelectionContext: value => {
+      assert.equal(value, capture);
+      return selection;
+    },
+  };
+  mocks['./agentContext'] = {
+    addSelectionToContext: async (vaultRoot, options) => {
+      exports.push({ vaultRoot, selection: await options.getActiveSelectionContext() });
+      return {
+        directoryPath: '/vault/.hl/agent/exports/browser',
+        markdownPath: '/vault/.hl/agent/exports/browser/selection.md',
+        jsonPath: '/vault/.hl/agent/exports/browser/selection.json',
+      };
+    },
+    syncSelectionExportAttachment: async (exported, fileName, bytes) => {
+      attachments.push({ exported, fileName, bytes });
+      return `${exported.directoryPath}/${fileName}`;
+    },
+  };
+  mocks['./cursorCrop'] = {
+    validateCursorCropPng: value => value,
+  };
+  mocks['./agentHandoff'] = {
+    handoffSelectionToAgent: async (contextUri, attachmentUris) => {
+      handoffs.push({
+        contextPath: contextUri.fsPath,
+        attachmentPaths: attachmentUris.map(uri => uri.fsPath),
+      });
+      return 'codex';
+    },
+  };
+
+  const { activate } = loadTsModule('src/extension.ts', mocks);
+  activate({ subscriptions: [] });
+  await vscode.__registeredCommands[
+    'human-learning.addCursorBrowserSelectionToChat'
+  ]();
+
+  assert.deepEqual(exports, [{ vaultRoot: '/vault', selection }]);
+  assert.equal(attachments[0].fileName, 'selection.png');
+  assert.equal(attachments[0].bytes, snapshotPng);
+  assert.deepEqual(handoffs, [{
+    contextPath: '/vault/.hl/agent/exports/browser/selection.md',
+    attachmentPaths: ['/vault/.hl/agent/exports/browser/selection.png'],
+  }]);
+});
+
+test('experimental owned reader routes its validated text and synthetic crop through the same handoff', async () => {
+  let browserOptions;
+  const exports = [];
+  const handoffs = [];
+  const snapshotPng = Uint8Array.from([137, 80, 78, 71]);
+  const selection = {
+    uri: { scheme: 'https', fsPath: '', toString: () => 'https://example.com/article' },
+    text: 'UNTRUSTED WEB CONTENT\n\nSelected passage:\n│ Reader passage',
+    startLine: 1,
+    endLine: 1,
+    sourceLabel: 'https://example.com/article',
+    rangeLabel: 'web selection on example.com',
+  };
+  const vscode = createVscodeMock({
+    executeCommandCalls: [],
+    activeDocumentUri: undefined,
+  });
+  const mocks = createActivationMocks({ vscode });
+  mocks['./experimentalOwnedBrowser'] = {
+    registerExperimentalOwnedBrowser: options => {
+      browserOptions = options;
+      return { dispose() {} };
+    },
+  };
+  mocks['./agentContext'] = {
+    addSelectionToContext: async (vaultRoot, options) => {
+      exports.push({ vaultRoot, selection: await options.getActiveSelectionContext() });
+      return {
+        directoryPath: '/vault/.hl/agent/exports/reader',
+        markdownPath: '/vault/.hl/agent/exports/reader/selection.md',
+        jsonPath: '/vault/.hl/agent/exports/reader/selection.json',
+      };
+    },
+    syncSelectionExportAttachment: async (exported, fileName, bytes) =>
+      bytes ? `${exported.directoryPath}/${fileName}` : undefined,
+  };
+  mocks['./cursorCrop'] = {
+    validateCursorCropPng: value => value,
+  };
+  mocks['./agentHandoff'] = {
+    handoffSelectionToAgent: async (contextUri, attachmentUris) => {
+      handoffs.push({
+        contextPath: contextUri.fsPath,
+        attachmentPaths: attachmentUris.map(uri => uri.fsPath),
+      });
+      return 'codebuddy';
+    },
+  };
+
+  const { activate } = loadTsModule('src/extension.ts', mocks);
+  activate({ subscriptions: [] });
+  await browserOptions.onSendSelection({
+    selection,
+    attachment: { bytes: snapshotPng, mediaType: 'image/png' },
+    screenshotStatus: 'captured',
+  });
+
+  assert.deepEqual(exports, [{ vaultRoot: '/vault', selection }]);
+  assert.deepEqual(handoffs, [{
+    contextPath: '/vault/.hl/agent/exports/reader/selection.md',
+    attachmentPaths: ['/vault/.hl/agent/exports/reader/selection.png'],
   }]);
 });
 
@@ -218,10 +822,13 @@ test('activation reopens an already-open PDF vault file in the custom viewer', a
       },
     },
     './agentContext': {
-      AgentContextProvider: class {
-        refresh() {}
-      },
       addSelectionToContext: async () => undefined,
+      syncSelectionExportAttachment: async () => undefined,
+    },
+    './cursorCrop': {
+      validateCursorCropPng: value => value instanceof Uint8Array
+        ? value
+        : undefined,
     },
     './uriDispatcher': { dispatchUri: () => undefined },
     './pdfEditorProvider': {
@@ -295,9 +902,6 @@ test('activation reopens a startup PDF when it becomes the active text editor af
       },
     },
     './agentContext': {
-      AgentContextProvider: class {
-        refresh() {}
-      },
       addSelectionToContext: async () => undefined,
     },
     './uriDispatcher': { dispatchUri: () => undefined },
@@ -379,9 +983,6 @@ test('activation retries reopening a startup PDF while VS Code keeps it in the t
       },
     },
     './agentContext': {
-      AgentContextProvider: class {
-        refresh() {}
-      },
       addSelectionToContext: async () => undefined,
     },
     './uriDispatcher': { dispatchUri: () => undefined },
@@ -426,6 +1027,18 @@ test('activation retries reopening a startup PDF while VS Code keeps it in the t
   );
 });
 
+test('startup custom-editor recovery uses short bounded retries instead of polling', () => {
+  const source = readFileSync(join(packageRoot, 'src', 'extension.ts'), 'utf8');
+
+  assert.match(
+    source,
+    /STARTUP_CUSTOM_EDITOR_RETRY_DELAYS_MS\s*=\s*\[0,\s*250,\s*1_000\]/,
+  );
+  assert.match(source, /STARTUP_CUSTOM_EDITOR_MONITOR_MS\s*=\s*1_500/);
+  assert.doesNotMatch(source, /\bsetInterval\s*\(/);
+  assert.doesNotMatch(source, /\b20_000\b/);
+});
+
 test('activation reopens a startup PDF that is visible even when no active text editor is focused', async () => {
   const executeCommandCalls = [];
   const visiblePdfEditor = {
@@ -462,9 +1075,6 @@ test('activation reopens a startup PDF that is visible even when no active text 
       },
     },
     './agentContext': {
-      AgentContextProvider: class {
-        refresh() {}
-      },
       addSelectionToContext: async () => undefined,
     },
     './uriDispatcher': { dispatchUri: () => undefined },
@@ -542,9 +1152,6 @@ test('activation reopens a startup PDF tab even when VS Code has not created a t
       },
     },
     './agentContext': {
-      AgentContextProvider: class {
-        refresh() {}
-      },
       addSelectionToContext: async () => undefined,
     },
     './uriDispatcher': { dispatchUri: () => undefined },
@@ -620,9 +1227,6 @@ test('activation registers a Vim mode toggle command for the markdown custom edi
       },
     },
     './agentContext': {
-      AgentContextProvider: class {
-        refresh() {}
-      },
       addSelectionToContext: async () => undefined,
     },
     './uriDispatcher': { dispatchUri: () => undefined },
@@ -777,9 +1381,6 @@ test('activation routes markdown link targets through the Human Learning dispatc
       },
     },
     './agentContext': {
-      AgentContextProvider: class {
-        refresh() {}
-      },
       addSelectionToContext: async () => undefined,
     },
     './uriDispatcher': { dispatchUri: (...args) => dispatched.push(args) },
@@ -815,7 +1416,7 @@ test('activation routes markdown link targets through the Human Learning dispatc
   assert.equal(dispatched.length, 1);
   assert.equal(dispatched[0][0], '/vault');
   assert.equal(dispatched[0][1], 'https://example.com/docs');
-  assert.equal(typeof dispatched[0][2].openWebTarget, 'function');
+  assert.equal(dispatched[0].length, 2);
 });
 
 test('activation refreshes Human Learning side panes when the active custom editor tab changes', async () => {
@@ -853,7 +1454,6 @@ test('activation refreshes Human Learning side panes when the active custom edit
     './linkProvider': { registerLinkProvider: () => undefined },
     './backlinksProvider': { BacklinksProvider: TestTreeProvider },
     './agentContext': {
-      AgentContextProvider: TestTreeProvider,
       addSelectionToContext: async () => undefined,
     },
     './uriDispatcher': { dispatchUri: () => undefined },
@@ -915,87 +1515,51 @@ test('openInMarkdownEditor command opens the active custom markdown tab URI', as
   );
 });
 
-test('ingestCurrentFile command ingests the active custom markdown tab URI', async () => {
+test('openLearningDiscussion opens the durable Markdown note without a chat panel', async () => {
   const executeCommandCalls = [];
-  const informationMessages = [];
-  const activeTabUri = { fsPath: '/vault/notes/Concepts/Online Softmax.md', scheme: 'file' };
-  const calls = { registeredPath: undefined, ingestedPath: undefined, closed: 0 };
+  const resumeCalls = [];
   const vscode = createVscodeMock({
     executeCommandCalls,
     activeDocumentUri: undefined,
-    activeTabUri,
-    informationMessages,
+  });
+  const mocks = createActivationMocks({ vscode });
+  mocks['./learningNoteStore'] = {
+    LearningNoteStore: class {
+      async loadDiscussion(discussionId, notePath) {
+        resumeCalls.push({ discussionId, notePath });
+        return {
+          note: {
+            absolutePath: '/vault/wiki/learning/durable.md',
+            relativePath: 'wiki/learning/durable.md',
+            markdown: '# Durable',
+          },
+        };
+      }
+    },
+  };
+  const { activate } = loadTsModule('src/extension.ts', mocks);
+  activate({ subscriptions: [] });
+
+  await vscode.__registeredCommands['human-learning.openLearningDiscussion']({
+    discussionId: 'discussion-durable',
+    notePath: 'wiki/learning/durable.md',
   });
 
-  const { activate } = loadTsModule('src/extension.ts', createActivationMocks({
-    vscode,
-    core: {
-      registerSource: (_db, _root, relPath) => {
-        calls.registeredPath = relPath;
-        return { id: 42 };
-      },
-      ingestFile: async (_db, _root, relPath, sourceId) => {
-        calls.ingestedPath = `${relPath}:${sourceId}`;
-      },
-      closeDatabase: () => {
-        calls.closed += 1;
-      },
-    },
-  }));
-
-  activate({ subscriptions: [] });
-  await vscode.__registeredCommands['human-learning.ingestCurrentFile']();
-
-  assert.equal(calls.registeredPath, 'notes/Concepts/Online Softmax.md');
-  assert.equal(calls.ingestedPath, 'notes/Concepts/Online Softmax.md:42');
-  assert.equal(calls.closed, 1);
-  assert.ok(informationMessages.includes('Ingested: notes/Concepts/Online Softmax.md'));
+  assert.deepEqual(resumeCalls, [{
+    discussionId: 'discussion-durable',
+    notePath: 'wiki/learning/durable.md',
+  }]);
+  const openCall = executeCommandCalls.find(([command]) => command === 'vscode.openWith');
+  assert.equal(openCall[1].fsPath, '/vault/wiki/learning/durable.md');
+  assert.equal(openCall[2], 'human-learning.markdownEditor');
 });
 
-test('showBacklinks command reads backlinks for the active custom markdown tab URI', async () => {
-  const executeCommandCalls = [];
-  const quickPickCalls = [];
-  const activeTabUri = { fsPath: '/vault/notes/Concepts/Online Softmax.md', scheme: 'file' };
-  const calls = { backlinksUri: undefined };
-  const vscode = createVscodeMock({
-    executeCommandCalls,
-    activeDocumentUri: undefined,
-    activeTabUri,
-    quickPickCalls,
-  });
-
-  const { activate } = loadTsModule('src/extension.ts', createActivationMocks({
-    vscode,
-    core: {
-      getBacklinks: (_db, uri) => {
-        calls.backlinksUri = uri;
-        return [{
-          from_note_path: 'notes/Concepts/FlashAttention.md',
-          from_line: 18,
-          label: 'Online Softmax',
-        }];
-      },
-    },
-  }));
-
-  activate({ subscriptions: [] });
-  await vscode.__registeredCommands['human-learning.showBacklinks']();
-
-  assert.equal(calls.backlinksUri, 'hl://note/notes/Concepts/Online%20Softmax.md');
-  assert.deepEqual(quickPickCalls, [
-    [
-      [{ label: 'notes/Concepts/FlashAttention.md:18', description: 'Online Softmax' }],
-      { title: 'Backlinks to notes/Concepts/Online Softmax.md' },
-    ],
-  ]);
-});
-
-test('combined activation registers the standalone PDF Ask workflow without a vault', async () => {
+test('combined activation treats any folder as a filesystem wiki without opening SQLite', async () => {
   const customEditorRegistrations = [];
   const providerOptions = [];
   let askSelectionCount = 0;
   let outlineRegistrationCount = 0;
-  let vaultWorkCount = 0;
+  let databaseOpenCount = 0;
   const vscode = createVscodeMock({
     executeCommandCalls: [],
     activeDocumentUri: undefined,
@@ -1009,22 +1573,15 @@ test('combined activation registers the standalone PDF Ask workflow without a va
   const { activate } = loadTsModule('src/extension.ts', {
     vscode,
     '@human-learning/core': {
-      detectVaultRoot: () => undefined,
       openDatabase: async () => {
-        vaultWorkCount += 1;
-        throw new Error('vault database must not open outside a vault');
+        databaseOpenCount += 1;
+        throw new Error('SQLite must not open in the simplified extension');
       },
     },
-    './linkProvider': {
-      registerLinkProvider: () => {
-        vaultWorkCount += 1;
-      },
-    },
+    './linkProvider': { registerLinkProvider: () => undefined },
     './backlinksProvider': {
       BacklinksProvider: class {
-        constructor() {
-          vaultWorkCount += 1;
-        }
+        refresh() {}
       },
     },
     './agentContext': { addSelectionToContext: async () => undefined },
@@ -1045,25 +1602,14 @@ test('combined activation registers the standalone PDF Ask workflow without a va
     },
     './markdownEditorProvider': {
       MarkdownEditorProvider: class {
-        constructor() {
-          vaultWorkCount += 1;
-        }
+        static viewType = 'human-learning.markdownEditor';
       },
     },
     './markdownSymbols': {
-      registerMarkdownOutlineProvider: () => {
-        vaultWorkCount += 1;
-      },
+      registerMarkdownOutlineProvider: () => undefined,
       registerMarkdownOutlineTreeProvider: () => {
         outlineRegistrationCount += 1;
         return { refresh() {} };
-      },
-    },
-    './webBrowserProvider': {
-      WebBrowserProvider: class {
-        constructor() {
-          vaultWorkCount += 1;
-        }
       },
     },
     './codexAppServerClient': {
@@ -1086,29 +1632,188 @@ test('combined activation registers the standalone PDF Ask workflow without a va
     globalStorageUri: { fsPath: '/global-storage' },
   });
 
-  assert.equal(customEditorRegistrations.length, 1);
+  assert.equal(customEditorRegistrations.length, 2);
   assert.equal(customEditorRegistrations[0].viewType, 'human-learning.pdfViewer');
   assert.equal(providerOptions.length, 1);
-  assert.equal(providerOptions[0].vaultRoot, undefined);
+  assert.equal(providerOptions[0].vaultRoot, '/documents');
   assert.equal(providerOptions[0].documentRoot, '/documents');
   assert.equal(providerOptions[0].globalStoragePath, '/global-storage');
-  assert.equal(providerOptions[0].annotationsEnabled, false);
   assert.equal(typeof vscode.__registeredCommands['human-learning.pdfAskSelection'], 'function');
   await vscode.__registeredCommands['human-learning.pdfAskSelection']();
   assert.equal(askSelectionCount, 1);
   assert.equal(outlineRegistrationCount, 1);
-  assert.equal(vaultWorkCount, 0);
+  assert.equal(databaseOpenCount, 0);
+});
+
+test('no-folder activation keeps custom viewers read-only and gates repository learning features', async () => {
+  const customEditorRegistrations = [];
+  const providerOptions = [];
+  const markdownStores = [];
+  const openedPdfTargets = [];
+  const warningMessages = [];
+  const informationMessages = [];
+  const treeProviderIds = [];
+  let codexClientCount = 0;
+  let learningNoteStoreCount = 0;
+  let backlinksCount = 0;
+  let watcherCount = 0;
+  let dailyNoteCount = 0;
+  let syncCount = 0;
+  let exportedSelectionCount = 0;
+  const vscode = createVscodeMock({
+    executeCommandCalls: [],
+    activeDocumentUri: undefined,
+    warningMessages,
+    informationMessages,
+    treeProviderIds,
+  });
+  vscode.workspace.workspaceFolders = undefined;
+  vscode.workspace.createFileSystemWatcher = () => {
+    watcherCount += 1;
+    return {
+      onDidChange() {},
+      onDidCreate() {},
+      onDidDelete() {},
+      dispose() {},
+    };
+  };
+  vscode.window.registerCustomEditorProvider = (viewType, provider, options) => {
+    customEditorRegistrations.push({ viewType, provider, options });
+    return { dispose() {} };
+  };
+
+  const mocks = createActivationMocks({ vscode });
+  mocks['./codexAppServerClient'] = {
+    CodexAppServerClient: class {
+      constructor() {
+        codexClientCount += 1;
+      }
+      dispose() {}
+    },
+  };
+  mocks['./learningNoteStore'] = {
+    LearningNoteStore: class {
+      constructor() {
+        learningNoteStoreCount += 1;
+      }
+    },
+  };
+  mocks['./backlinksProvider'] = {
+    BacklinksProvider: class {
+      constructor() {
+        backlinksCount += 1;
+      }
+      refresh() {}
+    },
+  };
+  mocks['./markdownEditorProvider'] = {
+    MarkdownEditorProvider: class {
+      static viewType = 'human-learning.markdownEditor';
+      constructor(_context, learningNoteStore) {
+        markdownStores.push(learningNoteStore);
+      }
+    },
+  };
+  mocks['./pdfEditorProvider'] = {
+    PdfEditorProvider: class {
+      static viewType = 'human-learning.pdfViewer';
+      constructor(_context, options) {
+        providerOptions.push(options);
+      }
+      async openPdfAtTarget(...args) {
+        openedPdfTargets.push(args);
+      }
+      getActiveWebview() {
+        return undefined;
+      }
+    },
+  };
+  mocks['./dailyNotes'] = {
+    generateDailyNote: async () => {
+      dailyNoteCount += 1;
+      throw new Error('no-folder activation must not generate daily notes');
+    },
+  };
+  mocks['./repositorySync'] = {
+    syncRepository: async () => {
+      syncCount += 1;
+      throw new Error('no-folder activation must not run Git');
+    },
+  };
+  mocks['./agentContext'] = {
+    addSelectionToContext: async () => {
+      exportedSelectionCount += 1;
+    },
+  };
+
+  const { activate } = loadTsModule('src/extension.ts', mocks);
+  activate({
+    subscriptions: [],
+    extensionUri: { fsPath: '/extension' },
+    globalStorageUri: { fsPath: '/global-storage' },
+  });
+
+  assert.equal(customEditorRegistrations.length, 2);
+  assert.deepEqual(markdownStores, [undefined]);
+  assert.equal(providerOptions.length, 1);
+  assert.equal(providerOptions[0].vaultRoot, undefined);
+  assert.equal(providerOptions[0].documentRoot, undefined);
+  assert.equal(providerOptions[0].learningNoteStore, undefined);
+  assert.equal(providerOptions[0].discussionController, undefined);
+  assert.equal(providerOptions[0].globalStoragePath, '/global-storage');
+  assert.equal(codexClientCount, 0);
+  assert.equal(learningNoteStoreCount, 0);
+  assert.equal(backlinksCount, 0);
+  assert.equal(treeProviderIds.length, 0);
+  assert.equal(watcherCount, 0);
+  assert.ok(informationMessages.includes(
+    'Human Learning viewers ready — open a folder to enable learning notes and repository features.',
+  ));
+
+  await vscode.__registeredCommands['human-learning.generateDailyNote']();
+  await vscode.__registeredCommands['human-learning.syncRepository']();
+  await vscode.__registeredCommands['human-learning.addSelectionToContext']();
+  assert.equal(dailyNoteCount, 0);
+  assert.equal(syncCount, 0);
+  assert.equal(exportedSelectionCount, 0);
+  assert.equal(warningMessages.length, 3);
+  assert.ok(warningMessages.every(message =>
+    message === 'Open a folder to use Human Learning notes and repository features.'
+  ));
+
+  await vscode.__registeredCommands['human-learning.openPdfTarget']({
+    pdfPath: '/outside/read-only.pdf',
+    page: 3,
+  });
+  assert.deepEqual(openedPdfTargets, [['/outside/read-only.pdf', 3, undefined]]);
+
+  await vscode.__registeredCommands['human-learning.openPdfTarget']({
+    pdfPath: 'relative.pdf',
+  });
+  assert.deepEqual(openedPdfTargets, [['/outside/read-only.pdf', 3, undefined]]);
+  assert.equal(warningMessages.length, 4);
 });
 
 test('combined extension activation owns a dedicated Codex output channel and passes its logger', () => {
   const outputChannels = [];
   const clientOptions = [];
+  const configurationSections = [];
   let clientDisposeCount = 0;
   const vscode = createVscodeMock({
     executeCommandCalls: [],
     activeDocumentUri: undefined,
     outputChannels,
   });
+  vscode.workspace.getConfiguration = section => {
+    configurationSections.push(section);
+    return {
+      get(key, fallback) {
+        assert.equal(key, 'codexCommand');
+        assert.equal(fallback, 'codex');
+        return '/opt/codex';
+      },
+    };
+  };
   const mocks = createActivationMocks({ vscode });
   mocks['./codexAppServerClient'] = {
     CodexAppServerClient: class {
@@ -1125,9 +1830,11 @@ test('combined extension activation owns a dedicated Codex output channel and pa
   activate({ subscriptions: [], extension: { packageJSON: { version: '7.6.5-test' } } });
 
   assert.equal(outputChannels.length, 1);
-  assert.equal(outputChannels[0].name, 'Human Learning PDF — Codex');
+  assert.equal(outputChannels[0].name, 'Human Learning — Codex');
   assert.equal(clientOptions.length, 1);
+  assert.equal(clientOptions[0].executable, '/opt/codex');
   assert.equal(clientOptions[0].extensionVersion, '7.6.5-test');
+  assert.deepEqual(configurationSections, ['humanLearning.agent']);
   assert.equal(typeof clientOptions[0].logger, 'function');
   clientOptions[0].logger('safe diagnostic');
   assert.deepEqual(outputChannels[0].lines, ['safe diagnostic']);
@@ -1135,6 +1842,59 @@ test('combined extension activation owns a dedicated Codex output channel and pa
   deactivate();
   assert.equal(clientDisposeCount, 1);
   assert.equal(outputChannels[0].disposeCount, 1);
+});
+
+test('combined Ask PDF stays inert until the workspace is trusted', async () => {
+  const warningMessages = [];
+  let askSelectionCount = 0;
+  let controllerOptions;
+  const vscode = createVscodeMock({
+    executeCommandCalls: [],
+    activeDocumentUri: undefined,
+    warningMessages,
+    workspaceTrusted: false,
+  });
+  const mocks = createActivationMocks({ vscode });
+  mocks['./pdfEditorProvider'] = {
+    PdfEditorProvider: class {
+      static viewType = 'human-learning.pdfViewer';
+      async openAskPdfForSelection() {
+        askSelectionCount += 1;
+      }
+      getActiveWebview() {
+        return undefined;
+      }
+    },
+  };
+  mocks['./pdfDiscussionController'] = {
+    PDF_DISCUSSION_WORKSPACE_TRUST_MESSAGE:
+      'Trust this workspace before using Ask PDF with Codex.',
+    PdfDiscussionController: class {
+      constructor(options) {
+        controllerOptions = options;
+      }
+      dispose() {}
+    },
+  };
+
+  const { activate } = loadTsModule('src/extension.ts', mocks);
+  activate({
+    subscriptions: [],
+    extensionUri: { fsPath: '/extension' },
+    globalStorageUri: { fsPath: '/global-storage' },
+  });
+
+  assert.equal(controllerOptions.isWorkspaceTrusted(), false);
+  await vscode.__registeredCommands['human-learning.pdfAskSelection']();
+  assert.equal(askSelectionCount, 0);
+  assert.deepEqual(warningMessages, [
+    'Trust this workspace before using Ask PDF with Codex.',
+  ]);
+
+  vscode.workspace.isTrusted = true;
+  assert.equal(controllerOptions.isWorkspaceTrusted(), true);
+  await vscode.__registeredCommands['human-learning.pdfAskSelection']();
+  assert.equal(askSelectionCount, 1);
 });
 
 function createActivationMocks({ vscode, core = {} }) {
@@ -1162,9 +1922,6 @@ function createActivationMocks({ vscode, core = {} }) {
       },
     },
     './agentContext': {
-      AgentContextProvider: class {
-        refresh() {}
-      },
       addSelectionToContext: async () => undefined,
     },
     './uriDispatcher': { dispatchUri: () => undefined },
@@ -1197,15 +1954,18 @@ function createVscodeMock({
   activeDocumentLanguageId = 'markdown',
   visibleTextEditors,
   activeTabUri,
+  activeTabViewType,
   informationMessages = [],
   openExternalCalls = [],
-  quickPickCalls = [],
   treeProviderIds = [],
   outputChannels = [],
+  warningMessages = [],
+  workspaceTrusted = true,
 }) {
   const watcher = {
     onDidChange: () => undefined,
     onDidCreate: () => undefined,
+    onDidDelete: () => undefined,
     dispose: () => undefined,
   };
   const registeredCommands = {};
@@ -1221,9 +1981,11 @@ function createVscodeMock({
       for (const handler of tabChangeHandlers) handler(event);
     },
     workspace: {
+      isTrusted: workspaceTrusted,
       workspaceFolders: [{ uri: { fsPath: '/vault' } }],
       asRelativePath: uri => uri?.fsPath?.replace('/vault/', '') ?? 'notes/Concepts/FlashAttention.md',
       createFileSystemWatcher: () => watcher,
+      getConfiguration: () => ({ get: (_key, fallback) => fallback }),
     },
     window: {
       activeTextEditor: activeDocumentUri ? {
@@ -1240,7 +2002,10 @@ function createVscodeMock({
         },
         activeTabGroup: {
           activeTab: activeTabUri ? {
-            input: { uri: activeTabUri },
+            input: {
+              uri: activeTabUri,
+              viewType: activeTabViewType,
+            },
           } : undefined,
         },
       },
@@ -1272,8 +2037,8 @@ function createVscodeMock({
         informationMessages.push(message);
         return undefined;
       },
-      showQuickPick: async (...args) => {
-        quickPickCalls.push(args);
+      showWarningMessage: message => {
+        warningMessages.push(message);
         return undefined;
       },
     },
@@ -1299,6 +2064,16 @@ function createVscodeMock({
     },
     Uri: {
       parse: value => ({ toString: () => value }),
+      file: fsPath => ({
+        scheme: 'file',
+        fsPath,
+        path: fsPath,
+        toString: () => `file://${fsPath}`,
+      }),
+      joinPath: (base, ...parts) => ({
+        scheme: 'file',
+        fsPath: [base.fsPath, ...parts].join('/'),
+      }),
     },
   };
 }

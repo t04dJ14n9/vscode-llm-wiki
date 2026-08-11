@@ -56,9 +56,13 @@ export interface PdfDiscussionAnnotationSnapshot {
     width: number;
     height: number;
     mimeType: 'image/png';
+    cropRect?: PdfRect;
+    padding?: number;
+    unit?: 'pt';
   };
   messages: PdfDiscussionMessageSnapshot[];
   summaryMarkdown?: string;
+  learningNotePath?: string;
   lastTurn: {
     status: PdfDiscussionTurnStatus;
     questionMessageId?: string;

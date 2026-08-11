@@ -15,6 +15,9 @@ export function hybridStyles() {
     '.cm-hybrid-heading-line-3': { fontSize: '1.3em' },
     '.cm-hybrid-heading-line-4': { fontSize: '1.15em' },
     '.cm-hybrid-heading-line-5': { fontSize: '1.05em' },
+    '.cm-hybrid-source-line': {
+      fontFamily: 'inherit',
+    },
     '.cm-hybrid-document-title': {
       display: 'block',
       padding: '0.28em 0 0.55em',
@@ -649,11 +652,9 @@ export function hybridStyles() {
       whiteSpace: 'pre-wrap',
     },
     '&': {
-      '--hl-codeblock-background': 'var(--vscode-editor-background, #1e1e1e)',
-      '--hl-codeblock-border': 'var(--vscode-editorWidget-border, var(--vscode-panel-border, rgba(127,127,127,.32)))',
-      '--hl-codeblock-header-background': 'var(--vscode-editorWidget-background, var(--vscode-editor-background, #1e1e1e))',
+      '--hl-codeblock-background': 'var(--vscode-textCodeBlock-background, rgba(127, 127, 127, 0.10))',
       '--hl-code-token-comment': '#6A9955',
-      '--hl-code-token-keyword': '#C586C0',
+      '--hl-code-token-keyword': '#569CD6',
       '--hl-code-token-string': '#CE9178',
       '--hl-code-token-function': '#DCDCAA',
       '--hl-code-token-number': '#B5CEA8',
@@ -665,8 +666,6 @@ export function hybridStyles() {
       '--hl-code-token-tag': '#569CD6',
     },
     '.vscode-light &': {
-      '--hl-codeblock-background': 'var(--vscode-editor-background, #ffffff)',
-      '--hl-codeblock-header-background': 'var(--vscode-editorWidget-background, var(--vscode-editor-background, #ffffff))',
       '--hl-code-token-comment': '#008000',
       '--hl-code-token-keyword': '#0000FF',
       '--hl-code-token-string': '#A31515',
@@ -679,8 +678,7 @@ export function hybridStyles() {
       '--hl-code-token-regex': '#811F3F',
       '--hl-code-token-tag': '#800000',
     },
-    '.vscode-high-contrast &': {
-      '--hl-codeblock-border': 'var(--vscode-contrastBorder, var(--vscode-panel-border, currentColor))',
+    '.vscode-high-contrast &, .vscode-high-contrast-light &': {
       '--hl-code-token-comment': 'var(--vscode-descriptionForeground, var(--vscode-editor-foreground))',
       '--hl-code-token-keyword': 'var(--vscode-textLink-foreground, var(--vscode-editor-foreground))',
       '--hl-code-token-string': 'var(--vscode-terminal-ansiGreen, var(--vscode-editor-foreground))',
@@ -694,9 +692,13 @@ export function hybridStyles() {
     },
     '.cm-hybrid-codeblock': {
       display: 'block',
+      height: '1lh',
       marginLeft: '-6px',
       marginRight: '-2px',
+      overflow: 'visible',
+      fontFamily: 'var(--hl-editor-font-family, var(--vscode-editor-font-family, ui-monospace, Menlo, monospace))',
       fontSize: '1em',
+      fontWeight: 'normal',
       lineHeight: 'inherit',
     },
     '.cm-line:has(.cm-hybrid-codeblock) > .cm-widgetBuffer, .cm-line:has(.cm-hybrid-codeblock-footer) > .cm-widgetBuffer': {
@@ -704,48 +706,57 @@ export function hybridStyles() {
     },
     '.cm-hybrid-codeblock-inner': {
       boxSizing: 'border-box',
+      height: '1lh',
       borderTopLeftRadius: '4px',
       borderTopRightRadius: '4px',
-      borderLeft: '1px solid var(--hl-codeblock-border)',
-      borderRight: '1px solid var(--hl-codeblock-border)',
-      boxShadow: 'inset 0 1px var(--hl-codeblock-border)',
       backgroundColor: 'var(--hl-codeblock-background)',
       overflow: 'hidden',
     },
     '.cm-hybrid-codeblock-header': {
       boxSizing: 'border-box',
+      position: 'relative',
       display: 'flex',
       alignItems: 'center',
-      justifyContent: 'flex-end',
-      gap: '1rem',
-      minHeight: '1lh',
+      height: '1lh',
       lineHeight: 'inherit',
-      padding: '0 12px',
-      backgroundColor: 'var(--hl-codeblock-header-background)',
+      padding: '0 38px 0 14px',
+      backgroundColor: 'var(--hl-codeblock-background)',
     },
     '.cm-hybrid-codeblock-language': {
       color: 'var(--vscode-descriptionForeground)',
-      fontSize: '0.82em',
-      fontWeight: '600',
+      fontFamily: 'inherit',
+      fontSize: 'inherit',
+      fontWeight: 'normal',
       lineHeight: 'inherit',
       letterSpacing: '0',
     },
     '.cm-hybrid-codeblock-copy': {
+      position: 'absolute',
+      top: '50%',
+      right: '8px',
+      display: 'inline-flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      width: '24px',
+      height: '20px',
+      transform: 'translateY(-50%)',
       border: '0',
-      borderRadius: '4px',
-      padding: '0 6px',
+      borderRadius: '3px',
+      padding: '0',
       color: 'var(--vscode-descriptionForeground, var(--vscode-editor-foreground))',
       backgroundColor: 'transparent',
-      font: 'inherit',
-      fontSize: '0.82em',
-      lineHeight: 'inherit',
       cursor: 'pointer',
-      opacity: '0',
-      pointerEvents: 'none',
+      opacity: '0.72',
     },
-    '.cm-hybrid-codeblock:hover .cm-hybrid-codeblock-copy, .cm-hybrid-codeblock:focus-within .cm-hybrid-codeblock-copy': {
+    '.cm-hybrid-codeblock-copy-icon': {
+      width: '16px',
+      height: '16px',
+      fill: 'none',
+      stroke: 'currentColor',
+      strokeWidth: '1.25',
+    },
+    '.cm-hybrid-codeblock:hover .cm-hybrid-codeblock-copy, .cm-hybrid-codeblock:focus-within .cm-hybrid-codeblock-copy, .cm-hybrid-codeblock-copy:focus-visible': {
       opacity: '1',
-      pointerEvents: 'auto',
     },
     '.cm-hybrid-codeblock-copy:hover': {
       color: 'var(--vscode-editor-foreground)',
@@ -753,8 +764,6 @@ export function hybridStyles() {
     },
     '.cm-hybrid-codeblock-content-line': {
       boxSizing: 'border-box',
-      borderLeft: '1px solid var(--hl-codeblock-border)',
-      borderRight: '1px solid var(--hl-codeblock-border)',
       paddingLeft: '14px',
       paddingRight: '14px',
       backgroundColor: 'var(--hl-codeblock-background)',
@@ -765,8 +774,6 @@ export function hybridStyles() {
     },
     '.cm-hybrid-codeblock-active-opening-line, .cm-hybrid-codeblock-active-closing-line': {
       boxSizing: 'border-box',
-      borderLeft: '1px solid var(--hl-codeblock-border)',
-      borderRight: '1px solid var(--hl-codeblock-border)',
       paddingLeft: '14px',
       paddingRight: '14px',
       backgroundColor: 'var(--hl-codeblock-background)',
@@ -778,12 +785,19 @@ export function hybridStyles() {
     '.cm-hybrid-codeblock-active-opening-line': {
       borderTopLeftRadius: '4px',
       borderTopRightRadius: '4px',
-      boxShadow: 'inset 0 1px var(--hl-codeblock-border)',
     },
     '.cm-hybrid-codeblock-active-closing-line': {
       borderBottomLeftRadius: '4px',
       borderBottomRightRadius: '4px',
-      boxShadow: 'inset 0 -1px var(--hl-codeblock-border)',
+    },
+    '.vscode-high-contrast & .cm-hybrid-codeblock-inner, .vscode-high-contrast & .cm-hybrid-codeblock-active-opening-line, .vscode-high-contrast-light & .cm-hybrid-codeblock-inner, .vscode-high-contrast-light & .cm-hybrid-codeblock-active-opening-line': {
+      boxShadow: 'inset 1px 0 var(--vscode-contrastBorder), inset -1px 0 var(--vscode-contrastBorder), inset 0 1px var(--vscode-contrastBorder)',
+    },
+    '.vscode-high-contrast & .cm-hybrid-codeblock-content-line, .vscode-high-contrast-light & .cm-hybrid-codeblock-content-line': {
+      boxShadow: 'inset 1px 0 var(--vscode-contrastBorder), inset -1px 0 var(--vscode-contrastBorder)',
+    },
+    '.vscode-high-contrast & .cm-hybrid-codeblock-footer, .vscode-high-contrast & .cm-hybrid-codeblock-active-closing-line, .vscode-high-contrast-light & .cm-hybrid-codeblock-footer, .vscode-high-contrast-light & .cm-hybrid-codeblock-active-closing-line': {
+      boxShadow: 'inset 1px 0 var(--vscode-contrastBorder), inset -1px 0 var(--vscode-contrastBorder), inset 0 -1px var(--vscode-contrastBorder)',
     },
     '.cm-hybrid-prism-token.token.comment, .cm-hybrid-prism-token.token.prolog, .cm-hybrid-prism-token.token.doctype, .cm-hybrid-prism-token.token.cdata': {
       color: 'var(--hl-code-token-comment)',
@@ -818,6 +832,9 @@ export function hybridStyles() {
     '.cm-hybrid-prism-token.token.tag': {
       color: 'var(--hl-code-token-tag)',
     },
+    '.cm-hybrid-codeblock-content-line *': {
+      color: 'inherit',
+    },
     '.cm-hybrid-prism-token.token.important, .cm-hybrid-prism-token.token.bold': {
       fontWeight: '600',
     },
@@ -827,16 +844,14 @@ export function hybridStyles() {
     '.cm-hybrid-codeblock-footer': {
       display: 'block',
       boxSizing: 'border-box',
-      minHeight: '1lh',
+      height: '1lh',
       marginLeft: '-6px',
       marginRight: '-2px',
+      overflow: 'hidden',
       fontSize: '1em',
       lineHeight: 'inherit',
       borderBottomLeftRadius: '4px',
       borderBottomRightRadius: '4px',
-      borderLeft: '1px solid var(--hl-codeblock-border)',
-      borderRight: '1px solid var(--hl-codeblock-border)',
-      boxShadow: 'inset 0 -1px var(--hl-codeblock-border)',
       backgroundColor: 'var(--hl-codeblock-background)',
     },
     '.cm-hybrid-footnote-ref': {

@@ -110,6 +110,29 @@ test('selection glyphs are grouped into visual lines independent of item order',
   assert.equal(lines[1].glyphs[0].glyph, secondLine);
 });
 
+test('overlapping equal-height glyph boxes remain separate visual rows', () => {
+  const lines = pdfSelection.buildPdfSelectionLines([
+    Array.from({ length: 5 }, (_, index) => glyph(0, 14 + index * 12, 60, 20, index)),
+  ]);
+
+  assert.equal(lines.length, 5);
+  assert.deepEqual(lines.map(line => line.center), [24, 36, 48, 60, 72]);
+});
+
+test('smaller overlapping formula scripts stay attached to their baseline row', () => {
+  const baseline = glyph(0, 20, 12, 16, 0);
+  const superscript = glyph(12, 17, 6, 12, 1);
+  const lines = pdfSelection.buildPdfSelectionLines([[superscript, baseline]]);
+
+  assert.equal(lines.length, 1);
+  assert.deepEqual(
+    lines[0].glyphs.map(candidate => candidate.glyph),
+    [baseline, superscript],
+  );
+  assert.equal(lines[0].center, 28);
+  assert.equal(lines[0].height, 16);
+});
+
 test('selectable-item traversal skips empty and soft-hyphen marker runs', () => {
   const items = [
     textItem('render'),

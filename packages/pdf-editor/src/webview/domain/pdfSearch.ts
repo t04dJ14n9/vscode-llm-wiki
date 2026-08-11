@@ -88,7 +88,8 @@ export function buildPdfSearchIndex(
     for (let offset = 0; offset < content.length; offset++) {
       appendSearchChar(index, content.charAt(offset), itemIndex, offset, skipNonAsciiArtifacts, matchCase, matchDiacritics);
     }
-    suppressNextGap = endsWithPdfWordJoinMarker(content);
+    suppressNextGap = textRects[itemIndex]?.wordJoinAfter === true
+      || endsWithPdfWordJoinMarker(content);
     previousTextItemIndex = itemIndex;
   }
   while (index.length) {
@@ -120,6 +121,7 @@ function shouldInsertSearchGap(index: PdfSearchIndexChar[], nextValue: string): 
 }
 
 export function shouldInsertGeometryGap(previousItem: any, nextItem: any): boolean {
+  if (previousItem?.wordJoinAfter === true) return false;
   const previousContent = String(previousItem?.content ?? '').trimEnd();
   if (/[-\u00ad\u2010\u2011]$/u.test(previousContent)) return false;
 

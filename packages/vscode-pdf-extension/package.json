@@ -18,6 +18,15 @@
     "workspaceContains:**/*.pdf"
   ],
   "main": "dist/extension.js",
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": "limited",
+      "description": "PDF viewing remains available, but Ask PDF is disabled until the workspace is trusted.",
+      "restrictedConfigurations": [
+        "humanLearning.pdf.codexCommand"
+      ]
+    }
+  },
   "contributes": {
     "customEditors": [
       {
@@ -131,6 +140,7 @@
         "humanLearning.pdf.codexCommand": {
           "type": "string",
           "default": "codex",
+          "scope": "machine",
           "description": "Command or absolute executable path used to start the Codex app-server for Ask PDF."
         }
       }

@@ -17,7 +17,7 @@ export default defineConfig({
   webServer: {
     command: 'node packages/vscode-extension/test/e2e/server.mjs',
     port: 8979,
-    reuseExistingServer: true,
+    reuseExistingServer: !process.env.CI,
     timeout: 10_000,
   },
 });

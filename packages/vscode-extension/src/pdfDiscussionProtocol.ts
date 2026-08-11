@@ -54,9 +54,13 @@ export interface PdfDiscussionAnnotationSnapshot {
     width: number;
     height: number;
     mimeType: 'image/png';
+    cropRect?: PdfDiscussionRect;
+    padding?: number;
+    unit?: 'pt';
   };
   messages: PdfDiscussionMessageSnapshot[];
   summaryMarkdown?: string;
+  learningNotePath?: string;
   lastTurn: {
     status: PdfDiscussionTurnStatus;
     questionMessageId?: string;
@@ -85,11 +89,14 @@ export type PdfDiscussionWebviewToHostMessage =
       question: string;
       model?: string;
       snapshotPngBase64?: string;
+      snapshotCropRect?: PdfDiscussionRect;
+      snapshotPadding?: number;
     }
   | { type: 'pdfDiscussionRetry'; requestId?: string; annotationId: string }
   | { type: 'pdfDiscussionCancel'; requestId?: string; annotationId: string }
   | { type: 'pdfDiscussionPromote'; requestId?: string; annotationId: string }
   | { type: 'pdfDiscussionOpenPromotedTask'; requestId?: string; annotationId: string }
+  | { type: 'pdfDiscussionOpenLearningNote'; requestId?: string; annotationId: string }
   | {
       type: 'pdfDiscussionCopyPortableLink';
       requestId?: string;

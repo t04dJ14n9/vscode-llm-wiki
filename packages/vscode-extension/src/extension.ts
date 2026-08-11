@@ -1,317 +1,469 @@
 import * as vscode from 'vscode';
+import { isAbsolute } from 'node:path';
+import type { PdfTextFragment } from '@human-learning/core';
 import {
-  closeDatabase,
-  detectVaultRoot,
-  getBacklinks,
-  ingestFile,
-  openDatabase,
-  rebuildAllLinks,
-  rebuildLinksForNote,
-  recordActivity,
-  registerSource,
-  runMigrations,
-  type PdfTextFragment,
-} from '@human-learning/core';
-import { registerLinkProvider } from './linkProvider';
+  addSelectionToContext,
+  syncSelectionExportAttachment,
+  type SelectionContextExportResult,
+} from './agentContext';
+import {
+  handoffSelectionToAgent,
+} from './agentHandoff';
 import { BacklinksProvider } from './backlinksProvider';
-import { dispatchUri } from './uriDispatcher';
-import { PdfEditorProvider } from './pdfEditorProvider';
-import { MarkdownEditorProvider } from './markdownEditorProvider';
-import { addSelectionToContext } from './agentContext';
-import { notePathToUri } from './wikiLinks';
-import { type MarkdownOutlineTreeProvider, registerMarkdownOutlineProvider, registerMarkdownOutlineTreeProvider } from './markdownSymbols';
-import { WebBrowserProvider } from './webBrowserProvider';
 import { CodexAppServerClient } from './codexAppServerClient';
-import { PdfDiscussionController } from './pdfDiscussionController';
+import {
+  captureActiveCursorBrowserSelection,
+  cursorBrowserCaptureToSelectionContext,
+} from './cursorBrowserSelection';
+import { generateDailyNote } from './dailyNotes';
+import {
+  registerExperimentalOwnedBrowser,
+} from './experimentalOwnedBrowser';
+import { getConceptGraph, loadFilesystemWiki } from './filesystemWiki';
+import { KnowledgeGraphPanel } from './knowledgeGraphPanel';
+import { LearningNoteStore } from './learningNoteStore';
+import { registerLinkProvider } from './linkProvider';
+import { MarkdownEditorProvider } from './markdownEditorProvider';
+import { validateCursorCropPng } from './cursorCrop';
+import {
+  type MarkdownOutlineTreeProvider,
+  registerMarkdownOutlineProvider,
+  registerMarkdownOutlineTreeProvider,
+} from './markdownSymbols';
+import {
+  PDF_DISCUSSION_WORKSPACE_TRUST_MESSAGE,
+  PdfDiscussionController,
+} from './pdfDiscussionController';
+import { PdfEditorProvider } from './pdfEditorProvider';
+import { syncRepository } from './repositorySync';
+import type { SelectionContext } from './selectionContext';
+import { dispatchUri } from './uriDispatcher';
 
-let backlinksProvider: BacklinksProvider;
-let forwardLinksProvider: BacklinksProvider;
-let pdfEditorProvider: PdfEditorProvider;
-let markdownEditorProvider: MarkdownEditorProvider;
-let markdownOutlineProvider: MarkdownOutlineTreeProvider;
-let webBrowserProvider: WebBrowserProvider;
-let codexClient: CodexAppServerClient | undefined;
+let backlinksProvider: BacklinksProvider | undefined;
+let forwardLinksProvider: BacklinksProvider | undefined;
+let pdfEditorProvider: PdfEditorProvider | undefined;
+let markdownEditorProvider: MarkdownEditorProvider | undefined;
+let markdownOutlineProvider: MarkdownOutlineTreeProvider | undefined;
 let pdfDiscussionController: PdfDiscussionController | undefined;
+let codexClient: CodexAppServerClient | undefined;
 let codexOutputChannel: vscode.OutputChannel | undefined;
+let graphPanel: KnowledgeGraphPanel | undefined;
+let refreshTimer: NodeJS.Timeout | undefined;
 
-export function activate(context: vscode.ExtensionContext) {
-  const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd();
-  const vaultRoot = detectVaultRoot(workspaceRoot);
+const STARTUP_CUSTOM_EDITOR_RETRY_DELAYS_MS = [0, 250, 1_000] as const;
+const STARTUP_CUSTOM_EDITOR_MONITOR_MS = 1_500;
+const WORKSPACE_REQUIRED_MESSAGE =
+  'Open a folder to use Human Learning notes and repository features.';
 
-  if (!vaultRoot) {
-    activatePdfWithoutVault(context, workspaceRoot);
-    return;
-  }
+interface AddSelectionToChatInput {
+  selection?: SelectionContext;
+  snapshotPng?: Uint8Array;
+}
 
-  console.log(`[Human Learning] Vault detected at ${vaultRoot}`);
+export function activate(context: vscode.ExtensionContext): void {
+  const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  const learningNotes = workspaceRoot
+    ? new LearningNoteStore(workspaceRoot)
+    : undefined;
 
-  initializePdfCodexRuntime(context);
+  if (workspaceRoot) initializeCodex(context);
 
-  // Register link provider for native markdown/Obsidian links
   registerLinkProvider(context);
   registerMarkdownOutlineProvider(context);
 
-  markdownEditorProvider = new MarkdownEditorProvider(context);
+  markdownEditorProvider = new MarkdownEditorProvider(context, learningNotes);
   pdfEditorProvider = new PdfEditorProvider(context, {
-    vaultRoot,
-    documentRoot: vaultRoot,
-    globalStoragePath: context.globalStorageUri?.fsPath ?? context.extensionUri?.fsPath ?? vaultRoot,
+    ...(workspaceRoot ? { vaultRoot: workspaceRoot, documentRoot: workspaceRoot } : {}),
+    globalStoragePath: context.globalStorageUri?.fsPath
+      ?? context.extensionUri?.fsPath
+      ?? workspaceRoot,
     discussionController: pdfDiscussionController,
+    learningNoteStore: learningNotes,
     markdownInsertTarget: markdownEditorProvider,
-    annotationsEnabled: true,
   });
   markdownOutlineProvider = registerMarkdownOutlineTreeProvider(context, pdfEditorProvider);
-  webBrowserProvider = new WebBrowserProvider(context, vaultRoot, markdownEditorProvider);
-  context.subscriptions.push(
+  graphPanel = new KnowledgeGraphPanel();
+
+  const productDisposables: vscode.Disposable[] = [
     vscode.window.registerCustomEditorProvider(PdfEditorProvider.viewType, pdfEditorProvider, {
       webviewOptions: { retainContextWhenHidden: true },
       supportsMultipleEditorsPerDocument: false,
     }),
-    vscode.window.registerCustomEditorProvider(MarkdownEditorProvider.viewType, markdownEditorProvider, {
-      webviewOptions: { retainContextWhenHidden: true },
-      supportsMultipleEditorsPerDocument: false,
-    }),
-  );
-  monitorStartupCustomEditors(context);
+    vscode.window.registerCustomEditorProvider(
+      MarkdownEditorProvider.viewType,
+      markdownEditorProvider,
+      {
+        webviewOptions: { retainContextWhenHidden: true },
+        supportsMultipleEditorsPerDocument: false,
+      },
+    ),
+    graphPanel,
+  ];
+  context.subscriptions.push(...productDisposables);
 
-  // Register TreeViews
-  backlinksProvider = new BacklinksProvider(vaultRoot, 'backlinks');
-  forwardLinksProvider = new BacklinksProvider(vaultRoot, 'forward');
-
-  vscode.window.registerTreeDataProvider('hl-backlinks', backlinksProvider);
-  vscode.window.registerTreeDataProvider('hl-forward-links', forwardLinksProvider);
+  if (workspaceRoot) {
+    backlinksProvider = new BacklinksProvider(workspaceRoot, 'backlinks');
+    forwardLinksProvider = new BacklinksProvider(workspaceRoot, 'forward');
+    context.subscriptions.push(
+      vscode.window.registerTreeDataProvider('hl-backlinks', backlinksProvider),
+      vscode.window.registerTreeDataProvider('hl-forward-links', forwardLinksProvider),
+    );
+  }
   context.subscriptions.push(
-    vscode.window.onDidChangeActiveTextEditor(refreshAllViews),
-    vscode.window.tabGroups.onDidChangeTabs(refreshAllViews),
+    vscode.window.onDidChangeActiveTextEditor(() => refreshAllViews()),
+    vscode.window.tabGroups.onDidChangeTabs(() => refreshAllViews()),
   );
 
-  // Register commands
+  registerExperimentalOwnedBrowser({
+    context,
+    onSendSelection: async payload => {
+      const root = requireWorkspaceRoot(workspaceRoot);
+      if (!root) throw new Error(WORKSPACE_REQUIRED_MESSAGE);
+      const sent = await exportSelectionAndHandoff(
+        root,
+        payload.selection,
+        payload.attachment?.bytes,
+        'The experimental browser crop could not be saved; the active agent will use text context only.',
+      );
+      if (!sent) throw new Error('The browser selection could not be exported.');
+    },
+  });
+  registerCommands(context, workspaceRoot, learningNotes);
+  if (workspaceRoot) registerMarkdownWatcher(context);
+  monitorStartupCustomEditors(context);
+  refreshAllViews();
+  vscode.window.showInformationMessage(
+    workspaceRoot
+      ? `Human Learning ready — Markdown, PDF, and Git-backed notes at ${workspaceRoot}`
+      : 'Human Learning viewers ready — open a folder to enable learning notes and repository features.',
+  );
+}
+
+function initializeCodex(context: vscode.ExtensionContext): void {
+  const executable = vscode.workspace
+    .getConfiguration('humanLearning.agent')
+    .get<string>('codexCommand', 'codex');
+  codexOutputChannel = vscode.window.createOutputChannel('Human Learning — Codex');
+  codexClient = new CodexAppServerClient({
+    executable,
+    extensionVersion: extensionPackageVersion(context),
+    logger: message => codexOutputChannel?.appendLine(message),
+  });
+  pdfDiscussionController = new PdfDiscussionController({
+    client: codexClient,
+    isWorkspaceTrusted: () => vscode.workspace.isTrusted === true,
+  });
+  context.subscriptions.push(codexOutputChannel, codexClient, pdfDiscussionController);
+}
+
+function registerCommands(
+  context: vscode.ExtensionContext,
+  workspaceRoot: string | undefined,
+  learningNotes: LearningNoteStore | undefined,
+): void {
+  const addSelectionToChat = async (input?: AddSelectionToChatInput): Promise<void> => {
+    const root = requireWorkspaceRoot(workspaceRoot);
+    if (!root) return;
+    if (!input?.selection && isPdfUri(activeTabUri())) {
+      await pdfEditorProvider?.addSelectionToCursorChat();
+      return;
+    }
+    if (input?.selection && !isSelectionContext(input.selection)) {
+      vscode.window.showWarningMessage('The selected passage could not be added to chat.');
+      return;
+    }
+    await exportSelectionAndHandoff(
+      root,
+      input?.selection,
+      input?.snapshotPng,
+      'The selection crop could not be saved; the active agent will use text context only.',
+    );
+  };
+
   context.subscriptions.push(
     vscode.commands.registerCommand('human-learning.openAnchor', async (uri?: string) => {
-      if (!uri) {
-        uri = await vscode.window.showInputBox({ prompt: 'Enter a note, PDF, code, web, or anchor link to open' });
-      }
-      if (uri) await openLinkTarget(vaultRoot, uri);
+      const target = uri ?? await vscode.window.showInputBox({
+        prompt: 'Enter a note, PDF, code, web, or source link',
+      });
+      if (target) await dispatchUri(workspaceRoot, target);
     }),
-
     vscode.commands.registerCommand('human-learning.openLinkTarget', async (uri?: string) => {
-      if (!uri) return;
-      await openLinkTarget(vaultRoot, uri);
+      if (uri) await dispatchUri(workspaceRoot, uri);
     }),
-
-    vscode.commands.registerCommand('human-learning.openPdfTarget', async (args?: { pdfPath?: string; page?: number; textFragment?: PdfTextFragment }) => {
+    vscode.commands.registerCommand('human-learning.openPdfTarget', async (args?: {
+      pdfPath?: string;
+      page?: number;
+      textFragment?: PdfTextFragment;
+    }) => {
       if (!args?.pdfPath) {
         vscode.window.showErrorMessage('Missing PDF path');
         return;
       }
-      await pdfEditorProvider.openPdfAtTarget(args.pdfPath, args.page, args.textFragment);
+      if (!workspaceRoot && !isAbsolute(args.pdfPath)) {
+        requireWorkspaceRoot(workspaceRoot);
+        return;
+      }
+      await pdfEditorProvider?.openPdfAtTarget(args.pdfPath, args.page, args.textFragment);
     }),
-
     vscode.commands.registerCommand('human-learning.openInMarkdownEditor', async () => {
       const uri = getActiveMarkdownUri();
-      if (!uri) return;
-      await vscode.commands.executeCommand('vscode.openWith', uri, MarkdownEditorProvider.viewType);
-    }),
-
-    vscode.commands.registerCommand('human-learning.addSelectionToContext', async () => {
-      const exported = await addSelectionToContext(vaultRoot, {
-        getActiveSelectionContext: async () =>
-          await pdfEditorProvider.getActiveSelectionContext()
-          ?? markdownEditorProvider.getActiveSelectionContext(),
-      });
-      if (exported) {
-        refreshAllViews();
-        const db = await openDatabase(vaultRoot);
-        try {
-          runMigrations(db);
-          recordActivity(db, { event_type: 'export_context' });
-        } finally {
-          closeDatabase(db);
-        }
+      if (uri) {
+        await vscode.commands.executeCommand(
+          'vscode.openWith',
+          uri,
+          MarkdownEditorProvider.viewType,
+        );
       }
     }),
-
+    vscode.commands.registerCommand('human-learning.openLearningDiscussion', async (args?: {
+      discussionId?: string;
+      notePath?: string;
+    }) => {
+      if (!requireWorkspaceRoot(workspaceRoot)) return;
+      if (
+        typeof args?.discussionId !== 'string'
+        || typeof args.notePath !== 'string'
+        || !args.discussionId.trim()
+        || !args.notePath.trim()
+      ) {
+        vscode.window.showWarningMessage('This learning annotation is incomplete.');
+        return;
+      }
+      const discussion = await learningNotes?.loadDiscussion(
+        args.discussionId,
+        args.notePath,
+      );
+      if (!discussion) {
+        vscode.window.showWarningMessage('The saved learning note could not be loaded.');
+        return;
+      }
+      await vscode.commands.executeCommand(
+        'vscode.openWith',
+        vscode.Uri.file(discussion.note.absolutePath),
+        MarkdownEditorProvider.viewType,
+      );
+    }),
     vscode.commands.registerCommand('human-learning.pdfAskSelection', async () => {
-      await pdfEditorProvider.openAskPdfForSelection();
+      if (!requireWorkspaceRoot(workspaceRoot)) return;
+      if (!requireWorkspaceTrust()) return;
+      await pdfEditorProvider?.openAskPdfForSelection();
     }),
-
-    vscode.commands.registerCommand('human-learning.openWebBrowser', async (uri?: string) => {
-      const url = uri || await vscode.window.showInputBox({
-        prompt: 'Enter a web URL to browse and persist',
-        value: 'https://example.com',
-      });
-      if (!url) return;
-      webBrowserProvider.open(url);
+    vscode.commands.registerCommand('human-learning.addSelectionToContext', async () => {
+      const root = requireWorkspaceRoot(workspaceRoot);
+      if (!root) return;
+      const exported = await exportCurrentSelection(root);
+      if (exported) {
+        await handoffSelectionToAgent(vscode.Uri.file(exported.markdownPath));
+      }
     }),
-
+    vscode.commands.registerCommand('human-learning.addSelectionToChat', addSelectionToChat),
+    // Compatibility alias for existing webview messages and older keybindings.
+    vscode.commands.registerCommand('human-learning.addSelectionToCursorChat', addSelectionToChat),
+    vscode.commands.registerCommand(
+      'human-learning.addCursorBrowserSelectionToChat',
+      async () => {
+        const root = requireWorkspaceRoot(workspaceRoot);
+        if (!root) return;
+        const capture = await captureActiveCursorBrowserSelection();
+        if (!capture) {
+          vscode.window.showWarningMessage(
+            'No active Cursor Browser text selection was available. In stock VS Code, use Human Learning: Open Experimental Web Reader.',
+          );
+          return;
+        }
+        await exportSelectionAndHandoff(
+          root,
+          cursorBrowserCaptureToSelectionContext(capture),
+          capture.snapshotPng,
+          'The Cursor Browser crop could not be saved; the active agent will use text context only.',
+        );
+      },
+    ),
+    vscode.commands.registerCommand('human-learning.generateDailyNote', async () => {
+      const root = requireWorkspaceRoot(workspaceRoot);
+      if (!root) return;
+      const daily = await generateDailyNote({ workspaceRoot: root });
+      await vscode.commands.executeCommand(
+        'vscode.openWith',
+        vscode.Uri.file(daily.absolutePath),
+        MarkdownEditorProvider.viewType,
+      );
+      vscode.window.showInformationMessage(
+        `Daily note ready: ${daily.dueReviews.length} reviews, ${daily.carriedTodos.length} carried tasks`,
+      );
+    }),
+    vscode.commands.registerCommand('human-learning.showKnowledgeGraph', async () => {
+      const root = requireWorkspaceRoot(workspaceRoot);
+      if (!root) return;
+      const graph = getConceptGraph(await loadFilesystemWiki(root));
+      graphPanel?.show(graph);
+    }),
+    vscode.commands.registerCommand('human-learning.syncRepository', async () => {
+      const root = requireWorkspaceRoot(workspaceRoot);
+      if (root) await runRepositorySync(root);
+    }),
+    vscode.commands.registerCommand('human-learning.refreshLinks', async () => {
+      if (!requireWorkspaceRoot(workspaceRoot)) return;
+      await refreshFilesystemViews();
+      vscode.window.showInformationMessage('Filesystem links and annotations refreshed.');
+    }),
     vscode.commands.registerCommand('human-learning.toggleVimMode', async () => {
-      const enabled = await markdownEditorProvider.toggleVimMode();
-      vscode.window.showInformationMessage(`Human Learning Vim mode ${enabled ? 'enabled' : 'disabled'}`);
+      const enabled = await markdownEditorProvider?.toggleVimMode();
+      if (enabled !== undefined) {
+        vscode.window.showInformationMessage(
+          `Human Learning Vim mode ${enabled ? 'enabled' : 'disabled'}`,
+        );
+      }
     }),
-
     vscode.commands.registerCommand('human-learning.consumeVimHostShortcut', async () => {
-      await markdownEditorProvider.consumeVimHostShortcut();
+      await markdownEditorProvider?.consumeVimHostShortcut();
     }),
-
     vscode.commands.registerCommand('human-learning.revealInMarkdownEditor', async (args?: {
       uri?: vscode.Uri;
       selection?: { from?: number; to?: number };
     }) => {
-      if (!args?.uri) return;
-      const from = args.selection?.from;
-      const to = args.selection?.to;
-      if (typeof from !== 'number' || typeof to !== 'number') return;
-      await markdownEditorProvider.revealInEditor(args.uri, { from, to });
+      if (
+        !args?.uri
+        || typeof args.selection?.from !== 'number'
+        || typeof args.selection.to !== 'number'
+      ) return;
+      await markdownEditorProvider?.revealInEditor(args.uri, {
+        from: args.selection.from,
+        to: args.selection.to,
+      });
     }),
-
     vscode.commands.registerCommand('human-learning.revealInPdfOutline', async (args?: {
       uri?: vscode.Uri;
       destination?: unknown;
       title?: string;
     }) => {
-      if (!args?.uri) return;
-      await pdfEditorProvider.revealPdfOutlineDestination(
-        args.uri,
-        args.destination,
-        args.title,
-      );
+      if (args?.uri) {
+        await pdfEditorProvider?.revealPdfOutlineDestination(
+          args.uri,
+          args.destination,
+          args.title,
+        );
+      }
     }),
-
     vscode.commands.registerCommand('human-learning.pdfPrevPage', () => {
-      pdfEditorProvider.getActiveWebview()?.postMessage({ type: 'navigate', direction: 'prev' });
+      pdfEditorProvider?.getActiveWebview()?.postMessage({ type: 'navigate', direction: 'prev' });
     }),
-
     vscode.commands.registerCommand('human-learning.pdfNextPage', () => {
-      pdfEditorProvider.getActiveWebview()?.postMessage({ type: 'navigate', direction: 'next' });
+      pdfEditorProvider?.getActiveWebview()?.postMessage({ type: 'navigate', direction: 'next' });
     }),
-
     vscode.commands.registerCommand('human-learning.pdfZoomIn', () => {
-      pdfEditorProvider.getActiveWebview()?.postMessage({ type: 'zoom', delta: 0.15 });
+      pdfEditorProvider?.getActiveWebview()?.postMessage({ type: 'zoom', delta: 0.15 });
     }),
-
     vscode.commands.registerCommand('human-learning.pdfZoomOut', () => {
-      pdfEditorProvider.getActiveWebview()?.postMessage({ type: 'zoom', delta: -0.15 });
+      pdfEditorProvider?.getActiveWebview()?.postMessage({ type: 'zoom', delta: -0.15 });
     }),
-
     vscode.commands.registerCommand('human-learning.pdfFitWidth', () => {
-      pdfEditorProvider.getActiveWebview()?.postMessage({ type: 'fitWidth' });
+      pdfEditorProvider?.getActiveWebview()?.postMessage({ type: 'fitWidth' });
     }),
-
     vscode.commands.registerCommand('human-learning.pdfToggleContinuousScroll', () => {
-      pdfEditorProvider.getActiveWebview()?.postMessage({ type: 'toggleContinuousScroll' });
+      pdfEditorProvider?.getActiveWebview()?.postMessage({ type: 'toggleContinuousScroll' });
     }),
-
     vscode.commands.registerCommand('human-learning.pdfToggleTwoPageView', () => {
-      pdfEditorProvider.getActiveWebview()?.postMessage({ type: 'toggleTwoPageView' });
+      pdfEditorProvider?.getActiveWebview()?.postMessage({ type: 'toggleTwoPageView' });
     }),
-
     vscode.commands.registerCommand('human-learning.openPdfMarkdownColumns', async () => {
       const pdfUri = getActivePdfUri();
-      if (!pdfUri) {
-        vscode.window.showWarningMessage('Open a PDF first to use PDF/markdown columns.');
-        return;
-      }
-
       const markdownUri = getActiveMarkdownUri();
-      if (!markdownUri) {
-        vscode.window.showWarningMessage('Open a markdown note before using PDF/markdown columns.');
+      if (!pdfUri || !markdownUri) {
+        vscode.window.showWarningMessage('Open both a PDF and a Markdown note first.');
         return;
       }
-
-      await vscode.commands.executeCommand('vscode.openWith', pdfUri, PdfEditorProvider.viewType, vscode.ViewColumn.One);
-      await vscode.commands.executeCommand('vscode.openWith', markdownUri, MarkdownEditorProvider.viewType, vscode.ViewColumn.Beside);
-    }),
-
-    vscode.commands.registerCommand('human-learning.ingestCurrentFile', async () => {
-      const uri = getActiveMarkdownUri();
-      if (!uri) return;
-
-      const db = await openDatabase(vaultRoot);
-      runMigrations(db);
-      const relPath = vscode.workspace.asRelativePath(uri);
-      const source = registerSource(db, vaultRoot, relPath);
-      await ingestFile(db, vaultRoot, relPath, source.id);
-      recordActivity(db, { event_type: 'open_note', source_id: source.id, metadata: { path: relPath } });
-      closeDatabase(db);
-      vscode.window.showInformationMessage(`Ingested: ${relPath}`);
-    }),
-
-    vscode.commands.registerCommand('human-learning.refreshLinks', async () => {
-      const db = await openDatabase(vaultRoot);
-      runMigrations(db);
-      rebuildAllLinks(db, vaultRoot);
-      closeDatabase(db);
-      refreshAllViews();
-      vscode.window.showInformationMessage('Links refreshed');
-    }),
-
-    vscode.commands.registerCommand('human-learning.showBacklinks', async () => {
-      const uri = getActiveMarkdownUri();
-      if (!uri) return;
-      const relPath = vscode.workspace.asRelativePath(uri);
-      const db = await openDatabase(vaultRoot);
-      runMigrations(db);
-      const backlinks = getBacklinks(db, notePathToUri(relPath));
-      recordActivity(db, { event_type: 'view_section', metadata: { path: relPath } });
-      closeDatabase(db);
-
-      if (backlinks.length === 0) {
-        vscode.window.showInformationMessage(`No backlinks to ${relPath}`);
-      } else {
-        const items = backlinks.map(b => ({
-          label: `${b.from_note_path}:${b.from_line}`,
-          description: b.label || '',
-        }));
-        vscode.window.showQuickPick(items, { title: `Backlinks to ${relPath}` });
-      }
+      await vscode.commands.executeCommand(
+        'vscode.openWith',
+        pdfUri,
+        PdfEditorProvider.viewType,
+        vscode.ViewColumn.One,
+      );
+      await vscode.commands.executeCommand(
+        'vscode.openWith',
+        markdownUri,
+        MarkdownEditorProvider.viewType,
+        vscode.ViewColumn.Beside,
+      );
     }),
   );
-
-  // Watch for markdown file changes
-  const watcher = vscode.workspace.createFileSystemWatcher('**/*.md');
-  watcher.onDidChange(async (uri) => {
-    const relPath = vscode.workspace.asRelativePath(uri);
-    const db = await openDatabase(vaultRoot);
-    runMigrations(db);
-    try {
-      rebuildLinksForNote(db, vaultRoot, relPath);
-    } catch (e) {
-      // May not be in sources yet
-    }
-    closeDatabase(db);
-    debounceRefresh();
-  });
-  watcher.onDidCreate(async (uri) => {
-    const relPath = vscode.workspace.asRelativePath(uri);
-    const db = await openDatabase(vaultRoot);
-    runMigrations(db);
-
-    const source = registerSource(db, vaultRoot, relPath);
-    await ingestFile(db, vaultRoot, relPath, source.id);
-    recordActivity(db, { event_type: 'open_note', source_id: source.id, metadata: { path: relPath } });
-    closeDatabase(db);
-  });
-  context.subscriptions.push(watcher);
-
-  // Initial refresh
-  refreshAllViews();
-
-  vscode.window.showInformationMessage(`Human Learning ready — vault at ${vaultRoot}`);
 }
 
-function initializePdfCodexRuntime(context: vscode.ExtensionContext): void {
-  const codexCommand = typeof vscode.workspace.getConfiguration === 'function'
-    ? vscode.workspace.getConfiguration('humanLearning.pdf').get<string>('codexCommand', 'codex')
-    : 'codex';
-  const outputChannel = vscode.window.createOutputChannel('Human Learning PDF — Codex');
-  codexOutputChannel = outputChannel;
-  codexClient = new CodexAppServerClient({
-    executable: codexCommand,
-    extensionVersion: extensionPackageVersion(context),
-    logger: message => outputChannel.appendLine(message),
-  });
-  pdfDiscussionController = new PdfDiscussionController({ client: codexClient });
-  context.subscriptions.push(codexClient, pdfDiscussionController);
+function requireWorkspaceRoot(
+  workspaceRoot: string | undefined,
+): string | undefined {
+  if (workspaceRoot) return workspaceRoot;
+  vscode.window.showWarningMessage(WORKSPACE_REQUIRED_MESSAGE);
+  return undefined;
+}
+
+function requireWorkspaceTrust(): boolean {
+  if (vscode.workspace.isTrusted === true) return true;
+  vscode.window.showWarningMessage(PDF_DISCUSSION_WORKSPACE_TRUST_MESSAGE);
+  return false;
+}
+
+async function runRepositorySync(workspaceRoot: string): Promise<void> {
+  try {
+    let result = await syncRepository(workspaceRoot);
+    if (result.status === 'merge-required') {
+      const action = await vscode.window.showWarningMessage(
+        `Local and ${result.after.upstream ?? 'remote'} both changed.`,
+        { modal: true, detail: 'Merge the fetched remote branch into your local branch?' },
+        'Merge remote changes',
+      );
+      if (action !== 'Merge remote changes') return;
+      result = await syncRepository(workspaceRoot, { allowMerge: true });
+    }
+    const messages: Record<typeof result.status, string> = {
+      'no-repository': 'This workspace is not a Git repository.',
+      'no-upstream': 'No upstream branch is configured.',
+      dirty: 'Commit or stash local changes before syncing.',
+      'up-to-date': 'Wiki is already up to date.',
+      ahead: 'Local wiki is ahead of remote; nothing was pulled.',
+      'fast-forwarded': 'Wiki updated to the latest remote content.',
+      'merge-required': 'Remote merge was not confirmed.',
+      merged: 'Remote and local wiki changes were merged.',
+    };
+    const message = messages[result.status];
+    if (result.status === 'dirty' || result.status === 'no-upstream' || result.status === 'no-repository') {
+      vscode.window.showWarningMessage(message);
+    } else {
+      vscode.window.showInformationMessage(message);
+    }
+    if (result.changed) await refreshFilesystemViews();
+  } catch (error) {
+    vscode.window.showErrorMessage(`Repository sync failed: ${errorMessage(error)}`);
+  }
+}
+
+function registerMarkdownWatcher(context: vscode.ExtensionContext): void {
+  const watcher = vscode.workspace.createFileSystemWatcher('**/*.md');
+  const schedule = () => {
+    if (refreshTimer) clearTimeout(refreshTimer);
+    refreshTimer = setTimeout(() => {
+      refreshTimer = undefined;
+      void refreshFilesystemViews();
+    }, 250);
+    refreshTimer.unref?.();
+  };
+  watcher.onDidChange(schedule);
+  watcher.onDidCreate(schedule);
+  watcher.onDidDelete(schedule);
+  context.subscriptions.push(watcher);
+}
+
+async function refreshFilesystemViews(): Promise<void> {
+  refreshAllViews();
+  if (typeof markdownEditorProvider?.refreshLearningAnnotations === 'function') {
+    await markdownEditorProvider.refreshLearningAnnotations();
+  }
+}
+
+function refreshAllViews(): void {
+  if (typeof backlinksProvider?.refresh === 'function') backlinksProvider.refresh();
+  if (typeof forwardLinksProvider?.refresh === 'function') forwardLinksProvider.refresh();
+  if (typeof markdownOutlineProvider?.refresh === 'function') markdownOutlineProvider.refresh();
 }
 
 function extensionPackageVersion(context: vscode.ExtensionContext): string {
@@ -319,241 +471,184 @@ function extensionPackageVersion(context: vscode.ExtensionContext): string {
   return typeof packageJson?.version === 'string' ? packageJson.version : '0.1.0';
 }
 
-function activatePdfWithoutVault(context: vscode.ExtensionContext, documentRoot: string): void {
-  initializePdfCodexRuntime(context);
-  pdfEditorProvider = new PdfEditorProvider(context, {
-    documentRoot,
-    globalStoragePath: context.globalStorageUri?.fsPath ?? context.extensionUri?.fsPath ?? documentRoot,
-    discussionController: pdfDiscussionController,
-    annotationsEnabled: false,
-  });
-  markdownOutlineProvider = registerMarkdownOutlineTreeProvider(context, pdfEditorProvider);
-  context.subscriptions.push(
-    vscode.window.registerCustomEditorProvider(PdfEditorProvider.viewType, pdfEditorProvider, {
-      webviewOptions: { retainContextWhenHidden: true },
-      supportsMultipleEditorsPerDocument: false,
-    }),
-  );
-  context.subscriptions.push(
-    vscode.commands.registerCommand('human-learning.openAnchor', async (uri?: string) => {
-      if (!uri) {
-        uri = await vscode.window.showInputBox({ prompt: 'Enter a PDF, note, code, web, or anchor link to open' });
-      }
-      if (uri) await dispatchUri(documentRoot, uri);
-    }),
-    vscode.commands.registerCommand('human-learning.openLinkTarget', async (uri?: string) => {
-      if (!uri) return;
-      await dispatchUri(documentRoot, uri);
-    }),
-    vscode.commands.registerCommand('human-learning.openPdfTarget', async (args?: { pdfPath?: string; page?: number; textFragment?: PdfTextFragment }) => {
-      if (!args?.pdfPath) {
-        vscode.window.showErrorMessage('Missing PDF path');
-        return;
-      }
-      await pdfEditorProvider.openPdfAtTarget(args.pdfPath, args.page, args.textFragment);
-    }),
-    vscode.commands.registerCommand('human-learning.addSelectionToContext', async () => {
-      vscode.window.showErrorMessage('Human Learning: No vault found. Run `hl init` to export selection context.');
-    }),
-    vscode.commands.registerCommand('human-learning.pdfAskSelection', async () => {
-      await pdfEditorProvider.openAskPdfForSelection();
-    }),
-    vscode.commands.registerCommand('human-learning.revealInPdfOutline', async (args?: {
-      uri?: vscode.Uri;
-      destination?: unknown;
-      title?: string;
-    }) => {
-      if (!args?.uri) return;
-      await pdfEditorProvider.revealPdfOutlineDestination(
-        args.uri,
-        args.destination,
-        args.title,
-      );
-    }),
-    vscode.commands.registerCommand('human-learning.pdfPrevPage', () => {
-      pdfEditorProvider.getActiveWebview()?.postMessage({ type: 'navigate', direction: 'prev' });
-    }),
-    vscode.commands.registerCommand('human-learning.pdfNextPage', () => {
-      pdfEditorProvider.getActiveWebview()?.postMessage({ type: 'navigate', direction: 'next' });
-    }),
-    vscode.commands.registerCommand('human-learning.pdfZoomIn', () => {
-      pdfEditorProvider.getActiveWebview()?.postMessage({ type: 'zoom', delta: 0.15 });
-    }),
-    vscode.commands.registerCommand('human-learning.pdfZoomOut', () => {
-      pdfEditorProvider.getActiveWebview()?.postMessage({ type: 'zoom', delta: -0.15 });
-    }),
-    vscode.commands.registerCommand('human-learning.pdfFitWidth', () => {
-      pdfEditorProvider.getActiveWebview()?.postMessage({ type: 'fitWidth' });
-    }),
-    vscode.commands.registerCommand('human-learning.pdfToggleContinuousScroll', () => {
-      pdfEditorProvider.getActiveWebview()?.postMessage({ type: 'toggleContinuousScroll' });
-    }),
-    vscode.commands.registerCommand('human-learning.pdfToggleTwoPageView', () => {
-      pdfEditorProvider.getActiveWebview()?.postMessage({ type: 'toggleTwoPageView' });
-    }),
-  );
-  vscode.window.showInformationMessage(
-    `Human Learning PDF ready — document root at ${documentRoot}; run \`hl init\` to enable vault features`,
-  );
-}
-
-let refreshTimeout: NodeJS.Timeout | null = null;
-function debounceRefresh() {
-  if (refreshTimeout) clearTimeout(refreshTimeout);
-  refreshTimeout = setTimeout(refreshAllViews, 500);
-}
-
-function refreshAllViews() {
-  backlinksProvider?.refresh();
-  forwardLinksProvider?.refresh();
-  markdownOutlineProvider?.refresh();
-}
-
-export function deactivate() {
+export function deactivate(): void {
+  if (refreshTimer) clearTimeout(refreshTimer);
+  refreshTimer = undefined;
+  graphPanel?.dispose();
   pdfDiscussionController?.dispose();
   codexClient?.dispose();
   codexOutputChannel?.dispose();
+  graphPanel = undefined;
   pdfDiscussionController = undefined;
   codexClient = undefined;
   codexOutputChannel = undefined;
 }
 
-async function openLinkTarget(vaultRoot: string, uri: string): Promise<void> {
-  await dispatchUri(vaultRoot, uri, {
-    openWebTarget: async url => {
-      webBrowserProvider.open(url);
-    },
-  });
-}
-
 function getActiveMarkdownUri(): vscode.Uri | undefined {
   const activeEditorUri = vscode.window.activeTextEditor?.document.uri;
-  if (activeEditorUri && isMarkdownUri(activeEditorUri)) return activeEditorUri;
-
-  const tabInput = vscode.window.tabGroups.activeTabGroup.activeTab?.input as { uri?: vscode.Uri } | undefined;
-  if (tabInput?.uri && isMarkdownUri(tabInput.uri)) return tabInput.uri;
-
-  const visibleEditor = vscode.window.visibleTextEditors.find(editor => isMarkdownUri(editor.document.uri));
-  if (visibleEditor) return visibleEditor.document.uri;
-
-  for (const tabUri of openTabUris()) {
-    if (isMarkdownUri(tabUri)) return tabUri;
-  }
-
-  const openDocument = (vscode.workspace.textDocuments ?? []).find(document => isMarkdownUri(document.uri));
-  if (openDocument) return openDocument.uri;
-
-  return undefined;
-}
-
-function isMarkdownUri(uri: vscode.Uri): boolean {
-  return uri.scheme === 'file' && uri.fsPath.toLowerCase().endsWith('.md');
+  if (isMarkdownUri(activeEditorUri)) return activeEditorUri;
+  const tabUri = activeTabUri();
+  if (isMarkdownUri(tabUri)) return tabUri;
+  return vscode.window.visibleTextEditors.find(
+    editor => isMarkdownUri(editor.document.uri),
+  )?.document.uri;
 }
 
 function getActivePdfUri(): vscode.Uri | undefined {
-  const activePdf = pdfEditorProvider.getActiveWebview()?.pdfUri;
-  if (activePdf) return activePdf;
-
-  const activeEditorUri = vscode.window.activeTextEditor?.document.uri;
-  if (activeEditorUri && isPdfUri(activeEditorUri)) return activeEditorUri;
-
-  const tabInput = vscode.window.tabGroups.activeTabGroup.activeTab?.input as { uri?: vscode.Uri } | undefined;
-  if (tabInput?.uri && isPdfUri(tabInput.uri)) return tabInput.uri;
-
-  return undefined;
+  return pdfEditorProvider?.getActiveWebview()?.pdfUri
+    ?? (isPdfUri(activeTabUri()) ? activeTabUri() : undefined);
 }
 
-function isPdfUri(uri: vscode.Uri): boolean {
-  return uri.scheme === 'file' && uri.fsPath.toLowerCase().endsWith('.pdf');
+async function exportCurrentSelection(
+  fallbackWorkspaceRoot: string,
+  suppliedSelection?: SelectionContext,
+): Promise<SelectionContextExportResult | undefined> {
+  const selection = suppliedSelection
+    ?? await activeCustomSelection()
+    ?? getNativeSelectionContext();
+  const workspaceRoot = selection
+    ? vscode.workspace.getWorkspaceFolder?.(selection.uri)?.uri.fsPath
+      ?? fallbackWorkspaceRoot
+    : fallbackWorkspaceRoot;
+  const exported = await addSelectionToContext(workspaceRoot, {
+    getActiveSelectionContext: () => selection,
+  });
+  return exported || undefined;
 }
 
-function openTabUris(): vscode.Uri[] {
-  const uris: vscode.Uri[] = [];
-  for (const group of vscode.window.tabGroups.all ?? []) {
-    for (const tab of group.tabs) {
-      const uri = (tab.input as { uri?: vscode.Uri } | undefined)?.uri;
-      if (uri) uris.push(uri);
-    }
+async function exportSelectionAndHandoff(
+  workspaceRoot: string,
+  selection: SelectionContext | undefined,
+  snapshotPng: Uint8Array | undefined,
+  cropFailureMessage: string,
+): Promise<boolean> {
+  const exported = await exportCurrentSelection(workspaceRoot, selection);
+  if (!exported) return false;
+  let cropPath: string | undefined;
+  try {
+    cropPath = await syncSelectionExportAttachment(
+      exported,
+      'selection.png',
+      validateCursorCropPng(snapshotPng),
+    );
+  } catch {
+    vscode.window.showWarningMessage(cropFailureMessage);
   }
-  return uris;
+  const agent = await handoffSelectionToAgent(
+    vscode.Uri.file(exported.markdownPath),
+    cropPath ? [vscode.Uri.file(cropPath)] : [],
+  );
+  return agent !== undefined;
+}
+
+async function activeCustomSelection(): Promise<SelectionContext | undefined> {
+  const activeUri = activeTabUri();
+  if (isPdfUri(activeUri)) {
+    return pdfEditorProvider?.getActiveSelectionContext();
+  }
+  if (isMarkdownUri(activeUri)) {
+    return activeTabCustomViewType() === MarkdownEditorProvider.viewType
+      ? markdownEditorProvider?.captureActiveSelectionContext()
+      : undefined;
+  }
+  return await pdfEditorProvider?.getActiveSelectionContext()
+    ?? await markdownEditorProvider?.captureActiveSelectionContext();
+}
+
+function getNativeSelectionContext(): SelectionContext | undefined {
+  const editor = vscode.window.activeTextEditor;
+  if (!editor) return undefined;
+  const { selection } = editor;
+  return {
+    uri: editor.document.uri,
+    text: selection.isEmpty ? '' : editor.document.getText(selection),
+    startLine: selection.start.line + 1,
+    endLine: selection.end.line + 1,
+  };
+}
+
+function isSelectionContext(value: unknown): value is SelectionContext {
+  if (!value || typeof value !== 'object') return false;
+  const candidate = value as Partial<SelectionContext>;
+  return Boolean(
+    candidate.uri
+    && typeof candidate.uri.scheme === 'string'
+    && typeof candidate.uri.fsPath === 'string'
+    && typeof candidate.text === 'string'
+    && Number.isSafeInteger(candidate.startLine)
+    && Number.isSafeInteger(candidate.endLine)
+    && (candidate.startLine ?? 0) > 0
+    && (candidate.endLine ?? 0) >= (candidate.startLine ?? 0),
+  );
+}
+
+function activeTabUri(): vscode.Uri | undefined {
+  return (
+    vscode.window.tabGroups.activeTabGroup.activeTab?.input as { uri?: vscode.Uri } | undefined
+  )?.uri;
+}
+
+function activeTabCustomViewType(): string | undefined {
+  const viewType = (
+    vscode.window.tabGroups.activeTabGroup.activeTab?.input as { viewType?: unknown } | undefined
+  )?.viewType;
+  return typeof viewType === 'string' ? viewType : undefined;
+}
+
+function isMarkdownUri(uri: vscode.Uri | undefined): uri is vscode.Uri {
+  return Boolean(uri?.scheme === 'file' && uri.fsPath.toLowerCase().endsWith('.md'));
+}
+
+function isPdfUri(uri: vscode.Uri | undefined): uri is vscode.Uri {
+  return Boolean(uri?.scheme === 'file' && uri.fsPath.toLowerCase().endsWith('.pdf'));
 }
 
 function monitorStartupCustomEditors(context: vscode.ExtensionContext): void {
-  const retryIntervalMs = 1000;
-  const retryWindowMs = 20000;
-
-  const getStartupDocuments = (): Array<{ uri: vscode.Uri; languageId?: string }> => {
-    const documents = new Map<string, { uri: vscode.Uri; languageId?: string }>();
-    const active = vscode.window.activeTextEditor;
-    if (active) {
-      documents.set(active.document.uri.toString(), {
-        uri: active.document.uri,
-        languageId: active.document.languageId,
-      });
-    }
-    for (const editor of vscode.window.visibleTextEditors) {
-      documents.set(editor.document.uri.toString(), {
-        uri: editor.document.uri,
-        languageId: editor.document.languageId,
-      });
-    }
-    const activeTabUri = (vscode.window.tabGroups.activeTabGroup.activeTab?.input as { uri?: vscode.Uri } | undefined)?.uri;
-    if (activeTabUri) {
-      documents.set(activeTabUri.toString(), { uri: activeTabUri });
-    }
-    return [...documents.values()];
-  };
-
-  const maybeReopen = async (document: { uri: vscode.Uri; languageId?: string } | undefined): Promise<void> => {
-    if (!document) return;
-    if (document.uri.scheme !== 'file') return;
-
-    if (document.languageId === 'markdown') {
-      await vscode.commands.executeCommand(
-        'vscode.openWith',
-        document.uri,
-        MarkdownEditorProvider.viewType,
-      );
-      return;
-    }
-
-    if (document.uri.fsPath.toLowerCase().endsWith('.pdf')) {
-      await vscode.commands.executeCommand(
-        'vscode.openWith',
-        document.uri,
-        PdfEditorProvider.viewType,
-      );
+  const reopen = async (uri: vscode.Uri | undefined, languageId?: string): Promise<void> => {
+    if (!uri || uri.scheme !== 'file') return;
+    if (languageId === 'markdown' || isMarkdownUri(uri)) {
+      await vscode.commands.executeCommand('vscode.openWith', uri, MarkdownEditorProvider.viewType);
+    } else if (isPdfUri(uri)) {
+      await vscode.commands.executeCommand('vscode.openWith', uri, PdfEditorProvider.viewType);
     }
   };
-
   const listener = vscode.window.onDidChangeActiveTextEditor(editor => {
-    void maybeReopen(editor ? {
-      uri: editor.document.uri,
-      languageId: editor.document.languageId,
-    } : undefined);
+    void reopen(editor?.document.uri, editor?.document.languageId);
   });
-  const retry = setInterval(() => {
-    for (const document of getStartupDocuments()) {
-      void maybeReopen(document);
+  const reopenVisibleEditors = () => {
+    const reopened = new Set<string>();
+    const reopenOnce = (uri: vscode.Uri | undefined, languageId?: string) => {
+      if (!uri) return;
+      const key = uri.fsPath || uri.toString();
+      if (reopened.has(key)) return;
+      reopened.add(key);
+      void reopen(uri, languageId);
+    };
+    const active = vscode.window.activeTextEditor;
+    reopenOnce(active?.document.uri, active?.document.languageId);
+    for (const editor of vscode.window.visibleTextEditors) {
+      reopenOnce(editor.document.uri, editor.document.languageId);
     }
-  }, retryIntervalMs);
-  const timeout = setTimeout(() => {
+    reopenOnce(activeTabUri());
+  };
+  const retries = STARTUP_CUSTOM_EDITOR_RETRY_DELAYS_MS.map(delay => {
+    const timer = setTimeout(reopenVisibleEditors, delay);
+    timer.unref?.();
+    return timer;
+  });
+  const stopMonitoring = setTimeout(() => {
     listener.dispose();
-    clearInterval(retry);
-  }, retryWindowMs);
-  timeout.unref?.();
-  retry.unref?.();
-
-  context.subscriptions.push(listener, {
+  }, STARTUP_CUSTOM_EDITOR_MONITOR_MS);
+  stopMonitoring.unref?.();
+  context.subscriptions.push({
     dispose() {
-      clearTimeout(timeout);
-      clearInterval(retry);
+      listener.dispose();
+      for (const retry of retries) clearTimeout(retry);
+      clearTimeout(stopMonitoring);
     },
   });
+}
 
-  setTimeout(() => {
-    for (const document of getStartupDocuments()) {
-      void maybeReopen(document);
-    }
-  }, 0);
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

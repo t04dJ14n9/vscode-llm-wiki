@@ -1,282 +1,321 @@
-# Human Learning - Current Feature List
+# Human Learning: Current Feature List
 
-Human Learning is a local-first VS Code learning workspace. It keeps raw
-sources, markdown notes, citations, link graph data, PDF/web locators, search
-chunks, and agent context in one inspectable vault.
+> This document describes the simplified combined desktop extension. For the
+> system boundaries and data flows, see
+> [Architecture and VS Code Integration](architecture-and-vscode-integration.md).
 
-This document describes the current implementation direction after the native
-reference-model update. Older planning docs may still contain `hl://` examples;
-those examples are historical, not the current generated user-facing format.
+Human Learning turns an ordinary Git repository into a source-linked learning
+workspace in VS Code or Cursor. Repository files, rather than a database, are
+the durable source of truth.
 
-## 1. Vault Model
+## 1. Product boundary
 
-```text
-vault/
-  raw/
-    pdf/
-    web/
-    code/
-    images/
-    text/
-  notes/
-    Concepts/
-    Papers/
-    Projects/
-    Daily Notes/
-    Literature Notes/
-    assets/
-  .hl/
-    index.sqlite
-    embeddings/
-    cache/
-    agent/
-      selection.md
-      selection.json
-      related.md
-      today.md
-      context.md
-      context.json
-  AGENTS.md
-  CLAUDE.md
-  .agents/skills/human-learning/SKILL.md
-  .claude/commands/
-  .codex/config.toml
-```
-
-Canonical knowledge remains in `raw/` and `notes/`. SQLite is a runtime index
-that can be rebuilt from markdown, source files, and durable metadata.
-
-## 2. Link Formats
-
-Human Learning no longer generates `hl://` links for notes, code, PDFs, or web
-targets. User-facing links are Obsidian/native markdown-compatible.
-
-| Target | Format |
+| Capability | Current release |
 | --- | --- |
-| Note | `[[Online Softmax#Why This Matters]]` |
-| Code line range | `[kernel](raw/code/attention.cu#L42-L57)` |
-| PDF page | `[paper p7](raw/pdf/flash-attention.pdf#page=7)` |
-| PDF text selection | `[selected text](raw/pdf/flash-attention.pdf#page=7:~:text=selected%20text)` |
-| Web native section | `[section](https://example.com/article#results)` |
-| Web text fragment | `[quote](https://example.com/article#:~:text=selected%20text)` |
-| Web DOM fallback | `[DOM block](https://example.com/article#hl-web=web_abc123)` |
+| Desktop host | VS Code and compatible desktop hosts such as Cursor |
+| Distribution unit | Combined `human-learning-vscode` extension |
+| Markdown and PDF reading | Included |
+| Markdown/PDF selection handoff | Active supported agent draft, never submitted automatically |
+| Web selection handoff | Cursor Browser capture plus an Experimental Web Reader for stock VS Code |
+| Selection-based, multi-turn questions | Included in the separate Ask PDF panel |
+| Durable learning records | Markdown under `wiki/learning/` |
+| PDF runtime state | v1 JSON sidecar under `.hl/annotations/pdf/` |
+| Portable PDF annotation mirror | Per-annotation W3C-shaped JSON-LD |
+| Graph, daily review, and safe Git update | Included |
+| Built-in agent provider | Local Codex app-server |
+| External agent handoff | Codex, Claude Code, Cursor Agent, and CodeBuddy |
+| MCP and `hl` CLI | Optional legacy/headless surfaces |
+| SQLite | Not used or shipped by the combined extension |
+| Standalone Markdown/PDF extensions | Legacy; excluded from the simplified release |
+| Web or mobile app | Out of scope |
 
-The parser stores every resolved edge in SQLite with the native target string in
-`links.to_uri`. Wikilinks are resolved to native vault paths for graph lookup,
-but remain readable and portable in markdown.
+No vault initialization is required. The extension works from the first
+workspace folder that contains the learner's Markdown, PDFs, and Git history.
 
-## 3. Reference Classification
+## 2. Markdown reading and editing
 
-The core reference classifier maps link destinations into:
+The custom Markdown editor keeps the VS Code `TextDocument` as its backing
+document and uses CodeMirror 6 in the webview. This preserves ordinary save,
+undo, file-watch, and Git behavior.
 
-```text
-note | pdf | code | web | image | text | unknown
-```
+Current rendering and interaction include:
 
-Classification uses scheme, file extension, path, and fragment:
+- Obsidian-like title and YAML properties;
+- headings, emphasis, links, images, task lists, tables, callouts, comments,
+  tags, footnotes, and reference links;
+- MathJax inline and display math;
+- Prism-highlighted fenced code;
+- Mermaid diagrams, including horizontally scrollable wide diagrams;
+- raw Markdown copy/paste and HTML-to-Markdown paste conversion;
+- optional Vim mode and supported host shortcuts;
+- VS Code editor typography and theme colors.
 
-- `*.md` paths are notes.
-- `*.pdf` paths and `raw/pdf/...` paths are PDFs.
-- Code extensions or `#Lx-Ly` fragments are code links.
-- `http://` and `https://` links are web links.
-- `#hl-web=<id>` resolves a durable web fallback target.
-- Image and text extensions open as ordinary files.
+Active content remains editable as raw Markdown. Rendering is decoration and
+widget state; the repository never receives an alternate rich-text format.
 
-## 4. Link Graph
+## 3. Add a Markdown selection to Chat
 
-The graph supports:
+With non-empty text selected, the learner can:
 
-- markdown links: `[label](target)`
-- Obsidian wikilinks: `[[Note]]`, `[[Note#Heading]]`, `[[Note|Alias]]`
-- same-note heading links: `[[#Heading]]`
-- same-note block references: `[[#^block-id]]`
-- image embeds: `![[image.png]]`
+- use the automatic **Cmd+L Add to Chat** selection prompt;
+- right-click **Add to Chat**;
+- press `Cmd+L` on macOS or `Ctrl+L` elsewhere.
 
-Graph rebuild deletes previous parser edges for the note, reparses the raw
-markdown file, and inserts resolved edges into `links`. Backlinks and forward
-links are read directly from SQLite.
+All three surfaces use the same shared handoff. The extension exports:
 
-## 5. PDF Chunks And Anchors
+- the exact selected quote in `selection.md`;
+- structured provenance in `selection.json`;
+- repository-relative source path;
+- line range and character offsets.
 
-PDF chunks and PDF anchors coexist.
+Human Learning prefers a visible Codex or Claude editor chat through stable VS
+Code APIs, then a selected Cursor composer when that private capability is
+available. Ambiguous sidebar-only cases show a picker. The chosen provider
+receives the immutable export as draft context; Human Learning never
+auto-submits or scrapes the answer. Empty selections do not trigger the
+handoff.
 
-| Object | Purpose | Created When |
+### Web selections
+
+In Cursor, **Add Cursor Browser Selection to Chat** uses feature-detected
+Browser commands to capture exact selected text, bounded surrounding context,
+the active page URL, and a validated selection crop. It verifies that the same
+tab, URL, and selection remain active across capture; if Cursor does not expose
+the required commands, the capability stays unavailable.
+
+Stock VS Code cannot inspect the built-in Simple Browser's foreign webview.
+**Open Experimental Web Reader** therefore provides a separate extension-owned
+experiment for public pages. It fetches through a guarded host path, sanitizes
+the page into a script-free reader, and can attach selected text plus a
+synthetic context image. It intentionally does not support authenticated
+sessions, cookies, forms, scripts, or remote media.
+
+## 4. Markdown annotations
+
+Learning notes contain the exact quote plus source line and character offsets.
+When the source Markdown file opens, the extension reconstructs annotations
+directly from those notes.
+
+The editor highlights the passage and shows a **✦ Note** action. Hovering the
+highlight, focusing the action, or moving the caret inside the exact annotation
+range shows a floating summary with the latest previous question and concise
+answer. Selecting **✦ Note** validates the repository-relative path and opens
+the complete human-readable learning note. It does not restore a sidebar
+transcript.
+
+If character offsets are stale after an edit, the editor falls back to finding
+the stored exact quote.
+
+## 5. PDF reading and discussions
+
+The custom PDF editor renders local files with EmbedPDF/PDFium. Current viewer
+features include:
+
+- local, offline rendering;
+- page navigation, zoom, fit-width, continuous scroll, and two-page layout;
+- selectable text and portable page/text-fragment links;
+- PDF and Markdown side-by-side layout;
+- selection highlights and an Ask PDF discussion panel;
+- multi-turn questions, retry/cancel state, and model selection;
+- a best-effort selection screenshot for every newly asked annotation;
+- **Add to Chat** in the selection context menu and toolbar, plus the
+  `Cmd+L` / `Ctrl+L` shortcut;
+- opening the corresponding learning note.
+
+Ask PDF requires a single-page text selection with rectangle geometry. The
+selection supplies the canonical extracted quote, page number, context, text offsets when
+available, portable source URL, and normalized
+`[left, top, right, bottom]` rectangles in PDF points from a top-left origin.
+PDFium line-wrap hyphens may be normalized out of the quote; the rectangles
+and crop preserve the visual source.
+
+For a PDF inside the repository, three file-backed records cooperate:
+
+| Record | Path | Role |
 | --- | --- | --- |
-| Chunk | Retrieval and citation unit | PDF ingestion/search |
-| Anchor | Durable arbitrary selection | User or agent cites a selection outside a stable chunk |
+| Learning note | `wiki/learning/*.md` | Human-readable Q&A truth, quote, summary, source link, and review dates |
+| v1 runtime sidecar | `.hl/annotations/pdf/<pdf-sha256>.json` | Current viewer geometry, messages, and turn/UI state |
+| Portable mirror | `.hl/annotations/pdf/<pdf-sha256>/<annotation-id>.jsonld` | W3C-shaped quote, page, geometry, and available learning-note/snapshot metadata for migration/interchange |
 
-PDF ingestion creates layout-ish chunk blocks:
+The JSON-LD mirror is not yet the viewer's canonical store. The current viewer
+reloads the v1 sidecar. A separate core scanner API can read the mirror's
+`TextQuoteSelector.exact`, but the filesystem wiki and graph do not consume
+portable annotations yet.
+
+For every newly asked annotation, Ask PDF attempts a PNG screenshot of the
+selection union with 24 PDF points of padding, clamped to the page. Successful
+snapshot metadata records `[left, top, right, bottom]`, `padding: 24`, and
+`unit: "pt"` alongside its PNG reference, hash, and pixel dimensions. A failed
+capture is non-fatal: the canonical quote, page, and multi-rectangle anchor remain
+valid and the question continues with text-only context.
+
+The PNG lives below `.hl/annotations/pdf/assets/`. The readable source quote,
+summary, and full Q&A are written to the matching `wiki/learning/*.md` after an
+assistant answer exists. Markdown alone cannot reconstruct PDF geometry, while
+the runtime sidecar alone is not the portable interchange representation.
+
+For a PDF outside the workspace, viewer state uses the extension's
+host-controlled global storage rather than writing beside an unrelated file;
+portable JSON-LD mirrors are emitted only for repository-managed PDFs.
+
+## 6. Portable source links
+
+Learning notes use ordinary Markdown-compatible destinations:
+
+| Source | Example |
+| --- | --- |
+| Markdown line | `[Open source](../../notes/attention.md#L12)` |
+| Markdown line range | `[Open source](../../notes/attention.md#L12-L14)` |
+| PDF page | `[Open source](../../papers/paper.pdf#page=7)` |
+| PDF text fragment | `[quote](../../papers/paper.pdf#page=7:~:text=selected%20text)` |
+| Code line range | `[kernel](../../src/kernel.ts#L42-L57)` |
+| Web URL | `[article](https://example.com/article)` |
+| Wikilink | `[[Online Softmax#Why it works]]` |
+
+Visible learning-note links are relative to the note itself, so they survive a
+clone or repository move. The extension does not persist local `file://` URLs
+for workspace sources.
+
+## 7. Filesystem wiki, backlinks, and outline
+
+The extension scans repository Markdown directly. It parses:
+
+- normal Markdown links;
+- Obsidian wikilinks, aliases, and heading targets;
+- same-note headings and block references;
+- image embeds and local asset references.
+
+From those files it derives:
+
+- Backlinks and Forward Links tree views;
+- the active-note Outline;
+- missing-note and missing-heading diagnostics;
+- note-to-note graph edges.
+
+There is no persisted link index. Changes are refreshed through workspace file
+events and can always be reconstructed from Markdown.
+
+The core package also exposes a narrow scanner for portable PDF JSON-LD
+mirrors. It is currently a migration/interchange API, not an input to the
+filesystem wiki, link trees, graph, or PDF viewer.
+
+## 8. Concept and entity graph
+
+**Human Learning: Show Knowledge Graph** opens a CSP-safe SVG graph derived from:
+
+- explicit links between Markdown notes;
+- `concepts` and `entities` YAML frontmatter.
+
+Supported metadata forms include inline and block string lists:
+
+```yaml
+---
+concepts: [Spaced repetition, Retrieval practice]
+entities:
+  - Hermann Ebbinghaus
+  - SuperMemo
+---
+```
+
+Concepts and entities are normalized and deduplicated case-insensitively while
+remaining distinct node types. The visualization uses different shapes/styles,
+a legend, and an accessible text fallback. It does not infer relationships
+that are absent from Markdown or frontmatter.
+
+## 9. Daily note and review plan
+
+**Human Learning: Open Today's Learning Note** creates or refreshes:
 
 ```text
-paragraph
-heading
-caption
-table
-list
-formula
+wiki/daily/YYYY-MM-DD.md
 ```
 
-Each chunk stores locator metadata in `chunks.metadata_json`, including:
+It contains:
 
-```json
-{
-  "source_path": "raw/pdf/flash-attention.pdf",
-  "page_start": 7,
-  "page_end": 7,
-  "block_type": "paragraph",
-  "reading_order": 3,
-  "text_offset_start": 1204,
-  "text_offset_end": 1518,
-  "bbox_rects": [],
-  "section_path": [],
-  "source_hash": "sha256...",
-  "chunk_hash": "sha256..."
-}
-```
+- a manual **Today** area for priorities, TODOs, and reflection;
+- due learning-note reviews;
+- unchecked ordinary TODOs carried from the latest earlier daily note.
 
-Search results emit portable links such as:
+Every learning note receives fixed review dates 1, 3, 7, 14, 30, 60, and 90
+days after its local creation day. Due items remain visible until checked.
+Later daily notes preserve completed note/date review pairs, while unchecked
+overdue items remain due. Generated review checkboxes are not accidentally
+carried as ordinary TODOs.
 
-```md
-[selected text](raw/pdf/flash-attention.pdf#page=7:~:text=selected%20text)
-```
+Regeneration updates marked generated regions while preserving manual text and
+current checkbox state.
 
-Anchors are sparse. They are created only when the user or agent needs a durable
-annotation for a selection that is not already represented by a stable chunk.
-Their stored URI uses the same portable format:
+## 10. Safe remote update
 
-```md
-[selected text](raw/pdf/flash-attention.pdf#page=7:~:text=selected%20text)
-```
+**Human Learning: Pull Latest Wiki Content** follows a conservative Git policy:
 
-Internal anchor IDs remain in SQLite and `.hl/anchors/` sidecar state; they are
-not exposed in Markdown destinations.
+1. require a Git repository;
+2. fetch and prune remote refs without touching working files;
+3. require an upstream and refuse any merge with a dirty working tree;
+4. report up-to-date or local-ahead state;
+5. fast-forward when possible;
+6. ask before creating a real merge.
 
-## 6. Web References
+The command never pushes, commits, resets, stashes, or deletes user files.
+Learners review generated notes and sidecars with their normal Git workflow.
 
-Human Learning uses normal web URLs whenever possible:
+## 11. Agent and security behavior
 
-- native URL fragments
-- browser text fragments
-- plain `https://` links
+Ask PDF starts Codex lazily through `codex app-server --listen stdio://`.
+Its question threads run with a read-only sandbox and no approvals. The agent
+explains the supplied source; it does not edit the repository. The extension
+performs serialized, atomic learning-note writes after Ask PDF answers finish.
 
-When the web page has no stable native target, the system stores a durable
-fallback record in `web_targets`:
+External handoff is separate: it updates the chosen agent draft with
+`selection.md` and, when supported, an optional validated `selection.png`. It
+never auto-submits and external answers remain owned by that provider.
 
-```json
-{
-  "id": "web_abc123",
-  "url": "https://example.com/article",
-  "title": "Article title",
-  "selected_text": "selected text",
-  "text_fragment": "https://example.com/article#:~:text=selected%20text",
-  "css_selector": "main article p:nth-of-type(4)",
-  "xpath": "/html/body/main/article/p[4]",
-  "text_hash": "sha256..."
-}
-```
+Webviews have restrictive content-security policies and send validated
+messages to the extension host. Untrusted agent text is rendered as text rather
+than injected HTML. External links use VS Code's external URL API.
 
-User-facing markdown uses:
+**Send Selection to Agent…** writes the exact Markdown selection or canonical
+PDF extracted quote and anchor to
+an immutable `.hl/agent/exports/<id>/` snapshot and refreshes
+`.hl/agent/selection.md` and `.json` as latest-export aliases. It detects
+supported commands at runtime, then lets the learner attach the snapshot's
+Markdown context file to Codex, Claude Code, Cursor Agent, or CodeBuddy. This
+is a local context handoff, not a second question-service implementation: only
+Ask PDF streams answers back and persists the resulting Q&A automatically.
 
-```md
-[DOM block](https://example.com/article#hl-web=web_abc123)
-```
+**Add to Chat** is the direct version of that shared handoff for an
+exact Markdown selection or canonical PDF extracted quote. Markdown exposes an automatic selection
+prompt and context-menu action; PDF exposes context-menu and selection-toolbar
+actions. Both accept `Cmd+L` / `Ctrl+L` and attach
+`.hl/agent/exports/<id>/selection.md` first. A PDF may also attach the immutable
+sibling `selection.png` when the best-effort crop passes validation and can be
+saved. The stable `.hl/agent/selection.{md,json,png}` paths remain latest-export
+aliases. Crop save or attachment failure warns and continues text-only. It
+prefers active editor-area agent chats using stable VS Code APIs, uses Cursor's
+selected-composer probe only when available, and asks when the target is
+ambiguous. It never submits the draft, and external answers are not
+automatically persisted.
 
-The VS Code dispatcher resolves `hl-web` metadata from SQLite. It opens Chrome
-first and falls back to VS Code's external URL opener if Chrome is unavailable.
+## 12. Optional and legacy surfaces
 
-## 7. Search And Retrieval
+MCP can be useful when an external agent host needs discoverable, structured
+wiki tools. The `hl` CLI can be useful for scripted migration, linting, imports,
+or CI. Neither is required by the combined desktop workflow.
 
-Current built-in search supports:
+The monorepo still contains database-backed core modules, the CLI, MCP server,
+and split Markdown/PDF packages for historical compatibility. The active
+combined extension imports the filesystem-only `core/lite` entry and excludes
+SQLite, `sql-wasm.wasm`, and `.hl/index.sqlite` from its runtime.
 
-- lexical search through `search_index`
-- deterministic local semantic vectors for offline tests
-- hybrid fusion over lexical and semantic results
-- note-only search
-- PDF chunk links in `SearchResult.anchor_uri`
-
-The generated Human Learning agent skill tells agents to prefer `tobi/qmd` for
-local hybrid retrieval and reranking when available. Human Learning still owns
-the citation links and locator metadata for notes, code, PDFs, and web targets.
-
-## 8. Markdown Editor
-
-The markdown custom editor is CodeMirror-based and keeps the document as raw
-markdown. Rendering is decoration/widget state.
-
-Implemented editor behavior includes:
-
-- Obsidian-like document title and YAML properties surface
-- active lines show raw markdown syntax
-- inactive headings, math, links, callouts, tables, images, comments, tags, and
-  footnotes render visually
-- MathJax display/inline math rendering
-- Prism-highlighted fenced code
-- Mermaid diagrams with natural-scale rendering and scrollable wide diagrams
-- Obsidian callouts, task lists, tables, image embeds, reference links, and
-  footnote rendering
-- raw markdown copy/paste preservation through rendered widgets
-- Turndown-based HTML paste conversion
-- Vim mode support, including movement into math/code blocks and `:w`, `:q`,
-  `:wq`, and `:x` host messages
-- editor typography inherited from VS Code editor settings
-
-## 9. PDF Viewer
-
-The bundled extension uses EmbedPDF/PDFium for the current custom PDF viewer.
-The viewer can open local PDFs, render pages, expose text selection actions,
-insert markdown links into the active markdown editor, and resolve page and
-text-fragment targets.
-
-The current dispatcher sends PDF targets to:
-
-```ts
-human-learning.openPdfTarget({pdfPath,page,textFragment})
-```
-
-If the custom PDF command is unavailable, it falls back to VS Code's default file
-open behavior.
-
-## 10. VS Code Extension
-
-The main extension contributes:
-
-- custom editor: `human-learning.markdownEditor`
-- custom editor: `human-learning.pdfViewer`
-- commands for context export, link refresh, current-file ingest, markdown open,
-  PDF navigation, and Vim mode toggle
-- Human Learning activity-bar views:
-  - Backlinks
-  - Forward Links
-  - Outline
-  - Agent Context
-  - Problems
-- split-package builds for the markdown and PDF extensions
-
-## 11. Agent Instructions
-
-Generated `AGENTS.md`, `CLAUDE.md`, and `.agents/skills/human-learning/SKILL.md`
-now instruct agents to:
-
-- use native Markdown/Obsidian links
-- avoid inventing PDF rectangle coordinates, chunk IDs, anchor IDs, or web target
-  IDs
-- cite PDF chunks directly when search returns a stable chunk link
-- create anchors only for arbitrary selections not covered by chunks
-- use `hl search` before creating quote-based PDF anchors
-- run `hl links check --fix` after note edits
-- prefer `qmd` for local hybrid retrieval/reranking when configured
-
-## 12. Verification Baseline
-
-The current reference-model/editor work is covered by:
+## 13. Verification commands
 
 ```bash
-pnpm test
-pnpm build:extension
-node packages/vscode-extension/test/e2e/pure-e2e.mjs
-npx playwright test --config playwright.config.ts
+pnpm --filter human-learning-vscode exec tsc --noEmit
+pnpm --filter @human-learning/core test
+pnpm --filter human-learning-vscode test
+pnpm exec playwright test --config playwright.config.ts
 ```
 
-The Playwright suite covers markdown editor rendering, Obsidian-style navigation,
-Vim behavior, math/code/Mermaid parity, PDF viewer smoke behavior, and link
-click dispatch.
+Browser tests cover the Markdown and PDF webviews. A release should also be
+smoke-tested in real VS Code and Cursor sessions to prove custom-editor,
+selection-prompt, context-menu, shortcut, Ask PDF, and composer behavior.

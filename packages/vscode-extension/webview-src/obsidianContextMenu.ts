@@ -22,22 +22,18 @@ export interface ObsidianContextMenuOptions {
 }
 
 let activeMenu: HTMLElement | undefined;
-let activeAnimationFrame: number | undefined;
 let removeActiveListeners: (() => void) | undefined;
 let focusTarget: HTMLElement | null = null;
 
 export function closeObsidianContextMenu(): void {
   const menu = activeMenu;
-  const animationFrame = activeAnimationFrame;
   const removeListeners = removeActiveListeners;
   const target = focusTarget;
 
   activeMenu = undefined;
-  activeAnimationFrame = undefined;
   removeActiveListeners = undefined;
   focusTarget = null;
 
-  if (animationFrame !== undefined) window.cancelAnimationFrame(animationFrame);
   removeListeners?.();
   menu?.remove();
   if (target?.isConnected) target.focus({ preventScroll: true });
@@ -108,6 +104,13 @@ export function showObsidianContextMenu(options: ObsidianContextMenuOptions): HT
   document.body.appendChild(menu);
   activeMenu = menu;
 
+  const viewportPadding = 8;
+  const bounds = menu.getBoundingClientRect();
+  const maxLeft = Math.max(viewportPadding, window.innerWidth - bounds.width - viewportPadding);
+  const maxTop = Math.max(viewportPadding, window.innerHeight - bounds.height - viewportPadding);
+  menu.style.left = `${Math.min(Math.max(viewportPadding, options.clientX), maxLeft)}px`;
+  menu.style.top = `${Math.min(Math.max(viewportPadding, options.clientY), maxTop)}px`;
+
   const dismissOutside = (event: PointerEvent) => {
     if (menu.contains(event.target as Node)) return;
     closeObsidianContextMenu();
@@ -146,17 +149,6 @@ export function showObsidianContextMenu(options: ObsidianContextMenuOptions): HT
     document.removeEventListener('pointerdown', dismissOutside, true);
     document.removeEventListener('keydown', handleKeydown, true);
   };
-
-  activeAnimationFrame = window.requestAnimationFrame(() => {
-    activeAnimationFrame = undefined;
-    if (!menu.isConnected) return;
-    const viewportPadding = 8;
-    const bounds = menu.getBoundingClientRect();
-    const maxLeft = Math.max(viewportPadding, window.innerWidth - bounds.width - viewportPadding);
-    const maxTop = Math.max(viewportPadding, window.innerHeight - bounds.height - viewportPadding);
-    menu.style.left = `${Math.min(Math.max(viewportPadding, options.clientX), maxLeft)}px`;
-    menu.style.top = `${Math.min(Math.max(viewportPadding, options.clientY), maxTop)}px`;
-  });
 
   menuItems[0]?.focus({ preventScroll: true });
   return menu;

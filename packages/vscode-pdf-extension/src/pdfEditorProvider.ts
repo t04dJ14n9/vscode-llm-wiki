@@ -468,6 +468,11 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
         case 'pdfDiscussionSubmit': {
           this.assertPdfDiscussionConsent();
           const snapshotPng = decodePdfDiscussionSnapshot(message.snapshotPngBase64);
+          const snapshotCapture = decodePdfDiscussionSnapshotCapture(
+            snapshotPng,
+            message.snapshotCropRect,
+            message.snapshotPadding,
+          );
           const model = normalizePdfDiscussionModel(message.model);
           await controller.submit(store, {
             ...(message.annotationId ? { annotationId: message.annotationId } : {}),
@@ -477,6 +482,7 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
             question: message.question,
             ...(model ? { model } : {}),
             ...(snapshotPng ? { snapshotPng } : {}),
+            ...snapshotCapture,
           });
           await this.sendPdfDiscussionState(webview, pdfUri, message.annotationId, message.requestId);
           return;
@@ -519,6 +525,8 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
           });
           return;
         }
+        case 'pdfDiscussionOpenLearningNote':
+          throw new Error('Learning notes require the combined Human Learning extension.');
         case 'pdfDiscussionCopyPortableLink': {
           let portableUrl: string | undefined;
           if (message.annotationId) {
@@ -1039,25 +1047,43 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
       justify-content: center;
       margin: 0;
       padding: 0;
-      border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border, #454545));
+      border: 1px solid var(--vscode-contrastBorder, var(--vscode-widget-border, var(--vscode-panel-border, #454545)));
       border-radius: 5px;
       appearance: none;
       -webkit-appearance: none;
-      background: var(--vscode-editorWidget-background, var(--vscode-sideBar-background, #252526));
-      color: var(--vscode-icon-foreground, var(--vscode-foreground, var(--vscode-editor-foreground, #cccccc)));
+      background: var(--vscode-button-secondaryBackground, #3a3d41);
+      color: var(--vscode-button-secondaryForeground, #ffffff);
       box-shadow: 0 2px 8px var(--vscode-widget-shadow, rgba(0,0,0,.38));
       cursor: pointer;
       transition: left 120ms ease, background-color 80ms ease, border-color 80ms ease;
     }
     #pdf-history-back[hidden] { display: none; }
     #pdf-sidebar:not([hidden]) ~ #pdf-history-back { left: 254px; }
-    #pdf-history-back:hover { background: var(--vscode-toolbar-hoverBackground, rgba(90,93,94,.31)); }
-    #pdf-history-back:active { background: var(--vscode-toolbar-activeBackground, rgba(90,93,94,.48)); }
-    #pdf-history-back:focus-visible { outline: 1px solid var(--vscode-focusBorder, #007fd4); outline-offset: 2px; }
+    #pdf-history-back:hover { background: var(--vscode-button-secondaryHoverBackground, #45494e); }
+    #pdf-history-back:active {
+      background: var(--vscode-button-secondaryHoverBackground, #45494e);
+      box-shadow: inset 0 1px 2px rgba(0,0,0,.35);
+    }
+    #pdf-history-back:focus-visible { outline: 2px solid var(--vscode-focusBorder, #007fd4); outline-offset: 2px; }
     #pdf-history-back svg { display: block; pointer-events: none; }
     body[data-reduce-animation="on"] #pdf-history-back { transition: none; }
     @media (prefers-reduced-motion: reduce) {
       body[data-reduce-animation="system"] #pdf-history-back { transition: none; }
+    }
+    @media (forced-colors: active) {
+      #pdf-history-back {
+        border-color: ButtonText;
+        background: ButtonFace;
+        color: ButtonText;
+        box-shadow: none;
+        forced-color-adjust: none;
+      }
+      #pdf-history-back:hover,
+      #pdf-history-back:active {
+        border-color: Highlight;
+        background: Highlight;
+        color: HighlightText;
+      }
     }
     #page-container { display: flex; flex-direction: column; align-items: safe center; gap: 12px; padding: 12px; }
     #page-container.scroll-horizontal { width: max-content; min-width: 100%; min-height: 100%; flex-direction: row; align-items: flex-start; }
@@ -1164,9 +1190,14 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
     }
     .pdf-search-match { position: absolute; border-radius: 2px; background: rgba(255, 214, 10, .40); outline: 1px solid rgba(255, 214, 10, .55); pointer-events: none; }
     .pdf-search-match.selected { background: rgba(177, 151, 252, .48); outline-color: rgba(177, 151, 252, .9); }
-    .selection-toolbar { position: absolute; transform: translateX(-50%); z-index: 20; display: flex; gap: 4px; padding: 4px; border: 1px solid var(--vscode-panel-border); border-radius: 6px; background: var(--vscode-editorWidget-background); box-shadow: 0 4px 16px rgba(0,0,0,.3); }
-    .selection-toolbar button { border: 0; border-radius: 4px; padding: 4px 8px; background: var(--vscode-button-background); color: var(--vscode-button-foreground); cursor: pointer; }
+    .selection-toolbar { position: absolute; transform: translateX(-50%); z-index: 20; display: flex; gap: 4px; padding: 4px; border: 1px solid var(--vscode-panel-border); border-radius: 6px; background: var(--vscode-editorWidget-background); box-shadow: 0 4px 16px rgba(0,0,0,.3); font: 12px var(--vscode-font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif); }
+    .selection-toolbar button { border: 0; border-radius: 4px; padding: 4px 8px; background: var(--vscode-button-background); color: var(--vscode-button-foreground); font: inherit; white-space: nowrap; cursor: pointer; }
+    .selection-toolbar button:hover { background: var(--vscode-button-hoverBackground, var(--vscode-button-background)); }
+    .selection-toolbar button:focus-visible { outline: 2px solid var(--vscode-focusBorder, #007fd4); outline-offset: 1px; }
     .selection-toolbar .secondary { background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); }
+    .selection-toolbar .secondary:hover { background: var(--vscode-button-secondaryHoverBackground, var(--vscode-button-secondaryBackground)); }
+    .selection-toolbar .cursor-chat-action { display: inline-flex; align-items: center; gap: 6px; }
+    .selection-toolbar .cursor-chat-action .add-to-chat-shortcut { display: inline-flex; align-items: center; height: 18px; padding: 0 4px; border: 0; border-radius: 4px; background: var(--vscode-toolbar-hoverBackground, rgba(127,127,127,.16)); color: var(--vscode-input-placeholderForeground, var(--vscode-descriptionForeground, inherit)); font: 11px var(--vscode-font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif); }
     .selection-toolbar .menu { position: absolute; top: calc(100% + 6px); right: 0; min-width: 180px; display: none; flex-direction: column; gap: 3px; padding: 4px; border: 1px solid var(--vscode-panel-border); border-radius: 6px; background: var(--vscode-editorWidget-background); }
     .selection-toolbar .menu.open { display: flex; }
     .ref-popover { position: absolute; z-index: 30; min-width: 260px; max-width: 440px; max-height: 320px; overflow: auto; padding: 6px 0; border: 1px solid var(--vscode-panel-border); border-radius: 6px; background: var(--vscode-editorWidget-background); color: var(--vscode-editor-foreground); box-shadow: 0 8px 24px rgba(0,0,0,.35); font-size: 12px; }
@@ -1392,6 +1423,13 @@ function toPdfDiscussionAnnotationSnapshot(
             width: annotation.snapshot.width,
             height: annotation.snapshot.height,
             mimeType: annotation.snapshot.mimeType,
+            ...(annotation.snapshot.cropRect
+              ? {
+                  cropRect: annotation.snapshot.cropRect,
+                  padding: annotation.snapshot.padding,
+                  unit: annotation.snapshot.unit,
+                }
+              : {}),
           },
         }
       : {}),
@@ -1439,6 +1477,28 @@ function decodePdfDiscussionSnapshot(value: unknown): Buffer | undefined {
   const decodedLength = (value.length / 4) * 3 - paddingLength;
   if (decodedLength > PDF_DISCUSSION_MAX_PNG_BYTES) throw oversizedPdfDiscussionSnapshot();
   return Buffer.from(value, 'base64');
+}
+
+function decodePdfDiscussionSnapshotCapture(
+  png: Buffer | undefined,
+  rect: unknown,
+  padding: unknown,
+): { snapshotCropRect?: [number, number, number, number]; snapshotPadding?: number } {
+  if (rect === undefined && padding === undefined) return {};
+  const cropRect = normalizePdfRects([rect])?.[0];
+  if (
+    !png
+    || !cropRect
+    || typeof padding !== 'number'
+    || !Number.isFinite(padding)
+    || padding < 0
+  ) {
+    throw new Error('Ask PDF snapshot crop metadata is invalid.');
+  }
+  return {
+    snapshotCropRect: [cropRect[0]!, cropRect[1]!, cropRect[2]!, cropRect[3]!],
+    snapshotPadding: padding,
+  };
 }
 
 function isCanonicalBase64(value: string): boolean {

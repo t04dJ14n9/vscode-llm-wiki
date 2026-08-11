@@ -1,13 +1,14 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
+import type { LearningNoteStore } from './learningNoteStore';
 import type { SelectionContext } from './selectionContext';
 
 interface ActiveMarkdownWebview {
   panel: vscode.WebviewPanel;
   document: vscode.TextDocument;
   selection?: RevealSelection;
-  postMessage(message: unknown): Thenable<boolean>;
+  postMessage: (message: unknown) => Thenable<boolean>;
 }
 
 interface EditorPresentationSettings {
@@ -28,26 +29,43 @@ interface PendingInsertion {
   timeout: ReturnType<typeof setTimeout>;
 }
 
+interface PendingSelectionRequest {
+  resolve: () => void;
+  timeout: ReturnType<typeof setTimeout>;
+}
+
 export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
   static readonly viewType = 'human-learning.markdownEditor';
   private static readonly vimModeStorageKey = 'markdownVimMode';
   private static readonly vimModeContextKey = 'humanLearningMarkdownVimMode';
+  private static readonly selectionContextKey = 'humanLearningMarkdownHasSelection';
 
-  private readonly webviews = new Map<string, ActiveMarkdownWebview>();
+  private readonly webviews = new Map<vscode.WebviewPanel, ActiveMarkdownWebview>();
   private readonly pendingReveals = new Map<string, RevealSelection>();
   private readonly pendingInsertions = new Map<string, PendingInsertion>();
-  private activeKey: string | undefined;
+  private readonly pendingSelectionRequests = new Map<string, PendingSelectionRequest>();
+  private activePanel: vscode.WebviewPanel | undefined;
   private vimModeEnabled: boolean;
 
-  constructor(private readonly context: vscode.ExtensionContext) {
+  constructor(
+    private readonly context: vscode.ExtensionContext,
+    private readonly learningNoteStore?: LearningNoteStore,
+  ) {
     this.vimModeEnabled = Boolean(
       this.context.workspaceState?.get<boolean>(MarkdownEditorProvider.vimModeStorageKey, false),
     );
     this.updateVimModeContext();
+    void vscode.commands.executeCommand('setContext', MarkdownEditorProvider.selectionContextKey, false);
+  }
+
+  async refreshLearningAnnotations(): Promise<void> {
+    await Promise.all([...this.webviews.values()].map(async active => {
+      await this.postLearningAnnotations(active.document, active.postMessage);
+    }));
   }
 
   async insertMarkdown(markdown: string): Promise<boolean> {
-    const active = this.activeKey ? this.webviews.get(this.activeKey) : undefined;
+    const active = this.getActiveWebview();
     if (!active) return false;
     active.panel.reveal(undefined, true);
     const requestId = `insert-${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -85,7 +103,7 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
   }
 
   async focusActiveEditor(): Promise<boolean> {
-    const active = this.activeKey ? this.webviews.get(this.activeKey) : undefined;
+    const active = this.getActiveWebview();
     if (!active) return false;
 
     active.panel.reveal(undefined, false);
@@ -98,10 +116,38 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
     return true;
   }
 
+  async captureActiveSelectionContext(
+    options: { allowEmpty?: boolean } = {},
+  ): Promise<SelectionContext | undefined> {
+    const active = this.getActiveWebview();
+    if (!active) return undefined;
+
+    const requestId = `selection-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const response = new Promise<void>(resolve => {
+      const timeout = setTimeout(() => {
+        this.pendingSelectionRequests.delete(requestId);
+        resolve();
+      }, 500);
+      this.pendingSelectionRequests.set(requestId, { resolve, timeout });
+    });
+    const posted = await active.postMessage({ type: 'requestSelection', requestId });
+    if (!posted) {
+      this.resolvePendingSelectionRequest(requestId);
+    }
+    await response;
+    if (!options.allowEmpty && (!active.selection || active.selection.from === active.selection.to)) {
+      return undefined;
+    }
+    return this.getActiveSelectionContext();
+  }
+
   async revealInEditor(uri: vscode.Uri, selection: RevealSelection): Promise<void> {
     const key = uri.toString();
     this.pendingReveals.set(key, selection);
-    const webview = this.webviews.get(key);
+    const active = this.getActiveWebview();
+    const webview = active?.document.uri.toString() === key
+      ? active
+      : [...this.webviews.values()].find(candidate => candidate.document.uri.toString() === key);
     if (!webview) return;
     await webview.postMessage({
       type: 'revealPosition',
@@ -125,13 +171,14 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
       ),
     };
     const key = document.uri.toString();
-    this.webviews.set(key, {
+    const activeWebview: ActiveMarkdownWebview = {
       panel: webviewPanel,
       document,
       postMessage: (message: unknown) => webviewPanel.webview.postMessage(message),
-    });
+    };
+    this.webviews.set(webviewPanel, activeWebview);
     if (webviewPanel.active) {
-      this.activeKey = key;
+      this.activePanel = webviewPanel;
     }
 
     let applyingWebviewEdit = false;
@@ -166,7 +213,7 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
     };
 
     const pushText = async () => {
-      webviewPanel.webview.postMessage({
+      await webviewPanel.webview.postMessage({
         type: 'setText',
         text: document.getText(),
         title: path.basename(document.uri.fsPath, path.extname(document.uri.fsPath)),
@@ -175,6 +222,10 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
         resourceBaseUri: webviewResourceUriString(webviewPanel.webview, documentDirectoryUri(document.uri)),
         resourceRootUri: webviewResourceUriString(webviewPanel.webview, workspaceRootUri(document.uri)),
       });
+      await this.postLearningAnnotations(
+        document,
+        message => webviewPanel.webview.postMessage(message),
+      );
     };
 
     const pushVimMode = () => {
@@ -273,16 +324,21 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
     webviewPanel.onDidDispose(() => configSub.dispose());
     webviewPanel.onDidDispose(() => clearAutoSave());
     webviewPanel.onDidDispose(() => {
-      this.webviews.delete(key);
-      if (this.activeKey === key) {
-        this.activeKey = undefined;
+      this.webviews.delete(webviewPanel);
+      if (this.activePanel === webviewPanel) {
+        this.activePanel = [...this.webviews.keys()].find(panel => panel.active);
+        this.updateSelectionContext();
       }
     });
 
     webviewPanel.onDidChangeViewState(() => {
       if (webviewPanel.active) {
-        this.activeKey = key;
+        this.activePanel = webviewPanel;
+        this.updateSelectionContext();
         requestFocus();
+      } else if (this.activePanel === webviewPanel) {
+        this.activePanel = [...this.webviews.keys()].find(panel => panel.active);
+        this.updateSelectionContext();
       }
     });
 
@@ -290,7 +346,8 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
       const message = asMessageRecord(rawMessage);
       switch (message?.type) {
         case 'active':
-          this.activeKey = key;
+          this.activePanel = webviewPanel;
+          this.updateSelectionContext();
           break;
         case 'ready':
           webviewPanel.reveal(undefined, false);
@@ -311,9 +368,18 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
         case 'selectionChanged': {
           const selection = normalizeSelectionMessage(message.selection);
           if (selection) {
-            const active = this.webviews.get(key);
-            if (active) active.selection = selection;
+            activeWebview.selection = selection;
+            if (this.activePanel === webviewPanel) this.updateSelectionContext();
           }
+          break;
+        }
+        case 'selectionResponse': {
+          if (typeof message.requestId !== 'string') return;
+          const selection = normalizeSelectionMessage(message.selection);
+          if (selection) {
+            activeWebview.selection = selection;
+          }
+          this.resolvePendingSelectionRequest(message.requestId);
           break;
         }
         case 'insertTextApplied': {
@@ -337,8 +403,22 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
           break;
         case 'openUri':
           if (typeof message.uri === 'string') {
-            await vscode.commands.executeCommand('human-learning.openLinkTarget', message.uri);
+            await vscode.commands.executeCommand(
+              'human-learning.openLinkTarget',
+              resolveMarkdownEditorLink(message.uri, documentRelativePath(document.uri)),
+            );
           }
+          break;
+        case 'openLearningNote':
+          if (
+            typeof message.notePath !== 'string'
+            || typeof message.discussionId !== 'string'
+            || path.isAbsolute(message.notePath)
+          ) return;
+          await vscode.commands.executeCommand('human-learning.openLearningDiscussion', {
+            notePath: message.notePath,
+            discussionId: message.discussionId,
+          });
           break;
         case 'copyText':
           if (typeof message.text === 'string') {
@@ -347,6 +427,11 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
           break;
         case 'lookupSelection':
           await this.lookupSelection(message.text);
+          break;
+        case 'addSelectionToCursorChat':
+          this.activePanel = webviewPanel;
+          this.updateSelectionContext();
+          await vscode.commands.executeCommand('human-learning.addSelectionToCursorChat');
           break;
         case 'renameTitle': {
           if (typeof message.title !== 'string') return;
@@ -371,7 +456,7 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
   }
 
   getActiveSelectionContext(): SelectionContext | undefined {
-    const active = this.activeKey ? this.webviews.get(this.activeKey) : undefined;
+    const active = this.getActiveWebview();
     if (!active) return undefined;
 
     const text = active.document.getText();
@@ -388,6 +473,11 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
       text: selectedText,
       startLine: active.document.positionAt(lineRangeFrom).line + 1,
       endLine: active.document.positionAt(lineRangeTo).line + 1,
+      metadata: {
+        kind: 'markdown',
+        from: lineRangeFrom,
+        to: lineRangeTo,
+      },
     };
   }
 
@@ -399,12 +489,63 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
     );
   }
 
+  private updateSelectionContext(): void {
+    const active = this.activePanel && this.webviews.get(this.activePanel);
+    const selection = active?.selection;
+    void vscode.commands.executeCommand(
+      'setContext',
+      MarkdownEditorProvider.selectionContextKey,
+      Boolean(active?.panel.active && selection && selection.from !== selection.to),
+    );
+  }
+
+  private getActiveWebview(): ActiveMarkdownWebview | undefined {
+    const remembered = this.activePanel ? this.webviews.get(this.activePanel) : undefined;
+    const visible = [...this.webviews.values()].find(candidate => candidate.panel.active);
+    const tabUri = (
+      vscode.window.tabGroups?.activeTabGroup?.activeTab?.input as { uri?: vscode.Uri } | undefined
+    )?.uri?.toString();
+    const active = (remembered?.panel.active ? remembered : undefined)
+      ?? visible
+      ?? (tabUri
+        ? [...this.webviews.values()].find(candidate => candidate.document.uri.toString() === tabUri)
+        : undefined)
+      ?? remembered;
+    if (active) this.activePanel = active.panel;
+    return active;
+  }
+
+  private async postLearningAnnotations(
+    document: vscode.TextDocument,
+    postMessage: (message: unknown) => Thenable<boolean>,
+  ): Promise<void> {
+    if (!this.learningNoteStore) {
+      await postMessage({ type: 'setLearningAnnotations', annotations: [] });
+      return;
+    }
+    try {
+      const sourcePath = vscode.workspace.asRelativePath(document.uri, false);
+      const annotations = await this.learningNoteStore.listAnnotationsForSource(sourcePath);
+      await postMessage({ type: 'setLearningAnnotations', annotations });
+    } catch {
+      await postMessage({ type: 'setLearningAnnotations', annotations: [] });
+    }
+  }
+
   private resolvePendingInsertion(requestId: string, applied: boolean): void {
     const pending = this.pendingInsertions.get(requestId);
     if (!pending) return;
     this.pendingInsertions.delete(requestId);
     clearTimeout(pending.timeout);
     pending.resolve(applied);
+  }
+
+  private resolvePendingSelectionRequest(requestId: string): void {
+    const pending = this.pendingSelectionRequests.get(requestId);
+    if (!pending) return;
+    this.pendingSelectionRequests.delete(requestId);
+    clearTimeout(pending.timeout);
+    pending.resolve();
   }
 
   private getHtml(webview: vscode.Webview): string {
@@ -593,6 +734,27 @@ function documentRelativePath(documentUri: vscode.Uri): string | undefined {
   const relativePath = path.relative(workspaceRoot.fsPath, documentUri.fsPath);
   if (!relativePath || relativePath.startsWith('..') || path.isAbsolute(relativePath)) return undefined;
   return relativePath.split(path.sep).join('/');
+}
+
+/**
+ * Generated notes use explicit ./ and ../ destinations relative to the note
+ * that contains the link. Existing vault-root links remain unchanged.
+ */
+export function resolveMarkdownEditorLink(
+  target: string,
+  currentNotePath: string | undefined,
+): string {
+  if (!currentNotePath || (!target.startsWith('./') && !target.startsWith('../'))) {
+    return target;
+  }
+  const fragmentIndex = target.indexOf('#');
+  const linkPath = fragmentIndex < 0 ? target : target.slice(0, fragmentIndex);
+  const fragment = fragmentIndex < 0 ? '' : target.slice(fragmentIndex);
+  const resolvedPath = path.posix.normalize(
+    path.posix.join(path.posix.dirname(currentNotePath), linkPath),
+  );
+  if (resolvedPath === '..' || resolvedPath.startsWith('../')) return target;
+  return `${resolvedPath}${fragment}`;
 }
 
 async function markdownNotePaths(documentUri: vscode.Uri): Promise<string[]> {

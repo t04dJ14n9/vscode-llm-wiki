@@ -36,7 +36,6 @@ const legacyUntypedFiles = [
   'packages/vscode-extension/src/markdownEditorProvider.ts',
   'packages/vscode-extension/src/pdfDiscussionController.ts',
   'packages/vscode-extension/src/pdfEditorProvider.ts',
-  'packages/vscode-extension/src/webBrowserProvider.ts',
   'packages/vscode-extension/webview-src/extensions/hybridMath.ts',
   'packages/vscode-extension/webview-src/markdown-editor.ts',
   'packages/vscode-markdown-extension/src/markdownEditorProvider.ts',

@@ -6,7 +6,13 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
 
-const markdownRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', 'vscode-markdown-extension');
+const markdownRoot = resolve(
+  dirname(fileURLToPath(import.meta.url)),
+  '..',
+  '..',
+  '..',
+  'vscode-markdown-extension',
+);
 
 function loadMarkdownTsModule(relativePath, mocks = {}) {
   const filename = join(markdownRoot, relativePath);

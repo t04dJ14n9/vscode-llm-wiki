@@ -2,7 +2,7 @@ import { test as base, expect, chromium, type Page, type BrowserContext } from '
 import path from 'path';
 import fs from 'fs';
 import { resolveVsCodeE2eTestDir } from './testDirectory.mjs';
-import { VIM_SANDBOXES } from './sandboxFixtures.mjs';
+import { MULTIPAGE_PDF_FIXTURE, VIM_SANDBOXES } from './sandboxFixtures.mjs';
 
 const TEST_DIR = resolveVsCodeE2eTestDir();
 const WS_URL_FILE = path.resolve(TEST_DIR, 'ws-url');
@@ -88,18 +88,13 @@ async function openQuickFile(page: Page, query: string, waitMs = 4000): Promise<
   await page.waitForTimeout(waitMs);
 }
 
-async function openHumanLearningSidebar(page: Page): Promise<void> {
-  const target = page.locator([
-    '.activitybar [aria-label*="Human Learning" i]',
-    '.activitybar [title*="Human Learning" i]',
-    '.activity-bar [aria-label*="Human Learning" i]',
-    '.activity-bar [title*="Human Learning" i]',
-  ].join(', ')).first();
-  await expect(target).toBeVisible({ timeout: 10_000 });
-  await target.click();
+async function openExplorerOutline(page: Page): Promise<void> {
+  const modifier = process.platform === 'darwin' ? 'Meta' : 'Control';
+  await focusWorkbenchChrome(page);
+  await page.keyboard.press(`${modifier}+Shift+E`);
 
   const outlineHeader = page.locator('.sidebar .pane-header, .part.sidebar .pane-header')
-    .filter({ hasText: /^Outline$/i })
+    .filter({ hasText: /^PDF Outline$/i })
     .last();
   await expect(outlineHeader).toBeVisible({ timeout: 10_000 });
   if (await outlineHeader.getAttribute('aria-expanded') === 'false') {
@@ -159,48 +154,18 @@ interface EditorPixelMetrics {
   firstLineHeight: number;
   firstLineFontFamily: string;
   firstLineFontSize: string;
+  firstLineFontStyle: string;
   firstLineFontWeight: string;
   firstLineLineHeight: string;
+  firstLineLetterSpacing: string;
+  firstLineTextWidth: number;
+  firstLineTextHeight: number;
+  firstLineTextRows: number;
+  firstLineIsActive: boolean;
   lineNumberLeft: number;
   lineNumberTop: number;
   lineNumberWidth: number;
   lineNumberHeight: number;
-}
-
-async function measureNativeEditorPixels(page: Page): Promise<EditorPixelMetrics> {
-  return page.evaluate(() => {
-    const editor = document.querySelector<HTMLElement>('.monaco-editor.focused, .monaco-editor');
-    const content = editor?.querySelector<HTMLElement>('.view-lines');
-    const firstLine = editor?.querySelector<HTMLElement>('.view-line');
-    const lineNumber = editor?.querySelector<HTMLElement>('.margin-view-overlays .line-numbers');
-    if (!editor || !content || !firstLine || !lineNumber) {
-      throw new Error('Missing native Monaco editor elements');
-    }
-    const editorRect = editor.getBoundingClientRect();
-    const contentRect = content.getBoundingClientRect();
-    const firstLineRect = firstLine.getBoundingClientRect();
-    const lineNumberRect = lineNumber.getBoundingClientRect();
-    const firstLineStyle = getComputedStyle(firstLine);
-    return {
-      editorLeft: editorRect.left,
-      editorTop: editorRect.top,
-      editorWidth: editorRect.width,
-      contentLeft: contentRect.left,
-      contentTop: contentRect.top,
-      contentWidth: contentRect.width,
-      firstLineLeft: firstLineRect.left,
-      firstLineTop: firstLineRect.top,
-      firstLineHeight: firstLineRect.height,
-      firstLineFontFamily: firstLineStyle.fontFamily,
-      firstLineFontSize: firstLineStyle.fontSize,
-      firstLineFontWeight: firstLineStyle.fontWeight,
-      firstLineLineHeight: firstLineStyle.lineHeight,
-      lineNumberLeft: lineNumberRect.left,
-      lineNumberTop: lineNumberRect.top,
-      lineNumberWidth: lineNumberRect.width,
-      lineNumberHeight: lineNumberRect.height,
-    };
-  });
 }
 
 async function moveCursorToTop(page: Page): Promise<void> {
@@ -492,8 +457,8 @@ test.describe('Human Learning — VS Code Extension E2E', () => {
     await closeQuickInput(page);
   });
 
-  test('can open a real multi-page PDF with production controls and a prefetched neighbor', async ({ vsCodePage: page }) => {
-    await openQuickFile(page, 'raw/pdf/lecture_03.pdf', 8000);
+  test('can open a synthetic multi-page PDF with production controls and a prefetched neighbor', async ({ vsCodePage: page }) => {
+    await openQuickFile(page, MULTIPAGE_PDF_FIXTURE, 8000);
     await expect(page.locator('iframe.webview:visible').first()).toBeVisible({ timeout: 15_000 });
 
     await screenshot(page, '10-pdf-file-opened');
@@ -600,12 +565,12 @@ test.describe('Human Learning — VS Code Extension E2E', () => {
           && canvas.height > 0,
       };
     `);
-    console.log(`[info] cached real-PDF page turn: ${pageTurn.durationMs.toFixed(1)} ms`);
+    console.log(`[info] cached multipage-PDF page turn: ${pageTurn.durationMs.toFixed(1)} ms`);
     expect(pageTurn.durationMs).toBeLessThan(750);
     expect(pageTurn.firstVisibleFrameHadBitmap).toBe(true);
     expect(pageTurn.targetCanvasReady).toBe(true);
 
-    await openHumanLearningSidebar(page);
+    await openExplorerOutline(page);
     const outlineTarget = page.getByText('Slide 3: Outline and goals', { exact: true }).last();
     await expect(outlineTarget).toBeVisible({ timeout: 15_000 });
     await outlineTarget.click();
@@ -734,56 +699,96 @@ test.describe('Human Learning — VS Code Extension E2E', () => {
     await expect(editor).toBeVisible({ timeout: 10_000 });
   });
 
-  test('markdown editor source rows use native VS Code typography and align with line numbers', async ({ vsCodePage: page }) => {
-    await openQuickFile(page, 'raw/text/native-typography.txt', 3000);
-    await expect(page.locator('.monaco-editor').first()).toBeVisible({ timeout: 10_000 });
-    const nativeMetrics = await measureNativeEditorPixels(page);
-
+  test('markdown source reveal preserves prose typography and line-number alignment', async ({ vsCodePage: page }) => {
     await openQuickFile(page, 'notes/Concepts/Native Typography.md', 4000);
     await expect(page.locator('iframe.webview:visible').first()).toBeVisible({ timeout: 15_000 });
 
-    const markdownMetrics = await evaluateHumanLearningWebview<EditorPixelMetrics>('Typography Check', `
-      view.dispatch({ selection: { anchor: view.state.doc.line(1).from }, scrollIntoView: true });
+    const transition = await evaluateHumanLearningWebview<{
+      inactive: EditorPixelMetrics;
+      active: EditorPixelMetrics;
+      restored: EditorPixelMetrics;
+    }>('Typography Check', `
+      const measure = () => {
+        const editor = doc.querySelector('.cm-editor');
+        const content = doc.querySelector('.cm-content');
+        const firstLine = doc.querySelector('.cm-line');
+        const lineNumber = [...doc.querySelectorAll('.cm-lineNumbers .cm-gutterElement')]
+          .find(row => row.textContent?.trim().length > 0 && row.getBoundingClientRect().height > 0);
+        if (!editor || !content || !firstLine || !lineNumber) {
+          throw new Error('Missing markdown CodeMirror editor elements');
+        }
+        const editorRect = editor.getBoundingClientRect();
+        const contentRect = content.getBoundingClientRect();
+        const firstLineRect = firstLine.getBoundingClientRect();
+        const lineNumberRect = lineNumber.getBoundingClientRect();
+        const firstLineStyle = getComputedStyle(firstLine);
+        const textRange = doc.createRange();
+        textRange.selectNodeContents(firstLine);
+        const textRect = textRange.getBoundingClientRect();
+        return {
+          editorLeft: editorRect.left,
+          editorTop: editorRect.top,
+          editorWidth: editorRect.width,
+          contentLeft: contentRect.left,
+          contentTop: contentRect.top,
+          contentWidth: contentRect.width,
+          firstLineLeft: firstLineRect.left,
+          firstLineTop: firstLineRect.top,
+          firstLineHeight: firstLineRect.height,
+          firstLineFontFamily: firstLineStyle.fontFamily,
+          firstLineFontSize: firstLineStyle.fontSize,
+          firstLineFontStyle: firstLineStyle.fontStyle,
+          firstLineFontWeight: firstLineStyle.fontWeight,
+          firstLineLineHeight: firstLineStyle.lineHeight,
+          firstLineLetterSpacing: firstLineStyle.letterSpacing,
+          firstLineTextWidth: textRect.width,
+          firstLineTextHeight: textRect.height,
+          firstLineTextRows: textRange.getClientRects().length,
+          firstLineIsActive: firstLine.classList.contains('cm-hybrid-source-line'),
+          lineNumberLeft: lineNumberRect.left,
+          lineNumberTop: lineNumberRect.top,
+          lineNumberWidth: lineNumberRect.width,
+          lineNumberHeight: lineNumberRect.height,
+        };
+      };
+      view.dispatch({ selection: { anchor: view.state.doc.line(4).from }, scrollIntoView: true });
       view.focus();
       await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-      const editor = doc.querySelector('.cm-editor');
-      const content = doc.querySelector('.cm-content');
-      const firstLine = doc.querySelector('.cm-line');
-      const lineNumber = [...doc.querySelectorAll('.cm-lineNumbers .cm-gutterElement')]
-        .find(row => row.textContent?.trim().length > 0 && row.getBoundingClientRect().height > 0);
-      if (!editor || !content || !firstLine || !lineNumber) {
-        throw new Error('Missing markdown CodeMirror editor elements');
-      }
-      const editorRect = editor.getBoundingClientRect();
-      const contentRect = content.getBoundingClientRect();
-      const firstLineRect = firstLine.getBoundingClientRect();
-      const lineNumberRect = lineNumber.getBoundingClientRect();
-      const firstLineStyle = getComputedStyle(firstLine);
-      return {
-        editorLeft: editorRect.left,
-        editorTop: editorRect.top,
-        editorWidth: editorRect.width,
-        contentLeft: contentRect.left,
-        contentTop: contentRect.top,
-        contentWidth: contentRect.width,
-        firstLineLeft: firstLineRect.left,
-        firstLineTop: firstLineRect.top,
-        firstLineHeight: firstLineRect.height,
-        firstLineFontFamily: firstLineStyle.fontFamily,
-        firstLineFontSize: firstLineStyle.fontSize,
-        firstLineFontWeight: firstLineStyle.fontWeight,
-        firstLineLineHeight: firstLineStyle.lineHeight,
-        lineNumberLeft: lineNumberRect.left,
-        lineNumberTop: lineNumberRect.top,
-        lineNumberWidth: lineNumberRect.width,
-        lineNumberHeight: lineNumberRect.height,
-      };
+      const inactive = measure();
+      view.dispatch({ selection: { anchor: view.state.doc.line(1).from } });
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      const active = measure();
+      view.dispatch({ selection: { anchor: view.state.doc.line(4).from } });
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      return { inactive, active, restored: measure() };
     `);
-    expect(markdownMetrics.firstLineFontFamily).toBe(nativeMetrics.firstLineFontFamily);
-    expect(markdownMetrics.firstLineFontSize).toBe(nativeMetrics.firstLineFontSize);
-    expect(markdownMetrics.firstLineFontWeight).toBe(nativeMetrics.firstLineFontWeight);
-    expect(markdownMetrics.firstLineLineHeight).toBe(nativeMetrics.firstLineLineHeight);
-    expectCloseTo(markdownMetrics.firstLineHeight, nativeMetrics.firstLineHeight);
+
+    expect(transition.inactive.firstLineIsActive).toBe(false);
+    expect(transition.active.firstLineIsActive).toBe(true);
+    expect(transition.restored.firstLineIsActive).toBe(false);
+    for (const current of [transition.active, transition.restored]) {
+      expect({
+        fontFamily: current.firstLineFontFamily,
+        fontSize: current.firstLineFontSize,
+        fontStyle: current.firstLineFontStyle,
+        fontWeight: current.firstLineFontWeight,
+        lineHeight: current.firstLineLineHeight,
+        letterSpacing: current.firstLineLetterSpacing,
+        textRows: current.firstLineTextRows,
+      }).toEqual({
+        fontFamily: transition.inactive.firstLineFontFamily,
+        fontSize: transition.inactive.firstLineFontSize,
+        fontStyle: transition.inactive.firstLineFontStyle,
+        fontWeight: transition.inactive.firstLineFontWeight,
+        lineHeight: transition.inactive.firstLineLineHeight,
+        letterSpacing: transition.inactive.firstLineLetterSpacing,
+        textRows: transition.inactive.firstLineTextRows,
+      });
+      expectCloseTo(current.firstLineHeight, transition.inactive.firstLineHeight);
+      expectCloseTo(current.firstLineTextWidth, transition.inactive.firstLineTextWidth);
+      expectCloseTo(current.firstLineTextHeight, transition.inactive.firstLineTextHeight);
+    }
+    const markdownMetrics = transition.active;
     expectCloseTo(markdownMetrics.firstLineLeft, markdownMetrics.contentLeft);
     expectCloseTo(markdownMetrics.lineNumberTop, markdownMetrics.firstLineTop);
     expectCloseTo(markdownMetrics.lineNumberHeight, markdownMetrics.firstLineHeight);
@@ -792,6 +797,76 @@ test.describe('Human Learning — VS Code Extension E2E', () => {
     expect(markdownMetrics.contentWidth).toBeGreaterThan(0);
 
     await screenshot(page, '37-native-markdown-pixel-parity');
+  });
+
+  test('markdown selection overlays use the active VS Code theme colors', async ({ vsCodePage: page }) => {
+    await openQuickFile(page, 'notes/Concepts/Native Typography.md', 4000);
+    const webview = page.locator('iframe.webview:visible').first();
+    await expect(webview).toBeVisible({ timeout: 15_000 });
+    await page.bringToFront();
+    await webview.click({ position: { x: 320, y: 260 } });
+
+    const colors = await evaluateHumanLearningWebview<{
+      active: string[];
+      inactive: string[];
+      expectedActive: string;
+      expectedInactive: string;
+      selectedText: string;
+      activeFocused: boolean;
+      inactiveFocused: boolean;
+    }>('Typography Check', `
+      const resolveThemeColor = name => {
+        const probe = doc.createElement('span');
+        probe.style.backgroundColor = 'var(' + name + ')';
+        doc.body.appendChild(probe);
+        const color = getComputedStyle(probe).backgroundColor;
+        probe.remove();
+        return color;
+      };
+      view.dispatch({
+        selection: {
+          anchor: view.state.doc.line(1).from + 2,
+          head: view.state.doc.line(2).to - 2,
+        },
+      });
+      view.focus();
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      const selectionColors = () => [...new Set(
+        [...doc.querySelectorAll('.cm-selectionLayer .cm-selectionBackground')]
+          .map(element => getComputedStyle(element).backgroundColor),
+      )];
+      const active = selectionColors();
+      const activeFocused = doc.querySelector('.cm-editor')?.classList.contains('cm-focused') === true;
+      const expectedActive = resolveThemeColor('--vscode-editor-selectionBackground');
+      const focusTarget = doc.createElement('button');
+      focusTarget.type = 'button';
+      doc.body.appendChild(focusTarget);
+      focusTarget.focus();
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      const inactive = selectionColors();
+      const inactiveFocused = doc.querySelector('.cm-editor')?.classList.contains('cm-focused') === true;
+      const expectedInactive = resolveThemeColor('--vscode-editor-inactiveSelectionBackground');
+      focusTarget.remove();
+      const range = view.state.selection.main;
+      return {
+        active,
+        inactive,
+        expectedActive,
+        expectedInactive,
+        selectedText: view.state.sliceDoc(range.from, range.to),
+        activeFocused,
+        inactiveFocused,
+      };
+    `);
+
+    expect(colors.selectedText).toContain('\n');
+    expect(colors.activeFocused).toBe(true);
+    expect(colors.inactiveFocused).toBe(false);
+    expect(colors.active.length).toBeGreaterThan(0);
+    expect(colors.inactive.length).toBeGreaterThan(0);
+    expect(colors.active).toEqual([colors.expectedActive]);
+    expect(colors.inactive).toEqual([colors.expectedInactive]);
+    expect(colors.active).not.toContain('rgb(215, 212, 240)');
   });
 
   test('inline math equations render via MathJax', async ({ vsCodePage: page }) => {

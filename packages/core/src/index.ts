@@ -117,10 +117,22 @@ export type {
   PdfDiscussionImportResult,
   PdfDiscussionLayout,
   PdfDiscussionSelectionKeyInput,
+  PdfDiscussionSnapshotCapture,
   PdfDiscussionStoreOptions,
   PdfDiscussionUpdate,
   PdfPathLike,
 } from './pdf-discussions/store';
+export {
+  HUMAN_LEARNING_CONTEXT,
+  PDF_FRAGMENT_CONFORMS_TO,
+  scanPortablePdfAnnotations,
+  toPortablePdfAnnotation,
+} from './pdf-discussions/portable';
+export type {
+  PortablePdfAnnotation,
+  PortablePdfAnnotationInput,
+  ScannedPortablePdfAnnotation,
+} from './pdf-discussions/portable';
 
 // Activity
 export { recordActivity } from './activity/record';

@@ -78,6 +78,22 @@ test('combined and standalone builds resolve the canonical shared PDF webview en
   }
 });
 
+test('shared PDF viewer exposes Cursor handoff only in the combined host', () => {
+  const sharedViewer = readFileSync(sharedPdfWebviewEntry, 'utf8');
+  const combinedHost = readFileSync(
+    join(extensionRoot, 'src', 'pdfEditorProvider.ts'),
+    'utf8',
+  );
+  const standaloneHost = readFileSync(
+    join(pdfRoot, 'src', 'pdfEditorProvider.ts'),
+    'utf8',
+  );
+
+  assert.match(sharedViewer, /addToCursorChatEnabled/);
+  assert.match(combinedHost, /window\.__humanLearningAddToCursorChat = true/);
+  assert.doesNotMatch(standaloneHost, /__humanLearningAddToCursorChat/);
+});
+
 test('combined and standalone manifests retain their intended editor surfaces', () => {
   const combinedManifest = readJson(join(extensionRoot, 'package.json'));
   const markdownManifest = readJson(join(markdownRoot, 'package.json'));

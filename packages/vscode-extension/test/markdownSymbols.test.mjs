@@ -152,18 +152,28 @@ test('registerMarkdownOutlineProvider contributes a markdown document-symbol pro
   assert.equal(context.subscriptions.length, 1);
 });
 
-test('markdown outline tree provider reads the active custom markdown tab and reveals headings', async () => {
+test('markdown outline tree mirrors native symbol icons, expanded hierarchy, and heading reveal', async () => {
   const uri = {
     scheme: 'file',
     fsPath: '/vault/notes/Concepts/Online Softmax.md',
     toString: () => 'file:///vault/notes/Concepts/Online%20Softmax.md',
   };
+  const lines = [
+    '# Online Softmax',
+    '',
+    '## Standard Softmax',
+    '',
+    '### Numerical Stability',
+    '',
+    '## Online Version',
+    '',
+  ];
   const revealCommands = [];
   const vscode = createVscodeMock({
     activeTabUri: uri,
     openDocument: {
       uri,
-      getText: () => '# Online Softmax\n\n## Standard Softmax\n\n## Online Version\n',
+      getText: () => lines.join('\n'),
       offsetAt: position => position.line * 100 + position.character,
     },
     executeCommandCalls: revealCommands,
@@ -176,11 +186,35 @@ test('markdown outline tree provider reads the active custom markdown tab and re
   assert.equal(roots.length, 1);
   assert.equal(roots[0].label, 'Online Softmax');
   assert.equal(roots[0].description, undefined);
-  assert.equal(roots[0].iconPath.id, 'blank');
+  assert.equal(roots[0].iconPath.id, 'symbol-string');
+  assert.equal(roots[0].collapsibleState, vscode.TreeItemCollapsibleState.Expanded);
   assert.equal(roots[0].children.length, 2);
   assert.deepEqual(roots[0].children.map(child => child.label), ['Standard Softmax', 'Online Version']);
   assert.deepEqual(roots[0].children.map(child => child.description), [undefined, undefined]);
-  assert.deepEqual(roots[0].children.map(child => child.iconPath.id), ['blank', 'blank']);
+  assert.deepEqual(
+    roots[0].children.map(child => child.iconPath.id),
+    ['symbol-string', 'symbol-string'],
+  );
+  assert.equal(
+    roots[0].children[0].collapsibleState,
+    vscode.TreeItemCollapsibleState.Expanded,
+  );
+  assert.equal(
+    roots[0].children[1].collapsibleState,
+    vscode.TreeItemCollapsibleState.None,
+  );
+  assert.deepEqual(
+    roots[0].children[0].children.map(child => ({
+      label: child.label,
+      icon: child.iconPath.id,
+      collapsibleState: child.collapsibleState,
+    })),
+    [{
+      label: 'Numerical Stability',
+      icon: 'symbol-string',
+      collapsibleState: vscode.TreeItemCollapsibleState.None,
+    }],
+  );
 
   await vscode.commands.executeCommand(
     roots[0].children[1].command.command,
@@ -192,10 +226,54 @@ test('markdown outline tree provider reads the active custom markdown tab and re
       'human-learning.revealInMarkdownEditor',
       {
         uri,
-        selection: { from: 403, to: 403 },
+        selection: { from: 603, to: 603 },
       },
     ],
   ]);
+});
+
+test('markdown outline item identities survive refreshes and disambiguate duplicate labels', async () => {
+  const uri = {
+    scheme: 'file',
+    fsPath: '/vault/notes/Concepts/Duplicate Headings.md',
+    toString: () => 'file:///vault/notes/Concepts/Duplicate%20Headings.md',
+  };
+  const vscode = createVscodeMock({
+    activeTabUri: uri,
+    openDocument: {
+      uri,
+      getText: () => [
+        '# Duplicate Headings',
+        '',
+        '## Repeated',
+        'First section',
+        '',
+        '## Repeated',
+        'Second section',
+      ].join('\n'),
+      offsetAt: position => position.line * 100 + position.character,
+    },
+  });
+  const { MarkdownOutlineTreeProvider } = loadTsModule('src/markdownSymbols.ts', { vscode });
+  const provider = new MarkdownOutlineTreeProvider();
+
+  const firstRoot = (await provider.getChildren())[0];
+  const secondRoot = (await provider.getChildren())[0];
+  const firstRepeated = firstRoot.children;
+  const secondRepeated = secondRoot.children;
+
+  assert.equal(typeof firstRoot.id, 'string');
+  assert.equal(firstRoot.id, secondRoot.id);
+  assert.deepEqual(
+    firstRepeated.map(item => item.id),
+    secondRepeated.map(item => item.id),
+    'refreshing an unchanged outline must preserve item identities',
+  );
+  assert.notEqual(
+    firstRepeated[0].id,
+    firstRepeated[1].id,
+    'same-label headings at different lines must remain distinct tree items',
+  );
 });
 
 test('outline tree provider reads nested PDF bookmarks from the active custom PDF tab', async () => {
@@ -283,9 +361,15 @@ test('outline tree provider distinguishes loading PDFs from PDFs without bookmar
   assert.equal((await provider.getChildren())[0].label, '(no PDF outline)');
 });
 
-test('markdown outline tree provider refreshes when the active custom editor tab changes', () => {
+test('outline tree provider creates collapsible Explorer views and refreshes with the active editor', () => {
   const tabChangeListeners = [];
-  const vscode = createVscodeMock({ tabChangeListeners });
+  const treeProviderRegistrations = [];
+  const treeViewCreations = [];
+  const vscode = createVscodeMock({
+    tabChangeListeners,
+    treeProviderRegistrations,
+    treeViewCreations,
+  });
   const { registerMarkdownOutlineTreeProvider } = loadTsModule('src/markdownSymbols.ts', { vscode });
   const context = { subscriptions: [] };
   const provider = registerMarkdownOutlineTreeProvider(context);
@@ -299,6 +383,26 @@ test('markdown outline tree provider refreshes when the active custom editor tab
   }
 
   assert.equal(refreshCount, 1);
+  assert.deepEqual(treeProviderRegistrations, []);
+  assert.deepEqual(
+    treeViewCreations,
+    [
+      {
+        id: 'hl-markdown-outline',
+        options: {
+          treeDataProvider: provider,
+          showCollapseAll: true,
+        },
+      },
+      {
+        id: 'hl-pdf-outline',
+        options: {
+          treeDataProvider: provider,
+          showCollapseAll: true,
+        },
+      },
+    ],
+  );
 });
 
 function createVscodeMock({
@@ -307,6 +411,8 @@ function createVscodeMock({
   openDocument,
   executeCommandCalls = [],
   tabChangeListeners = [],
+  treeProviderRegistrations = [],
+  treeViewCreations = [],
 } = {}) {
   const textDocumentChangeListeners = [];
   const activeEditorChangeListeners = [];
@@ -376,7 +482,14 @@ function createVscodeMock({
     },
     window: {
       activeTextEditor: undefined,
-      registerTreeDataProvider: () => ({ dispose() {} }),
+      registerTreeDataProvider: (id, provider) => {
+        treeProviderRegistrations.push({ id, provider });
+        return { dispose() {} };
+      },
+      createTreeView: (id, options) => {
+        treeViewCreations.push({ id, options });
+        return { dispose() {} };
+      },
       onDidChangeActiveTextEditor: listener => {
         activeEditorChangeListeners.push(listener);
         return { dispose() {} };

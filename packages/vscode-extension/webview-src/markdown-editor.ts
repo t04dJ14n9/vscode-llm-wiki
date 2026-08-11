@@ -1,13 +1,21 @@
 /// <reference path="./vscode.d.ts" />
 
-import { acceptCompletion, autocompletion, startCompletion } from '@codemirror/autocomplete';
+import { acceptCompletion, autocompletion, completionStatus, startCompletion } from '@codemirror/autocomplete';
 import type { Completion, CompletionContext, CompletionResult } from '@codemirror/autocomplete';
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
 import { markdown } from '@codemirror/lang-markdown';
 import { languages } from '@codemirror/language-data';
 import { bracketMatching, defaultHighlightStyle, foldGutter, syntaxHighlighting } from '@codemirror/language';
-import { Compartment, EditorSelection, EditorState, Prec } from '@codemirror/state';
-import type { Range, Text } from '@codemirror/state';
+import {
+  Annotation,
+  Compartment,
+  EditorSelection,
+  EditorState,
+  Prec,
+  StateEffect,
+  StateField,
+} from '@codemirror/state';
+import type { Range, SelectionRange, Text } from '@codemirror/state';
 import { search, searchKeymap } from '@codemirror/search';
 import { getCM, vim, Vim } from '@replit/codemirror-vim';
 import type { CodeMirrorV, InputStateInterface, MotionArgs, Pos, vimState } from '@replit/codemirror-vim';
@@ -92,6 +100,387 @@ class HlLinkWidget extends WidgetType {
   override ignoreEvent(): boolean {
     return true;
   }
+}
+
+interface LearningAnnotation {
+  discussionId: string;
+  notePath: string;
+  quote: string;
+  question: string;
+  questionCount: number;
+  summary: string;
+  from?: number;
+  to?: number;
+}
+
+interface ResolvedLearningAnnotation extends LearningAnnotation {
+  from: number;
+  to: number;
+}
+
+const setLearningAnnotations = StateEffect.define<readonly LearningAnnotation[]>();
+
+class LearningNoteWidget extends WidgetType {
+  constructor(readonly annotation: LearningAnnotation) {
+    super();
+  }
+
+  override toDOM(): HTMLElement {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'cm-learning-note-link';
+    button.dataset.learningDiscussionId = this.annotation.discussionId;
+    button.textContent = '✦ Note';
+    button.setAttribute(
+      'aria-label',
+      `Open learning note: ${this.annotation.question || this.annotation.summary || this.annotation.notePath}`,
+    );
+    const stopSelection = (event: Event) => {
+      event.preventDefault();
+      event.stopPropagation();
+    };
+    button.addEventListener('pointerdown', stopSelection);
+    button.addEventListener('mousedown', stopSelection);
+    button.addEventListener('click', event => {
+      stopSelection(event);
+      vscode.postMessage({
+        type: 'openLearningNote',
+        notePath: this.annotation.notePath,
+        discussionId: this.annotation.discussionId,
+      });
+    });
+    return button;
+  }
+
+  override eq(other: LearningNoteWidget): boolean {
+    return other.annotation.discussionId === this.annotation.discussionId
+      && other.annotation.notePath === this.annotation.notePath
+      && other.annotation.question === this.annotation.question
+      && other.annotation.questionCount === this.annotation.questionCount
+      && other.annotation.summary === this.annotation.summary;
+  }
+
+  override ignoreEvent(): boolean {
+    return true;
+  }
+}
+
+const learningAnnotationField = StateField.define<readonly ResolvedLearningAnnotation[]>({
+  create: () => [],
+  update(annotations, transaction) {
+    let next = annotations.flatMap(annotation => {
+      const from = transaction.changes.mapPos(annotation.from, 1);
+      const to = transaction.changes.mapPos(annotation.to, -1);
+      return to > from ? [{ ...annotation, from, to }] : [];
+    });
+    for (const effect of transaction.effects) {
+      if (effect.is(setLearningAnnotations)) {
+        next = resolveLearningAnnotations(transaction.state.doc, effect.value);
+      }
+    }
+    return next;
+  },
+  provide: field => EditorView.decorations.from(field, buildLearningAnnotationDecorations),
+});
+
+function resolveLearningAnnotations(
+  doc: Text,
+  annotations: readonly LearningAnnotation[],
+): ResolvedLearningAnnotation[] {
+  const text = doc.toString();
+  const resolved: ResolvedLearningAnnotation[] = [];
+  for (const annotation of annotations) {
+    let from = annotation.from;
+    let to = annotation.to;
+    if (
+      from === undefined
+      || to === undefined
+      || from < 0
+      || to <= from
+      || to > text.length
+      || (annotation.quote && text.slice(from, to) !== annotation.quote)
+    ) {
+      const match = annotation.quote ? text.indexOf(annotation.quote) : -1;
+      if (match < 0) continue;
+      from = match;
+      to = match + annotation.quote.length;
+    }
+    resolved.push({ ...annotation, from, to });
+  }
+  return resolved;
+}
+
+function buildLearningAnnotationDecorations(
+  annotations: readonly ResolvedLearningAnnotation[],
+): DecorationSet {
+  const ranges: Range<Decoration>[] = [];
+  for (const annotation of annotations) {
+    ranges.push(
+      Decoration.mark({
+        class: 'cm-learning-annotation',
+        attributes: {
+          'data-learning-discussion-id': annotation.discussionId,
+        },
+      }).range(annotation.from, annotation.to),
+      Decoration.widget({
+        widget: new LearningNoteWidget(annotation),
+        side: 1,
+      }).range(annotation.to),
+    );
+  }
+  return Decoration.set(ranges, true);
+}
+
+class LearningAnnotationPopover {
+  private readonly popover = document.createElement('div');
+  private hoveredDiscussionId: string | undefined;
+  private hoverAnchor: HTMLElement | undefined;
+  private dismissedDiscussionId: string | undefined;
+  private activeAnnotation: ResolvedLearningAnnotation | undefined;
+  private lastCaretPosition = -1;
+  private positionFrame: number | undefined;
+
+  private readonly onPointerOver = (event: PointerEvent) => {
+    const target = learningAnnotationElement(event.target, this.view.dom);
+    if (!target) return;
+    this.hoveredDiscussionId = target.dataset.learningDiscussionId;
+    this.hoverAnchor = target;
+    this.dismissedDiscussionId = undefined;
+    this.sync();
+  };
+
+  private readonly onPointerOut = (event: PointerEvent) => {
+    const current = learningAnnotationElement(event.target, this.view.dom);
+    if (!current) return;
+    const related = learningAnnotationElement(event.relatedTarget, this.view.dom);
+    if (
+      related
+      && related.dataset.learningDiscussionId === current.dataset.learningDiscussionId
+    ) {
+      this.hoverAnchor = related;
+      return;
+    }
+    this.hoveredDiscussionId = undefined;
+    this.hoverAnchor = undefined;
+    this.sync();
+  };
+
+  private readonly onFocusIn = (event: FocusEvent) => {
+    const target = learningAnnotationElement(event.target, this.view.dom);
+    if (!target?.classList.contains('cm-learning-note-link')) return;
+    this.hoveredDiscussionId = target.dataset.learningDiscussionId;
+    this.hoverAnchor = target;
+    this.dismissedDiscussionId = undefined;
+    this.sync();
+  };
+
+  private readonly onFocusOut = (event: FocusEvent) => {
+    const current = learningAnnotationElement(event.target, this.view.dom);
+    if (!current?.classList.contains('cm-learning-note-link')) return;
+    const related = learningAnnotationElement(event.relatedTarget, this.view.dom);
+    if (
+      related
+      && related.dataset.learningDiscussionId === current.dataset.learningDiscussionId
+    ) {
+      return;
+    }
+    this.hoveredDiscussionId = undefined;
+    this.hoverAnchor = undefined;
+    this.sync();
+  };
+
+  private readonly onKeyDown = (event: KeyboardEvent) => {
+    if (event.key !== 'Escape' || !this.activeAnnotation) return;
+    this.dismissedDiscussionId = this.activeAnnotation.discussionId;
+    this.hoveredDiscussionId = undefined;
+    this.hoverAnchor = undefined;
+    this.hide();
+    event.preventDefault();
+    event.stopPropagation();
+  };
+
+  private readonly reposition = () => this.schedulePosition();
+
+  constructor(private readonly view: EditorView) {
+    this.popover.id = 'cm-learning-note-popover';
+    this.popover.className = 'cm-learning-note-popover';
+    this.popover.setAttribute('role', 'tooltip');
+    this.popover.hidden = true;
+    this.view.dom.append(this.popover);
+    this.view.dom.addEventListener('pointerover', this.onPointerOver);
+    this.view.dom.addEventListener('pointerout', this.onPointerOut);
+    this.view.dom.addEventListener('focusin', this.onFocusIn);
+    this.view.dom.addEventListener('focusout', this.onFocusOut);
+    this.view.dom.addEventListener('keydown', this.onKeyDown, true);
+    this.view.scrollDOM.addEventListener('scroll', this.reposition);
+    window.addEventListener('resize', this.reposition);
+    this.sync();
+  }
+
+  update(update: ViewUpdate): void {
+    const caretPosition = update.state.selection.main.empty
+      ? update.state.selection.main.head
+      : -1;
+    if (caretPosition !== this.lastCaretPosition) {
+      this.dismissedDiscussionId = undefined;
+      this.lastCaretPosition = caretPosition;
+    }
+    if (
+      update.docChanged
+      || update.selectionSet
+      || update.geometryChanged
+      || update.transactions.some(transaction =>
+        transaction.effects.some(effect => effect.is(setLearningAnnotations))
+      )
+    ) {
+      this.sync();
+    }
+  }
+
+  destroy(): void {
+    this.view.dom.removeEventListener('pointerover', this.onPointerOver);
+    this.view.dom.removeEventListener('pointerout', this.onPointerOut);
+    this.view.dom.removeEventListener('focusin', this.onFocusIn);
+    this.view.dom.removeEventListener('focusout', this.onFocusOut);
+    this.view.dom.removeEventListener('keydown', this.onKeyDown, true);
+    this.view.scrollDOM.removeEventListener('scroll', this.reposition);
+    window.removeEventListener('resize', this.reposition);
+    if (this.positionFrame !== undefined) cancelAnimationFrame(this.positionFrame);
+    this.popover.remove();
+  }
+
+  private sync(): void {
+    const annotations = this.view.state.field(learningAnnotationField);
+    const hovered = this.hoveredDiscussionId
+      ? annotations.find(annotation => annotation.discussionId === this.hoveredDiscussionId)
+      : undefined;
+    const selection = this.view.state.selection.main;
+    const caret = selection.empty
+      ? annotations
+        .filter(annotation => annotation.from <= selection.head && selection.head < annotation.to)
+        .sort((left, right) => (left.to - left.from) - (right.to - right.from))[0]
+      : undefined;
+    const annotation = hovered ?? caret;
+    if (!annotation || annotation.discussionId === this.dismissedDiscussionId) {
+      this.hide();
+      return;
+    }
+    this.show(annotation);
+  }
+
+  private show(annotation: ResolvedLearningAnnotation): void {
+    this.activeAnnotation = annotation;
+    const count = Math.max(1, annotation.questionCount);
+    const label = count === 1 ? 'Previous question' : `${count} previous questions`;
+    const question = annotation.question || 'Previous learning note';
+    const summary = annotation.summary || 'No answer recorded yet.';
+    this.popover.replaceChildren(
+      popoverText('cm-learning-note-popover-label', label),
+      popoverText('cm-learning-note-popover-question', question),
+      popoverText('cm-learning-note-popover-summary', summary),
+      popoverText(
+        'cm-learning-note-popover-hint',
+        'Open ✦ Note for the full discussion',
+      ),
+    );
+    this.popover.hidden = false;
+    this.view.dom.querySelectorAll<HTMLElement>('.cm-learning-note-link').forEach(marker => {
+      if (marker.dataset.learningDiscussionId === annotation.discussionId) {
+        marker.setAttribute('aria-describedby', this.popover.id);
+      } else {
+        marker.removeAttribute('aria-describedby');
+      }
+    });
+    this.schedulePosition();
+  }
+
+  private hide(): void {
+    if (this.positionFrame !== undefined) {
+      cancelAnimationFrame(this.positionFrame);
+      this.positionFrame = undefined;
+    }
+    this.activeAnnotation = undefined;
+    this.popover.hidden = true;
+    this.popover.style.removeProperty('visibility');
+    this.view.dom.querySelectorAll<HTMLElement>('.cm-learning-note-link').forEach(marker => {
+      marker.removeAttribute('aria-describedby');
+    });
+  }
+
+  private schedulePosition(): void {
+    if (this.positionFrame !== undefined) cancelAnimationFrame(this.positionFrame);
+    this.popover.style.visibility = 'hidden';
+    this.positionFrame = requestAnimationFrame(() => {
+      this.positionFrame = undefined;
+      this.position();
+    });
+  }
+
+  private position(): void {
+    if (this.popover.hidden || !this.activeAnnotation) return;
+    const selection = this.view.state.selection.main;
+    let caret: ReturnType<EditorView['coordsAtPos']> | undefined;
+    if (
+      selection.empty
+      && this.activeAnnotation.from <= selection.head
+      && selection.head < this.activeAnnotation.to
+    ) {
+      try {
+        caret = this.view.coordsAtPos(selection.head);
+      } catch {
+        caret = undefined;
+      }
+    }
+    const anchor = this.hoverAnchor?.isConnected
+      ? this.hoverAnchor.getBoundingClientRect()
+      : caret ?? learningAnnotationMarker(this.view.dom, this.activeAnnotation.discussionId)
+        ?.getBoundingClientRect();
+    if (!anchor) {
+      this.hide();
+      return;
+    }
+    const gap = 8;
+    const bounds = this.popover.getBoundingClientRect();
+    const maxLeft = Math.max(gap, window.innerWidth - bounds.width - gap);
+    const left = Math.min(Math.max(gap, anchor.left), maxLeft);
+    let top = anchor.bottom + gap;
+    if (top + bounds.height > window.innerHeight - gap) {
+      top = anchor.top - bounds.height - gap;
+    }
+    top = Math.min(
+      Math.max(gap, top),
+      Math.max(gap, window.innerHeight - bounds.height - gap),
+    );
+    this.popover.style.left = `${Math.round(left)}px`;
+    this.popover.style.top = `${Math.round(top)}px`;
+    this.popover.style.visibility = 'visible';
+  }
+}
+
+const learningAnnotationPopover = ViewPlugin.fromClass(LearningAnnotationPopover);
+
+function learningAnnotationElement(
+  target: EventTarget | null,
+  root: HTMLElement,
+): HTMLElement | undefined {
+  if (!(target instanceof Element)) return undefined;
+  const element = target.closest<HTMLElement>('[data-learning-discussion-id]');
+  return element && root.contains(element) ? element : undefined;
+}
+
+function learningAnnotationMarker(
+  root: HTMLElement,
+  discussionId: string,
+): HTMLElement | undefined {
+  return Array.from(root.querySelectorAll<HTMLElement>('[data-learning-discussion-id]'))
+    .find(element => element.dataset.learningDiscussionId === discussionId);
+}
+
+function popoverText(className: string, text: string): HTMLElement {
+  const element = document.createElement('div');
+  element.className = className;
+  element.textContent = text;
+  return element;
 }
 
 class TextReplacementWidget extends WidgetType {
@@ -256,8 +645,15 @@ function vimStateForEditorView(editorView: EditorView): { insertMode?: boolean }
   }).cm?.state?.vim;
 }
 
+const nonVimLogicalVerticalMove = Annotation.define<boolean>();
+const nonVimVerticalGoalColumns = new WeakMap<EditorView, number>();
+
 const vimBacktickGuard = ViewPlugin.define((editorView: EditorView) => {
   const keydown = (event: KeyboardEvent) => {
+    if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') {
+      nonVimVerticalGoalColumns.delete(editorView);
+    }
+    preserveHeadingTextBoundaryOnVimEscape(event, editorView);
     handleVimBacktickKeydown(event, editorView);
   };
   const beforeinput = (event: Event) => {
@@ -268,12 +664,52 @@ const vimBacktickGuard = ViewPlugin.define((editorView: EditorView) => {
   editorView.dom.addEventListener('keydown', keydown, true);
   editorView.dom.addEventListener('beforeinput', beforeinput, true);
   return {
+    update(update: ViewUpdate) {
+      const isLogicalVerticalMove = update.transactions.some(transaction => (
+        transaction.annotation(nonVimLogicalVerticalMove) === true
+      ));
+      if ((update.docChanged || update.selectionSet) && !isLogicalVerticalMove) {
+        nonVimVerticalGoalColumns.delete(editorView);
+      }
+    },
     destroy() {
+      nonVimVerticalGoalColumns.delete(editorView);
       editorView.dom.removeEventListener('keydown', keydown, true);
       editorView.dom.removeEventListener('beforeinput', beforeinput, true);
     },
   };
 });
+
+function preserveHeadingTextBoundaryOnVimEscape(
+  event: KeyboardEvent,
+  editorView: EditorView,
+): void {
+  if (!vimModeEnabled || event.key !== 'Escape') return;
+  if (!vimStateForEditorView(editorView)?.insertMode) return;
+
+  const selection = editorView.state.selection.main;
+  if (!selection.empty) return;
+  const line = editorView.state.doc.lineAt(selection.head);
+  const heading = /^( {0,3}#{1,6}\s+)/.exec(line.text);
+  if (!heading) return;
+
+  const contentFrom = line.from + heading[0].length;
+  if (selection.head !== contentFrom) return;
+
+  const restoreBoundary = () => {
+    if (vimStateForEditorView(editorView)?.insertMode !== false) return;
+    const currentSelection = editorView.state.selection.main;
+    if (!currentSelection.empty || currentSelection.head !== contentFrom - 1) return;
+    const currentLine = editorView.state.doc.lineAt(currentSelection.head);
+    if (currentLine.from !== line.from || currentLine.text !== line.text) return;
+    editorView.dispatch({
+      selection: EditorSelection.cursor(contentFrom),
+      scrollIntoView: true,
+    });
+  };
+  queueMicrotask(restoreBoundary);
+  window.setTimeout(restoreBoundary, 0);
+}
 
 function restoreEditorFocusAfterShortcut(editorView: EditorView): void {
   editorView.focus();
@@ -402,9 +838,69 @@ function createView(text: string, title?: string): EditorView {
         }),
         hybridRendering(),
         hlLinkRendering,
+        learningAnnotationField,
+        learningAnnotationPopover,
+        EditorView.baseTheme({
+          '.cm-learning-annotation': {
+            backgroundColor: 'var(--vscode-editor-wordHighlightStrongBackground, rgba(255, 205, 64, .24))',
+            borderBottom: '1px solid var(--vscode-editorInfo-foreground, rgba(255, 205, 64, .9))',
+            borderRadius: '2px',
+          },
+          '.cm-learning-note-link': {
+            marginLeft: '5px',
+            padding: '1px 5px',
+            border: '1px solid var(--vscode-button-border, var(--vscode-widget-border))',
+            borderRadius: '9px',
+            color: 'var(--vscode-textLink-foreground)',
+            background: 'var(--vscode-editorWidget-background)',
+            font: '11px var(--vscode-font-family)',
+            cursor: 'pointer',
+          },
+          '.cm-learning-note-popover': {
+            position: 'fixed',
+            zIndex: '1000',
+            boxSizing: 'border-box',
+            width: 'min(360px, calc(100vw - 16px))',
+            maxHeight: 'min(280px, calc(100vh - 16px))',
+            padding: '10px 12px',
+            overflow: 'auto',
+            border: '1px solid var(--vscode-editorHoverWidget-border, var(--vscode-widget-border))',
+            borderRadius: '6px',
+            color: 'var(--vscode-editorHoverWidget-foreground, var(--vscode-editor-foreground))',
+            background: 'var(--vscode-editorHoverWidget-background, var(--vscode-editorWidget-background))',
+            boxShadow: '0 4px 14px var(--vscode-widget-shadow, rgba(0, 0, 0, .3))',
+            font: '13px/1.45 var(--vscode-font-family)',
+            whiteSpace: 'normal',
+            pointerEvents: 'none',
+          },
+          '.cm-learning-note-popover[hidden]': {
+            display: 'none',
+          },
+          '.cm-learning-note-popover-label': {
+            marginBottom: '4px',
+            color: 'var(--vscode-descriptionForeground)',
+            fontSize: '11px',
+            fontWeight: '600',
+            letterSpacing: '.02em',
+            textTransform: 'uppercase',
+          },
+          '.cm-learning-note-popover-question': {
+            fontWeight: '600',
+          },
+          '.cm-learning-note-popover-summary': {
+            marginTop: '6px',
+          },
+          '.cm-learning-note-popover-hint': {
+            marginTop: '8px',
+            color: 'var(--vscode-descriptionForeground)',
+            fontSize: '11px',
+          },
+        }),
         Prec.highest(keymap.of([
           { key: 'Ctrl-o', run: handleControlO, preventDefault: true },
           { key: 'Ctrl-O', run: handleControlO, preventDefault: true },
+          { key: 'ArrowUp', run: editorView => moveNonVimCursorByDocumentLine(editorView, -1) },
+          { key: 'ArrowDown', run: editorView => moveNonVimCursorByDocumentLine(editorView, 1) },
           { key: 'Enter', run: editorView => acceptCompletion(editorView) || handleObsidianEnter(editorView), preventDefault: true },
           { key: 'Backspace', run: handleObsidianListBackspace, preventDefault: true },
         ])),
@@ -417,6 +913,10 @@ function createView(text: string, title?: string): EditorView {
           },
           mousedown(event, editorView) {
             return handleModifiedLinkClick(event, editorView);
+          },
+          mouseup(_event, editorView) {
+            queueMicrotask(() => syncNativeSelectionToEditorSelection(editorView));
+            return false;
           },
           contextmenu(event, editorView) {
             return handleSelectionContextMenu(event, editorView);
@@ -451,7 +951,14 @@ function createView(text: string, title?: string): EditorView {
           { key: 'Mod-c', run: editorView => copySelectionToClipboard(editorView, postCopyTextToHost) },
           { key: 'Mod-`', run: runOutsideVimMode(obsidianLikeCommands['editor:toggle-code']!), preventDefault: true },
           { key: 'Mod-k', run: runOutsideVimMode(obsidianLikeCommands['editor:insert-link']!), preventDefault: true },
-          { key: 'Mod-l', run: runOutsideVimMode(obsidianLikeCommands['editor:toggle-checklist-status']!), preventDefault: true },
+          {
+            key: 'Mod-l',
+            run: editorView => (
+              addSelectionToCursorChat(editorView)
+              || runOutsideVimMode(obsidianLikeCommands['editor:toggle-checklist-status']!)(editorView)
+            ),
+            preventDefault: true,
+          },
           { key: 'Mod-Enter', run: obsidianLikeCommands['editor:follow-link']!, preventDefault: true },
           { key: 'Alt-Enter', run: obsidianLikeCommands['editor:follow-link']!, preventDefault: true },
           { key: 'Tab', run: indentCodeOrListItems, preventDefault: true },
@@ -476,7 +983,7 @@ function createView(text: string, title?: string): EditorView {
             height: '100%',
             backgroundColor: 'var(--vscode-editor-background)',
             color: 'var(--vscode-editor-foreground)',
-            fontFamily: 'var(--hl-editor-font-family, var(--vscode-editor-font-family, ui-monospace, Menlo, monospace))',
+            fontFamily: 'var(--vscode-font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif)',
             fontSize: 'var(--hl-editor-font-size, 16px)',
             fontWeight: 'var(--hl-editor-font-weight, var(--vscode-editor-font-weight, normal))',
             lineHeight: 'var(--hl-editor-line-height, 24px)',
@@ -513,6 +1020,12 @@ function createView(text: string, title?: string): EditorView {
           '.cm-lineNumbers': {
             minWidth: '22px',
             width: '22px',
+            color: 'var(--vscode-editorLineNumber-foreground, var(--vscode-editorGutter-foreground))',
+            fontFamily: 'var(--vscode-editor-font-family, ui-monospace, Menlo, Monaco, Consolas, monospace)',
+            fontSize: 'var(--vscode-editor-font-size, 14px)',
+            fontWeight: 'var(--vscode-editor-font-weight, normal)',
+            fontVariantNumeric: 'tabular-nums',
+            letterSpacing: 'var(--hl-editor-letter-spacing, normal)',
           },
           '.cm-foldGutter': {
             minWidth: '18px',
@@ -539,9 +1052,16 @@ function createView(text: string, title?: string): EditorView {
             padding: '0',
             lineHeight: 'var(--hl-editor-line-height, 24px)',
             textAlign: 'right',
+            cursor: 'default',
           },
           '.cm-cursor, .cm-dropCursor': {
             borderLeftColor: 'var(--vscode-editorCursor-foreground, currentColor)',
+          },
+          '.cm-selectionBackground': {
+            backgroundColor: 'var(--vscode-editor-inactiveSelectionBackground, rgba(127, 127, 127, 0.24))',
+          },
+          '&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground': {
+            backgroundColor: 'var(--vscode-editor-selectionBackground, rgba(38, 79, 120, 0.65))',
           },
           '.cm-panel.cm-vim-panel': {
             boxSizing: 'border-box',
@@ -758,8 +1278,9 @@ function createView(text: string, title?: string): EditorView {
             display: 'inline-block',
             marginLeft: '4px',
             fontSize: '0.8em',
+            lineHeight: '1',
             opacity: '0.85',
-            verticalAlign: 'text-top',
+            verticalAlign: '0.15em',
           },
           '.cm-active-link-label': {
             color: 'var(--vscode-textLink-foreground)',
@@ -782,8 +1303,9 @@ function createView(text: string, title?: string): EditorView {
             display: 'inline-block',
             marginLeft: '4px',
             fontSize: '0.8em',
+            lineHeight: '1',
             opacity: '0.85',
-            verticalAlign: 'text-top',
+            verticalAlign: '0.15em',
           },
           '.cm-active-bold': { fontWeight: '700' },
           '.cm-active-italic': { fontStyle: 'italic' },
@@ -798,7 +1320,7 @@ function createView(text: string, title?: string): EditorView {
             borderRadius: '4px',
             padding: '1px 5px',
             color: 'var(--vscode-textPreformat-foreground, inherit)',
-            fontFamily: 'var(--vscode-editor-font-family, ui-monospace, Menlo, monospace)',
+            fontFamily: 'var(--hl-editor-font-family, var(--vscode-editor-font-family, ui-monospace, Menlo, monospace))',
           },
           '.cm-active-math-delimiter': {
             color: 'var(--vscode-symbolIcon-operatorForeground, #c586c0)',
@@ -815,9 +1337,16 @@ function createView(text: string, title?: string): EditorView {
             padding: '0 4px',
             fontWeight: '500',
           },
-          '.cm-active-footnote-ref, .cm-active-footnote-def-label': {
+          '.cm-active-footnote-ref': {
             color: 'var(--vscode-textLink-foreground)',
             fontSize: '0.78em',
+            verticalAlign: 'super',
+            lineHeight: '0',
+            fontWeight: '600',
+          },
+          '.cm-active-footnote-def-label': {
+            color: 'var(--vscode-textLink-foreground)',
+            fontSize: '0.85em',
             verticalAlign: 'super',
             lineHeight: '0',
             fontWeight: '600',
@@ -861,6 +1390,10 @@ function createView(text: string, title?: string): EditorView {
   }, true);
   (window as MarkdownEditorTestWindow).__cmView = editorView;
   postSelection(editorView);
+  editorView.scrollDOM.addEventListener('scroll', () => updateCursorSelectionPrompt(editorView), {
+    passive: true,
+  });
+  window.addEventListener('resize', () => updateCursorSelectionPrompt(editorView));
   queueInitialFocus(editorView, { retries: typeof title !== 'string' });
   ensureVimInsertMode(editorView);
   return editorView;
@@ -868,6 +1401,7 @@ function createView(text: string, title?: string): EditorView {
 
 function postSelection(editorView: EditorView): void {
   const selection = editorView.state.selection.main;
+  updateCursorSelectionPrompt(editorView);
   vscode.postMessage({
     type: 'selectionChanged',
     selection: {
@@ -1094,7 +1628,11 @@ function syncNativeSelectionToEditorSelection(editorView: EditorView): void {
   try {
     const anchor = editorView.posAtDOM(selection.anchorNode!, selection.anchorOffset);
     const head = editorView.posAtDOM(selection.focusNode!, selection.focusOffset);
-    if (anchor !== head) {
+    const current = editorView.state.selection.main;
+    if (
+      anchor !== head
+      && (current.anchor !== anchor || current.head !== head)
+    ) {
       editorView.dispatch({ selection: { anchor, head } });
     }
   } catch {
@@ -1111,6 +1649,15 @@ function showMarkdownSelectionContextMenu(editorView: EditorView, clientX: numbe
     clientX,
     clientY,
     items: [
+      {
+        id: 'add-selection-to-cursor-chat',
+        label: `${cursorSelectionShortcutLabel()}  Add to Chat`,
+        onSelect: () => {
+          addSelectionToCursorChat(editorView);
+          editorView.focus();
+        },
+      },
+      { type: 'separator' },
       {
         label: 'Copy',
         onSelect: () => {
@@ -1129,6 +1676,125 @@ function showMarkdownSelectionContextMenu(editorView: EditorView, clientX: numbe
       { label: 'Look Up', onSelect: () => runCommand('editor:lookup-selection') },
     ],
   });
+}
+
+function addSelectionToCursorChat(editorView: EditorView): boolean {
+  syncNativeSelectionToEditorSelection(editorView);
+  const selection = editorView.state.selection.main;
+  if (selection.empty) return false;
+  vscode.postMessage({ type: 'addSelectionToCursorChat' });
+  return true;
+}
+
+let cursorSelectionPrompt:
+  | { button: HTMLButtonElement; editorView: EditorView }
+  | undefined;
+
+function updateCursorSelectionPrompt(editorView: EditorView): void {
+  const selection = editorView.state.selection.main;
+  if (selection.empty || !editorView.dom.isConnected) {
+    cursorSelectionPrompt?.button.remove();
+    cursorSelectionPrompt = undefined;
+    return;
+  }
+
+  if (!cursorSelectionPrompt) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'hl-cursor-selection-prompt';
+    button.setAttribute('aria-label', `Add to Chat ${cursorSelectionShortcutLabel()}`);
+    const label = document.createElement('span');
+    label.className = 'add-to-chat-label';
+    label.textContent = 'Add to Chat';
+    const shortcut = document.createElement('span');
+    shortcut.className = 'add-to-chat-shortcut';
+    shortcut.textContent = cursorSelectionShortcutLabel();
+    button.append(label, shortcut);
+    button.addEventListener('pointerdown', event => {
+      event.preventDefault();
+      event.stopPropagation();
+    });
+    button.addEventListener('click', event => {
+      event.preventDefault();
+      event.stopPropagation();
+      const current = cursorSelectionPrompt?.editorView;
+      if (current) {
+        addSelectionToCursorChat(current);
+        current.focus();
+      }
+    });
+    ensureCursorSelectionPromptStyles();
+    document.body.appendChild(button);
+    cursorSelectionPrompt = { button, editorView };
+  } else {
+    cursorSelectionPrompt.editorView = editorView;
+  }
+
+  const button = cursorSelectionPrompt.button;
+  button.style.visibility = 'hidden';
+  const forward = selection.head >= selection.anchor;
+  const coords = editorView.coordsAtPos(selection.head, forward ? -1 : 1);
+  if (!coords) {
+    button.remove();
+    cursorSelectionPrompt = undefined;
+    return;
+  }
+  const box = button.getBoundingClientRect();
+  const left = Math.max(8, Math.min(window.innerWidth - box.width - 8, coords.left - box.width / 2));
+  const above = coords.top - box.height - 8;
+  const top = above >= 8 ? above : Math.min(window.innerHeight - box.height - 8, coords.bottom + 8);
+  button.style.left = `${left}px`;
+  button.style.top = `${Math.max(8, top)}px`;
+  button.style.visibility = 'visible';
+}
+
+function cursorSelectionShortcutLabel(): string {
+  return /Mac|iPhone|iPad/u.test(navigator.platform) ? '⌘L' : 'Ctrl+L';
+}
+
+function ensureCursorSelectionPromptStyles(): void {
+  if (document.getElementById('hl-cursor-selection-prompt-styles')) return;
+  const style = document.createElement('style');
+  style.id = 'hl-cursor-selection-prompt-styles';
+  style.textContent = `
+    .hl-cursor-selection-prompt {
+      position: fixed;
+      z-index: 1000;
+      box-sizing: border-box;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      height: 28px;
+      padding: 2px 6px 2px 8px;
+      border: 1px solid var(--vscode-commandCenter-inactiveBorder, var(--vscode-widget-border, rgba(127, 127, 127, .35)));
+      border-radius: 8px;
+      background: var(--vscode-editorWidget-background, var(--vscode-editorHoverWidget-background));
+      color: var(--vscode-editorWidget-foreground, var(--vscode-editorHoverWidget-foreground));
+      box-shadow: 0 6px 18px var(--vscode-inlineChat-shadow, var(--vscode-widget-shadow, rgba(0, 0, 0, .3)));
+      font: 12px var(--vscode-font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
+      white-space: nowrap;
+      cursor: pointer;
+    }
+    .hl-cursor-selection-prompt:hover {
+      background: var(--vscode-toolbar-hoverBackground, rgba(127, 127, 127, .16));
+    }
+    .hl-cursor-selection-prompt:focus-visible {
+      outline: 2px solid var(--vscode-focusBorder, #007fd4);
+      outline-offset: 1px;
+    }
+    .hl-cursor-selection-prompt .add-to-chat-shortcut {
+      display: inline-flex;
+      align-items: center;
+      height: 18px;
+      padding: 0 4px;
+      border: 0;
+      border-radius: 4px;
+      background: var(--vscode-toolbar-hoverBackground, rgba(127, 127, 127, .16));
+      color: var(--vscode-input-placeholderForeground, var(--vscode-descriptionForeground, inherit));
+      font: 11px var(--vscode-font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
+    }
+  `;
+  document.head.appendChild(style);
 }
 
 interface LookupRequest {
@@ -1628,6 +2294,47 @@ function handleControlO(editorView: EditorView): boolean {
   return true;
 }
 
+function moveNonVimCursorByDocumentLine(
+  editorView: EditorView,
+  direction: -1 | 1,
+): boolean {
+  if (vimModeEnabled || completionStatus(editorView.state) != null) return false;
+  if (document.activeElement !== editorView.contentDOM) return false;
+  const selection = editorView.state.selection;
+  if (selection.ranges.length !== 1 || !selection.main.empty) return false;
+
+  const line = editorView.state.doc.lineAt(selection.main.head);
+  const nativeTarget = editorView.moveVertically(selection.main, direction > 0);
+  const targetLine = editorView.state.doc.lineAt(nativeTarget.head);
+  if (targetLine.number === line.number) return false;
+  if (
+    !isSingleVisualLine(editorView, selection.main, line.from, line.to)
+    || !isSingleVisualLine(editorView, nativeTarget, targetLine.from, targetLine.to)
+  ) {
+    return false;
+  }
+  const column = nonVimVerticalGoalColumns.get(editorView)
+    ?? selection.main.head - line.from;
+  nonVimVerticalGoalColumns.set(editorView, column);
+  editorView.dispatch({
+    selection: EditorSelection.cursor(targetLine.from + Math.min(column, targetLine.length)),
+    scrollIntoView: true,
+    annotations: nonVimLogicalVerticalMove.of(true),
+  });
+  return true;
+}
+
+function isSingleVisualLine(
+  editorView: EditorView,
+  range: SelectionRange,
+  lineFrom: number,
+  lineTo: number,
+): boolean {
+  const visualFrom = editorView.moveToLineBoundary(range, false, true).head;
+  const visualTo = editorView.moveToLineBoundary(range, true, true).head;
+  return visualFrom === lineFrom && visualTo === lineTo;
+}
+
 function ensureVimInsertMode(editorView: EditorView): void {
   if (!vimModeEnabled) return;
   if (enterVimInsertModeForView(editorView)) return;
@@ -1833,6 +2540,30 @@ window.addEventListener('message', event => {
       break;
     }
 
+    case 'setLearningAnnotations':
+      if (!view) return;
+      view.dispatch({
+        effects: setLearningAnnotations.of(normalizeLearningAnnotations(message.annotations)),
+      });
+      break;
+
+    case 'requestSelection': {
+      if (typeof message.requestId !== 'string') return;
+      if (view) {
+        syncNativeSelectionToEditorSelection(view);
+      }
+      const selection = view?.state.selection.main;
+      vscode.postMessage({
+        type: 'selectionResponse',
+        requestId: message.requestId,
+        selection: {
+          from: selection?.from ?? 0,
+          to: selection?.to ?? 0,
+        },
+      });
+      break;
+    }
+
     case 'executeCommand': {
       if (!view || typeof message.command !== 'string') return;
       obsidianLikeCommands[message.command]?.(view);
@@ -1878,6 +2609,51 @@ window.addEventListener('error', event => {
 });
 
 vscode.postMessage({ type: 'ready' });
+
+function normalizeLearningAnnotations(value: unknown): LearningAnnotation[] {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, 1_000).flatMap(candidate => {
+    if (!candidate || typeof candidate !== 'object') return [];
+    const raw = candidate as Record<string, unknown>;
+    if (
+      typeof raw.discussionId !== 'string'
+      || typeof raw.notePath !== 'string'
+      || typeof raw.quote !== 'string'
+      || typeof raw.summary !== 'string'
+      || raw.discussionId.length > 200
+      || raw.notePath.length > 1_024
+      || raw.quote.length > 1_000_000
+      || raw.summary.length > 2_000
+    ) {
+      return [];
+    }
+    const question = typeof raw.question === 'string' ? raw.question : '';
+    if (question.length > 2_000) return [];
+    const rawQuestionCount = nonNegativeInteger(raw.questionCount);
+    const questionCount = Math.min(
+      10_000,
+      Math.max(rawQuestionCount ?? 0, question ? 1 : 0),
+    );
+    const from = nonNegativeInteger(raw.from);
+    const to = nonNegativeInteger(raw.to);
+    return [{
+      discussionId: raw.discussionId,
+      notePath: raw.notePath,
+      quote: raw.quote,
+      question,
+      questionCount,
+      summary: raw.summary,
+      ...(from !== undefined ? { from } : {}),
+      ...(to !== undefined ? { to } : {}),
+    }];
+  });
+}
+
+function nonNegativeInteger(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
+    ? value
+    : undefined;
+}
 (window as MarkdownEditorTestWindow).__hlCommands = obsidianLikeCommands;
 (window as MarkdownEditorTestWindow).__hlVimModeEnabled = () => vimModeEnabled;
 
@@ -1974,11 +2750,17 @@ function buildDecorations(view: EditorView): DecorationSet {
   const activeLines = getActiveLines(view);
   const activeSelectionRanges = getActiveSelectionRanges(view);
   const referenceDefinitions = markdownReferenceDefinitions(view.state.doc.toString());
+  const decoratedLines = new Set<number>();
 
   for (const { from, to } of view.visibleRanges) {
     let pos = from;
     while (pos <= to) {
       const line = view.state.doc.lineAt(pos);
+      if (decoratedLines.has(line.number)) {
+        pos = line.to + 1;
+        continue;
+      }
+      decoratedLines.add(line.number);
       if (isLineInsideFencedCodeBlock(view.state.doc, line.number)) {
         pos = line.to + 1;
         continue;
@@ -2148,18 +2930,18 @@ function collectActiveLineDecorations(
     rawLinkSourceSpans.push({ from: sourceFrom, to: sourceTo });
   }
 
-  addActiveInlineCodeMarks(lineFrom, text, decorations, reserved);
-  addActiveFootnoteMarks(lineFrom, text, decorations, reserved);
+  addActiveInlineCodeMarks(lineFrom, text, activeSelectionRanges, decorations, reserved);
+  addActiveFootnoteMarks(lineFrom, text, activeSelectionRanges, decorations, reserved);
   addActiveAutolinkMarks(lineFrom, text, decorations, reserved, rawLinkSourceSpans);
-  addActiveTagMarks(lineFrom, text, decorations, reserved);
-  addActiveDelimitedMarks(lineFrom, text, /\*\*\*(?=\S)(.+?\S)\*\*\*/g, 3, [activeBoldMark, activeItalicMark], decorations, reserved);
-  addActiveDelimitedMarks(lineFrom, text, /(?<![A-Za-z0-9_])___(?=\S)(.+?\S)___(?![A-Za-z0-9_])/g, 3, [activeBoldMark, activeItalicMark], decorations, reserved);
-  addActiveDelimitedMarks(lineFrom, text, /\*\*(?=\S)(.+?\S)\*\*/g, 2, [activeBoldMark], decorations, reserved);
-  addActiveDelimitedMarks(lineFrom, text, /(?<![A-Za-z0-9_])__(?=\S)(.+?\S)__(?![A-Za-z0-9_])/g, 2, [activeBoldMark], decorations, reserved);
-  addActiveDelimitedMarks(lineFrom, text, /(?<!\*)\*(?=\S)(.+?\S)\*(?!\*)/g, 1, [activeItalicMark], decorations, reserved);
-  addActiveDelimitedMarks(lineFrom, text, /(?<![A-Za-z0-9_])_(?=\S)(.+?\S)_(?![A-Za-z0-9_])/g, 1, [activeItalicMark], decorations, reserved);
-  addActiveDelimitedMarks(lineFrom, text, /~~(?=\S)(.+?\S)~~/g, 2, [activeStrikeMark], decorations, reserved);
-  addActiveDelimitedMarks(lineFrom, text, /==(?=\S)(.+?\S)==/g, 2, [activeHighlightMark], decorations, reserved);
+  addActiveTagMarks(lineFrom, text, activeSelectionRanges, decorations, reserved);
+  addActiveDelimitedMarks(lineFrom, text, /\*\*\*(?=\S)(.+?\S)\*\*\*/g, 3, activeSelectionRanges, [activeBoldMark, activeItalicMark], decorations, reserved);
+  addActiveDelimitedMarks(lineFrom, text, /(?<![A-Za-z0-9_])___(?=\S)(.+?\S)___(?![A-Za-z0-9_])/g, 3, activeSelectionRanges, [activeBoldMark, activeItalicMark], decorations, reserved);
+  addActiveDelimitedMarks(lineFrom, text, /\*\*(?=\S)(.+?\S)\*\*/g, 2, activeSelectionRanges, [activeBoldMark], decorations, reserved);
+  addActiveDelimitedMarks(lineFrom, text, /(?<![A-Za-z0-9_])__(?=\S)(.+?\S)__(?![A-Za-z0-9_])/g, 2, activeSelectionRanges, [activeBoldMark], decorations, reserved);
+  addActiveDelimitedMarks(lineFrom, text, /(?<!\*)\*(?=\S)(.+?\S)\*(?!\*)/g, 1, activeSelectionRanges, [activeItalicMark], decorations, reserved);
+  addActiveDelimitedMarks(lineFrom, text, /(?<![A-Za-z0-9_])_(?=\S)(.+?\S)_(?![A-Za-z0-9_])/g, 1, activeSelectionRanges, [activeItalicMark], decorations, reserved);
+  addActiveDelimitedMarks(lineFrom, text, /~~(?=\S)(.+?\S)~~/g, 2, activeSelectionRanges, [activeStrikeMark], decorations, reserved);
+  addActiveDelimitedMarks(lineFrom, text, /==(?=\S)(.+?\S)==/g, 2, activeSelectionRanges, [activeHighlightMark], decorations, reserved);
 }
 
 interface ActiveWikiLinkDisplayPlan {
@@ -2349,11 +3131,15 @@ function addActiveDelimitedMarks(
   text: string,
   pattern: RegExp,
   delimiterLength: number,
+  activeSelectionRanges: { from: number; to: number }[],
   marks: Decoration[],
   decorations: Range<Decoration>[],
   reserved: { from: number; to: number }[],
 ): void {
   for (const match of text.matchAll(pattern)) {
+    const sourceFrom = lineFrom + (match.index ?? 0);
+    const sourceTo = sourceFrom + match[0].length;
+    if (!selectionTouchesSource(activeSelectionRanges, sourceFrom, sourceTo)) continue;
     const from = lineFrom + (match.index ?? 0) + delimiterLength;
     const to = from + (match[1] ?? '').length;
     if (isEscapedAt(text, match.index ?? 0) || isEscapedAt(text, to - lineFrom)) continue;
@@ -2368,10 +3154,12 @@ function addActiveDelimitedMarks(
 function addActiveInlineCodeMarks(
   lineFrom: number,
   text: string,
+  activeSelectionRanges: { from: number; to: number }[],
   decorations: Range<Decoration>[],
   reserved: { from: number; to: number }[],
 ): void {
   for (const span of inlineCodeSourceSpans(lineFrom, text)) {
+    if (!selectionTouchesSource(activeSelectionRanges, span.from, span.to)) continue;
     const from = span.contentFrom;
     const to = span.contentTo;
     if (reserved.some(span => from < span.to && to > span.from)) continue;
@@ -2383,15 +3171,21 @@ function addActiveInlineCodeMarks(
 function addActiveFootnoteMarks(
   lineFrom: number,
   text: string,
+  activeSelectionRanges: { from: number; to: number }[],
   decorations: Range<Decoration>[],
   reserved: { from: number; to: number }[],
 ): void {
   const definition = text.match(/^(\s*)\[\^([^\]\s]+)\]:/);
   if (definition && !isEscapedAt(text, definition[1]!.length)) {
     const id = definition[2] ?? '';
+    const sourceFrom = lineFrom + definition[1]!.length;
+    const sourceTo = sourceFrom + definition[0].trimStart().length;
     const from = lineFrom + definition[1]!.length + 2;
     const to = from + id.length;
-    if (!reserved.some(span => from < span.to && to > span.from)) {
+    if (
+      selectionTouchesSource(activeSelectionRanges, sourceFrom, sourceTo)
+      && !reserved.some(span => from < span.to && to > span.from)
+    ) {
       decorations.push(activeFootnoteDefLabelMark.range(from, to));
       reserved.push({ from, to });
     }
@@ -2400,8 +3194,11 @@ function addActiveFootnoteMarks(
   for (const match of text.matchAll(/\[\^([^\]\s]+)\]/g)) {
     if (isEscapedAt(text, match.index ?? 0)) continue;
     const id = match[1] ?? '';
+    const sourceFrom = lineFrom + (match.index ?? 0);
+    const sourceTo = sourceFrom + match[0].length;
     const from = lineFrom + (match.index ?? 0) + 2;
     const to = from + id.length;
+    if (!selectionTouchesSource(activeSelectionRanges, sourceFrom, sourceTo)) continue;
     if (reserved.some(span => from < span.to && to > span.from)) continue;
     decorations.push(activeFootnoteRefMark.range(from, to));
     reserved.push({ from, to });
@@ -2428,6 +3225,7 @@ function addActiveAutolinkMarks(
 function addActiveTagMarks(
   lineFrom: number,
   text: string,
+  activeSelectionRanges: { from: number; to: number }[],
   decorations: Range<Decoration>[],
   reserved: { from: number; to: number }[],
 ): void {
@@ -2435,6 +3233,7 @@ function addActiveTagMarks(
     const from = lineFrom + (match.index ?? 0);
     const to = from + match[0].length;
     if (isEscapedAt(text, match.index ?? 0)) continue;
+    if (!selectionTouchesSource(activeSelectionRanges, from, to)) continue;
     if (reserved.some(span => from < span.to && to > span.from)) continue;
     decorations.push(activeTagMark.range(from, to));
     reserved.push({ from, to });
@@ -2466,7 +3265,7 @@ function selectionTouchesSource(
 ): boolean {
   return ranges.some(range => {
     if (range.from === range.to) {
-      return range.from >= sourceFrom && range.from <= sourceTo;
+      return range.from >= sourceFrom && range.from < sourceTo;
     }
     return range.from < sourceTo && range.to > sourceFrom;
   });

@@ -1,318 +1,423 @@
-# Human Learning - Current Implementation Detail
+# Human Learning: Current Implementation Detail
 
-This document reflects the current `main` implementation. It supersedes older
-planning documents that described `hl://` as the generated user-facing link
-scheme.
+> This document describes the simplified combined desktop implementation. The
+> architectural rationale and user-facing flow are in
+> [Architecture and VS Code Integration](architecture-and-vscode-integration.md).
 
-## 1. Packages
+## 1. Active package boundary
+
+The release artifact is `packages/vscode-extension`. It contains both custom
+editors, repository services, shared agent handoff, and command orchestration.
 
 ```text
-packages/core
-  SQLite schema, vault detection, source registry, chunks, search, links,
-  anchors, web target records, context export, generated agent instructions.
-
-packages/cli
-  `hl` command surface for init/status/doctor/ingest/search/links/anchor/context.
-
 packages/vscode-extension
-  Combined VS Code extension with markdown editor, PDF viewer, side views, URI
-  dispatch, and E2E webview fixtures.
+  src/                    extension-host code
+  webview-src/            Markdown editor and experimental web-reader webviews
+  dist/                   combined release bundle
 
-packages/vscode-markdown-extension
-  Split markdown-only extension build.
+packages/pdf-editor
+  src/webview/            PDF viewer and Ask PDF user interface
 
-packages/vscode-pdf-extension
-  Split PDF-only extension build.
+packages/core
+  src/lite.ts             filesystem-only types/store used by the extension
+  src/pdf-discussions/    v1 sidecar, portable JSON-LD mirror, and scan API
+  src/...                 legacy database/search modules, not in the release bundle
 ```
 
-## 2. Database Schema
+The extension build compiles core first, then its Webpack configuration aliases
+`@human-learning/core` to `packages/core/dist/lite.js`, generated solely from
+`src/lite.ts`. That entry exports portable-link classification, the file-backed
+PDF discussion store, and the portable annotation mapper/scanner API. It
+deliberately excludes database, ingestion, search, embeddings, activity, and
+legacy review imports.
 
-Schema version is `3`.
-
-Core tables:
-
-| Table | Responsibility |
-| --- | --- |
-| `sources` | Registered markdown, PDF, HTML, code, image, and text files |
-| `anchors` | Durable precise locators, currently including PDF selections |
-| `links` | Parsed graph edges from markdown notes |
-| `chunks` | Retrieval units with optional locator metadata |
-| `search_index` | Token index for lexical search |
-| `chunk_embeddings` | Deterministic local vectors for testable semantic search |
-| `web_targets` | Durable web fallback records for `#hl-web=` links |
-| `diagnostics` | Link and vault problems |
-| `activity` | Future activity log events |
-
-Migration 2 added `chunks.metadata_json` and embedding vectors. Migration 3
-added `web_targets`.
-
-## 3. Native Reference Targets
-
-`packages/core/src/links/reference-target.ts` owns target classification and
-href generation.
-
-```ts
-type ReferenceKind = 'note' | 'pdf' | 'code' | 'web' | 'image' | 'text' | 'unknown';
-```
-
-`classifyReferenceTarget()` returns:
-
-```ts
-interface ReferenceTarget {
-  kind: ReferenceKind;
-  uri: string;
-  path?: string;
-  url?: string;
-  heading?: string;
-  lines?: { start: number; end: number };
-  page?: number;
-  textFragment?: {
-    textStart: string;
-    textEnd?: string;
-    prefix?: string;
-    suffix?: string;
-  };
-  webTargetId?: string;
-}
-```
-
-Helpers:
-
-```ts
-noteHref(path, heading?)
-pdfHref(path, { page?, textFragment? })
-codeHref(path, { start, end? }?)
-```
-
-Generated examples:
-
-```md
-[[Online Softmax#Why This Matters]]
-[kernel](raw/code/attention.cu#L42-L57)
-[paper p7](raw/pdf/flash-attention.pdf#page=7)
-[selected text](raw/pdf/flash-attention.pdf#page=7:~:text=selected%20text)
-[quote](https://example.com/article#:~:text=selected%20text)
-[DOM block](https://example.com/article#hl-web=web_abc123)
-```
-
-## 4. Markdown Link Parsing
-
-`packages/core/src/links/link-parser.ts` parses:
-
-- standard markdown links
-- folder-qualified Obsidian wikilinks
-- basename-resolved wikilinks using known note paths
-- same-note heading links
-- same-note block references
-- image embeds
-
-It stores native `uri` strings and parsed `ReferenceTarget` metadata. It does not
-generate `hl://` links for MVP output.
-
-## 5. Link Graph Rebuild
-
-`packages/core/src/links/graph.ts` handles rebuilds:
-
-1. Delete existing parser-created links for the note.
-2. Read the markdown file from disk.
-3. Parse links with the current note path list.
-4. Insert `links` rows with:
-   - `from_note_path`
-   - `from_line`
-   - `to_uri`
-   - optional `to_anchor_id`
-   - `label`
-   - `relation = references`
-   - `created_by = parser`
-   - `status = resolved`
-
-Backlinks query by `links.to_uri`. Forward links query by source note path.
-
-## 6. PDF Chunking
-
-`packages/core/src/sources/chunks.ts` chunks PDFs into layout-ish blocks after
-text extraction. Blocks are separated by blank lines and classified as:
+The following monorepo packages remain for historical or optional workflows but
+are not shipped in the simplified release:
 
 ```text
-paragraph | heading | caption | table | list | formula
+packages/cli
+packages/mcp-server
+packages/vscode-markdown-extension
+packages/vscode-pdf-extension
 ```
 
-PDF chunk IDs use the `chk_pdf_` prefix and content hash. Chunk metadata stores
-page, offsets, reading order, block type, source hash, chunk hash, and future
-rectangle data.
+## 2. Combined extension output
 
-Search results for PDF chunks currently emit portable page-only targets:
+`pnpm --filter human-learning-vscode build` emits:
 
-```md
-raw/pdf/file.pdf#page=N
+| Artifact | Purpose |
+| --- | --- |
+| `dist/extension.js` | Node/Electron extension host |
+| `dist/markdown-editor.js` | CodeMirror Markdown webview |
+| `dist/pdf-viewer.js` | EmbedPDF/PDFium webview |
+| `dist/experimental-owned-browser.js` | Sanitized experimental web-reader webview |
+| `dist/pdfium.wasm` | Local PDF renderer |
+
+The combined output does not include `sql.js`, `sql-wasm.wasm`, a SQLite
+binding, or a required `.hl/index.sqlite`.
+
+The split-package build scripts still exist for compatibility testing. They are
+not the simplified product or its packaging path.
+
+## 3. Activation and host integration
+
+[`src/extension.ts`](../packages/vscode-extension/src/extension.ts) is the one
+entry point for VS Code and Cursor. It registers:
+
+- `human-learning.markdownEditor`;
+- `human-learning.pdfViewer`;
+- Backlinks and Forward Links in the Human Learning activity view;
+- context-aware Markdown Outline and PDF Outline panels in the main Explorer
+  sidebar;
+- source navigation, selection, daily-note, graph, Git-sync, Markdown, and PDF
+  commands;
+- Cursor Browser capture and the extension-owned Experimental Web Reader
+  commands;
+- a debounced Markdown watcher that refreshes file-derived views and source
+  annotations.
+
+The implementation currently uses the first workspace folder as its repository
+root. Without an open folder, the Markdown and PDF viewers still register, but
+learning notes, graph, daily review, and Git commands display a workspace
+requirement instead of creating hidden state.
+
+The same manifest and JavaScript bundle run in Cursor through its VS Code
+extension API. There is no Cursor-specific persistence layer or UI fork.
+
+## 4. Durable file model
+
+The active runtime has no opaque knowledge database. Durable state is:
+
+| Path | Responsibility |
+| --- | --- |
+| user-chosen `*.md` | authored notes and source material |
+| user-chosen `*.pdf` | original PDF sources |
+| `wiki/learning/*.md` | readable source quote, summary, full Q&A, and review dates |
+| `wiki/daily/*.md` | manual daily plan, carried TODOs, and due reviews |
+| `.hl/annotations/pdf/<sha256>.json` | current v1 PDF discussion/viewer state |
+| `.hl/annotations/pdf/<sha256>/<annotation-id>.jsonld` | portable per-annotation mirror |
+| `.hl/annotations/pdf/assets/…` | best-effort bounded PNG selection screenshots |
+| `.hl/agent/selection.{md,json,png}` | latest handoff aliases; PNG exists only for a validated PDF crop |
+
+These are ordinary files. Git provides diff, history, merge, remote update, and
+recovery. There is no required ingest step: commands retaining the old
+“refresh/ingest” wording simply rescan filesystem content.
+
+### Three coordinated PDF records
+
+The current migration state deliberately writes three representations:
+
+1. `wiki/learning/*.md` is the Q&A authority. It contains the exact Markdown
+   quote or canonical PDF extracted quote, portable source link, concise
+   answer, full transcript, and review schedule.
+2. `.hl/annotations/pdf/<pdf-sha256>.json` is the v1 runtime sidecar used by
+   the PDF UI. It contains geometry, text offsets, selection identity,
+   transcript/turn state, summary state, and snapshot metadata.
+3. `.hl/annotations/pdf/<pdf-sha256>/<annotation-id>.jsonld` is the portable
+   W3C-shaped mirror. It stores relative repository IRIs, quote/page/geometry
+   selectors, the learning-note body link when available, and snapshot
+   metadata.
+
+The v1 sidecar remains the viewer/controller compatibility store; JSON-LD is
+not yet its replacement. `scanPortablePdfAnnotations()` is a core
+migration/interchange API that reads `TextQuoteSelector.exact`, page, and
+geometry from mirrors. `filesystemWiki`, `KnowledgeGraphPanel`, and
+`PdfEditorProvider` do not consume that scan result.
+
+The overlap keeps the learning record readable, the current viewer stable, and
+the source anchor portable. All three are filesystem/Git state rather than a
+database or generated SQLite index.
+
+[`portable.ts`](../packages/core/src/pdf-discussions/portable.ts) serializes
+the mirror with:
+
+- `TextQuoteSelector.exact` plus prefix/suffix when available;
+- an RFC 8118 `FragmentSelector` whose value is `page=N`;
+- `hl:PdfRectSelector` rectangles in `pt`, top-left origin, with
+  `left,top,right,bottom` coordinates;
+- optional PDF text-item offsets and `hl:snapshot` metadata.
+
+For a PDF outside the repository, v1 runtime state is stored below the
+extension's host-controlled global storage. If that PDF later opens inside a
+repository, the store can import matching content-addressed state; portable
+JSON-LD mirrors are emitted only for repository-managed PDFs.
+
+## 5. Markdown custom editor
+
+[`src/markdownEditorProvider.ts`](../packages/vscode-extension/src/markdownEditorProvider.ts)
+owns host synchronization. Each open webview panel has its own handle, even if
+the same document is visible in another group. The provider:
+
+- keeps VS Code's `TextDocument` as canonical content;
+- applies webview edits with `WorkspaceEdit`;
+- mirrors external document changes back to the webview;
+- requests the current live selection from the active panel before handoff;
+- passes exact offsets and source context to the host;
+- loads learning annotations for the active source file.
+
+[`webview-src/markdown-editor.ts`](../packages/vscode-extension/webview-src/markdown-editor.ts)
+owns CodeMirror interaction and rendering. Its `requestSelection` response
+prevents a menu or keyboard handoff from using a stale host-side selection. A
+non-empty selection reveals a compact **Cmd+L Add to Chat** prompt;
+`Cmd+L` on macOS and `Ctrl+L` elsewhere invoke the same action as the context
+menu.
+
+Learning-note annotations arrive as quote/offset records. The webview highlights
+the stored range and renders **✦ Note**. The same resolved range drives a
+floating previous-question/answer summary on hover, marker focus, or a collapsed
+caret inside `[from, to)`. If offsets no longer match, exact-quote search
+provides a conservative fallback rather than guessing a fuzzy location.
+
+## 6. Markdown agent handoff
+
+```text
+selection
+  -> exact source packet
+  -> immutable .hl/agent/exports/<id>/selection.md
+  -> active supported agent draft
+  -> learner reviews and submits
 ```
 
-Chunks remain internal retrieval units. Their IDs are not exposed in the URL;
-the current search layer does not reconstruct a precise selector from a chunk.
-User-created selections and persisted annotations do include text fragments.
+The automatic selection prompt, context menu, and `Cmd+L` / `Ctrl+L` shortcut
+all dispatch the provider-neutral `human-learning.addSelectionToChat` command.
+The legacy `human-learning.addSelectionToCursorChat` ID remains an internal
+compatibility alias for older webview bundles. The shared `agentHandoff.ts`
+router prefers stable editor-tab evidence, uses feature-detected Cursor support
+only as a fallback, asks when ambiguous, never submits, and does not read the
+resulting external conversation.
 
-## 7. PDF Anchors
+### Web selection capture
 
-`packages/core/src/anchors/pdf.ts` creates anchors from quote search or trusted
-webview selections.
+Cursor hosts expose private, feature-detected Browser commands that let the
+extension read the active selection, collect bounded surrounding text, verify
+the active tab and URL before and after capture, and request a validated PNG
+crop. Stock VS Code does not expose another extension's Simple Browser DOM or
+pixels, so Human Learning does not attempt to inspect it.
 
-Persisted annotation rows also store portable links:
+For stock VS Code and portable testing, **Open Experimental Web Reader** opens
+an extension-owned, script-free reading surface. The host fetches only
+revalidated public HTTP(S) addresses with redirect, timeout, and size limits;
+the webview sanitizes the response and strips scripts, forms, credentials,
+remote media, and active page behavior. Its Add to Chat action attaches exact
+selected text, bounded before/after context, portable URL metadata, and an
+optional synthetic context image. Both browser paths use the same provider
+router and never submit the draft.
 
-```md
-raw/pdf/file.pdf#page=N:~:text=exact%20selected%20text
-```
+Clicking a saved Markdown annotation invokes
+`human-learning.openLearningDiscussion` for compatibility. The host confines
+the requested path to `wiki/learning/`, checks that its frontmatter ID matches,
+and opens the durable Markdown note. It does not restore a Learning Chat
+sidebar or start an agent thread.
 
-The annotation row ID remains internal database identity. Quote-based anchors
-store:
+## 7. Learning-note store
 
-- page
-- rects when available
-- text item and character offsets when available
-- quote offset and quote length
-- strategy: `quote-search` or `webview-selection`
-- text hash
-- source hash
-- status and confidence
+[`src/learningNoteStore.ts`](../packages/vscode-extension/src/learningNoteStore.ts)
+uses the discussion ID as identity. A short deterministic hash appears in the
+filename, allowing a restart to find the same note by scanning
+`wiki/learning/` rather than querying an index.
 
-Anchor creation appends records to the anchor sidecar through `appendAnchorToFile`.
+Each file contains:
 
-## 8. Web Targets
+- validated frontmatter;
+- workspace-relative POSIX source path and portable link;
+- Markdown line/character offsets when available;
+- exact Markdown text or canonical PDF extracted quote;
+- latest question and first-paragraph answer summary;
+- complete ordered Q&A;
+- hidden per-message markers used for lossless transcript recovery;
+- fixed review dates;
+- a marked manual-notes region.
 
-`packages/core/src/web/targets.ts` stores durable fallback targets:
+Writes for the same discussion are serialized. The replacement is written to a
+temporary file and atomically renamed. Existing manual-note content is
+preserved during regeneration. Local `file://` URIs are removed from persisted
+workspace links.
 
-```ts
-upsertWebTarget(db, {
-  url,
-  title,
-  selectedText,
-  textFragment,
-  cssSelector,
-  xpath,
-  metadata
-})
-```
+## 8. PDF viewer and discussion path
 
-The generated id is deterministic from URL, selected text, selector, and XPath
-unless the caller supplies an id. The dispatcher resolves `#hl-web=<id>` by
-looking up `web_targets` and preferring `text_fragment` over the plain URL.
+[`src/pdfEditorProvider.ts`](../packages/vscode-extension/src/pdfEditorProvider.ts)
+reads bytes with `vscode.workspace.fs` and sends them to the PDF webview.
+EmbedPDF/PDFium renders locally.
 
-## 9. Search
+Ask PDF uses a single-page text selection with non-empty rectangle geometry.
+The webview supplies:
 
-`packages/core/src/search/search.ts` supports:
+- page and quote;
+- prefix/suffix context;
+- normalized `[left, top, right, bottom]` rectangles in PDF points from a
+  top-left origin;
+- start/end text-item and character offsets when available;
+- a portable page/text-fragment URL;
+- a best-effort, size-limited PNG screenshot for a new asked annotation.
 
-- `searchLexical`
-- `searchSemantic`
-- `searchHybrid`
-- `searchNotes`
+The screenshot attempt covers the union of the selection rectangles with 24
+PDF points of padding, clamped to the page. A successful snapshot stores
+`cropRect: [left, top, right, bottom]`, `padding: 24`, and `unit: "pt"` together
+with its repository-relative file, SHA-256, MIME type, and pixel dimensions.
+Capture failure leaves the text/page/rectangle anchor valid and submits
+text-only context.
 
-The current semantic implementation uses deterministic local embeddings for
-offline repeatability. Agent instructions prefer `qmd` for stronger local hybrid
-retrieval and reranking when it is installed/configured in the Human Learning
-skill environment.
+[`src/pdfDiscussionController.ts`](../packages/vscode-extension/src/pdfDiscussionController.ts)
+validates input, manages Codex turns, streams deltas, and updates the sidecar.
+The underlying
+[`PdfDiscussionStore`](../packages/core/src/pdf-discussions/store.ts):
 
-`SearchResult.anchor_uri` is a native link:
+- validates a versioned schema;
+- keys repository sidecars by PDF SHA-256;
+- uses a lock and conflict checks for concurrent writers;
+- writes atomically;
+- verifies snapshot path, hash, size, dimensions, and all-or-none crop
+  metadata;
+- writes or refreshes the per-annotation JSON-LD mirror for repository PDFs;
+- leaves malformed sidecars untouched and reports an error.
 
-- PDF: `pdfHref(sourcePath, { page })`
-- code: `codeHref(sourcePath, { start, end })`
-- markdown/text: source path
+After an assistant message exists, `PdfEditorProvider` also upserts the
+corresponding `wiki/learning/*.md` and refreshes the mirror with its relative
+body link. Opening the PDF later still reloads the v1 JSON rectangles and
+discussion state, reconstructs page highlights, and exposes the learning-note
+link. Follow-ups in the PDF Ask panel coordinate the Markdown note, v1
+sidecar, and portable mirror.
 
-## 10. VS Code URI Dispatch
+## 9. Agent transport
 
-`packages/vscode-extension/src/uriDispatcher.ts` dispatches native targets:
+[`src/codexAppServerClient.ts`](../packages/vscode-extension/src/codexAppServerClient.ts)
+starts `codex app-server --listen stdio://` lazily for Ask PDF and communicates
+through JSON-RPC.
+
+Ask PDF uses:
+
+- a read-only sandbox;
+- no approval requests;
+- explicit source/context prompts;
+- incremental answer deltas;
+- bounded input validation and cancellation/error handling.
+
+The extension, not the agent, owns Ask PDF's durable file writes. A separate
+[`agentHandoff.ts`](../packages/vscode-extension/src/agentHandoff.ts) path
+exports exact Markdown text or the canonical PDF extracted quote to
+`.hl/agent/selection.*` and attaches the immutable Markdown export to an
+available Codex, Claude Code, Cursor Agent, or CodeBuddy sidebar.
+
+**Add to Chat** exposes that shared path in both custom editors; the PDF path
+may attach a validated crop PNG beside `selection.md`. The router updates the
+chosen provider's draft and never submits it. External answers remain owned by
+the provider and are not automatically written into Human Learning notes.
+
+## 10. Filesystem wiki and graph
+
+[`src/filesystemWiki.ts`](../packages/vscode-extension/src/filesystemWiki.ts)
+recursively reads Markdown while excluding internal/build paths. It derives
+notes, headings, Markdown links, wikilinks, backlinks, forward links, broken
+targets, and graph edges in memory.
+
+YAML `concepts` and `entities` accept inline or block string lists. Values are
+normalized and deduplicated case-insensitively. Invalid or ambiguous metadata
+is ignored instead of inferred.
+
+[`src/backlinksProvider.ts`](../packages/vscode-extension/src/backlinksProvider.ts)
+feeds the link trees.
+[`src/knowledgeGraphPanel.ts`](../packages/vscode-extension/src/knowledgeGraphPanel.ts)
+renders a CSP-safe SVG with distinct note, concept, and entity nodes, an honest
+legend, and accessible text fallback. The graph contains only explicit
+Markdown/frontmatter relationships.
+
+The separate core `scanPortablePdfAnnotations()` API walks only
+`.hl/annotations/pdf/<sha256>/*.jsonld`. It is tested as a migration and
+interchange surface but is not wired into this Markdown wiki or graph path.
+
+## 11. Daily notes
+
+[`src/dailyNotes.ts`](../packages/vscode-extension/src/dailyNotes.ts) creates or
+refreshes `wiki/daily/YYYY-MM-DD.md` using the desktop's local calendar date.
+
+It scans learning-note frontmatter for reviews due on or before the requested
+date. The fixed offsets are 1, 3, 7, 14, 30, 60, and 90 days. Completed
+note/date review pairs are found in earlier generated review regions and
+suppressed; overdue unchecked reviews remain visible.
+
+Unchecked ordinary TODOs are carried from the latest prior daily note. Review
+checkboxes are excluded from that TODO carry. Marker-delimited generated
+sections can be updated without replacing manual prose or current checkbox
+state.
+
+## 12. Git synchronization
+
+[`src/repositorySync.ts`](../packages/vscode-extension/src/repositorySync.ts)
+uses Git as a conservative transport:
+
+1. validate the repository;
+2. fetch and prune remote refs without touching working files;
+3. validate the upstream and refuse any merge for a dirty worktree;
+4. compare local and upstream ancestry;
+5. fast-forward when possible;
+6. return `merge-required` for divergence;
+7. merge only after the command obtains explicit confirmation.
+
+The implementation does not push, commit, reset, stash, delete, or resolve
+conflicts on the user's behalf.
+
+## 13. URI dispatch
+
+[`src/uriDispatcher.ts`](../packages/vscode-extension/src/uriDispatcher.ts)
+classifies ordinary destinations:
 
 | Kind | Behavior |
 | --- | --- |
-| Note | `vscode.openWith(..., human-learning.markdownEditor)` and reveal heading/block/line |
-| Code | Open native VS Code text editor and reveal `#Lx-Ly` |
-| PDF | Execute `human-learning.openPdfTarget({pdfPath,page,textFragment})` |
-| Web | Open Chrome first, then fall back to VS Code external opener |
-| Image/Text | Open local file |
-| Unknown | Show VS Code error |
+| Markdown/note | Open custom Markdown editor and reveal heading/block/line |
+| Code | Open native text editor and reveal `#Lx-Ly` |
+| PDF | Open custom PDF viewer at page/text fragment |
+| Web | Use `vscode.env.openExternal` |
+| Image/text | Open the local file |
+| Unknown | Report an error |
 
-It does not dispatch raw internal annotation IDs. Portable PDF targets are
-classified directly from the Markdown destination.
+Relative destinations in generated learning notes resolve against the
+containing note. Workspace-root-style destinations remain supported. This
+keeps source links portable after clone or repository relocation.
 
-## 11. Markdown Editor
+## 14. Security and reliability
 
-`packages/vscode-extension/webview-src/markdown-editor.ts` owns the CodeMirror
-editor shell. The hybrid rendering extensions live under:
+- Webviews use content-security policies and validated host messages.
+- Agent output is inserted with text-safe rendering, not arbitrary HTML.
+- Opening a Markdown annotation confines its note path to `wiki/learning/` and
+  verifies the stored ID.
+- PDF sidecars use schema validation, lock files, atomic writes, and
+  content-addressed routing.
+- Portable annotation paths remain repository-relative; the scanner ignores
+  damaged records and symbolic-link escapes.
+- Screenshot capture failure is non-fatal and never erases the source anchor.
+- Agent threads cannot modify the repository.
+- Git sync refuses dirty state and requires consent for divergence.
+- Exact quotes and complete transcripts keep summaries auditable.
 
-```text
-packages/vscode-extension/webview-src/extensions/
-```
+## 15. MCP, CLI, and SQLite status
 
-Important rendering/interaction details:
+MCP is useful as an optional structured tool boundary for external agents. The
+CLI is useful for headless migration, linting, import, diagnostics, or CI.
+Neither is called by the interactive extension.
 
-- active lines stay raw and editable
-- inactive lines can render headings, properties, math, links, images, tables,
-  code blocks, Mermaid, callouts, tags, footnotes, and comments
-- display math keeps source rows and line numbers stable while hiding source
-  text when inactive
-- fenced code blocks keep syntax highlighting and alignment even when the cursor
-  enters the block
-- opening and closing fence lines reveal raw backticks when active
-- Mermaid diagrams render at natural scale; wide diagrams scroll horizontally
-  instead of shrinking unreadably
-- Vim movement can enter rendered math/code widgets
-- Vim ex commands send `save`, `close`, and `saveAndClose` messages to the host
-- copy and paste preserve raw markdown source
+Database-backed core and old split-extension code remain only as legacy
+surfaces. They should not gain new product dependencies. Once concrete
+migration/compatibility consumers are retired, they can be deleted without
+changing the filesystem-first desktop architecture.
 
-Bundled editor libraries align with the Obsidian-like behavior where useful:
+## 16. Verification
 
-```text
-CodeMirror 6
-@replit/codemirror-vim
-MathJax
-Mermaid 11.4.1
-Prism 1.29.0
-DOMPurify
-Turndown
-YAML 2.7.0
-```
-
-## 12. PDF Viewer
-
-The main extension and split PDF extension build a custom editor for PDFs using
-EmbedPDF/PDFium packages. The webview bundle copies `pdfium.wasm` and
-`sql-wasm.wasm` for offline extension-host use.
-
-The PDF provider resolves:
-
-- `#page=N`
-- `#page=N:~:text=...`
-
-The page and parsed text fragment are surfaced directly to the webview for
-page-scoped matching and transient highlighting, without a database lookup.
-
-## 13. Generated Agent Files
-
-`generateAgentInstructions()` writes:
-
-- `AGENTS.md`
-- `CLAUDE.md`
-- `.claude/commands/hl-*.md`
-- `.agents/skills/human-learning/SKILL.md`
-- `.codex/config.toml`
-
-The generated rules now say:
-
-- use native Markdown/Obsidian links
-- do not invent coordinates, chunk IDs, anchor IDs, or web target IDs
-- cite PDF chunks directly when search returns them
-- create anchors only for arbitrary selections outside stable chunks
-- use `hl search` before `hl anchor create-pdf --quote`
-- prefer `qmd` when configured
-
-## 14. Verification
-
-Use these commands for the current implementation:
+Use scoped commands for the simplified product:
 
 ```bash
-pnpm test
-pnpm build:extension
-node packages/vscode-extension/test/e2e/pure-e2e.mjs
-npx playwright test --config playwright.config.ts
+pnpm --filter human-learning-vscode exec tsc --noEmit
+pnpm --filter @human-learning/core test
+pnpm --filter human-learning-vscode test
+pnpm exec playwright test --config playwright.config.ts
 ```
 
-`pnpm test` covers core, CLI, and extension unit tests. Playwright covers the
-markdown editor and PDF viewer webview behavior.
+The build should contain only the combined host/webview artifacts and
+`pdfium.wasm`. Unit tests cover filesystem parsing, learning-note persistence,
+annotation opening, daily regeneration, Git decisions, graph rendering, Codex transport,
+PDF sidecars, portable annotation mapping/scanning, crop metadata, and
+host/webview messages. Playwright covers the rendered Markdown and PDF
+interactions.
+
+The final release gate is a real-host smoke test in both VS Code and Cursor,
+because browser fixtures alone cannot prove custom-editor, command, selection
+prompt, context-menu, shortcut, and composer behavior.

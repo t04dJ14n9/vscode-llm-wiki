@@ -54,6 +54,11 @@ interface PdfAskPageSurface {
   pageHeight: number;
 }
 
+interface PdfSelectionCrop {
+  dataUrl: string;
+  cropRect: PdfRect;
+}
+
 interface VsCodeWebviewApi {
   postMessage(message: unknown): void;
   getState(): unknown;
@@ -108,6 +113,13 @@ export function capturePdfSelectionCrop(
   surface: PdfAskPageSurface,
   selection: PdfAskSelection,
 ): string | undefined {
+  return capturePdfSelectionSnapshot(surface, selection)?.dataUrl;
+}
+
+function capturePdfSelectionSnapshot(
+  surface: PdfAskPageSurface,
+  selection: PdfAskSelection,
+): PdfSelectionCrop | undefined {
   const rects = validRects(selection.rects);
   if (!rects.length || surface.canvas.width < 1 || surface.canvas.height < 1) return undefined;
   const union = rects.reduce((current, rect) => ({
@@ -163,7 +175,12 @@ export function capturePdfSelectionCrop(
     }
     try {
       const dataUrl = output.toDataURL('image/png');
-      if (base64ByteLength(dataUrl.split(',')[1] ?? '') <= ASK_PDF_MAX_PNG_BYTES) return dataUrl;
+      if (base64ByteLength(dataUrl.split(',')[1] ?? '') <= ASK_PDF_MAX_PNG_BYTES) {
+        return {
+          dataUrl,
+          cropRect: [left, top, right, bottom],
+        };
+      }
     } catch {
       return undefined;
     }
@@ -194,6 +211,7 @@ class PdfAskPanelController implements PdfAskPanel {
   private activeWindowKey: string | undefined;
   private currentSelection: PdfAskSelection | undefined;
   private currentCropDataUrl: string | undefined;
+  private currentCropRect: PdfRect | undefined;
   private currentSelectionKey: string | undefined;
   private draft: string;
   private legacyDraftClaimed = false;
@@ -292,10 +310,12 @@ class PdfAskPanelController implements PdfAskPanel {
     this.currentSelection = { ...selection, rects };
     this.activeAnnotationId = undefined;
     this.currentSelectionKey = undefined;
-    this.currentCropDataUrl = capturePdfSelectionCrop(
+    const crop = capturePdfSelectionSnapshot(
       this.options.getPageSurface(selection.page) ?? { canvas: document.createElement('canvas'), pageWidth: 1, pageHeight: 1 },
       this.currentSelection,
     );
+    this.currentCropDataUrl = crop?.dataUrl;
+    this.currentCropRect = crop?.cropRect;
     this.errorMessage = undefined;
     this.transientActionError = undefined;
     this.linkCopyNotice = undefined;
@@ -712,8 +732,15 @@ class PdfAskPanelController implements PdfAskPanel {
       notices.push({ kind: 'status', text: 'Response stopped. You can revise the question and send again.' });
     }
     if (annotation && annotationHasAnswer(annotation) && turnState.status !== 'running') {
+      if (annotation.learningNotePath) {
+        actions.push({ kind: 'open-note', label: 'Open learning note', primary: true });
+      }
       if (!annotation.promotion && this.consentGranted) {
-        actions.push({ kind: 'promote', label: 'Continue in Codex', primary: true });
+        actions.push({
+          kind: 'promote',
+          label: 'Continue in Codex',
+          primary: !annotation.learningNotePath,
+        });
       } else if (annotation.promotion) {
         actions.push({ kind: 'open-task', label: 'Open Codex task', primary: true });
         if (this.promotionError?.annotationId === annotation.id) {
@@ -815,6 +842,11 @@ class PdfAskPanelController implements PdfAskPanel {
       case 'openTranscriptLink':
         this.post({ type: 'pdfDiscussionOpenLink', href: event.href });
         return;
+      case 'openLearningNote':
+        if (annotation) {
+          this.post({ type: 'pdfDiscussionOpenLearningNote', annotationId: annotation.id });
+        }
+        return;
       case 'promote':
         if (annotation) this.post({ type: 'pdfDiscussionPromote', annotationId: annotation.id });
         return;
@@ -889,6 +921,12 @@ class PdfAskPanelController implements PdfAskPanel {
       question,
       ...(model ? { model } : {}),
       ...(base64 ? { snapshotPngBase64: base64 } : {}),
+      ...(base64 && this.currentCropRect
+        ? {
+            snapshotCropRect: this.currentCropRect,
+            snapshotPadding: ASK_PDF_CROP_PADDING_POINTS,
+          }
+        : {}),
     });
     this.pendingSubmits.set(pendingOwnerKey, {
       requestId,
@@ -911,6 +949,7 @@ class PdfAskPanelController implements PdfAskPanel {
     this.currentSelection = selectionFromAnnotation(annotation);
     this.currentSelectionKey = annotation.selectionKey;
     this.currentCropDataUrl = undefined;
+    this.currentCropRect = undefined;
     this.overviewOpen = false;
     this.activateWindow(annotation.id, { restore: true });
     this.closedByUser = false;

@@ -31,6 +31,7 @@ class CodeBlockHeaderWidget extends WidgetType {
     private readonly code: string,
     private readonly blockFrom: number,
     private readonly blockTo: number,
+    private readonly blockIsActive: boolean,
   ) {
     super();
   }
@@ -48,13 +49,34 @@ class CodeBlockHeaderWidget extends WidgetType {
 
     const label = document.createElement('div');
     label.className = 'cm-hybrid-codeblock-language';
-    label.textContent = formatCodeBlockLanguage(this.language);
+    label.textContent = this.blockIsActive
+      ? formatActiveCodeBlockFence(this.language)
+      : formatCodeBlockLanguage(this.language);
 
     const copyButton = document.createElement('button');
     copyButton.type = 'button';
     copyButton.className = 'cm-hybrid-codeblock-copy';
-    copyButton.textContent = 'Copy';
+    copyButton.setAttribute('aria-label', 'Copy code');
     copyButton.title = 'Copy code';
+    const copyIcon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    copyIcon.classList.add('cm-hybrid-codeblock-copy-icon');
+    copyIcon.setAttribute('viewBox', '0 0 16 16');
+    copyIcon.setAttribute('aria-hidden', 'true');
+    copyIcon.setAttribute('focusable', 'false');
+    const copyBack = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    copyBack.setAttribute('x', '5.5');
+    copyBack.setAttribute('y', '1.5');
+    copyBack.setAttribute('width', '8');
+    copyBack.setAttribute('height', '10');
+    copyBack.setAttribute('rx', '1.25');
+    const copyFront = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    copyFront.setAttribute('x', '2.5');
+    copyFront.setAttribute('y', '4.5');
+    copyFront.setAttribute('width', '8');
+    copyFront.setAttribute('height', '10');
+    copyFront.setAttribute('rx', '1.25');
+    copyIcon.append(copyBack, copyFront);
+    copyButton.appendChild(copyIcon);
     copyButton.addEventListener('mousedown', event => {
       event.preventDefault();
       event.stopPropagation();
@@ -65,7 +87,7 @@ class CodeBlockHeaderWidget extends WidgetType {
       void writeTextToClipboard(this.code, text => dispatchCopyTextEvent(view.dom, text));
     });
 
-    header.append(copyButton, label);
+    header.append(label, copyButton);
     inner.append(header);
     wrapper.appendChild(inner);
 
@@ -83,7 +105,8 @@ class CodeBlockHeaderWidget extends WidgetType {
     return this.language === other.language
       && this.code === other.code
       && this.blockFrom === other.blockFrom
-      && this.blockTo === other.blockTo;
+      && this.blockTo === other.blockTo
+      && this.blockIsActive === other.blockIsActive;
   }
 
   override ignoreEvent(): boolean {
@@ -120,6 +143,20 @@ function formatCodeBlockLanguage(language: string): string {
   const label = codeBlockLanguageLabels[normalized.toLowerCase()];
   if (label) return label;
   return normalized.charAt(0).toUpperCase() + normalized.slice(1);
+}
+
+const codeBlockLanguageNames: Record<string, string> = {
+  js: 'javascript',
+  md: 'markdown',
+  py: 'python',
+  sh: 'shell',
+  ts: 'typescript',
+  yml: 'yaml',
+};
+
+function formatActiveCodeBlockFence(language: string): string {
+  const normalized = language.trim().toLowerCase();
+  return `\`\`\`${codeBlockLanguageNames[normalized] ?? normalized}`;
 }
 
 class CodeBlockFooterWidget extends WidgetType {
@@ -196,14 +233,20 @@ export function addCodeBlockDecorations(
 ): void {
   const openingLine = state.doc.line(block.startLine);
   const closingLine = state.doc.line(block.endLine);
-  const blockHasSelection = [...activeLines].some(lineNumber => (
+  const blockIsActive = [...activeLines].some(lineNumber => (
     lineNumber >= block.startLine && lineNumber <= block.endLine
   ));
-  if (blockHasSelection) {
+  if (activeLines.has(block.startLine)) {
     decorations.push(activeCodeBlockOpeningLineDeco.range(openingLine.from));
   } else {
     decorations.push(Decoration.replace({
-      widget: new CodeBlockHeaderWidget(block.language ?? '', block.content, block.from, block.to),
+      widget: new CodeBlockHeaderWidget(
+        block.language ?? '',
+        block.content,
+        block.from,
+        block.to,
+        blockIsActive,
+      ),
     }).range(openingLine.from, openingLine.to));
   }
 
@@ -211,7 +254,7 @@ export function addCodeBlockDecorations(
     decorations.push(codeBlockContentLineDeco.range(state.doc.line(lineNumber).from));
   }
 
-  if (blockHasSelection) {
+  if (activeLines.has(block.endLine)) {
     decorations.push(activeCodeBlockClosingLineDeco.range(closingLine.from));
   } else {
     decorations.push(Decoration.replace({
