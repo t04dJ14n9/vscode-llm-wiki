@@ -1,192 +1,216 @@
-# Human Learning (`hl`)
+# Human Learning
 
-本地优先的 VS Code 学习工作区，将原始学习材料（PDF、网页快照、代码、Markdown 笔记）通过 AI 代理转化为一个**可溯源的知识图谱**。
+Human Learning is a desktop learning workspace for VS Code and Cursor. Open a
+normal Git repository, read Markdown, PDFs, and selected web passages, attach
+source context to a supported agent draft, and keep durable PDF discussions
+connected to their source.
 
-> 不是通用笔记应用，不是 PDF 编辑器，不是 Zotero 替代品，也不是 Obsidian 克隆。
-> 是一个以源文档为地址的学习图谱，以 PDF 和 Markdown 为前端界面。
+The combined VS Code extension is the product. It is local-first,
+filesystem-first, and intentionally has no web or mobile app.
 
----
+For the complete design and integration guide, see
+[Architecture and VS Code Integration](docs/architecture-and-vscode-integration.md).
 
-## 核心概念
+## Learning loop
 
-**Source Anchor（源锚点）** 是项目的核心抽象——对任意文档片段的稳定、可寻址引用。每一个有意义的选区都可以成为：
+1. Open a Markdown file or PDF in VS Code or Cursor.
+2. Select the passage you want to understand.
+3. Use the selection prompt, context menu, or `Cmd+L` / `Ctrl+L` to add the
+   passage to the active supported agent draft without submitting it.
+4. For a PDF, optionally use the separate Ask PDF panel for a durable,
+   multi-turn discussion.
+5. Reopen a source annotation later to review its Markdown learning note.
+6. Use the daily note and concept graph to decide what to revisit next.
 
-- 一个稳定锚点（`anchors.jsonl`）
-- 一条 Markdown 引用
-- SQLite 链接图中的一条边
-- 一个可选的嵌入向量块
-- 一个代理上下文包
+Codex powers the built-in Ask PDF flow and its durable note creation.
+**Send Selection to Agent…** exports exact Markdown text or the canonical PDF
+extracted quote and attaches it to an installed Codex, Claude Code, Cursor
+Agent, or CodeBuddy sidebar. Those
+external sidebars own their own conversation; Human Learning does not scrape
+their answers into a learning note.
 
----
+**Add to Chat** is the compact action in the Markdown and PDF selection UI;
+`Cmd+L` on macOS or `Ctrl+L` elsewhere invokes the same shared handoff. It
+prefers an active Codex or Claude editor chat through stable VS Code APIs, then
+uses a selected Cursor composer when Cursor exposes that capability. Ambiguous
+sidebar-only cases show a provider picker instead of guessing. The command
+refreshes `.hl/agent/selection.{md,json,png}` and attaches immutable files from
+`.hl/agent/exports/<id>/`; optional visual evidence falls back to text context
+if it cannot be saved or attached. Human Learning only updates the draft and
+never submits it.
 
-## 项目结构
+Cursor Browser selections can also be captured with bounded surrounding text
+and a real selection crop. Stock VS Code cannot inspect Simple Browser, so the
+separate **Experimental Web Reader** safely fetches and sanitizes public pages
+and can attach a synthetic selection-context image; it does not support page
+scripts, authentication, cookies, forms, or remote media.
 
+## Current desktop features
+
+- A CodeMirror-based Markdown editor with rendered headings, links, math,
+  Mermaid, tables, code, images, callouts, tasks, footnotes, and optional Vim
+  mode.
+- An EmbedPDF/PDFium viewer with local rendering, page navigation, selection,
+  highlights, and multi-turn passage discussions.
+- **Add to Chat** for exact Markdown selections and canonical PDF
+  extracted quotes through an
+  automatic selection prompt, context menu, or `Cmd+L` / `Ctrl+L`; PDF also
+  has a selection-toolbar action and optional crop attachment.
+- Selection context export to available Codex, Claude Code, Cursor Agent, and
+  CodeBuddy sidebars.
+- Durable learning notes containing a portable source link, selected quote,
+  concise summary, full transcript, and fixed review dates.
+- Source annotations: Markdown displays a **✦ Note** link and PDF restores
+  page-aligned highlights. Hovering the Markdown annotation, focusing its
+  marker, or moving the caret into its exact range shows the previous question
+  and concise answer; the marker opens the full durable note. PDF discussions
+  can be reopened and continued in Ask PDF.
+- Backlinks and forward links in the Human Learning activity view, contextual
+  **Markdown Outline** and **PDF Outline** panels in the main Explorer sidebar,
+  broken-link detection, and a concept graph parsed directly from repository
+  Markdown.
+- Explicit graph concepts and entities through YAML frontmatter.
+- Daily notes with manual sections, unchecked TODO carry-forward, and review
+  dates at 1, 3, 7, 14, 30, 60, and 90 days.
+- Conservative Git updates: fetch, fast-forward when safe, and ask before a
+  true merge. Dirty worktrees are left untouched.
+
+## Files and Git are the source of truth
+
+The active extension does not require SQLite or a generated database. A
+repository is usable immediately after opening or cloning it.
+
+```text
+my-learning-repo/
+├── notes/                         # authored Markdown, anywhere in the repo
+├── papers/                        # source PDFs, anywhere in the repo
+├── wiki/
+│   ├── learning/                  # human-readable discussion records
+│   └── daily/                     # daily plans and review checklists
+├── .hl/
+│   └── annotations/
+│       └── pdf/
+│           ├── <pdf-sha256>.json  # runtime discussion state
+│           ├── <pdf-sha256>/      # portable annotation JSON-LD
+│           └── assets/            # padded selection screenshots
+└── .git/
 ```
-human-learning/
-├── docs/                        # 设计文档、PRD、MVP 规划
-│   ├── all-in-one plan.md       # 主 PRD（25 节完整产品规格）
-│   ├── product proposal.md      # 产品提案与相关工作
-│   └── superpowers/
-│       ├── plans/               # MVP 实施计划
-│       └── specs/               # MVP 设计规格
-├── packages/
-│   ├── core/                    # @human-learning/core — 核心服务层
-│   ├── cli/                     # @human-learning/cli — `hl` 命令行工具
-│   └── vscode-extension/        # VS Code 扩展（PDF 查看器 + Markdown 编辑器）
-├── package.json                 # pnpm monorepo 根配置
-├── pnpm-workspace.yaml
-└── playwright.config.ts         # E2E 测试配置
+
+Markdown learning notes are the readable study record: source quote, summary,
+and complete Q&A. PDF highlight rectangles and the state needed to reopen the
+PDF discussion are stored in a content-addressed JSON sidecar under
+`.hl/annotations/pdf/` when the PDF is inside the repository. Each asked
+annotation also gets a W3C-shaped JSON-LD mirror containing the exact text,
+page, rectangles, PDF hash, learning-note link, and available screenshot metadata.
+Markdown alone does not reconstruct page geometry. All forms are ordinary
+files and can be reviewed, merged, and recovered with Git.
+
+Markdown annotations use the exact quote plus line and character offsets
+stored in the learning note; no separate annotation database is needed.
+
+## Architecture
+
+```mermaid
+flowchart LR
+    Learner["Learner"]
+    Host["VS Code / Cursor<br/>extension host"]
+    Markdown["Markdown editor"]
+    PDF["PDF viewer"]
+    AskPDF["Ask PDF panel"]
+    Browser["Cursor Browser / Experimental Web Reader"]
+    Agent["Supported agent draft"]
+    Codex["Local Codex app-server"]
+    Repo["Repository files<br/>Markdown + PDF JSON sidecars"]
+    Git["Git remote"]
+
+    Learner --> Markdown
+    Learner --> PDF
+    Learner --> Browser
+    Markdown --> Host
+    PDF --> Host
+    Browser --> Host
+    Host --> Agent
+    PDF --> AskPDF
+    AskPDF <--> Host
+    Host <--> Codex
+    Host <--> Repo
+    Host <--> Git
 ```
 
----
+Webviews render and collect interaction. The extension host owns filesystem,
+Git, VS Code API, and agent-process access. Codex threads are read-only; the
+extension performs the explicit, atomic learning-note write after an answer
+finishes.
 
-## 技术栈
+## MCP and CLI
 
-| 层次 | 技术 |
-|------|------|
-| 数据库 | `sql.js`（WASM SQLite，零原生依赖） |
-| PDF 渲染 | `@embedpdf/pdfium`（VS Code webview） |
-| Markdown 编辑器 | CodeMirror 6 + Vim 模式 |
-| 图表渲染 | Mermaid 11 |
-| 数学公式 | MathJax 4 |
-| CLI | Commander 12 |
-| 测试 | Node `node:test` + Playwright |
-| 构建 | TypeScript 5.4 + Webpack 5 |
-| 包管理 | pnpm workspaces |
+MCP and the `hl` CLI are optional access surfaces, not dependencies of the
+desktop learning flow:
 
----
+- MCP can expose controlled wiki operations to an external agent host.
+- The CLI can support headless linting, migration, imports, health checks, or
+  CI automation.
 
-## 核心数据流
+Ordinary reading, asking, annotating, graphing, reviewing, and syncing happen
+directly in the combined extension. The legacy CLI, MCP server, database-backed
+core modules, and standalone Markdown/PDF extension packages are excluded from
+the simplified release runtime.
 
-```
-原始文件（PDF/MD/代码/文本）
-  → registerSource()       # 注册来源，哈希去重
-  → ingestFile()           # 分块，写入 chunks + search_index
-  → rebuildAllLinks()      # 解析 Markdown 链接，构建链接图
-  → refreshEmbeddings()    # 生成向量，写入 chunk_embeddings
-  → search()               # 词法 / 语义 / 混合搜索
-  → createPdfAnchor()      # 创建 PDF 锚点，写入 anchors.jsonl
-  → exportSourceContext()  # 导出代理上下文（context.md + context.json）
-```
+## Repository packages
 
----
-
-## Vault 目录结构
-
-`hl init` 初始化后的工作区布局：
-
-```
-vault/
-  raw/pdf/, raw/web/, raw/code/, raw/images/, raw/text/
-  notes/Concepts/, notes/Papers/, notes/Projects/,
-  notes/Daily Notes/, notes/Literature Notes/
-  .hl/
-    config.yaml
-    index.sqlite              # 派生数据，可重建
-    anchors/anchors.jsonl     # 锚点规范文件
-    agent/                    # context.md, context.json, today.md
-    annotations/pdf/
-    embeddings/, cache/, logs/
-  AGENTS.md
-  CLAUDE.md
+```text
+packages/
+├── vscode-extension/          # active combined VS Code/Cursor extension
+├── pdf-editor/                # PDF webview shared by the combined extension
+├── core/                      # filesystem-only `lite` entry plus legacy modules
+├── cli/                       # optional legacy/headless surface
+├── mcp-server/                # optional legacy agent surface
+├── vscode-markdown-extension/ # legacy split package, not shipped
+└── vscode-pdf-extension/      # legacy split package, not shipped
 ```
 
----
+The combined bundle aliases `@human-learning/core` to its filesystem-only
+`core/lite` entry. It ships `extension.js`, the Markdown, PDF, and experimental
+web-reader bundles, plus `pdfium.wasm`; it does not ship `sql.js`,
+`sql-wasm.wasm`, or require `.hl/index.sqlite`.
 
-## URI 方案
+## Development
 
-项目使用**原生相对路径**作为链接 URI：
-
-| 类型 | 示例 |
-|------|------|
-| 笔记 | `notes/Concepts/FlashAttention.md` |
-| 笔记标题锚点 | `notes/Concepts/FlashAttention.md#Online Softmax` |
-| PDF 页面锚点 | `raw/pdf/paper.pdf#page=3&anchor=anc_pdf_abc123` |
-| PDF 块引用 | `raw/pdf/paper.pdf#page=7&chunk=chk_pdf_abc123` |
-| 代码行范围 | `raw/code/kernel.cu#L42-L57` |
-| 网页目标 | `https://example.com/article#hl-web=web_abc123` |
-
----
-
-## CLI 命令
+Requirements: Node.js 20.19 or newer, pnpm 10, and VS Code or Cursor.
 
 ```bash
-hl init                          # 初始化 vault
-hl status                        # 显示 vault 状态
-hl doctor                        # 检查环境健康
-hl ingest <file>                 # 摄入文件
-hl search <query>                # 搜索
-hl links rebuild                 # 重建链接图
-hl links check                   # 检查断链
-hl links backlinks <file>        # 查看反向链接
-hl anchor create-pdf             # 创建 PDF 锚点
-hl anchor resolve <id>           # 解析锚点
-hl context export                # 导出代理上下文
-hl embeddings refresh            # 刷新嵌入向量
-hl skills install                # 安装技能
-hl hooks install --target claude # 安装 Claude 钩子
-hl today                         # 今日学习摘要
-```
-
----
-
-## 已实现功能
-
-- **PDF 查看器**：PDFium 渲染，支持选区锚点创建、引用覆盖层、反向链接高亮
-- **Markdown 编辑器**：CodeMirror 6，双向同步，Vim 模式，Mermaid/MathJax 渲染，代码高亮
-- **反向链接面板**：TreeView 展示入链、出链、问题诊断
-- **链接图谱**：构建、检查、修复（大小写不敏感路径匹配）
-- **搜索**：词法搜索（token 索引）+ 语义搜索 + 混合搜索
-- **代理上下文导出**：生成 `context.md` + `context.json` 供 AI 代理使用
-- **活动追踪**：`activity` 表完整写入，`hl today` 返回真实事件计数
-- **真实语义嵌入**：支持 Ollama 和 OpenAI-compatible 接口，通过 `config.yaml` 切换（默认本地哈希向量）
-- **MCP 服务器**：`hl mcp stdio` 实现 JSON-RPC 2.0 over stdio，暴露 7 个工具给 AI 工具（Claude、Cursor 等）
-- **间隔重复系统**：SM-2 算法，`hl review add/list/due/record/history/suspend` 完整 CLI
-- **完整 CLI**：`hl` 命令覆盖初始化、摄入、搜索、链接、锚点、上下文、嵌入、MCP、复习等全流程
-
----
-
-## 待完成事项
-
-### 中优先级
-
-| 功能 | 状态 | 说明 |
-|------|------|------|
-| 链接修复增强 | 部分实现 | `safeRepairLinks()` 仅支持大小写不敏感路径匹配，PRD 要求哈希/模糊匹配 |
-| HTML 快照查看器 | 未实现 | `web_targets` 表和函数存在，无 webview 实现 |
-| 跨平台浏览器打开 | macOS 限定 | `openInChrome()` 使用 macOS `open` 命令，无跨平台回退 |
-
-### 低优先级（未启动）
-
-- 移动端/iPad 注释导入（`hl mobile import`）
-- Zotero / Obsidian 导入适配器
-- 知识图谱可视化
-- 符号感知代码锚点（语言服务器集成）
-- 分割扩展包构建流程（`vscode-markdown-extension` + `vscode-pdf-extension`）
-
----
-
-## 开发
-
-```bash
-# 安装依赖
 pnpm install
 
-# 构建所有包
-pnpm build
-
-# 运行核心测试
+# Type-check and test the active product
+pnpm --filter human-learning-vscode exec tsc --noEmit
 pnpm --filter @human-learning/core test
+pnpm --filter human-learning-vscode test
 
-# 运行 CLI 测试
-pnpm --filter @human-learning/cli test
-
-# 运行 E2E 测试
-pnpm playwright test
+# Run browser-level webview tests
+pnpm exec playwright test --config playwright.config.ts
 ```
 
----
+In VS Code, open this repository and run the **Launch Human Learning
+Extension** debug configuration (`F5`). It builds the combined package and
+opens `demo-vault` in an Extension Development Host. The same extension entry
+point can be launched in Cursor.
 
-## 许可证
+The root `pnpm build` and `pnpm test` commands also exercise the legacy
+monorepo packages. For work on the simplified release, prefer the scoped
+commands above. Split-extension compatibility is opt-in via
+`pnpm --filter human-learning-vscode test:legacy-split`.
+
+## Documentation
+
+- [Architecture and VS Code Integration](docs/architecture-and-vscode-integration.md)
+- [Current Feature List](docs/feature%20list.md)
+- [Current Implementation Detail](docs/implementation%20detail.md)
+
+The remaining proposals, assessments, timelines, reference notes, and files
+under `docs/superpowers/` are historical design records. They may describe
+database-backed, mobile, or split-package designs that are not part of the
+current combined release.
+
+## License
 
 MIT

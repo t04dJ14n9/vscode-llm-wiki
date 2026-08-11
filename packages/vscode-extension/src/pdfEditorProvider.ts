@@ -2,11 +2,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import { statSync } from 'fs';
 import {
-  closeDatabase,
-  createPdfAnchorFromSelection,
-  openDatabase,
   pdfHref,
-  runMigrations,
   type PdfDiscussionAnchorV1,
   type PdfDiscussionAnnotationV1,
   type PdfDiscussionStore,
@@ -19,11 +15,13 @@ import {
   type PdfDiscussionController,
   type PdfDiscussionControllerEvent,
 } from './pdfDiscussionController';
+import { decodeCursorCropPngBase64 } from './cursorCrop';
 import type {
   PdfDiscussionAnnotationSnapshot,
   PdfDiscussionHostToWebviewMessage,
   PdfDiscussionWebviewToHostMessage,
 } from './pdfDiscussionProtocol';
+import type { LearningNoteResult, LearningNoteStore } from './learningNoteStore';
 import type { SelectionContext } from './selectionContext';
 
 interface PdfSelectionAnchor {
@@ -35,32 +33,18 @@ interface PdfSelectionAnchor {
   endCharOffset?: number;
   length?: number;
   rects?: number[][];
-  highlightColor?: PdfHighlightColor;
   prefix?: string;
   suffix?: string;
   snippet: string;
 }
 
-type PdfHighlightColor = 'yellow' | 'red' | 'green' | 'purple';
-
-const PDF_HIGHLIGHT_COLORS = new Set<PdfHighlightColor>([
-  'yellow',
-  'red',
-  'green',
-  'purple',
-]);
-
-interface PdfHighlightSpec {
-  anchor: PdfSelectionAnchor;
-  kind: 'referenced' | 'annotated';
-}
-
-interface PdfReferenceListItem {
-  source: string;
-  sourceLine: number;
-  snippet?: string;
-  contextLine?: string;
-}
+type PdfSelectionAction =
+  | 'addToCursorChat'
+  | 'copyLink'
+  | 'insertLink'
+  | 'copyQuoteAndLink'
+  | 'insertQuoteAndLink'
+  | 'copyRectEmbed';
 
 export interface PdfOutlineDestination {
   pageIndex: number;
@@ -112,9 +96,12 @@ export interface PdfEditorProviderOptions {
   documentRoot?: string;
   globalStoragePath?: string;
   discussionController?: PdfDiscussionController;
+  learningNoteStore?: LearningNoteStore;
   markdownInsertTarget?: MarkdownInsertTarget;
-  annotationsEnabled?: boolean;
 }
+
+export const ADD_SELECTION_TO_CURSOR_CHAT_COMMAND =
+  'human-learning.addSelectionToCursorChat';
 
 const PDF_DISCUSSION_CONSENT_KEY = 'humanLearning.pdf.askPdfConsent';
 
@@ -154,8 +141,8 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
   private readonly documentRoot: string;
   private readonly globalStoragePath?: string;
   private readonly discussionController?: PdfDiscussionController;
+  private readonly learningNoteStore?: LearningNoteStore;
   private readonly markdownInsertTarget?: MarkdownInsertTarget;
-  private readonly annotationsEnabled: boolean;
   private readonly pdfOutlineListeners = new Set<(uri: vscode.Uri) => unknown>();
   readonly onDidChangePdfOutline: vscode.Event<vscode.Uri> = (listener, thisArgs, disposables) => {
     const wrapped = thisArgs
@@ -187,15 +174,14 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
           documentRoot: optionsOrVaultRoot,
           globalStoragePath: context.globalStorageUri?.fsPath,
           markdownInsertTarget,
-          annotationsEnabled: true,
         }
       : optionsOrVaultRoot;
     this.vaultRoot = options.vaultRoot;
     this.documentRoot = options.documentRoot ?? options.vaultRoot ?? process.cwd();
     this.globalStoragePath = options.globalStoragePath;
     this.discussionController = options.discussionController;
+    this.learningNoteStore = options.learningNoteStore;
     this.markdownInsertTarget = options.markdownInsertTarget;
-    this.annotationsEnabled = options.annotationsEnabled ?? Boolean(options.vaultRoot);
     if (this.discussionController) {
       context.subscriptions.push(
         this.discussionController.onEvent(event => this.forwardDiscussionEvent(event)),
@@ -242,16 +228,26 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
     this.getActiveWebview()?.postMessage({ type: 'pdfDiscussionOpenForSelection' });
   }
 
+  async addSelectionToCursorChat(): Promise<void> {
+    this.getActiveWebview()?.postMessage({ type: 'addSelectionToCursorChat' });
+  }
+
   async getActiveSelectionContext(): Promise<SelectionContext | undefined> {
     const active = this.getActiveWebview();
-    const selection = active?.selection;
-    if (!active || !selection?.snippet.trim()) return undefined;
+    return active ? this.toSelectionContext(active.pdfUri, active.selection) : undefined;
+  }
 
-    const relPath = vscode.workspace.asRelativePath(active.pdfUri);
+  private toSelectionContext(
+    pdfUri: vscode.Uri,
+    rawSelection: unknown,
+  ): SelectionContext | undefined {
+    const selection = normalizePdfSelectionAnchor(rawSelection);
+    if (!selection) return undefined;
+    const relPath = vscode.workspace.asRelativePath(pdfUri);
     const textFragment = pdfTextFragmentForSelection(selection);
 
     return {
-      uri: active.pdfUri,
+      uri: pdfUri,
       text: selection.snippet,
       startLine: selection.page,
       endLine: selection.page,
@@ -314,9 +310,11 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
       },
     };
     this.webviews.set(key, active);
-    this.activeKey = key;
-    await vscode.commands.executeCommand('setContext', 'humanLearningPdfOpen', true);
-    await vscode.commands.executeCommand('setContext', 'humanLearningPdfHasSelection', false);
+    if (webviewPanel.active) {
+      this.activeKey = key;
+      await vscode.commands.executeCommand('setContext', 'humanLearningPdfOpen', true);
+      await vscode.commands.executeCommand('setContext', 'humanLearningPdfHasSelection', false);
+    }
 
     webviewPanel.webview.onDidReceiveMessage(async (message: any) => {
       if (isPdfDiscussionMessage(message)) {
@@ -328,7 +326,12 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
           await this.loadPdf(webviewPanel.webview, pdfUri);
           break;
         case 'selectionAction':
-          await this.handleSelectionAction(pdfUri, message.action, message.anchor);
+          await this.handleSelectionAction(
+            pdfUri,
+            message.action,
+            message.anchor,
+            message.snapshotPngBase64,
+          );
           break;
         case 'copyText': {
           const text = normalizePdfMessageText(message.text);
@@ -353,14 +356,6 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
           active.outline = normalizePdfOutlineEntries(message.items);
           this.firePdfOutlineChanged(pdfUri);
           break;
-        case 'requestReferencesForAnchor':
-          await this.sendReferencesForAnchor(webviewPanel.webview, message.anchor);
-          break;
-        case 'openMarkdownAtLocation':
-          if (typeof message.path === 'string') {
-            await this.openMarkdownAt(message.path, Number(message.line ?? 1));
-          }
-          break;
         case 'pageChanged':
           break;
         case 'error':
@@ -370,14 +365,19 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
     });
 
     webviewPanel.onDidChangeViewState(async () => {
-      if (webviewPanel.active) {
-        this.activeKey = key;
-        await vscode.commands.executeCommand('setContext', 'humanLearningPdfOpen', true);
-        await vscode.commands.executeCommand('setContext', 'humanLearningPdfHasSelection', Boolean(active.selection));
-        if (this.annotationsEnabled) await this.sendHighlights(webviewPanel.webview, pdfUri);
-        await this.sendPdfDiscussionState(webviewPanel.webview, pdfUri);
-        this.firePdfOutlineChanged(pdfUri);
+      if (!webviewPanel.active) {
+        if (this.activeKey === key) {
+          this.activeKey = undefined;
+          await vscode.commands.executeCommand('setContext', 'humanLearningPdfOpen', false);
+          await vscode.commands.executeCommand('setContext', 'humanLearningPdfHasSelection', false);
+        }
+        return;
       }
+      this.activeKey = key;
+      await vscode.commands.executeCommand('setContext', 'humanLearningPdfOpen', true);
+      await vscode.commands.executeCommand('setContext', 'humanLearningPdfHasSelection', Boolean(active.selection));
+      await this.sendPdfDiscussionState(webviewPanel.webview, pdfUri);
+      this.firePdfOutlineChanged(pdfUri);
     });
 
     webviewPanel.onDidDispose(async () => {
@@ -412,7 +412,6 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
         type: 'loadPdf',
         data: Buffer.from(bytes).toString('base64'),
       });
-      if (this.annotationsEnabled) await this.sendHighlights(webview, pdfUri);
       await this.sendPdfDiscussionState(webview, pdfUri);
     } catch (error) {
       vscode.window.showErrorMessage(`Failed to load PDF: ${String(error)}`);
@@ -545,8 +544,13 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
         case 'pdfDiscussionSubmit': {
           this.assertPdfDiscussionConsent();
           const snapshotPng = decodePdfDiscussionSnapshot(message.snapshotPngBase64);
+          const snapshotCapture = decodePdfDiscussionSnapshotCapture(
+            snapshotPng,
+            message.snapshotCropRect,
+            message.snapshotPadding,
+          );
           const model = normalizePdfDiscussionModel(message.model);
-          await controller.submit(store, {
+          const annotation = await controller.submit(store, {
             ...(message.annotationId ? { annotationId: message.annotationId } : {}),
             ...(message.selection
               ? { anchor: this.toDiscussionAnchor(pdfUri, message.selection) }
@@ -554,15 +558,19 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
             question: message.question,
             ...(model ? { model } : {}),
             ...(snapshotPng ? { snapshotPng } : {}),
+            ...snapshotCapture,
           });
+          await this.persistPdfLearningNote(pdfUri, annotation);
           await this.sendPdfDiscussionState(webview, pdfUri, message.annotationId, message.requestId);
           return;
         }
-        case 'pdfDiscussionRetry':
+        case 'pdfDiscussionRetry': {
           this.assertPdfDiscussionConsent();
-          await controller.retry(store, { annotationId: message.annotationId });
+          const annotation = await controller.retry(store, { annotationId: message.annotationId });
+          await this.persistPdfLearningNote(pdfUri, annotation);
           await this.sendPdfDiscussionState(webview, pdfUri, message.annotationId, message.requestId);
           return;
+        }
         case 'pdfDiscussionCancel':
           await controller.cancel(store, { annotationId: message.annotationId });
           await this.sendPdfDiscussionState(webview, pdfUri, message.annotationId, message.requestId);
@@ -594,6 +602,21 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
             ...result,
             requestId: message.requestId,
           });
+          return;
+        }
+        case 'pdfDiscussionOpenLearningNote': {
+          const annotation = controller.list(store).find(
+            candidate => candidate.id === message.annotationId,
+          );
+          if (!annotation) throw new Error('PDF discussion annotation was not found.');
+          const note = await this.persistPdfLearningNote(pdfUri, annotation)
+            ?? await this.learningNoteStore?.findDiscussion(annotation.id);
+          if (!note) throw new Error('This discussion does not have a learning note yet.');
+          await vscode.commands.executeCommand(
+            'vscode.openWith',
+            vscode.Uri.file(note.absolutePath),
+            'human-learning.markdownEditor',
+          );
           return;
         }
         case 'pdfDiscussionCopyPortableLink': {
@@ -680,7 +703,10 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
     const controller = this.discussionController;
     const store = this.getDiscussionStore(pdfUri);
     if (!controller || !store) return;
-    const annotations = controller.list(store).map(toPdfDiscussionAnnotationSnapshot);
+    const annotations = await Promise.all(controller.list(store).map(async annotation => {
+      const note = await this.learningNoteStore?.findDiscussion(annotation.id);
+      return toPdfDiscussionAnnotationSnapshot(annotation, note?.relativePath);
+    }));
     await this.postDiscussionMessage(webview, {
       type: 'pdfDiscussionSnapshot',
       annotations,
@@ -700,6 +726,41 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
           : {}),
       })),
     });
+  }
+
+  private async persistPdfLearningNote(
+    pdfUri: vscode.Uri,
+    annotation: PdfDiscussionAnnotationV1,
+  ): Promise<LearningNoteResult | undefined> {
+    if (
+      !this.learningNoteStore
+      || !annotation.messages.some(message => message.role === 'assistant')
+    ) {
+      return undefined;
+    }
+    const sourcePath = vscode.workspace.asRelativePath(pdfUri, false);
+    const note = await this.learningNoteStore.upsertDiscussion({
+      discussionId: annotation.id,
+      source: {
+        kind: 'pdf',
+        path: sourcePath,
+        link: annotation.anchor.portableUrl,
+        location: `page ${annotation.anchor.page}`,
+        quote: annotation.anchor.quote,
+        ...(annotation.anchor.prefix ? { prefix: annotation.anchor.prefix } : {}),
+        ...(annotation.anchor.suffix ? { suffix: annotation.anchor.suffix } : {}),
+      },
+      messages: annotation.messages.map(message => ({
+        role: message.role,
+        markdown: message.markdown,
+        createdAt: message.createdAt,
+      })),
+      ...(annotation.summaryMarkdown ? { summaryMarkdown: annotation.summaryMarkdown } : {}),
+      createdAt: annotation.createdAt,
+      updatedAt: annotation.updatedAt,
+    });
+    this.getDiscussionStore(pdfUri)?.writePortableAnnotation?.(annotation, note.relativePath);
+    return note;
   }
 
   private discussionConsentGranted(): boolean {
@@ -760,9 +821,21 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
 
   private async handleSelectionAction(
     pdfUri: vscode.Uri,
-    action: 'copyLink' | 'insertLink' | 'copyQuoteAndLink' | 'insertQuoteAndLink' | 'highlight' | 'copyRectEmbed',
+    action: unknown,
     anchor: PdfSelectionAnchor,
+    rawSnapshotPngBase64?: unknown,
   ): Promise<void> {
+    if (!isPdfSelectionAction(action)) return;
+    if (action === 'addToCursorChat') {
+      const selection = this.toSelectionContext(pdfUri, anchor);
+      if (!selection) throw new Error('Cannot add an empty PDF selection to Cursor Chat');
+      const snapshotPng = decodeCursorCropPngBase64(rawSnapshotPngBase64);
+      await vscode.commands.executeCommand(ADD_SELECTION_TO_CURSOR_CHAT_COMMAND, {
+        selection,
+        ...(snapshotPng ? { snapshotPng } : {}),
+      });
+      return;
+    }
     const relPath = vscode.workspace.asRelativePath(pdfUri);
     if (action === 'copyRectEmbed') {
       const rect = normalizePdfRects(anchor.rects)?.[0];
@@ -774,19 +847,6 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
 
     const selection = normalizePdfSelectionAnchor(anchor);
     if (!selection) throw new Error('Cannot create a PDF selection link without selected text and a page');
-
-    if (action === 'highlight') {
-      if (!this.annotationsEnabled) {
-        vscode.window.showWarningMessage(
-          'Human Learning PDF highlights require an initialized Human Learning vault. Run `hl init` first.',
-        );
-        return;
-      }
-      await this.persistSelectionAnchor(pdfUri, selection);
-      vscode.window.showInformationMessage('Human Learning PDF highlight created');
-      await this.refreshOpenPdfHighlights(pdfUri);
-      return;
-    }
 
     const textFragment = pdfTextFragmentForSelection(selection);
     const portableUri = pdfHref(relPath, { page: selection.page, textFragment });
@@ -835,159 +895,6 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
     }
   }
 
-  private async persistSelectionAnchor(
-    pdfUri: vscode.Uri,
-    anchor: PdfSelectionAnchor,
-  ): Promise<{ id: string; uri: string }> {
-    const selection = normalizePdfSelectionAnchor(anchor);
-    if (!selection) throw new Error('Cannot persist a PDF highlight without selected text and a page');
-    const relPath = vscode.workspace.asRelativePath(pdfUri);
-    const db = await openDatabase(this.vaultRoot!);
-    try {
-      runMigrations(db);
-      const rects = normalizePdfRects(selection.rects);
-      const highlightColor = normalizePdfHighlightColor(selection.highlightColor);
-      return createPdfAnchorFromSelection(db, this.vaultRoot!, relPath, {
-        quote: selection.snippet,
-        page: selection.page,
-        ...(selection.prefix ? { prefix: selection.prefix } : {}),
-        ...(selection.suffix ? { suffix: selection.suffix } : {}),
-        ...(selection.textItemIndex !== undefined ? { textItemIndex: selection.textItemIndex } : {}),
-        ...(selection.charOffset !== undefined ? { charOffset: selection.charOffset } : {}),
-        ...(selection.endTextItemIndex !== undefined ? { endTextItemIndex: selection.endTextItemIndex } : {}),
-        ...(selection.endCharOffset !== undefined ? { endCharOffset: selection.endCharOffset } : {}),
-        ...(rects ? { rects } : {}),
-        ...(highlightColor ? { highlightColor } : {}),
-        createdBy: 'user',
-      });
-    } finally {
-      closeDatabase(db);
-    }
-  }
-
-  private async refreshOpenPdfHighlights(pdfUri: vscode.Uri): Promise<void> {
-    if (!this.annotationsEnabled) return;
-    const active = this.webviews.get(pdfUri.toString());
-    if (active) await this.sendHighlights(active.panel.webview, pdfUri);
-  }
-
-  private async sendHighlights(webview: vscode.Webview, pdfUri: vscode.Uri): Promise<void> {
-    if (!this.annotationsEnabled) return;
-    const relPath = vscode.workspace.asRelativePath(pdfUri);
-    const db = await openDatabase(this.vaultRoot!);
-    try {
-      runMigrations(db);
-      const rows = db.prepare(`
-        SELECT
-          a.id,
-          a.locator_json,
-          a.text_quote,
-          a.created_by,
-          COUNT(l.id) AS reference_count
-        FROM anchors a
-        JOIN sources s ON s.id = a.source_id
-        LEFT JOIN links l
-          ON (l.to_anchor_id = a.id OR l.to_uri = a.uri)
-          AND l.status = 'resolved'
-        WHERE s.path = ?
-          AND a.kind = 'pdf_rect'
-          AND a.status = 'resolved'
-        GROUP BY a.id, a.locator_json, a.text_quote, a.created_by
-        ORDER BY a.created_at
-      `).all(relPath) as Array<{
-        id: string;
-        locator_json: string;
-        text_quote: string | null;
-        created_by: string;
-        reference_count: number;
-      }>;
-
-      const referenced: PdfHighlightSpec[] = [];
-      const annotated: PdfHighlightSpec[] = [];
-      for (const row of rows) {
-        const anchor = {
-          id: row.id,
-          ...locatorToWebviewAnchor(row.locator_json, row.text_quote ?? ''),
-        } as PdfSelectionAnchor;
-        if (row.reference_count > 0) {
-          referenced.push({ anchor, kind: 'referenced' });
-        } else if (row.created_by === 'user') {
-          annotated.push({ anchor, kind: 'annotated' });
-        }
-      }
-
-      webview.postMessage({ type: 'setHighlights', referenced, annotated });
-    } finally {
-      closeDatabase(db);
-    }
-  }
-
-  private async sendReferencesForAnchor(webview: vscode.Webview, anchor: PdfSelectionAnchor): Promise<void> {
-    if (!this.annotationsEnabled || !anchor?.id) {
-      webview.postMessage({ type: 'referencesForAnchor', anchor, items: [] });
-      return;
-    }
-
-    const db = await openDatabase(this.vaultRoot!);
-    try {
-      runMigrations(db);
-      const rows = db.prepare(`
-        SELECT from_note_path, from_line, label
-        FROM links
-        WHERE status = 'resolved'
-          AND (to_anchor_id = ? OR to_uri IN (SELECT uri FROM anchors WHERE id = ?))
-        ORDER BY from_note_path, from_line
-      `).all(anchor.id, anchor.id) as Array<{
-        from_note_path: string;
-        from_line: number;
-        label: string | null;
-      }>;
-      const items: PdfReferenceListItem[] = [];
-      for (const row of rows) {
-        items.push({
-          source: row.from_note_path,
-          sourceLine: row.from_line,
-          snippet: row.label ?? anchor.snippet,
-          contextLine: await this.readMarkdownLine(row.from_note_path, row.from_line),
-        });
-      }
-      webview.postMessage({ type: 'referencesForAnchor', anchor, items });
-    } finally {
-      closeDatabase(db);
-    }
-  }
-
-  private async readMarkdownLine(relPath: string, oneBasedLine: number): Promise<string | undefined> {
-    try {
-      const uri = vscode.Uri.file(path.join(this.documentRoot, relPath));
-      const open = vscode.workspace.textDocuments.find(doc => doc.uri.fsPath === uri.fsPath);
-      const document = open ?? await vscode.workspace.openTextDocument(uri);
-      const index = Math.max(0, oneBasedLine - 1);
-      if (index >= document.lineCount) return undefined;
-      const text = document.lineAt(index).text.trim();
-      return text.length > 240 ? `${text.slice(0, 237)}...` : text;
-    } catch {
-      return undefined;
-    }
-  }
-
-  private async openMarkdownAt(relPath: string, oneBasedLine: number): Promise<void> {
-    const uri = vscode.Uri.file(path.join(this.documentRoot, relPath));
-    const document = await vscode.workspace.openTextDocument(uri);
-    const line = Math.max(0, Math.min(document.lineCount - 1, oneBasedLine - 1));
-    const anchor = document.offsetAt(new vscode.Position(line, 0));
-
-    await vscode.commands.executeCommand(
-      'vscode.openWith',
-      uri,
-      'human-learning.markdownEditor',
-    );
-    await vscode.commands.executeCommand('human-learning.revealInMarkdownEditor', {
-      uri,
-      selection: { from: anchor, to: anchor },
-    });
-  }
-
   private async waitForWebview(key: string): Promise<ActivePdfWebview | undefined> {
     for (let attempt = 0; attempt < 20; attempt++) {
       const webview = this.webviews.get(key);
@@ -1025,17 +932,9 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
     .toolbar-number span { padding-right: 5px; color: var(--vscode-descriptionForeground); white-space: nowrap; }
     #page-input { width: 36px; }
     #page-total { min-width: 30px; }
-    .toolbar-color-dot { display: inline-block; width: 12px; height: 12px; border-radius: 50%; background: #ffd54f; box-shadow: 0 0 0 1px rgba(255,255,255,.35); }
-    .toolbar-palette { display: inline-flex; align-items: center; gap: 1px; }
-    #toolbar .toolbar-palette .palette-color { min-width: 22px; width: 22px; padding: 0; }
-    #toolbar .toolbar-palette .palette-color[aria-pressed="true"] { background: rgba(127,127,127,.24); box-shadow: inset 0 -2px 0 var(--vscode-focusBorder); }
-    .palette-color[data-palette-highlight-color="red"] .toolbar-color-dot { background: #ff6b6b; }
-    .palette-color[data-palette-highlight-color="green"] .toolbar-color-dot { background: #69db7c; }
-    .palette-color[data-palette-highlight-color="purple"] .toolbar-color-dot { background: #b197fc; }
     .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; }
     .toolbar-menu { position: fixed; top: 42px; z-index: 60; min-width: 210px; padding: 5px; border: 1px solid var(--vscode-panel-border); border-radius: 5px; background: var(--vscode-editorWidget-background); box-shadow: 0 6px 20px rgba(0,0,0,.4); font: 12px var(--vscode-font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif); }
     #display-menu { left: 112px; }
-    #highlight-color-menu { right: 106px; }
     #copy-link-format-menu { right: 54px; }
     .toolbar-menu.hidden { display: none; }
     .toolbar-menu .menu-section { padding: 4px 8px 2px; color: var(--vscode-descriptionForeground); font-size: 11px; }
@@ -1116,25 +1015,43 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
       justify-content: center;
       margin: 0;
       padding: 0;
-      border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border, #454545));
+      border: 1px solid var(--vscode-contrastBorder, var(--vscode-widget-border, var(--vscode-panel-border, #454545)));
       border-radius: 5px;
       appearance: none;
       -webkit-appearance: none;
-      background: var(--vscode-editorWidget-background, var(--vscode-sideBar-background, #252526));
-      color: var(--vscode-icon-foreground, var(--vscode-foreground, var(--vscode-editor-foreground, #cccccc)));
+      background: var(--vscode-button-secondaryBackground, #3a3d41);
+      color: var(--vscode-button-secondaryForeground, #ffffff);
       box-shadow: 0 2px 8px var(--vscode-widget-shadow, rgba(0,0,0,.38));
       cursor: pointer;
       transition: left 120ms ease, background-color 80ms ease, border-color 80ms ease;
     }
     #pdf-history-back[hidden] { display: none; }
     #pdf-sidebar:not([hidden]) ~ #pdf-history-back { left: 254px; }
-    #pdf-history-back:hover { background: var(--vscode-toolbar-hoverBackground, rgba(90,93,94,.31)); }
-    #pdf-history-back:active { background: var(--vscode-toolbar-activeBackground, rgba(90,93,94,.48)); }
-    #pdf-history-back:focus-visible { outline: 1px solid var(--vscode-focusBorder, #007fd4); outline-offset: 2px; }
+    #pdf-history-back:hover { background: var(--vscode-button-secondaryHoverBackground, #45494e); }
+    #pdf-history-back:active {
+      background: var(--vscode-button-secondaryHoverBackground, #45494e);
+      box-shadow: inset 0 1px 2px rgba(0,0,0,.35);
+    }
+    #pdf-history-back:focus-visible { outline: 2px solid var(--vscode-focusBorder, #007fd4); outline-offset: 2px; }
     #pdf-history-back svg { display: block; pointer-events: none; }
     body[data-reduce-animation="on"] #pdf-history-back { transition: none; }
     @media (prefers-reduced-motion: reduce) {
       body[data-reduce-animation="system"] #pdf-history-back { transition: none; }
+    }
+    @media (forced-colors: active) {
+      #pdf-history-back {
+        border-color: ButtonText;
+        background: ButtonFace;
+        color: ButtonText;
+        box-shadow: none;
+        forced-color-adjust: none;
+      }
+      #pdf-history-back:hover,
+      #pdf-history-back:active {
+        border-color: Highlight;
+        background: Highlight;
+        color: HighlightText;
+      }
     }
     #page-container { display: flex; flex-direction: column; align-items: safe center; gap: 12px; padding: 12px; }
     #page-container.scroll-horizontal { width: max-content; min-width: 100%; min-height: 100%; flex-direction: row; align-items: flex-start; }
@@ -1215,14 +1132,6 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
     #page-container.rectangle-mode .page-wrapper { cursor: crosshair; }
     #page-container.rectangle-mode .text-layer { pointer-events: none; user-select: none; }
     .rectangle-selection-overlay { position: absolute; z-index: 15; box-sizing: border-box; border: 1px dashed var(--vscode-focusBorder); background: rgba(0, 127, 212, .16); pointer-events: none; }
-    .annotation-highlight { position: absolute; pointer-events: auto; cursor: pointer; border-radius: 2px; transition: filter .12s, background-color .12s; }
-    body[data-reduce-animation="on"] .annotation-highlight { transition: none; }
-    @media (prefers-reduced-motion: reduce) {
-      body[data-reduce-animation="system"] .annotation-highlight { transition: none; }
-    }
-    .annotation-highlight.referenced { background: rgba(58, 190, 110, .42); }
-    .annotation-highlight.annotated { background: rgba(255, 218, 80, .38); }
-    .annotation-highlight.hover-active { filter: brightness(1.25) saturate(1.2); }
     .anchor-highlight { position: absolute; background: rgba(0, 150, 255, .35); border-radius: 2px; pointer-events: none; }
     .pdf-destination-focus {
       position: absolute;
@@ -1241,18 +1150,16 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
     }
     .pdf-search-match { position: absolute; border-radius: 2px; background: rgba(255, 214, 10, .40); outline: 1px solid rgba(255, 214, 10, .55); pointer-events: none; }
     .pdf-search-match.selected { background: rgba(177, 151, 252, .48); outline-color: rgba(177, 151, 252, .9); }
-    .selection-toolbar { position: absolute; transform: translateX(-50%); z-index: 20; display: flex; gap: 4px; padding: 4px; border: 1px solid var(--vscode-panel-border); border-radius: 6px; background: var(--vscode-editorWidget-background); box-shadow: 0 4px 16px rgba(0,0,0,.3); }
-    .selection-toolbar button { border: 0; border-radius: 4px; padding: 4px 8px; background: var(--vscode-button-background); color: var(--vscode-button-foreground); cursor: pointer; }
+    .selection-toolbar { position: absolute; transform: translateX(-50%); z-index: 20; display: flex; gap: 4px; padding: 4px; border: 1px solid var(--vscode-panel-border); border-radius: 6px; background: var(--vscode-editorWidget-background); box-shadow: 0 4px 16px rgba(0,0,0,.3); font: 12px var(--vscode-font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif); }
+    .selection-toolbar button { border: 0; border-radius: 4px; padding: 4px 8px; background: var(--vscode-button-background); color: var(--vscode-button-foreground); font: inherit; white-space: nowrap; cursor: pointer; }
+    .selection-toolbar button:hover { background: var(--vscode-button-hoverBackground, var(--vscode-button-background)); }
+    .selection-toolbar button:focus-visible { outline: 2px solid var(--vscode-focusBorder, #007fd4); outline-offset: 1px; }
     .selection-toolbar .secondary { background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); }
+    .selection-toolbar .secondary:hover { background: var(--vscode-button-secondaryHoverBackground, var(--vscode-button-secondaryBackground)); }
+    .selection-toolbar .cursor-chat-action { display: inline-flex; align-items: center; gap: 6px; }
+    .selection-toolbar .cursor-chat-action .add-to-chat-shortcut { display: inline-flex; align-items: center; height: 18px; padding: 0 4px; border: 0; border-radius: 4px; background: var(--vscode-toolbar-hoverBackground, rgba(127,127,127,.16)); color: var(--vscode-input-placeholderForeground, var(--vscode-descriptionForeground, inherit)); font: 11px var(--vscode-font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif); }
     .selection-toolbar .menu { position: absolute; top: calc(100% + 6px); right: 0; min-width: 180px; display: none; flex-direction: column; gap: 3px; padding: 4px; border: 1px solid var(--vscode-panel-border); border-radius: 6px; background: var(--vscode-editorWidget-background); }
     .selection-toolbar .menu.open { display: flex; }
-    .ref-popover { position: absolute; z-index: 30; min-width: 260px; max-width: 440px; max-height: 320px; overflow: auto; padding: 6px 0; border: 1px solid var(--vscode-panel-border); border-radius: 6px; background: var(--vscode-editorWidget-background); color: var(--vscode-editor-foreground); box-shadow: 0 8px 24px rgba(0,0,0,.35); font-size: 12px; }
-    .ref-popover .header { padding: 4px 12px 6px; border-bottom: 1px solid var(--vscode-panel-border); color: var(--vscode-descriptionForeground); }
-    .ref-popover .item { padding: 7px 12px; cursor: pointer; }
-    .ref-popover .item:hover { background: var(--vscode-list-hoverBackground, rgba(127,127,127,.18)); }
-    .ref-popover .context { line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-    .ref-popover .meta { margin-top: 3px; color: var(--vscode-descriptionForeground); }
-    .ref-popover .empty { padding: 10px 12px; color: var(--vscode-descriptionForeground); font-style: italic; }
     .error { padding: 24px; color: var(--vscode-errorForeground); }
   </style>
 </head>
@@ -1274,16 +1181,8 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
       <button id="next" type="button" aria-label="Next page">›</button>
     </div>
     <span class="toolbar-spacer"></span>
-    <div class="toolbar-palette" role="group" aria-label="Highlight palette">
-      <button class="palette-color" type="button" aria-label="Yellow highlight" aria-pressed="true" data-palette-highlight-color="yellow"><span class="toolbar-color-dot"></span></button>
-      <button class="palette-color" type="button" aria-label="Red highlight" aria-pressed="false" data-palette-highlight-color="red"><span class="toolbar-color-dot"></span></button>
-      <button class="palette-color" type="button" aria-label="Green highlight" aria-pressed="false" data-palette-highlight-color="green"><span class="toolbar-color-dot"></span></button>
-      <button class="palette-color" type="button" aria-label="Purple highlight" aria-pressed="false" data-palette-highlight-color="purple"><span class="toolbar-color-dot"></span></button>
-      <button id="highlight-color" type="button" aria-label="Highlight color" aria-controls="highlight-color-menu" aria-haspopup="menu" aria-expanded="false" data-highlight-color="yellow">⌄</button>
-    </div>
     <button id="copy-link-format" type="button" aria-label="Copy link format" aria-controls="copy-link-format-menu" aria-haspopup="menu" aria-expanded="false" data-copy-link-format="link">🔗⌄</button>
     <button id="rectangle-selection" type="button" aria-label="Copy embed link to rectangular selection" title="Copy embed link to rectangular selection" aria-pressed="false">▱</button>
-    <button id="direct-highlight" type="button" aria-label="Direct highlight" aria-pressed="false">✎</button>
     <span id="page-info" class="sr-only" aria-live="polite"></span>
   </div>
   <div id="display-menu" class="toolbar-menu hidden" role="menu" aria-label="Display options">
@@ -1303,12 +1202,6 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
     <button type="button" role="menuitemradio" aria-checked="false" data-display-action="reduce-animation-off">Off</button>
     <button type="button" role="menuitemradio" aria-checked="true" data-display-action="reduce-animation-system">System</button>
     <button type="button" role="menuitem" data-display-action="defaults">Defaults</button>
-  </div>
-  <div id="highlight-color-menu" class="toolbar-menu hidden" role="menu" aria-label="Highlight colors">
-    <button type="button" role="menuitemradio" aria-checked="true" data-highlight-color="yellow">Yellow</button>
-    <button type="button" role="menuitemradio" aria-checked="false" data-highlight-color="red">Red</button>
-    <button type="button" role="menuitemradio" aria-checked="false" data-highlight-color="green">Green</button>
-    <button type="button" role="menuitemradio" aria-checked="false" data-highlight-color="purple">Purple</button>
   </div>
   <div id="copy-link-format-menu" class="toolbar-menu hidden" role="menu" aria-label="Copy link format">
     <button type="button" role="menuitemradio" aria-checked="true" data-copy-link-format="link">Link only</button>
@@ -1347,7 +1240,10 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
       </svg>
     </button>
   </div>
-  <script nonce="${nonce}">window.__pdfiumWasmUrl = "${wasmUri.toString()}";</script>
+  <script nonce="${nonce}">
+    window.__pdfiumWasmUrl = "${wasmUri.toString()}";
+    window.__humanLearningAddToCursorChat = true;
+  </script>
   <script nonce="${nonce}" src="${scriptUri.toString()}?v=${nonce}"></script>
 </body>
 </html>`;
@@ -1386,28 +1282,6 @@ function samePdfFileFingerprint(
   );
 }
 
-export function locatorToWebviewAnchor(locatorJson: string, quote: string): Record<string, unknown> {
-  try {
-    const locator = JSON.parse(locatorJson);
-    const rects = normalizePdfRects(locator.rects);
-    const highlightColor = normalizePdfHighlightColor(locator.highlightColor);
-    return {
-      page: locator.page ?? 1,
-      textItemIndex: locator.textItemIndex,
-      charOffset: locator.charOffset,
-      endTextItemIndex: locator.endTextItemIndex,
-      endCharOffset: locator.endCharOffset,
-      ...(rects ? { rects } : {}),
-      ...(highlightColor ? { highlightColor } : {}),
-      ...(normalizePdfMessageText(locator.prefix) ? { prefix: normalizePdfMessageText(locator.prefix) } : {}),
-      ...(normalizePdfMessageText(locator.suffix) ? { suffix: normalizePdfMessageText(locator.suffix) } : {}),
-      snippet: quote,
-    };
-  } catch {
-    return { page: 1, snippet: quote };
-  }
-}
-
 function normalizePdfSelectionAnchor(anchor: unknown): PdfSelectionAnchor | undefined {
   if (!anchor || typeof anchor !== 'object') return undefined;
   const raw = anchor as Record<string, unknown>;
@@ -1427,7 +1301,6 @@ function normalizePdfSelectionAnchor(anchor: unknown): PdfSelectionAnchor | unde
     endCharOffset: numberValue(raw.endCharOffset),
     length: numberValue(raw.length),
     rects: normalizePdfRects(raw.rects),
-    highlightColor: normalizePdfHighlightColor(raw.highlightColor),
     prefix: normalizePdfMessageText(raw.prefix),
     suffix: normalizePdfMessageText(raw.suffix),
     snippet,
@@ -1436,6 +1309,7 @@ function normalizePdfSelectionAnchor(anchor: unknown): PdfSelectionAnchor | unde
 
 function toPdfDiscussionAnnotationSnapshot(
   annotation: PdfDiscussionAnnotationV1,
+  learningNotePath?: string,
 ): PdfDiscussionAnnotationSnapshot {
   return {
     id: annotation.id,
@@ -1469,6 +1343,13 @@ function toPdfDiscussionAnnotationSnapshot(
             width: annotation.snapshot.width,
             height: annotation.snapshot.height,
             mimeType: annotation.snapshot.mimeType,
+            ...(annotation.snapshot.cropRect
+              ? {
+                  cropRect: annotation.snapshot.cropRect,
+                  padding: annotation.snapshot.padding,
+                  unit: annotation.snapshot.unit,
+                }
+              : {}),
           },
         }
       : {}),
@@ -1483,6 +1364,7 @@ function toPdfDiscussionAnnotationSnapshot(
     ...(annotation.summaryMarkdown !== undefined
       ? { summaryMarkdown: annotation.summaryMarkdown }
       : {}),
+    ...(learningNotePath ? { learningNotePath } : {}),
     lastTurn: {
       status: annotation.lastTurn.status,
       ...(annotation.lastTurn.questionMessageId !== undefined
@@ -1516,6 +1398,28 @@ function decodePdfDiscussionSnapshot(value: unknown): Buffer | undefined {
   const decodedLength = (value.length / 4) * 3 - paddingLength;
   if (decodedLength > PDF_DISCUSSION_MAX_PNG_BYTES) throw oversizedPdfDiscussionSnapshot();
   return Buffer.from(value, 'base64');
+}
+
+function decodePdfDiscussionSnapshotCapture(
+  png: Buffer | undefined,
+  rect: unknown,
+  padding: unknown,
+): { snapshotCropRect?: [number, number, number, number]; snapshotPadding?: number } {
+  if (rect === undefined && padding === undefined) return {};
+  const cropRect = normalizePdfRects([rect])?.[0];
+  if (
+    !png
+    || !cropRect
+    || typeof padding !== 'number'
+    || !Number.isFinite(padding)
+    || padding < 0
+  ) {
+    throw new Error('Ask PDF snapshot crop metadata is invalid.');
+  }
+  return {
+    snapshotCropRect: [cropRect[0]!, cropRect[1]!, cropRect[2]!, cropRect[3]!],
+    snapshotPadding: padding,
+  };
 }
 
 function isCanonicalBase64(value: string): boolean {
@@ -1561,6 +1465,7 @@ function isPdfDiscussionMessage(
     'pdfDiscussionCancel',
     'pdfDiscussionPromote',
     'pdfDiscussionOpenPromotedTask',
+    'pdfDiscussionOpenLearningNote',
     'pdfDiscussionCopyPortableLink',
     'pdfDiscussionOpenLink',
     'pdfDiscussionConsent',
@@ -1573,12 +1478,6 @@ function pdfTextFragmentForSelection(selection: PdfSelectionAnchor): PdfTextFrag
     ...(selection.prefix ? { prefix: selection.prefix } : {}),
     ...(selection.suffix ? { suffix: selection.suffix } : {}),
   };
-}
-
-function normalizePdfHighlightColor(value: unknown): PdfHighlightColor | undefined {
-  return typeof value === 'string' && PDF_HIGHLIGHT_COLORS.has(value as PdfHighlightColor)
-    ? value as PdfHighlightColor
-    : undefined;
 }
 
 function normalizePdfRects(value: unknown): number[][] | undefined {
@@ -1716,6 +1615,15 @@ function normalizeLookupText(value: unknown): string | undefined {
 
 function normalizePdfPage(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isSafeInteger(value) && value > 0 ? value : undefined;
+}
+
+function isPdfSelectionAction(value: unknown): value is PdfSelectionAction {
+  return value === 'addToCursorChat'
+    || value === 'copyLink'
+    || value === 'insertLink'
+    || value === 'copyQuoteAndLink'
+    || value === 'insertQuoteAndLink'
+    || value === 'copyRectEmbed';
 }
 
 function decodePath(input: string): string {

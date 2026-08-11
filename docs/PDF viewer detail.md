@@ -1,310 +1,228 @@
-# Human Learning - PDF Viewer And Locator Detail
+# Human Learning: PDF Viewer and Portable Annotations
 
-This document describes the current PDF model after the native reference-model
-update.
+> Current behavior of the combined desktop extension in VS Code and Cursor.
+> For the full system, see
+> [Architecture and VS Code Integration](architecture-and-vscode-integration.md).
 
-## 1. Principle
+## 1. Current boundary
 
-The PDF engine renders and exposes selection data. Human Learning owns locators,
-links, chunks, anchors, graph edges, and agent context.
+The combined extension is the product. It reads PDF bytes through the VS Code
+extension host and renders them locally with the bundled EmbedPDF/PDFium
+webview. The renderer does not upload the document.
 
-```text
-PDF engine:
-  render pages
-  expose text selection
-  expose page coordinates when available
-  support zoom/navigation
+The reader supports local search, page and outline navigation, zoom and fit
+modes, continuous or paginated navigation, one- or two-page layouts, and exact
+text selection. PDF text and glyph geometry come from PDFium, so a selection
+can survive zoom and layout changes without relying on stretched browser text.
 
-Human Learning:
-  chunk PDFs for retrieval
-  create durable anchors for arbitrary selections
-  store locator metadata in SQLite
-  generate portable page/text-fragment markdown links
-  resolve note -> PDF jumps
-  expose context to agents
-```
+The active PDF workflow is filesystem-first:
 
-## 2. Link Formats
+- the PDF stays unchanged;
+- learning answers are readable Markdown;
+- annotation geometry and viewer state are inspectable JSON;
+- Git can diff, merge, and restore those files;
+- the combined extension does not require SQLite, a CLI, or an MCP server.
 
-PDF links are plain markdown links to vault-relative PDF paths.
+## 2. What a PDF anchor is
 
-```md
-[paper p7](raw/pdf/flash-attention.pdf#page=7)
-[selected text](raw/pdf/flash-attention.pdf#page=7:~:text=selected%20text)
-```
+An anchor is the durable description of the selected source passage. It is not
+a screenshot, a search chunk, or a database row.
 
-`hl://pdf/...` is no longer the generated user-facing format.
+Each asked annotation records complementary selectors:
 
-## 3. Chunks Versus Anchors
-
-PDF chunks and PDF anchors are different objects.
-
-| Object | Role | Cardinality |
+| Selector | Stored value | Purpose |
 | --- | --- | --- |
-| Chunk | Search and retrieval unit | Many per PDF |
-| Anchor | Durable arbitrary selection | Sparse |
+| Exact quote | Selected text, with optional prefix and suffix | Lets any scanner recover and verify the original passage |
+| Page | One-based PDF page | Gives a portable page-level fallback |
+| Geometry | Every selection rectangle | Restores the precise visual highlight |
+| Text position | Optional start/end text-item and character offsets | Qualifies the selection when PDFium exposes stable offsets |
 
-Chunks are created during ingestion. Anchors are created only when a user or
-agent explicitly needs to cite a selection outside an existing stable chunk.
+Rectangles use `[left, top, right, bottom]` in PDF points (`pt`, 1/72 inch),
+measured right and down from the page's top-left origin. A multi-line selection
+has multiple rectangles. These are page coordinates, not viewport pixels, so
+they do not change with zoom.
 
-This keeps retrieval rich without forcing every chunk to become an anchor. Both
-objects produce portable links; their internal IDs are never URL parameters.
+The portable JSON-LD mirror represents these as:
 
-## 4. PDF Chunk Metadata
+- a W3C `TextQuoteSelector`;
+- an RFC 8118 `FragmentSelector` with `page=N`;
+- a Human Learning `hl:PdfRectSelector`;
+- an optional `hl:PdfTextItemSelector`.
 
-PDF text is split into layout-ish blocks:
+The canonical extracted quote, page, and rectangles are deliberately
+redundant. Consumers that do not understand the optional text offsets can
+still locate the original text, and the current viewer can draw the original
+highlight.
+
+Learning notes use an ordinary repository-relative PDF link such as:
+
+```markdown
+[Open source](../../papers/paper.pdf#page=7)
+```
+
+The anchor keeps the canonical quote and geometry even when the visible link
+uses only its portable page fragment.
+
+## 3. Ask PDF flow
+
+1. Select a passage on a PDF page.
+2. Open **Ask about selection…** from the selection UI or context menu.
+3. Enter a question in the floating Ask PDF inspector.
+4. On the first submission, the webview automatically attempts a screenshot
+   crop around the selection.
+5. After first-use consent, the extension sends the source packet and question
+   to the local Codex app-server and streams the answer.
+6. A completed answer is written to the learning repository. Cancellation or
+   failure never commits a partial assistant answer.
+
+The source packet contains the canonical extracted quote, nearby text context,
+page/link, anchor geometry, the question and prior turns, and the crop when
+capture succeeded. Agent threads use a read-only sandbox with no approval
+capability; the extension host performs the explicit repository writes.
+
+The inspector belongs to the annotation. It can be moved, resized, minimized
+to its numbered marker, reopened, and used for follow-up questions. Opening and
+closing an empty inspector does not create an annotation; the first submitted
+question does.
+
+## 4. What is persisted
+
+For a repository-managed PDF, the full PDF SHA-256 identifies its annotation
+set. A newly asked annotation produces three records with distinct roles:
+
+| Record | Path | Authority and runtime role |
+| --- | --- | --- |
+| Learning Markdown | `wiki/learning/*.md` | Human-readable authority for the canonical extracted quote, source link, summary, full Q&A, and review dates |
+| v1 runtime sidecar | `.hl/annotations/pdf/<pdf-sha256>.json` | Current viewer state: anchor geometry, transcript, turn status, and inspector state |
+| Portable JSON-LD mirror | `.hl/annotations/pdf/<pdf-sha256>/<annotation-id>.jsonld` | One annotation per file for migration, scanning, and interchange |
+
+The current viewer still reads and updates the v1 sidecar. The JSON-LD mirror
+is not yet its interactive read path; the core
+`scanPortablePdfAnnotations()` API reads that mirror independently. The
+Markdown note remains the authority for what the learner asked and what the
+agent answered.
+
+### Screenshot evidence
+
+Every newly asked annotation attempts a PNG crop. This is automatic rather than
+a per-annotation user choice.
+
+The crop is the union of all selection rectangles plus 24 PDF points of
+surrounding context on every side, clamped to the page. A successful capture is
+stored at:
 
 ```text
-paragraph
-heading
-caption
-table
-list
-formula
-```
-
-Each PDF chunk stores metadata in `chunks.metadata_json`:
-
-```json
-{
-  "line_start": 12,
-  "line_end": 18,
-  "source_path": "raw/pdf/flash-attention.pdf",
-  "page_start": 7,
-  "page_end": 7,
-  "block_type": "paragraph",
-  "reading_order": 4,
-  "text_offset_start": 1502,
-  "text_offset_end": 1844,
-  "bbox_rects": [],
-  "section_path": [],
-  "source_hash": "sha256...",
-  "chunk_hash": "sha256..."
-}
-```
-
-Search currently emits portable page-only PDF citations through
-`SearchResult.anchor_uri`:
-
-```text
-raw/pdf/flash-attention.pdf#page=7
-```
-
-Exact text fragments are emitted for explicit PDF selections and persisted
-annotations, not for retrieval chunks.
-
-## 5. PDF Anchor Metadata
-
-Anchors are stored in the `anchors` table with `kind = 'pdf_rect'`.
-
-Quote-created anchors use `strategy = 'quote-search'`. Webview-created anchors
-use `strategy = 'webview-selection'`.
-
-Locator data includes:
-
-```json
-{
-  "page": 7,
-  "rects": [[120, 240, 530, 310]],
-  "textItemIndex": 82,
-  "charOffset": 4,
-  "endTextItemIndex": 85,
-  "endCharOffset": 19,
-  "quote_offset": 1502,
-  "quote_length": 342,
-  "strategy": "webview-selection"
-}
-```
-
-The persisted URI uses native PDF syntax:
-
-```text
-raw/pdf/flash-attention.pdf#page=7:~:text=FlashAttention%20uses%20tiling
-```
-
-The annotation row keeps its internal ID only in storage.
-
-## 6. Viewer Jump Resolution
-
-The VS Code dispatcher classifies PDF links and calls:
-
-```ts
-human-learning.openPdfTarget({pdfPath,page,textFragment})
-```
-
-The PDF provider resolves:
-
-| Fragment | Resolution |
-| --- | --- |
-| `#page=N` | Open page `N` |
-| `#page=N:~:text=...` | Match the text on page `N`, scroll to it, and flash it |
-
-When selector matching fails, page-level navigation still works.
-
-### Preview-style viewing and selection
-
-The combined and standalone readers share the same viewing implementation.
-Single-page versus two-page layout is independent from continuous versus
-paginated navigation, producing the same four combinations as Preview. The
-default zoom fits the whole visible page or spread; fit mode recomputes when the
-viewer, sidebar, or spread changes. A manually entered zoom is preserved during
-page turns. `Option+Left/Right` and `Option+Up/Down` turn pages without taking
-focus from an active text field.
-
-Text selection does not rely on Chromium guessing carets inside stretched DOM
-text runs. The reader obtains PDFium's loose and tight per-glyph boxes, uses the
-tight boxes for pointer hit-testing, and draws the visible selection from the
-loose PDF boxes. Dragging into leading or trailing line whitespace therefore
-snaps to the nearest glyph on that visual line instead of jumping to the first
-text item on the page. The logical selection and its PDF-coordinate rectangles
-survive zoom and layout rerenders.
-
-Layout, continuity, zoom mode, custom scale, page, spread parity, and theme
-adaptation are saved in VS Code webview state.
-
-## 7. Source Of Truth
-
-Raw PDFs remain immutable. Ask PDF never modifies PDF bytes. Locator, reference,
-and discussion metadata is stored outside the PDF.
-
-Vault-backed Ask PDF discussions use the full PDF SHA-256 as their source
-identity:
-
-```text
-.hl/annotations/pdf/<pdf-sha256>.json
 .hl/annotations/pdf/assets/<annotation-id>/selection.png
 ```
 
-When a PDF is outside a vault, including when it is opened by the PDF-only
-extension without any `.hl` directory, the same data lives under VS Code's
-extension-global storage:
+Its metadata includes the crop rectangle, `padding: 24`, `unit: "pt"`, image
+dimensions, and SHA-256. The crop is supporting visual evidence, not part of
+anchor identity. If rendering or capture fails, the question continues with
+text-only context and the quote/page/multi-rectangle anchor remains valid.
+
+## 5. Reload and round trip
+
+Reopening the same PDF loads the v1 sidecar, restores numbered markers and
+precise highlights, and makes each saved transcript available in its Ask PDF
+inspector. **Open learning note** opens the matching durable Markdown file.
+Follow-up questions append to the same discussion and update the same learning
+note.
+
+The JSON-LD mirror preserves the same source identity for other tools and a
+future viewer migration. The PNG remains linked evidence. None of these files
+modifies or embeds data into the original PDF.
+
+If the PDF bytes change, its SHA-256 changes and it receives a different
+content-addressed annotation set instead of silently attaching old geometry to
+a new document.
+
+## 6. Local agent handoff
+
+**Human Learning: Send Selection to Agent…** is a separate, lightweight path.
+For the active Markdown or PDF selection it writes an immutable snapshot and
+refreshes stable latest-export aliases:
 
 ```text
-<extension-global-storage>/pdf-annotations/<pdf-sha256>/annotations.json
-<extension-global-storage>/pdf-annotations/<pdf-sha256>/assets/<annotation-id>/selection.png
+.hl/agent/exports/<id>/selection.md
+.hl/agent/exports/<id>/selection.json
+.hl/agent/selection.md                  # latest alias
+.hl/agent/selection.json                # latest alias
 ```
 
-Global discussion storage is local to that extension installation. It is not
-encrypted or synchronized. If the same PDF is later opened inside a vault, its
-global discussions are imported non-destructively into the vault sidecar; the
-global copy remains as a backup.
+The extension then attaches the immutable snapshot's `selection.md` to an
+installed Codex, Claude, Cursor Agent, or CodeBuddy panel. The Markdown file
+contains the canonical extracted passage and portable source anchor; the JSON
+file preserves structured context. PDFium line-wrap hyphens may be normalized
+out of that quote, while rectangle geometry and the crop preserve the visual
+source. A later export can refresh the aliases without changing a file already
+attached to a composer.
 
-Other PDF locator data remains separate:
+For a selected PDF passage, **Add to Chat** is available in the
+right-click selection menu, floating selection toolbar, and editor title
+toolbar. It routes through the same export instead of maintaining a separate
+context format. The chosen supported agent receives:
 
-```text
-.hl/index.sqlite
-.hl/anchors/
-.hl/references/pdf/      future/reference overlay output
-.hl/annotations/pdf/     Ask PDF and future/manual annotation sidecars
-```
+- `.hl/agent/exports/<id>/selection.md`, containing the canonical extracted quote and
+  portable page/text-fragment anchor;
+- `.hl/agent/exports/<id>/selection.png`, when the best-effort crop is a valid,
+  bounded PNG that can be saved and attached.
 
-SQLite is the runtime index. Sidecars and markdown links are rebuildable or
-inspectable sources of truth depending on the data type.
+The structured `.hl/agent/selection.json` remains available as the latest
+repository alias but is not attached. The optional latest crop alias is
+`.hl/agent/selection.png`. If saving or attaching the crop fails, the extension
+warns and continues with the Markdown attachment only. The extension updates
+the chosen draft with the available attachments and never submits it. If no
+supported provider is available, the export
+is retained and an availability warning is shown.
 
-## 8. Ask PDF Discussions
+This handoff does not submit the external provider's prompt, read its
+transcript, or auto-persist its answer. Built-in Ask PDF is the supported path
+for streamed multi-turn answers that automatically become learning notes.
 
-Ask PDF is available in both the combined Human Learning extension and the
-standalone PDF extension. Select text on one page, right-click, and choose
-**Ask about selection…**. The first submitted question creates the durable
-annotation; simply opening and closing the panel does not create empty data.
+## 7. Security and path constraints
 
-Each annotation owns a quiet, Codex-inspired floating inspector rather than
-sharing a docked document sidebar. The inspector opens beside its selected
-passage and follows that passage while attached. Dragging its header detaches
-it; its edges and corners resize it within the PDF viewport. Position, size,
-draft, selected model, and minimized state are retained per annotation, so
-switching markers restores that discussion's own window. Minimizing or pressing
-Escape collapses the inspector back into its blue numbered marker without
-cancelling a running turn. The source quote and crop stay collapsed until
-needed, transcript nodes remain stable while answers stream, and the composer
-uses icon controls. Below 900 px the inspector becomes an overlay; below 620 px
-it becomes full-width with pointer movement and resizing disabled.
+- Webviews run under a restrictive content-security policy and send typed,
+  validated messages to the extension host.
+- Portable paths must be repository-relative. Absolute paths, URI schemes,
+  `..` traversal, and malformed percent encoding are rejected.
+- The portable scanner accepts only the content-addressed
+  `.hl/annotations/pdf/<64-hex-sha256>/*.jsonld` layout and strictly validates
+  selectors, source hashes, learning-note links, and canonical snapshot paths.
+- Scanner and snapshot reads reject symbolic links, confine real paths to their
+  storage root, use no-follow file opens where supported, and check that a file
+  did not change while being opened.
+- Snapshot bytes are bounded and verified as PNG data; stored hashes and pixel
+  dimensions must match.
+- A PDF outside the repository uses extension-controlled global runtime
+  storage rather than writing beside an unrelated file. Portable JSON-LD
+  mirrors are emitted only for repository-managed PDFs.
+- Without an open folder, repository and agent features remain disabled; the
+  Markdown and PDF viewers remain available without writing to the process
+  working directory.
+- The raw PDF is never modified, and read-only agent threads cannot silently
+  edit the repository.
 
-The extension host launches the local `codex app-server`, reuses the user's
-existing Codex authentication, and never stores an API key. The supported
-development baseline is Codex CLI 0.144.1 or newer. The executable defaults to
-`codex` and can be changed with `humanLearning.pdf.codexCommand`.
+## 8. Verification
 
-After consent, the composer loads the visible model catalog from the signed-in
-Codex account. It starts with the catalog default, lets the user choose another
-visible model for the lightweight discussion, and records the chosen model as
-turn provenance. If a previously selected model disappears, Ask PDF falls back
-to the current catalog default. Promotion remains a clean handoff and does not
-force the lightweight discussion's model onto the persistent Codex task.
-
-Lightweight discussion tasks use:
-
-```text
-ephemeral: true
-sandbox: read-only
-approvalPolicy: never
-web_search: cached
-```
-
-After first-use consent, the selected quote, nearby context, portable page/text
-link, question, and optional PNG crop are sent to the local Codex runtime. The
-visible answer streams in memory. Only a successfully completed answer is
-committed to the annotation by the extension host; cancellation and failure
-retain the question but never persist a partial assistant answer. Diagnostics
-include runtime lifecycle and request metadata, but never PDF text, crops,
-questions, or answers.
-
-**Continue in Codex** creates a normal, persistent Codex task using the user's
-usual permission defaults. It is a one-time, one-way handoff of the visible
-source context and transcript. The annotation retains the task ID, but later
-turns in that task are not synchronized back into the PDF discussion.
-
-## 9. Agent Rules
-
-Agents must not invent:
-
-- PDF rectangles
-- chunk IDs
-- anchor IDs
-- page-specific quotes not found in the source
-
-Preferred workflow:
-
-```text
-1. Use hl search to find relevant chunks.
-2. Cite the returned chunk link if it is precise enough.
-3. Use hl anchor create-pdf --quote only when an arbitrary quote needs a durable anchor.
-4. Insert only returned native markdown links.
-```
-
-## 10. Current Engine
-
-The current extension uses EmbedPDF/PDFium packages and bundles `pdfium.wasm`.
-PDF.js remains a reasonable fallback strategy for future work, but the current
-main extension is wired through the EmbedPDF/PDFium bundle.
-
-## 11. Test Coverage
-
-PDF behavior is covered by:
+Run the current combined extension checks from the repository root:
 
 ```bash
-npx playwright test --config playwright.config.ts --grep "pdf viewer"
+pnpm --filter human-learning-vscode exec tsc --noEmit
+pnpm --filter @human-learning/core test
+pnpm --filter human-learning-vscode test
+pnpm exec playwright test --config playwright.config.ts
 ```
 
-The broader editor/PDF integration is covered by:
+`pnpm --filter human-learning-vscode test:legacy-split` is an optional
+compatibility check for the retired split-extension packages; it is not part of
+the combined product's runtime.
 
-```bash
-pnpm test
-node packages/vscode-extension/test/e2e/pure-e2e.mjs
-npx playwright test --config playwright.config.ts
-```
+The final desktop smoke test should be repeated in both VS Code and Cursor:
 
-For a manual smoke test against the installed Codex runtime:
-
-```bash
-codex --version       # must be 0.144.1 or newer
-codex login status
-pnpm build:extension
-pnpm build:pdf-extension
-```
-
-Then select text on one PDF page, ask a question, and verify that the answer
-streams. Close and reopen the PDF to confirm the numbered marker and transcript
-persist, ask a follow-up, and verify the PDF SHA-256 is unchanged. Repeat from a
-folder without `.hl` using the PDF-only extension. Finally, promote the
-discussion and confirm that the persistent Codex task opens.
+1. select a multi-line PDF passage and open Ask PDF;
+2. after approving transmission, ask one question and wait for completion;
+3. inspect the learning note, v1 sidecar, JSON-LD mirror, and PNG (or the
+   documented text-only fallback);
+4. reload the window and reopen the PDF;
+5. verify the marker, exact highlight, transcript, learning-note link, and a
+   follow-up question.

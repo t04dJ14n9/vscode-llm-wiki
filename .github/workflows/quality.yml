@@ -40,3 +40,36 @@ jobs:
 
       - name: Run quality checks
         run: pnpm check
+
+  webview-regressions:
+    name: Markdown and PDF browser regressions
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.28.2
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Build combined extension
+        run: pnpm build:extension
+
+      - name: Run Markdown and PDF browser regressions
+        run: pnpm exec playwright test --config playwright.config.ts

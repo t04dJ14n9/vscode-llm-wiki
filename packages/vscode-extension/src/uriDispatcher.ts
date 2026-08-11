@@ -1,28 +1,42 @@
 import * as vscode from 'vscode';
-import { execFile } from 'child_process';
 import {
   classifyReferenceTarget,
-  closeDatabase,
-  openDatabase,
-  resolveWebTarget,
-  runMigrations,
   type PdfTextFragment,
 } from '@human-learning/core';
-import { existsSync, mkdirSync, writeFileSync } from 'fs';
-import { isAbsolute, join } from 'path';
+import { existsSync, lstatSync, mkdirSync, writeFileSync } from 'fs';
+import { isAbsolute, join, relative, resolve, sep } from 'path';
 
 export interface DispatchUriOptions {
   openWebTarget?(url: string): Promise<void> | void;
 }
 
-export async function dispatchUri(vaultRoot: string, uri: string, options: DispatchUriOptions = {}): Promise<void> {
+export async function dispatchUri(
+  vaultRoot: string | undefined,
+  uri: string,
+  options: DispatchUriOptions = {},
+): Promise<void> {
   const target = classifyReferenceTarget(uri);
+  if (
+    !vaultRoot
+    && target.kind !== 'web'
+    && !(target.kind === 'pdf' && Boolean(target.path && isAbsolute(target.path)))
+  ) {
+    vscode.window.showErrorMessage(
+      `Open a workspace folder before opening this relative link: ${uri}`,
+    );
+    return;
+  }
+  const workspaceRoot = vaultRoot ?? '';
 
   switch (target.kind) {
     case 'note': {
       if (!target.path) break;
-      const filePath = join(vaultRoot, target.path);
-      ensureMarkdownNoteExists(filePath);
+      const filePath = workspaceFilePath(workspaceRoot, target.path);
+      if (!filePath) {
+        showOutsideWorkspaceError(target.path);
+        return;
+      }
+      ensureMarkdownNoteExists(workspaceRoot, filePath);
       const fileUri = vscode.Uri.file(filePath);
       await vscode.commands.executeCommand(
         'vscode.openWith',
@@ -41,9 +55,20 @@ export async function dispatchUri(vaultRoot: string, uri: string, options: Dispa
 
     case 'code': {
       if (!target.path) break;
-      const direct = join(vaultRoot, target.path);
-      const fallback = join(vaultRoot, 'raw', 'code', target.path.split('/').pop() || target.path);
+      const direct = workspaceFilePath(workspaceRoot, target.path);
+      if (!direct) {
+        showOutsideWorkspaceError(target.path);
+        return;
+      }
+      const fallback = workspaceFilePath(
+        workspaceRoot,
+        join('raw', 'code', target.path.split('/').pop() || target.path),
+      );
       const filePath = existsSync(direct) ? direct : fallback;
+      if (!filePath) {
+        showOutsideWorkspaceError(target.path);
+        return;
+      }
       try {
         const doc = await vscode.workspace.openTextDocument(filePath);
         const editor = await vscode.window.showTextDocument(doc);
@@ -63,6 +88,10 @@ export async function dispatchUri(vaultRoot: string, uri: string, options: Dispa
 
     case 'pdf': {
       if (!target.path) break;
+      if (!isAbsolute(target.path) && !workspaceFilePath(workspaceRoot, target.path)) {
+        showOutsideWorkspaceError(target.path);
+        return;
+      }
       const args: { pdfPath: string; page?: number; textFragment?: PdfTextFragment } = {
         pdfPath: target.path,
       };
@@ -72,13 +101,13 @@ export async function dispatchUri(vaultRoot: string, uri: string, options: Dispa
         await vscode.commands.executeCommand('human-learning.openPdfTarget', args);
       } catch (error) {
         if (!isMissingPdfEditorCommand(error)) throw error;
-        await openPdfWithDefaultEditor(vaultRoot, target.path);
+        await openPdfWithDefaultEditor(workspaceRoot, target.path);
       }
       return;
     }
 
     case 'web': {
-      await openWebTarget(vaultRoot, target.url ?? uri, target.webTargetId, options);
+      await openWebTarget(workspaceRoot, target.url ?? uri, target.webTargetId, options);
       return;
     }
 
@@ -86,14 +115,18 @@ export async function dispatchUri(vaultRoot: string, uri: string, options: Dispa
     case 'text':
     case 'unknown': {
       if (target.path) {
-        const filePath = join(vaultRoot, target.path);
+        const filePath = workspaceFilePath(workspaceRoot, target.path);
+        if (!filePath) {
+          showOutsideWorkspaceError(target.path);
+          return;
+        }
         if (existsSync(filePath)) {
           await vscode.commands.executeCommand('vscode.open', vscode.Uri.file(filePath));
           return;
         }
       }
       if (/^https?:\/\//i.test(uri)) {
-        await openWebTarget(vaultRoot, uri, undefined, options);
+        await openWebTarget(workspaceRoot, uri, undefined, options);
         return;
       }
       vscode.window.showErrorMessage(`Cannot open link target: ${uri}`);
@@ -105,47 +138,59 @@ export async function dispatchUri(vaultRoot: string, uri: string, options: Dispa
 }
 
 async function openWebTarget(
-  vaultRoot: string,
+  _vaultRoot: string,
   url: string,
-  webTargetId: string | undefined,
+  _webTargetId: string | undefined,
   options: DispatchUriOptions,
 ): Promise<void> {
-  let targetUrl = url;
-  if (webTargetId) {
-    const db = await openDatabase(vaultRoot);
-    try {
-      runMigrations(db);
-      const target = resolveWebTarget(db, webTargetId);
-      if (target?.text_fragment) {
-        targetUrl = target.text_fragment;
-      } else if (target?.url) {
-        targetUrl = target.url;
-      }
-    } finally {
-      closeDatabase(db);
-    }
-  }
-
   if (options.openWebTarget) {
-    await options.openWebTarget(targetUrl);
+    await options.openWebTarget(url);
     return;
   }
-
-  if (await openInChrome(targetUrl)) return;
-  await vscode.env.openExternal(vscode.Uri.parse(targetUrl));
-}
-
-function openInChrome(url: string): Promise<boolean> {
-  return new Promise(resolve => {
-    execFile('open', ['-a', 'Google Chrome', url], error => {
-      resolve(!error);
-    });
-  });
+  await vscode.env.openExternal(vscode.Uri.parse(url));
 }
 
 async function openPdfWithDefaultEditor(vaultRoot: string, pdfPath: string): Promise<void> {
   const filePath = isAbsolute(pdfPath) ? pdfPath : join(vaultRoot, pdfPath);
   await vscode.commands.executeCommand('vscode.open', vscode.Uri.file(filePath));
+}
+
+function workspaceFilePath(workspaceRoot: string, candidatePath: string): string | undefined {
+  if (!candidatePath || isAbsolute(candidatePath)) return undefined;
+  const root = resolve(workspaceRoot);
+  const candidate = resolve(root, candidatePath);
+  const fromRoot = relative(root, candidate);
+  if (
+    fromRoot === '..'
+    || fromRoot.startsWith(`..${sep}`)
+    || isAbsolute(fromRoot)
+  ) {
+    return undefined;
+  }
+  if (hasSymlinkedAncestor(root, candidate)) return undefined;
+  return candidate;
+}
+
+function hasSymlinkedAncestor(root: string, candidate: string): boolean {
+  const fromRoot = relative(root, candidate);
+  let current = root;
+  for (const segment of fromRoot.split(sep).filter(Boolean)) {
+    current = join(current, segment);
+    if (!existsSync(current)) break;
+    try {
+      if (lstatSync(current).isSymbolicLink()) return true;
+    } catch (error) {
+      if (isNodeError(error, 'ENOENT')) break;
+      throw error;
+    }
+  }
+  return false;
+}
+
+function showOutsideWorkspaceError(candidatePath: string): void {
+  vscode.window.showErrorMessage(
+    `Cannot open link outside the workspace: ${candidatePath}`,
+  );
 }
 
 function isMissingPdfEditorCommand(error: unknown): boolean {
@@ -154,10 +199,14 @@ function isMissingPdfEditorCommand(error: unknown): boolean {
     && /not found|not registered|does not exist|unknown command/i.test(message);
 }
 
-function ensureMarkdownNoteExists(filePath: string): void {
+function ensureMarkdownNoteExists(workspaceRoot: string, filePath: string): void {
   if (!filePath.toLowerCase().endsWith('.md') || existsSync(filePath)) return;
   const directory = dirnamePath(filePath);
   if (directory) mkdirSync(directory, { recursive: true });
+  const relativePath = relative(resolve(workspaceRoot), filePath);
+  if (workspaceFilePath(workspaceRoot, relativePath) !== filePath) {
+    throw new Error('Refusing to create a Markdown note through a symbolic link.');
+  }
   try {
     writeFileSync(filePath, '', { flag: 'wx' });
   } catch (error) {
@@ -170,6 +219,12 @@ function isFileExistsError(error: unknown): boolean {
     && error !== null
     && 'code' in error
     && (error as { code?: unknown }).code === 'EEXIST';
+}
+
+function isNodeError(error: unknown, code: string): error is NodeJS.ErrnoException {
+  return error instanceof Error
+    && 'code' in error
+    && error.code === code;
 }
 
 async function resolveNoteSelection(
@@ -199,7 +254,9 @@ async function resolveNoteSelection(
     const startLine = Math.max(1, lines.start);
     const endLine = Math.max(startLine, lines.end);
     const from = doc.offsetAt(new vscode.Position(startLine - 1, 0));
-    const to = doc.offsetAt(new vscode.Position(endLine - 1, 0));
+    const to = endLine < doc.lineCount
+      ? doc.offsetAt(new vscode.Position(endLine, 0))
+      : doc.getText().length;
     return { from, to };
   }
 

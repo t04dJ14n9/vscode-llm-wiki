@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import Module from 'node:module';
 import { mkdtempSync, readFileSync, renameSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
 
@@ -28,6 +28,7 @@ function loadTsModule(root, relativePath, mocks = {}) {
   const originalLoad = Module._load;
   Module._load = function patchedLoad(request, parent, isMain) {
     if (Object.prototype.hasOwnProperty.call(mocks, request)) return mocks[request];
+    if (request === './cursorCrop' && root === packageRoot) return cursorCrop;
     return originalLoad.call(this, request, parent, isMain);
   };
   try {
@@ -38,6 +39,12 @@ function loadTsModule(root, relativePath, mocks = {}) {
   }
 }
 
+const cursorCrop = loadTsModule(packageRoot, 'src/cursorCrop.ts', {
+  './pdfDiscussionController': {
+    PDF_DISCUSSION_MAX_PNG_BYTES: 5 * 1024 * 1024,
+  },
+});
+
 function uri(fsPath) {
   return {
     fsPath,
@@ -47,7 +54,7 @@ function uri(fsPath) {
   };
 }
 
-function createVscodeMock({ openExternalResult = false } = {}) {
+function createVscodeMock({ openExternalResult = false, workspaceRoot = '/vault' } = {}) {
   const external = [];
   const commands = [];
   const clipboard = [];
@@ -62,7 +69,7 @@ function createVscodeMock({ openExternalResult = false } = {}) {
       joinPath: (base, ...parts) => uri(join(base.fsPath, ...parts)),
     },
     workspace: {
-      asRelativePath: value => value.fsPath.replace(/^\/vault\/?/, ''),
+      asRelativePath: value => relative(workspaceRoot, value.fsPath).replaceAll('\\', '/'),
       fs: { readFile: async () => Buffer.from('%PDF') },
       textDocuments: [],
       openTextDocument: async () => ({
@@ -214,7 +221,6 @@ async function exerciseProvider(root) {
     documentRoot: '/vault',
     globalStoragePath: '/host/global',
     discussionController: controller,
-    annotationsEnabled: false,
   });
   const harness = createPanel();
   const originalSetTimeout = globalThis.setTimeout;
@@ -399,7 +405,6 @@ async function createPersistedSnapshotTransportHarness(
     documentRoot: '/vault',
     globalStoragePath: '/host/global',
     discussionController: controller,
-    annotationsEnabled: false,
   });
   const harness = createPanel();
   const originalSetTimeout = globalThis.setTimeout;
@@ -473,7 +478,6 @@ async function createSnapshotSubmitHarness(root, { modelError } = {}) {
     documentRoot: '/vault',
     globalStoragePath: '/host/global',
     discussionController: controller,
-    annotationsEnabled: false,
   });
   const harness = createPanel();
   const originalSetTimeout = globalThis.setTimeout;
@@ -548,7 +552,6 @@ async function createCodexActionBoundaryHarness(
     documentRoot: '/vault',
     globalStoragePath: '/host/global',
     discussionController: controller,
-    annotationsEnabled: false,
   });
   const harness = createPanel();
   const originalSetTimeout = globalThis.setTimeout;
@@ -589,6 +592,163 @@ test('combined and standalone providers enforce host path authority and typed di
   await exerciseProvider(standaloneRoot);
 });
 
+test('combined provider persists an answered PDF discussion and opens its durable learning note', async () => {
+  const workspaceRoot = mkdtempSync(join(tmpdir(), 'hl-pdf-learning-note-'));
+  const pdfPath = join(workspaceRoot, 'paper.pdf');
+  writeFileSync(pdfPath, Buffer.from('%PDF-learning-note', 'utf8'));
+
+  const { vscode, commands } = createVscodeMock({ workspaceRoot });
+  const portableWrites = [];
+  const fakeStore = {
+    pdfPath,
+    writePortableAnnotation(annotation, notePath) {
+      portableWrites.push({ annotation, notePath });
+    },
+  };
+  const baseAnnotation = discussionAnnotation();
+  const annotation = discussionAnnotation({
+    anchor: {
+      ...baseAnnotation.anchor,
+      uri: uri(pdfPath).toString(),
+      portableUrl: 'paper.pdf#page=2',
+    },
+    messages: [
+      {
+        id: 'question-1',
+        role: 'user',
+        markdown: 'Why is this passage important?',
+        createdAt: '2026-01-01T00:00:01.000Z',
+      },
+      {
+        id: 'answer-1',
+        role: 'assistant',
+        markdown: 'It establishes the durable source of truth.',
+        createdAt: '2026-01-01T00:00:02.000Z',
+      },
+    ],
+    summaryMarkdown: 'The passage establishes the durable source of truth.',
+    updatedAt: '2026-01-01T00:00:02.000Z',
+  });
+  const controller = {
+    onEvent: () => ({ dispose() {} }),
+    list(store) {
+      assert.equal(store, fakeStore);
+      return [annotation];
+    },
+    async submit(store, input) {
+      assert.equal(store, fakeStore);
+      assert.equal(input.question, 'Why is this passage important?');
+      return annotation;
+    },
+  };
+  const context = {
+    extensionUri: uri(join(packageRoot, 'extension')),
+    subscriptions: [],
+    globalState: {
+      get: () => true,
+      update: async () => undefined,
+    },
+  };
+  const { LearningNoteStore } = loadTsModule(packageRoot, 'src/learningNoteStore.ts');
+  const durableStore = new LearningNoteStore(workspaceRoot);
+  const upserts = [];
+  const learningNoteStore = {
+    async upsertDiscussion(input) {
+      upserts.push(input);
+      return await durableStore.upsertDiscussion(input);
+    },
+    findDiscussion: discussionId => durableStore.findDiscussion(discussionId),
+  };
+  const { PdfEditorProvider } = loadTsModule(packageRoot, 'src/pdfEditorProvider.ts', {
+    vscode,
+    '@human-learning/core': {
+      pdfHref: (path, options) => `${path}#page=${options.page}`,
+    },
+    './pdfDiscussionController': {
+      createPdfDiscussionStoreForDocument: () => ({ store: fakeStore, layout: 'vault' }),
+      PDF_DISCUSSION_MAX_PNG_BYTES: 5 * 1024 * 1024,
+      PDF_DISCUSSION_MAX_QUESTION_BYTES: 8 * 1024,
+    },
+  });
+  const provider = new PdfEditorProvider(context, {
+    vaultRoot: workspaceRoot,
+    documentRoot: workspaceRoot,
+    globalStoragePath: join(workspaceRoot, '.host'),
+    discussionController: controller,
+    learningNoteStore,
+  });
+  const harness = createPanel();
+  const originalSetTimeout = globalThis.setTimeout;
+  globalThis.setTimeout = () => ({ unref() {} });
+  try {
+    await provider.resolveCustomEditor(
+      { uri: uri(pdfPath), dispose() {} },
+      harness.panel,
+      {},
+    );
+  } finally {
+    globalThis.setTimeout = originalSetTimeout;
+  }
+
+  await harness.receive({
+    type: 'pdfDiscussionSubmit',
+    requestId: 'answered-submit',
+    annotationId: annotation.id,
+    question: 'Why is this passage important?',
+  });
+
+  assert.equal(upserts.length, 1);
+  assert.deepEqual(upserts[0], {
+    discussionId: annotation.id,
+    source: {
+      kind: 'pdf',
+      path: 'paper.pdf',
+      link: 'paper.pdf#page=2',
+      location: 'page 2',
+      quote: 'selected',
+      prefix: 'before',
+      suffix: 'after',
+    },
+    messages: [
+      {
+        role: 'user',
+        markdown: 'Why is this passage important?',
+        createdAt: '2026-01-01T00:00:01.000Z',
+      },
+      {
+        role: 'assistant',
+        markdown: 'It establishes the durable source of truth.',
+        createdAt: '2026-01-01T00:00:02.000Z',
+      },
+    ],
+    summaryMarkdown: 'The passage establishes the durable source of truth.',
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:02.000Z',
+  });
+  const note = await durableStore.findDiscussion(annotation.id);
+  assert.ok(note, 'the answered discussion was not written to LearningNoteStore');
+  assert.match(note.markdown, /Why is this passage important\?/);
+  assert.match(note.markdown, /It establishes the durable source of truth\./);
+  assert.deepEqual(portableWrites, [{ annotation, notePath: note.relativePath }]);
+
+  await harness.receive({
+    type: 'pdfDiscussionOpenLearningNote',
+    requestId: 'open-learning-note',
+    annotationId: annotation.id,
+  });
+  const openCommand = commands.findLast(([command]) => command === 'vscode.openWith');
+  assert.ok(openCommand, 'the durable learning note was not opened');
+  assert.equal(openCommand[1].fsPath, note.absolutePath);
+  assert.equal(openCommand[2], 'human-learning.markdownEditor');
+  assert.equal(
+    harness.posted.some(message => (
+      message.type === 'pdfDiscussionError'
+      && message.requestId === 'open-learning-note'
+    )),
+    false,
+  );
+});
+
 test('both providers invalidate cached discussion stores for same-size, same-mtime PDF replacements', () => {
   for (const root of [packageRoot, standaloneRoot]) {
     const tempRoot = mkdtempSync(join(tmpdir(), 'hl-pdf-provider-store-cache-'));
@@ -627,7 +787,6 @@ test('both providers invalidate cached discussion stores for same-size, same-mti
       documentRoot: tempRoot,
       globalStoragePath: join(tempRoot, 'global'),
       discussionController: { onEvent: () => ({ dispose() {} }) },
-      annotationsEnabled: false,
     });
     const pdfUri = uri(pdfPath);
 
@@ -773,6 +932,32 @@ test('both providers keep lifecycle ownership and promotion attempts host-intern
     assert.equal(snapshot.messages[0].codexModel, 'gpt-5.4');
     assert.equal('promotionAttempt' in snapshot, false);
     assert.doesNotMatch(JSON.stringify(snapshot), /internal-controller-owner|internal-thread-id/);
+  }
+});
+
+test('both providers forward snapshot bytes and crop metadata to new discussion submissions', async () => {
+  const snapshotBytes = Buffer.from('selection-crop-png');
+  const snapshotCropRect = [12, 24, 180, 240];
+  for (const root of [packageRoot, standaloneRoot]) {
+    const { harness, submissions } = await createSnapshotSubmitHarness(root);
+    await harness.receive({
+      type: 'pdfDiscussionSubmit',
+      requestId: 'submit-crop-metadata',
+      selection: {
+        page: 2,
+        snippet: 'selected',
+        rects: [[1, 2, 3, 4]],
+      },
+      question: 'Explain this crop.',
+      snapshotPngBase64: snapshotBytes.toString('base64'),
+      snapshotCropRect,
+      snapshotPadding: 24,
+    });
+
+    assert.equal(submissions.length, 1);
+    assert.deepEqual(Buffer.from(submissions[0].snapshotPng), snapshotBytes);
+    assert.deepEqual(submissions[0].snapshotCropRect, snapshotCropRect);
+    assert.equal(submissions[0].snapshotPadding, 24);
   }
 });
 
@@ -1052,7 +1237,7 @@ test('both providers fall back to text-only for missing or invalid persisted cro
   }
 });
 
-test('both manifests contribute Ask PDF command/config without a default keybinding', () => {
+test('both manifests contribute Ask PDF without a default keybinding', () => {
   for (const root of [packageRoot, standaloneRoot]) {
     const manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
     const command = manifest.contributes.commands.find(
@@ -1061,16 +1246,51 @@ test('both manifests contribute Ask PDF command/config without a default keybind
     assert.ok(command, `${manifest.name} is missing pdfAskSelection`);
     assert.equal(command.title, 'Human Learning: Ask PDF About Selection');
     assert.equal(
-      manifest.contributes.configuration.properties['humanLearning.pdf.codexCommand'].default,
-      'codex',
-    );
-    assert.equal(
       (manifest.contributes.keybindings ?? []).some(
         binding => binding.command === 'human-learning.pdfAskSelection',
       ),
       false,
     );
   }
+
+  const combined = JSON.parse(readFileSync(join(packageRoot, 'package.json'), 'utf8'));
+  const standalone = JSON.parse(readFileSync(join(standaloneRoot, 'package.json'), 'utf8'));
+  assert.equal(
+    combined.contributes.configuration.properties['humanLearning.agent.codexCommand'].default,
+    'codex',
+  );
+  assert.equal(
+    combined.contributes.configuration.properties['humanLearning.agent.codexCommand'].scope,
+    'machine',
+  );
+  assert.deepEqual(
+    combined.capabilities.untrustedWorkspaces,
+    {
+      supported: 'limited',
+      description: 'Markdown and PDF viewing remain available, but Ask PDF is disabled until the workspace is trusted.',
+      restrictedConfigurations: ['humanLearning.agent.codexCommand'],
+    },
+  );
+  assert.equal(
+    'humanLearning.pdf.codexCommand' in combined.contributes.configuration.properties,
+    false,
+  );
+  assert.equal(
+    standalone.contributes.configuration.properties['humanLearning.pdf.codexCommand'].default,
+    'codex',
+  );
+  assert.equal(
+    standalone.contributes.configuration.properties['humanLearning.pdf.codexCommand'].scope,
+    'machine',
+  );
+  assert.deepEqual(
+    standalone.capabilities.untrustedWorkspaces,
+    {
+      supported: 'limited',
+      description: 'PDF viewing remains available, but Ask PDF is disabled until the workspace is trusted.',
+      restrictedConfigurations: ['humanLearning.pdf.codexCommand'],
+    },
+  );
 });
 
 test('both extension hosts create one shared client/controller, register the command, and own disposal', () => {
@@ -1079,8 +1299,13 @@ test('both extension hosts create one shared client/controller, register the com
     assert.equal((source.match(/new CodexAppServerClient\s*\(/g) ?? []).length, 1);
     assert.equal((source.match(/new PdfDiscussionController\s*\(/g) ?? []).length, 1);
     assert.match(source, /human-learning\.pdfAskSelection/);
-    assert.match(source, /humanLearning\.pdf/);
+    assert.match(
+      source,
+      root === packageRoot ? /humanLearning\.agent/ : /humanLearning\.pdf/,
+    );
     assert.match(source, /codexCommand/);
+    assert.match(source, /isWorkspaceTrusted:\s*\(\)\s*=>\s*vscode\.workspace\.isTrusted\s*===\s*true/);
+    assert.match(source, /pdfAskSelection[\s\S]*requireWorkspaceTrust\(\)/);
     assert.match(source, /subscriptions\.push\([^)]*codexClient|subscriptions\.push\(codexClient/s);
     assert.match(source, /deactivate\(\)[\s\S]*dispose\(\)/);
   }

@@ -1,10 +1,20 @@
 import { expect, test, type Page } from '@playwright/test';
 
 const viewerOrigin = 'http://localhost:8979';
+const realPdfUrl = `${viewerOrigin}/pdf-viewer.html`;
 const outOfOrderUrl = `${viewerOrigin}/pdf-viewer.html?fixture=out-of-order-text`;
 const mixedStyleUrl = `${viewerOrigin}/pdf-viewer.html?fixture=mixed-style-selection`;
+const shortRowUrl = `${viewerOrigin}/pdf-viewer.html?fixture=short-row-selection`;
+const formulaUrl = `${viewerOrigin}/pdf-viewer.html?fixture=formula-selection`;
 const twoPageUrl = `${viewerOrigin}/pdf-viewer.html?fixture=two-page`;
 const fourPageUrl = `${viewerOrigin}/pdf-viewer.html?fixture=four-page`;
+
+const realPdfText = [
+  'FlashAttention uses tiling to reduce HBM accesses.',
+  'By splitting Q, K, V into blocks that fit in on-chip SRAM, the algorithm avoids materializing the full NxN attention matrix.',
+  'Online softmax computes normalization incrementally across tiles.',
+  'This yields 2-4x speedup over standard attention with exact results.',
+].join(' ');
 
 const orderedLines = [
   'First line starts the paragraph.',
@@ -18,6 +28,82 @@ type Point = { x: number; y: number };
 type Box = Point & { width: number; height: number };
 
 test.describe('Preview-compatible PDF text selection', () => {
+  test('real PDF character drags keep exact first and last glyph endpoints across repeated attempts', async ({ page }) => {
+    await openRealPdf(page);
+    const start = await characterTarget(page, 'FlashAttention', 0, 0);
+    const end = await characterTarget(page, 'results.', 0, 'results.'.length - 1);
+    const expected = {
+      page: 1,
+      textItemIndex: start.itemIndex,
+      charOffset: start.offset,
+      endTextItemIndex: end.itemIndex,
+      endCharOffset: end.offset + 1,
+      snippet: realPdfText,
+    };
+
+    const attempts = [
+      { startBias: -0.2, endBias: 0.2 },
+      { startBias: 0.2, endBias: -0.2 },
+      { startBias: 0, endBias: 0 },
+    ];
+    const anchors = [];
+    for (const attempt of attempts) {
+      await resetMessages(page);
+      await dragSelection(
+        page,
+        pointWithinCharacter(start, attempt.startBias),
+        pointWithinCharacter(end, attempt.endBias),
+      );
+      anchors.push(await waitForSelectionAnchor(page));
+    }
+
+    for (const anchor of anchors) {
+      expect(anchor).toMatchObject(expected);
+    }
+    expect(await canonicalNativeSelection(page)).toBe(realPdfText);
+    const bands = await normalizedSelectionBands(page);
+    expect(bands).toHaveLength(5);
+    for (let index = 1; index < bands.length; index++) {
+      expect(bands[index - 1]!.y + bands[index - 1]!.height)
+        .toBeLessThanOrEqual(bands[index]!.y);
+    }
+  });
+
+  test('real PDF reverse drags preserve wrapped-line endpoints around repeated attention runs', async ({ page }) => {
+    await openRealPdf(page);
+    const firstAttention = await characterTarget(page, 'attention', 0, 0);
+    const secondAttentionEnd = await characterTarget(page, 'attention', 1, 'attention'.length - 1);
+    const expectedText = [
+      'attention matrix.',
+      'Online softmax computes normalization incrementally across tiles.',
+      'This yields 2-4x speedup over standard attention',
+    ].join(' ');
+    const expected = {
+      page: 1,
+      textItemIndex: firstAttention.itemIndex,
+      charOffset: firstAttention.offset,
+      endTextItemIndex: secondAttentionEnd.itemIndex,
+      endCharOffset: secondAttentionEnd.offset + 1,
+      snippet: expectedText,
+    };
+
+    const anchors = [];
+    for (const jitter of [-0.2, 0, 0.2]) {
+      await resetMessages(page);
+      await dragSelection(
+        page,
+        pointWithinCharacter(secondAttentionEnd, jitter),
+        pointWithinCharacter(firstAttention, -jitter),
+      );
+      anchors.push(await waitForSelectionAnchor(page));
+    }
+
+    for (const anchor of anchors) {
+      expect(anchor).toMatchObject(expected);
+    }
+    expect(await canonicalNativeSelection(page)).toBe(expectedText);
+  });
+
   test('mixed normal and bold text produces one non-overlapping selection band per visual line', async ({ page }) => {
     await openMixedStyleFixture(page);
     await selectMixedStyleLines(page);
@@ -62,6 +148,94 @@ test.describe('Preview-compatible PDF text selection', () => {
       page,
       'Normal text before bold words and after. Tightly spaced normal second line.',
     );
+  });
+
+  test('far trailing whitespace keeps the endpoint on the intended short visual row', async ({ page }) => {
+    await page.goto(shortRowUrl);
+    await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 1/, { timeout: 10_000 });
+    const spans = page.locator('#page-1 .text-layer span[data-item-index]');
+    await expect(spans).toHaveCount(3);
+    const first = await requiredBox(spans.nth(0));
+    const short = await requiredBox(spans.nth(1));
+    const pageBox = await requiredBox(page.locator('#page-1'));
+    const trailingWhitespaceX = pageBox.x + pageBox.width - 16;
+    expect(trailingWhitespaceX).toBeGreaterThan(short.x + short.width + 250);
+
+    await resetMessages(page);
+    await dragSelection(
+      page,
+      { x: first.x + 1, y: first.y + first.height / 2 },
+      { x: trailingWhitespaceX, y: short.y + short.height / 2 },
+    );
+
+    const expected = [
+      'The preceding row is intentionally much longer than the row below.',
+      'Short.',
+    ].join(' ');
+    await expectSelectionSnippet(page, expected);
+    expect(await canonicalNativeSelection(page)).toBe(expected);
+    expect(await waitForSelectionAnchor(page)).toMatchObject({
+      page: 1,
+      textItemIndex: 0,
+      charOffset: 0,
+      endTextItemIndex: 1,
+      endCharOffset: 'Short.'.length,
+      snippet: expected,
+    });
+    const bands = await normalizedSelectionBands(page);
+    expect(bands).toHaveLength(2);
+    expect(bands[1]!.x + bands[1]!.width).toBeLessThan(short.x + short.width + 1);
+  });
+
+  test('rapid repeated character drags never escalate into word or line selection', async ({ page }) => {
+    await openRealPdf(page);
+    const start = await characterTarget(page, 'FlashAttention', 0, 2);
+    const end = await characterTarget(page, 'FlashAttention', 0, 4);
+
+    for (let attempt = 0; attempt < 8; attempt++) {
+      await resetMessages(page);
+      await dragSelection(page, pointWithinCharacter(start, 0), pointWithinCharacter(end, 0));
+      expect(await waitForSelectionAnchor(page)).toMatchObject({
+        page: 1,
+        textItemIndex: start.itemIndex,
+        charOffset: start.offset,
+        endTextItemIndex: end.itemIndex,
+        endCharOffset: end.offset + 1,
+        snippet: 'ash',
+      });
+      expect(await canonicalNativeSelection(page)).toBe('ash');
+      await expect(page.locator('#page-1 .pdf-selection-rect')).toHaveCount(1);
+    }
+  });
+
+  test('formula scripts extend one baseline selection band to their painted bounds', async ({ page }) => {
+    await page.goto(formulaUrl);
+    await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 1/, { timeout: 10_000 });
+    const spans = page.locator('#page-1 .text-layer span[data-item-index]');
+    await expect(spans).toHaveCount(5);
+    const firstRun = await requiredBox(spans.first());
+    const lastRun = await requiredBox(spans.last());
+    await resetMessages(page);
+    await dragSelection(
+      page,
+      { x: firstRun.x + 1, y: firstRun.y + firstRun.height / 2 },
+      { x: lastRun.x + lastRun.width - 1, y: lastRun.y + lastRun.height / 2 },
+    );
+    await expect(page.locator('#selection-toolbar')).toBeVisible();
+
+    const bands = await normalizedSelectionBands(page);
+    expect(bands).toHaveLength(1);
+    const formulaRuns = await spans.evaluateAll(elements => elements.map(element => {
+      const rect = element.getBoundingClientRect();
+      return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+    }));
+    const superscriptTop = Math.min(...formulaRuns.map(rect => rect.y));
+    const subscriptBottom = Math.max(...formulaRuns.map(rect => rect.y + rect.height));
+    expect(formulaRuns.filter(rect => rect.height < Math.max(...formulaRuns.map(run => run.height)) * 0.8))
+      .toHaveLength(2);
+    expect(bands[0]!.y).toBeLessThanOrEqual(superscriptTop + 0.5);
+    expect(bands[0]!.y + bands[0]!.height)
+      .toBeGreaterThanOrEqual(subscriptBottom - 0.5);
   });
 
   test('double-click selects the complete word under the pointer', async ({ page }) => {
@@ -217,6 +391,12 @@ async function openOutOfOrderFixture(page: Page): Promise<void> {
   await expect(page.locator('#page-1 .text-layer span[data-item-index]')).toHaveCount(5);
 }
 
+async function openRealPdf(page: Page): Promise<void> {
+  await page.goto(realPdfUrl);
+  await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 1/, { timeout: 10_000 });
+  await expect(page.locator('#page-1 .text-layer span[data-item-index]')).not.toHaveCount(0);
+}
+
 async function openMixedStyleFixture(page: Page): Promise<void> {
   await page.goto(mixedStyleUrl);
   await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 1/, { timeout: 10_000 });
@@ -273,6 +453,59 @@ async function pointInsideText(
       y: rect.top + rect.height / 2,
     };
   }, needle);
+}
+
+type CharacterTarget = Point & {
+  width: number;
+  itemIndex: number;
+  offset: number;
+};
+
+async function characterTarget(
+  page: Page,
+  needle: string,
+  occurrence: number,
+  needleOffset: number,
+): Promise<CharacterTarget> {
+  return page.locator('#page-1 .text-layer').evaluate((layer, request) => {
+    let remaining = request.occurrence;
+    for (const element of layer.querySelectorAll<HTMLElement>('span[data-item-index] .pdf-text-glyphs')) {
+      const node = element.firstChild;
+      const content = node?.textContent ?? '';
+      let from = 0;
+      for (;;) {
+        const match = content.indexOf(request.needle, from);
+        if (match < 0) break;
+        if (remaining-- === 0) {
+          if (!node || node.nodeType !== Node.TEXT_NODE) {
+            throw new Error(`Expected a text node for "${request.needle}"`);
+          }
+          const offset = match + request.needleOffset;
+          const range = document.createRange();
+          range.setStart(node, offset);
+          range.setEnd(node, offset + 1);
+          const rect = range.getBoundingClientRect();
+          const item = element.closest<HTMLElement>('span[data-item-index]');
+          return {
+            x: rect.left,
+            y: rect.top + rect.height / 2,
+            width: rect.width,
+            itemIndex: Number(item?.dataset.itemIndex ?? -1),
+            offset,
+          };
+        }
+        from = match + 1;
+      }
+    }
+    throw new Error(`Could not find occurrence ${request.occurrence} of "${request.needle}"`);
+  }, { needle, occurrence, needleOffset });
+}
+
+function pointWithinCharacter(target: CharacterTarget, centerBias: number): Point {
+  return {
+    x: target.x + target.width * (0.5 + centerBias),
+    y: target.y,
+  };
 }
 
 async function lineBox(page: Page, itemIndex: number): Promise<Box> {
@@ -333,6 +566,19 @@ async function latestSelectionSnippet(page: Page): Promise<string | undefined> {
   return page.evaluate(() => (window as any).__mockMessages
     ?.filter((message: any) => message.type === 'selectionChanged' && message.anchor)
     .at(-1)?.anchor?.snippet);
+}
+
+async function waitForSelectionAnchor(page: Page): Promise<Record<string, unknown>> {
+  await expect.poll(() => page.evaluate(() => (window as any).__mockMessages
+    ?.filter((message: any) => message.type === 'selectionChanged' && message.anchor)
+    .at(-1)?.anchor), { timeout: 2_000 }).toBeTruthy();
+  return page.evaluate(() => (window as any).__mockMessages
+    ?.filter((message: any) => message.type === 'selectionChanged' && message.anchor)
+    .at(-1)?.anchor);
+}
+
+async function canonicalNativeSelection(page: Page): Promise<string> {
+  return page.evaluate(() => window.getSelection()?.toString().replace(/\s+/gu, ' ').trim() ?? '');
 }
 
 async function expectSelectionSnippet(page: Page, expected: string): Promise<void> {

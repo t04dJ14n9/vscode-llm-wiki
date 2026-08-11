@@ -42,6 +42,19 @@ export const PdfDiscussionSnapshotV1Schema = z.object({
   width: z.number().int().positive(),
   height: z.number().int().positive(),
   mimeType: z.literal('image/png'),
+  cropRect: PdfDiscussionRectV1Schema
+    .refine(rect => rect[2] > rect[0] && rect[3] > rect[1], 'Crop rectangle must have positive area')
+    .optional(),
+  padding: z.number().finite().nonnegative().optional(),
+  unit: z.literal('pt').optional(),
+}).superRefine((snapshot, context) => {
+  const fields = [snapshot.cropRect, snapshot.padding, snapshot.unit];
+  if (fields.some(value => value !== undefined) && fields.some(value => value === undefined)) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'Snapshot cropRect, padding, and unit must be stored together',
+    });
+  }
 });
 
 export const PdfDiscussionMessageV1Schema = z.object({

@@ -6,6 +6,10 @@
   "description": "Human Learning — a local-first VS Code vault for agentic study",
   "publisher": "human-learning",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/t04dJ14n9/human-learning.git"
+  },
   "engines": {
     "vscode": "^1.85.0"
   },
@@ -20,6 +24,15 @@
     "workspaceContains:**/*.pdf"
   ],
   "main": "dist/extension.js",
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": "limited",
+      "description": "Markdown and PDF viewing remain available, but Ask PDF is disabled until the workspace is trusted.",
+      "restrictedConfigurations": [
+        "humanLearning.agent.codexCommand"
+      ]
+    }
+  },
   "contributes": {
     "customEditors": [
       {
@@ -49,16 +62,8 @@
         "title": "Human Learning: Open Anchor"
       },
       {
-        "command": "human-learning.ingestCurrentFile",
-        "title": "Human Learning: Ingest Current File"
-      },
-      {
         "command": "human-learning.refreshLinks",
         "title": "Human Learning: Refresh Links"
-      },
-      {
-        "command": "human-learning.showBacklinks",
-        "title": "Human Learning: Show Backlinks for Current File"
       },
       {
         "command": "human-learning.openInMarkdownEditor",
@@ -66,17 +71,47 @@
       },
       {
         "command": "human-learning.addSelectionToContext",
-        "title": "Human Learning: Add Selection to Agent Context",
+        "title": "Human Learning: Send Selection to Agent…",
         "icon": "$(selection)"
+      },
+      {
+        "command": "human-learning.addSelectionToChat",
+        "title": "Human Learning: Add to Chat",
+        "icon": "$(comment-discussion)"
+      },
+      {
+        "command": "human-learning.addCursorBrowserSelectionToChat",
+        "title": "Human Learning: Add Cursor Browser Selection to Chat",
+        "icon": "$(globe)"
+      },
+      {
+        "command": "human-learning.experimentalBrowser.open",
+        "title": "Human Learning: Open Experimental Web Reader",
+        "icon": "$(preview)"
+      },
+      {
+        "command": "human-learning.experimentalBrowser.sendSelection",
+        "title": "Human Learning: Add Experimental Web Selection to Chat",
+        "icon": "$(comment-discussion)"
       },
       {
         "command": "human-learning.pdfAskSelection",
         "title": "Human Learning: Ask PDF About Selection"
       },
       {
-        "command": "human-learning.openWebBrowser",
-        "title": "Human Learning: Open Web Browser",
-        "icon": "$(globe)"
+        "command": "human-learning.generateDailyNote",
+        "title": "Human Learning: Open Today's Learning Note",
+        "icon": "$(calendar)"
+      },
+      {
+        "command": "human-learning.showKnowledgeGraph",
+        "title": "Human Learning: Show Knowledge Graph",
+        "icon": "$(type-hierarchy-sub)"
+      },
+      {
+        "command": "human-learning.syncRepository",
+        "title": "Human Learning: Pull Latest Wiki Content",
+        "icon": "$(sync)"
       },
       {
         "command": "human-learning.toggleVimMode",
@@ -165,10 +200,10 @@
         "when": "activeCustomEditorId == 'human-learning.markdownEditor' && humanLearningMarkdownVimMode"
       },
       {
-        "command": "human-learning.consumeVimHostShortcut",
+        "command": "human-learning.addSelectionToChat",
         "key": "ctrl+l",
         "mac": "cmd+l",
-        "when": "activeCustomEditorId == 'human-learning.markdownEditor' && humanLearningMarkdownVimMode"
+        "when": "(activeCustomEditorId == 'human-learning.markdownEditor' && humanLearningMarkdownHasSelection) || (humanLearningPdfOpen && humanLearningPdfHasSelection)"
       },
       {
         "command": "human-learning.consumeVimHostShortcut",
@@ -228,6 +263,16 @@
     "menus": {
       "editor/title": [
         {
+          "command": "human-learning.addSelectionToContext",
+          "when": "activeCustomEditorId == 'human-learning.markdownEditor'",
+          "group": "navigation@1"
+        },
+        {
+          "command": "human-learning.addSelectionToChat",
+          "when": "activeCustomEditorId == 'human-learning.markdownEditor'",
+          "group": "navigation@2"
+        },
+        {
           "command": "human-learning.pdfPrevPage",
           "when": "humanLearningPdfOpen",
           "group": "navigation@1"
@@ -271,6 +316,18 @@
           "command": "human-learning.addSelectionToContext",
           "when": "humanLearningPdfOpen && humanLearningPdfHasSelection",
           "group": "navigation@9"
+        },
+        {
+          "command": "human-learning.addSelectionToChat",
+          "when": "humanLearningPdfOpen && humanLearningPdfHasSelection",
+          "group": "navigation@10"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "human-learning.addSelectionToChat",
+          "when": "editorLangId == markdown && editorHasSelection",
+          "group": "navigation@10"
         }
       ]
     },
@@ -285,11 +342,20 @@
           "id": "hl-forward-links",
           "name": "Forward Links",
           "type": "tree"
+        }
+      ],
+      "explorer": [
+        {
+          "id": "hl-markdown-outline",
+          "name": "Markdown Outline",
+          "type": "tree",
+          "when": "activeCustomEditorId == 'human-learning.markdownEditor'"
         },
         {
-          "id": "hl-outline",
-          "name": "Outline",
-          "type": "tree"
+          "id": "hl-pdf-outline",
+          "name": "PDF Outline",
+          "type": "tree",
+          "when": "activeCustomEditorId == 'human-learning.pdfViewer'"
         }
       ]
     },
@@ -303,12 +369,13 @@
       ]
     },
     "configuration": {
-      "title": "Human Learning PDF",
+      "title": "Human Learning",
       "properties": {
-        "humanLearning.pdf.codexCommand": {
+        "humanLearning.agent.codexCommand": {
           "type": "string",
           "default": "codex",
-          "description": "Command or absolute executable path used to start the Codex app-server for Ask PDF."
+          "scope": "machine",
+          "description": "Command or absolute executable path used to start the local Codex app-server for learning discussions."
         }
       }
     },
@@ -320,12 +387,13 @@
     }
   },
   "scripts": {
-    "build": "rm -rf dist && webpack --mode production",
+    "build": "pnpm --filter @human-learning/core build && rm -rf dist && webpack --mode production",
     "build:split": "pnpm --filter human-learning-markdown build && pnpm --filter human-learning-pdf build && pnpm prepare:split",
     "prepare:split": "node scripts/prepare-split-packages.mjs",
     "watch": "webpack --mode development --watch",
     "clean": "rm -rf dist",
-    "test": "pnpm build && pnpm --filter human-learning-markdown build && pnpm --filter human-learning-pdf build && node --test test/*.test.mjs",
+    "test": "pnpm build && node --test test/*.test.mjs",
+    "test:legacy-split": "pnpm build && pnpm build:split && node --test test/legacy/*.test.mjs",
     "test:e2e": "node test/e2e/pure-e2e.mjs",
     "test:playwright": "playwright test --config ../../playwright.config.ts",
     "test:vscode-e2e": "playwright test --config test/vscode-e2e/playwright.config.mjs"
@@ -352,7 +420,6 @@
     "marked": "^13.0.3",
     "mermaid": "11.4.1",
     "prismjs": "1.29.0",
-    "sql.js": "^1.10.0",
     "turndown": "^7.2.4",
     "yaml": "2.7.0"
   },

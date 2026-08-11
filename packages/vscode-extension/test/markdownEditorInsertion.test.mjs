@@ -29,11 +29,13 @@ function loadTsModule(relativePath, mocks = {}) {
     }
     if (request === './pdfDiscussionController') {
       return {
+        PDF_DISCUSSION_MAX_PNG_BYTES: 5 * 1024 * 1024,
         createPdfDiscussionStoreForDocument: () => {
           throw new Error('PDF discussion storage is not configured in this legacy provider test');
         },
       };
     }
+    if (request === './cursorCrop') return cursorCrop;
     return originalLoad.call(this, request, parent, isMain);
   };
   try {
@@ -43,6 +45,12 @@ function loadTsModule(relativePath, mocks = {}) {
     Module._load = originalLoad;
   }
 }
+
+const cursorCrop = loadTsModule('src/cursorCrop.ts', {
+  './pdfDiscussionController': {
+    PDF_DISCUSSION_MAX_PNG_BYTES: 5 * 1024 * 1024,
+  },
+});
 
 test('insert helper replaces selections and returns cursor positions', () => {
   const { applyInsertText } = loadTsModule('webview-src/insertText.ts');
@@ -587,7 +595,8 @@ test('markdown editor provider queues and posts reveal selections for the active
 
 test('markdown editor provider exposes the active custom markdown selection as raw source context', async () => {
   const messages = [];
-  const vscode = createVscodeMock();
+  const executeCommandCalls = [];
+  const vscode = createVscodeMock({ executeCommandCalls });
   const { MarkdownEditorProvider } = loadTsModule('src/markdownEditorProvider.ts', { vscode });
   const provider = new MarkdownEditorProvider({
     extensionUri: { scheme: 'file', path: '/extension' },
@@ -609,7 +618,157 @@ test('markdown editor provider exposes the active custom markdown selection as r
     text: '**beta**',
     startLine: 2,
     endLine: 2,
+    metadata: {
+      kind: 'markdown',
+      from: 13,
+      to: 21,
+    },
   });
+  assert.deepEqual(executeCommandCalls.at(-1), [
+    'setContext',
+    'humanLearningMarkdownHasSelection',
+    true,
+  ]);
+
+  await panel.fireMessage({
+    type: 'selectionChanged',
+    selection: { from: 21, to: 21 },
+  });
+  assert.deepEqual(executeCommandCalls.at(-1), [
+    'setContext',
+    'humanLearningMarkdownHasSelection',
+    false,
+  ]);
+});
+
+test('markdown editor provider keeps selections separate for duplicate editor groups', async () => {
+  const firstMessages = [];
+  const secondMessages = [];
+  const vscode = createVscodeMock();
+  const { MarkdownEditorProvider } = loadTsModule('src/markdownEditorProvider.ts', { vscode });
+  const provider = new MarkdownEditorProvider({
+    extensionUri: { scheme: 'file', path: '/extension' },
+    workspaceState: createStorageMock(),
+  });
+  const document = createDocumentMock({
+    text: '# Note\nAlpha **beta** gamma\nOmega\n',
+  });
+  const firstPanel = createPanelMock(firstMessages);
+  const secondPanel = createPanelMock(secondMessages);
+
+  await provider.resolveCustomTextEditor(document, firstPanel, {});
+  await firstPanel.fireMessage({
+    type: 'selectionChanged',
+    selection: { from: 7, to: 12 },
+  });
+  await provider.resolveCustomTextEditor(document, secondPanel, {});
+  await secondPanel.fireMessage({
+    type: 'selectionChanged',
+    selection: { from: 13, to: 21 },
+  });
+
+  await firstPanel.fireMessage({ type: 'active' });
+  assert.equal(provider.getActiveSelectionContext()?.text, 'Alpha');
+
+  await secondPanel.fireMessage({ type: 'active' });
+  assert.equal(provider.getActiveSelectionContext()?.text, '**beta**');
+});
+
+test('markdown editor provider requests the live webview selection before host commands use it', async () => {
+  const messages = [];
+  const vscode = createVscodeMock();
+  const { MarkdownEditorProvider } = loadTsModule('src/markdownEditorProvider.ts', { vscode });
+  const provider = new MarkdownEditorProvider({
+    extensionUri: { scheme: 'file', path: '/extension' },
+    workspaceState: createStorageMock(),
+  });
+  const document = createDocumentMock({
+    text: '# Note\nAlpha **beta** gamma\nOmega\n',
+  });
+  const panel = createPanelMock(messages);
+
+  await provider.resolveCustomTextEditor(document, panel, {});
+  const capture = provider.captureActiveSelectionContext();
+  const request = messages.at(-1);
+  assert.equal(request.type, 'requestSelection');
+  assert.equal(typeof request.requestId, 'string');
+
+  await panel.fireMessage({
+    type: 'selectionResponse',
+    requestId: request.requestId,
+    selection: { from: 13, to: 21 },
+  });
+
+  assert.equal((await capture)?.text, '**beta**');
+});
+
+test('markdown host commands resolve the selected custom-editor tab without recent webview focus', async () => {
+  const messages = [];
+  const document = createDocumentMock({
+    uri: 'file:///vault/notes/Concepts/Online Softmax.md',
+    text: '# Note\nExact passage\n',
+  });
+  const vscode = createVscodeMock({
+    activeTabUri: document.uri,
+  });
+  const { MarkdownEditorProvider } = loadTsModule('src/markdownEditorProvider.ts', { vscode });
+  const provider = new MarkdownEditorProvider({
+    extensionUri: { scheme: 'file', path: '/extension' },
+    workspaceState: createStorageMock(),
+  });
+  const panel = createPanelMock(messages, { active: false });
+
+  await provider.resolveCustomTextEditor(document, panel, {});
+  const capture = provider.captureActiveSelectionContext();
+  const request = messages.at(-1);
+  await panel.fireMessage({
+    type: 'selectionResponse',
+    requestId: request.requestId,
+    selection: { from: 7, to: 20 },
+  });
+
+  assert.equal((await capture)?.text, 'Exact passage');
+});
+
+test('markdown editor provider does not turn an empty selection into the whole note', async () => {
+  const messages = [];
+  const vscode = createVscodeMock();
+  const { MarkdownEditorProvider } = loadTsModule('src/markdownEditorProvider.ts', { vscode });
+  const provider = new MarkdownEditorProvider({
+    extensionUri: { scheme: 'file', path: '/extension' },
+    workspaceState: createStorageMock(),
+  });
+  const panel = createPanelMock(messages);
+
+  await provider.resolveCustomTextEditor(createDocumentMock({ text: '# Note\nWhole document\n' }), panel, {});
+  const capture = provider.captureActiveSelectionContext();
+  const request = messages.at(-1);
+  await panel.fireMessage({
+    type: 'selectionResponse',
+    requestId: request.requestId,
+    selection: { from: 8, to: 8 },
+  });
+
+  assert.equal(await capture, undefined);
+});
+
+test('markdown editor provider routes Cursor selection intent through the shared host command', async () => {
+  const messages = [];
+  const executeCommandCalls = [];
+  const vscode = createVscodeMock({ executeCommandCalls });
+  const { MarkdownEditorProvider } = loadTsModule('src/markdownEditorProvider.ts', { vscode });
+  const provider = new MarkdownEditorProvider({
+    extensionUri: { scheme: 'file', path: '/extension' },
+    workspaceState: createStorageMock(),
+  });
+  const panel = createPanelMock(messages);
+
+  await provider.resolveCustomTextEditor(createDocumentMock(), panel, {});
+  await panel.fireMessage({ type: 'addSelectionToCursorChat' });
+
+  assert.deepEqual(executeCommandCalls.at(-1), [
+    'human-learning.addSelectionToCursorChat',
+  ]);
 });
 
 test('markdown editor provider anchors an empty custom markdown selection to the whole document range', async () => {
@@ -635,6 +794,11 @@ test('markdown editor provider anchors an empty custom markdown selection to the
     text,
     startLine: 1,
     endLine: 3,
+    metadata: {
+      kind: 'markdown',
+      from: 0,
+      to: text.length,
+    },
   });
 });
 
@@ -655,6 +819,79 @@ test('markdown editor provider routes openUri messages through the host link tar
   assert.deepEqual(executeCommandCalls.at(-1), [
     'human-learning.openLinkTarget',
     'https://example.com/docs',
+  ]);
+});
+
+test('markdown annotation clicks route note identity to the durable-note command', async () => {
+  const messages = [];
+  const executeCommandCalls = [];
+  const vscode = createVscodeMock({ executeCommandCalls });
+  const { MarkdownEditorProvider } = loadTsModule('src/markdownEditorProvider.ts', { vscode });
+  const provider = new MarkdownEditorProvider({
+    extensionUri: { scheme: 'file', path: '/extension' },
+    workspaceState: createStorageMock(),
+  });
+  const panel = createPanelMock(messages);
+
+  await provider.resolveCustomTextEditor(createDocumentMock(), panel, {});
+  await panel.fireMessage({
+    type: 'openLearningNote',
+    discussionId: 'discussion-durable',
+    notePath: 'wiki/learning/durable.md',
+  });
+
+  assert.deepEqual(executeCommandCalls.at(-1), [
+    'human-learning.openLearningDiscussion',
+    {
+      discussionId: 'discussion-durable',
+      notePath: 'wiki/learning/durable.md',
+    },
+  ]);
+});
+
+test('markdown editor provider resolves generated daily and learning-note links from their note', async () => {
+  const messages = [];
+  const executeCommandCalls = [];
+  const vscode = createVscodeMock({
+    executeCommandCalls,
+    workspaceFolder: { uri: createUri('/vault') },
+  });
+  const { MarkdownEditorProvider } = loadTsModule('src/markdownEditorProvider.ts', { vscode });
+  const provider = new MarkdownEditorProvider({
+    extensionUri: { scheme: 'file', path: '/extension' },
+    workspaceState: createStorageMock(),
+  });
+
+  const dailyPanel = createPanelMock(messages);
+  await provider.resolveCustomTextEditor(
+    createDocumentMock({ uri: 'file:///vault/wiki/daily/2026-08-10.md' }),
+    dailyPanel,
+    {},
+  );
+  await dailyPanel.fireMessage({
+    type: 'openUri',
+    uri: '../learning/Memory%20Systems.md',
+  });
+
+  const learningPanel = createPanelMock(messages);
+  await provider.resolveCustomTextEditor(
+    createDocumentMock({ uri: 'file:///vault/wiki/learning/Memory Systems.md' }),
+    learningPanel,
+    {},
+  );
+  await learningPanel.fireMessage({
+    type: 'openUri',
+    uri: '../../notes/Concepts/Memory.md#L4-L5',
+  });
+  await learningPanel.fireMessage({
+    type: 'openUri',
+    uri: 'notes/Concepts/Root Link.md#Overview',
+  });
+
+  assert.deepEqual(executeCommandCalls.slice(-3), [
+    ['human-learning.openLinkTarget', 'wiki/learning/Memory%20Systems.md'],
+    ['human-learning.openLinkTarget', 'notes/Concepts/Memory.md#L4-L5'],
+    ['human-learning.openLinkTarget', 'notes/Concepts/Root Link.md#Overview'],
   ]);
 });
 
@@ -896,38 +1133,6 @@ test('pdf quote link format keeps the quote separate from a stable source label'
   assert.deepEqual(informationMessages, ['Human Learning PDF quote copied']);
 });
 
-test('pdf reference jumps reopen markdown notes in the custom editor and reveal the target line', async () => {
-  const executeCommandCalls = [];
-  const openTextDocumentCalls = [];
-  const vscode = createVscodeMock({ executeCommandCalls, openTextDocumentCalls });
-  const { PdfEditorProvider } = loadTsModule('src/pdfEditorProvider.ts', {
-    vscode,
-    '@human-learning/core': {
-      closeDatabase: () => undefined,
-      createPdfAnchorFromSelection: () => undefined,
-      openDatabase: async () => ({}),
-      resolveAnchor: () => undefined,
-      runMigrations: () => undefined,
-    },
-  });
-  const provider = new PdfEditorProvider(
-    { extensionUri: { scheme: 'file', path: '/extension' } },
-    '/vault',
-  );
-
-  await provider.openMarkdownAt('notes/Concepts/FlashAttention.md', 12);
-
-  assert.equal(openTextDocumentCalls.length, 1);
-  assert.equal(openTextDocumentCalls[0][0].fsPath, '/vault/notes/Concepts/FlashAttention.md');
-  assert.equal(executeCommandCalls.length, 2);
-  assert.equal(executeCommandCalls[0][0], 'vscode.openWith');
-  assert.equal(executeCommandCalls[0][1].fsPath, '/vault/notes/Concepts/FlashAttention.md');
-  assert.equal(executeCommandCalls[0][2], 'human-learning.markdownEditor');
-  assert.equal(executeCommandCalls[1][0], 'human-learning.revealInMarkdownEditor');
-  assert.equal(executeCommandCalls[1][1].uri.fsPath, '/vault/notes/Concepts/FlashAttention.md');
-  assert.deepEqual(executeCommandCalls[1][1].selection, { from: 11, to: 11 });
-});
-
 function createVscodeMock(options = {}) {
   const editorConfig = {
     fontFamily: options.editorConfig?.fontFamily ?? 'Menlo',
@@ -1010,6 +1215,13 @@ function createVscodeMock(options = {}) {
         selection: null,
         revealRange() {},
       }),
+      tabGroups: options.activeTabUri
+        ? {
+            activeTabGroup: {
+              activeTab: { input: { uri: options.activeTabUri } },
+            },
+          }
+        : undefined,
     },
     WorkspaceEdit,
     Position: class Position {
@@ -1079,7 +1291,7 @@ function createDocumentMock(options = {}) {
 function createPanelMock(messages, options = {}) {
   let receiveMessageHandler = () => undefined;
   return {
-    active: true,
+    active: options.active ?? true,
     visible: true,
     reveal: (...args) => {
       options.revealCalls?.push(args);

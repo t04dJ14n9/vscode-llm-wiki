@@ -1,7 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import Module from 'node:module';
-import { readFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
@@ -25,6 +33,12 @@ function loadTsModule(relativePath, mocks = {}) {
   const originalLoad = Module._load;
   Module._load = function patchedLoad(request, parent, isMain) {
     if (Object.prototype.hasOwnProperty.call(mocks, request)) {
+      if (request === 'fs') {
+        return {
+          ...originalLoad.call(this, request, parent, isMain),
+          ...mocks[request],
+        };
+      }
       return mocks[request];
     }
     return originalLoad.call(this, request, parent, isMain);
@@ -80,6 +94,47 @@ test('dispatchUri opens markdown note links with the Human Learning markdown edi
   assert.deepEqual(showTextDocumentCalls, []);
 });
 
+test('dispatchUri refuses to create a note through a workspace symlink', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'hl-uri-root-'));
+  const outside = mkdtempSync(join(tmpdir(), 'hl-uri-outside-'));
+  const executeCommandCalls = [];
+  const errorMessages = [];
+  try {
+    mkdirSync(join(root, 'notes'), { recursive: true });
+    symlinkSync(outside, join(root, 'notes', 'out'), 'dir');
+    const vscode = createVscodeMock({
+      executeCommandCalls,
+      openTextDocumentCalls: [],
+      showTextDocumentCalls: [],
+      document: {
+        getText: () => '',
+        positionAt: () => ({ line: 0, character: 0 }),
+      },
+      errorMessages,
+    });
+    const { dispatchUri } = loadTsModule('src/uriDispatcher.ts', {
+      vscode,
+      '@human-learning/core': {
+        classifyReferenceTarget: () => ({
+          kind: 'note',
+          path: 'notes/out/Escape.md',
+        }),
+      },
+    });
+
+    await dispatchUri(root, 'notes/out/Escape.md');
+
+    assert.deepEqual(executeCommandCalls, []);
+    assert.equal(existsSync(join(outside, 'Escape.md')), false);
+    assert.deepEqual(errorMessages, [
+      'Cannot open link outside the workspace: notes/out/Escape.md',
+    ]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
+  }
+});
+
 test('dispatchUri creates missing markdown note links before opening them', async () => {
   const executeCommandCalls = [];
   const createdDirectories = [];
@@ -131,6 +186,122 @@ test('dispatchUri creates missing markdown note links before opening them', asyn
   ]);
 });
 
+test('dispatchUri rejects note targets that would create files outside the workspace', async () => {
+  const executeCommandCalls = [];
+  const openTextDocumentCalls = [];
+  const writtenFiles = [];
+  const createdDirectories = [];
+  const errorMessages = [];
+  const vscode = createVscodeMock({
+    executeCommandCalls,
+    openTextDocumentCalls,
+    showTextDocumentCalls: [],
+    errorMessages,
+    document: undefined,
+  });
+  const { dispatchUri } = loadTsModule('src/uriDispatcher.ts', {
+    vscode,
+    '@human-learning/core': {
+      classifyReferenceTarget: () => ({
+        kind: 'note',
+        path: '../outside.md',
+      }),
+    },
+    fs: {
+      existsSync: () => false,
+      mkdirSync: (...args) => createdDirectories.push(args),
+      writeFileSync: (...args) => writtenFiles.push(args),
+    },
+  });
+
+  await dispatchUri('/vault', '../outside.md');
+
+  assert.deepEqual(executeCommandCalls, []);
+  assert.deepEqual(openTextDocumentCalls, []);
+  assert.deepEqual(createdDirectories, []);
+  assert.deepEqual(writtenFiles, []);
+  assert.deepEqual(errorMessages, [
+    'Cannot open link outside the workspace: ../outside.md',
+  ]);
+});
+
+test('dispatchUri rejects relative code, asset, and PDF targets outside the workspace', async () => {
+  for (const kind of ['code', 'image', 'text', 'unknown', 'pdf']) {
+    const executeCommandCalls = [];
+    const openTextDocumentCalls = [];
+    const showTextDocumentCalls = [];
+    const errorMessages = [];
+    const path = `../../outside.${kind === 'pdf' ? 'pdf' : kind === 'code' ? 'ts' : 'txt'}`;
+    const vscode = createVscodeMock({
+      executeCommandCalls,
+      openTextDocumentCalls,
+      showTextDocumentCalls,
+      errorMessages,
+      document: undefined,
+    });
+    const { dispatchUri } = loadTsModule('src/uriDispatcher.ts', {
+      vscode,
+      '@human-learning/core': {
+        classifyReferenceTarget: () => ({ kind, path }),
+      },
+      fs: { existsSync: () => true },
+    });
+
+    await dispatchUri('/vault', path);
+
+    assert.deepEqual(executeCommandCalls, [], kind);
+    assert.deepEqual(openTextDocumentCalls, [], kind);
+    assert.deepEqual(showTextDocumentCalls, [], kind);
+    assert.deepEqual(errorMessages, [
+      `Cannot open link outside the workspace: ${path}`,
+    ], kind);
+  }
+});
+
+test('dispatchUri without a workspace allows only web and absolute PDF viewing', async () => {
+  const executeCommandCalls = [];
+  const openExternalCalls = [];
+  const errorMessages = [];
+  const vscode = createVscodeMock({
+    executeCommandCalls,
+    openTextDocumentCalls: [],
+    showTextDocumentCalls: [],
+    openExternalCalls,
+    errorMessages,
+    document: undefined,
+  });
+  const { dispatchUri } = loadTsModule('src/uriDispatcher.ts', {
+    vscode,
+    '@human-learning/core': {
+      classifyReferenceTarget: uri => {
+        if (uri.startsWith('https://')) return { kind: 'web', url: uri };
+        if (uri.startsWith('/')) {
+          return { kind: 'pdf', path: '/outside/read-only.pdf', page: 4 };
+        }
+        return { kind: 'note', path: uri };
+      },
+    },
+    fs: { existsSync: () => true },
+  });
+
+  await dispatchUri(undefined, '/outside/read-only.pdf#page=4');
+  await dispatchUri(undefined, 'https://example.com/reference');
+  await dispatchUri(undefined, 'notes/relative.md');
+
+  assert.deepEqual(executeCommandCalls, [[
+    'human-learning.openPdfTarget',
+    { pdfPath: '/outside/read-only.pdf', page: 4 },
+  ]]);
+  assert.equal(openExternalCalls.length, 1);
+  assert.equal(
+    openExternalCalls[0][0].toString(),
+    'https://example.com/reference',
+  );
+  assert.deepEqual(errorMessages, [
+    'Open a workspace folder before opening this relative link: notes/relative.md',
+  ]);
+});
+
 test('dispatchUri reveals note headings inside the Human Learning markdown editor after opening', async () => {
   const executeCommandCalls = [];
   const document = {
@@ -175,6 +346,45 @@ test('dispatchUri reveals note headings inside the Human Learning markdown edito
         selection: { from: 9, to: 9 },
       },
     ],
+  ]);
+});
+
+test('dispatchUri reveals Markdown line fragments as complete line ranges', async () => {
+  const executeCommandCalls = [];
+  const text = 'one\nsecond\nthird\nfourth\nfifth\nsixth';
+  const lineStarts = [0, 4, 11, 17, 24, 30];
+  const document = {
+    uri: { fsPath: '/vault/notes/Concepts/Memory.md' },
+    lineCount: lineStarts.length,
+    getText: () => text,
+    offsetAt: position => lineStarts[position.line] ?? text.length,
+  };
+  const vscode = createVscodeMock({
+    executeCommandCalls,
+    openTextDocumentCalls: [],
+    showTextDocumentCalls: [],
+    document,
+  });
+  const { dispatchUri } = loadTsModule('src/uriDispatcher.ts', {
+    vscode,
+    '@human-learning/core': {
+      classifyReferenceTarget: () => ({
+        kind: 'note',
+        path: 'notes/Concepts/Memory.md',
+        lines: { start: 4, end: 5 },
+      }),
+    },
+    fs: { existsSync: () => true },
+  });
+
+  await dispatchUri('/vault', 'notes/Concepts/Memory.md#L4-L5');
+
+  assert.deepEqual(executeCommandCalls.at(-1), [
+    'human-learning.revealInMarkdownEditor',
+    {
+      uri: { fsPath: '/vault/notes/Concepts/Memory.md' },
+      selection: { from: 17, to: 30 },
+    },
   ]);
 });
 
@@ -708,6 +918,12 @@ function createVscodeMock({
     },
     TextEditorRevealType: {
       AtTop: 0,
+    },
+    Position: class Position {
+      constructor(line, character) {
+        this.line = line;
+        this.character = character;
+      }
     },
   };
 }

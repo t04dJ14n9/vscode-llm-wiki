@@ -1,17 +1,22 @@
 import * as vscode from 'vscode';
-import { openDatabase, closeDatabase, getBacklinks, getForwardLinks, checkLinks, runMigrations } from '@human-learning/core';
-import { notePathToUri } from './wikiLinks';
+import { relative } from 'node:path';
+import {
+  getBacklinks,
+  getForwardLinks,
+  loadFilesystemWiki,
+  type WikiLink,
+} from './filesystemWiki';
 
-type ViewMode = 'backlinks' | 'forward' | 'problems';
+type ViewMode = 'backlinks' | 'forward';
 
 export class BacklinksProvider implements vscode.TreeDataProvider<vscode.TreeItem> {
   private _onDidChangeTreeData = new vscode.EventEmitter<void>();
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
-  private mode: ViewMode;
 
-  constructor(private vaultRoot: string, mode: ViewMode) {
-    this.mode = mode;
-  }
+  constructor(
+    private readonly workspaceRoot: string,
+    private readonly mode: ViewMode,
+  ) {}
 
   refresh(): void {
     this._onDidChangeTreeData.fire();
@@ -24,88 +29,48 @@ export class BacklinksProvider implements vscode.TreeDataProvider<vscode.TreeIte
   async getChildren(element?: vscode.TreeItem): Promise<vscode.TreeItem[]> {
     if (element) return [];
 
-    const relPath = getActiveMarkdownRelativePath();
-    if (this.mode !== 'problems' && !relPath) {
+    const relPath = getActiveMarkdownRelativePath(this.workspaceRoot);
+    if (!relPath) {
       return [new vscode.TreeItem('(no active editor)')];
     }
 
-    const db = await openDatabase(this.vaultRoot);
-    runMigrations(db);
-
     try {
+      const wiki = await loadFilesystemWiki(this.workspaceRoot);
       if (this.mode === 'backlinks') {
-        const backlinks = getBacklinks(db, notePathToUri(relPath!));
-        closeDatabase(db);
+        const backlinks = getBacklinks(wiki, relPath);
 
         if (backlinks.length === 0) {
           return [new vscode.TreeItem('(no backlinks)')];
         }
 
-        return backlinks.map(b => {
-          const item = new vscode.TreeItem(`${b.from_note_path}:${b.from_line}`);
-          item.description = b.label || 'reference';
-          item.tooltip = b.to_uri;
-          item.command = {
-            command: 'human-learning.openAnchor',
-            title: 'Open',
-            arguments: [b.from_note_path],
-          };
-          item.iconPath = new vscode.ThemeIcon('arrow-left');
-          return item;
-        });
-      } else if (this.mode === 'forward') {
-        const forward = getForwardLinks(db, relPath!);
-        closeDatabase(db);
-
-        if (forward.length === 0) {
-          return [new vscode.TreeItem('(no forward links)')];
-        }
-
-        return forward.map(f => {
-          const item = new vscode.TreeItem(formatForwardLinkLabel(f));
-          item.description = `line ${f.from_line}`;
-          item.tooltip = f.to_uri;
-          item.command = {
-            command: 'human-learning.openAnchor',
-            title: 'Open',
-            arguments: [f.to_uri],
-          };
-          item.iconPath = new vscode.ThemeIcon('arrow-right');
-          return item;
-        });
-      } else {
-        const issues = checkLinks(db);
-        closeDatabase(db);
-
-        if (issues.length === 0) {
-          return [new vscode.TreeItem('(no problems)')];
-        }
-
-        return issues.map(i => {
-          const item = new vscode.TreeItem(i.message);
-          item.iconPath = new vscode.ThemeIcon(
-            i.status === 'broken' ? 'error' : 'warning'
-          );
-          return item;
-        });
+        return backlinks.map(link => backlinkTreeItem(link));
       }
+
+      const forward = getForwardLinks(wiki, relPath);
+      if (forward.length === 0) {
+        return [new vscode.TreeItem('(no forward links)')];
+      }
+
+      return forward.map(link => forwardLinkTreeItem(link));
     } catch (error) {
-      try { closeDatabase(db); } catch {}
       return [new vscode.TreeItem(`(error: ${errorMessage(error)})`)];
     }
   }
 }
 
 type ForwardLinkLike = {
-  to_uri: string;
+  to_uri?: string;
+  href?: string;
   label?: string | null;
-  from_line: number;
+  from_line?: number;
+  line?: number;
 };
 
 export function formatForwardLinkLabel(link: ForwardLinkLike): string {
   const label = link.label?.trim();
   if (label) return label;
-  return noteTitleFromUri(link.to_uri) ?? link.to_uri;
+  const href = link.href ?? link.to_uri ?? '';
+  return noteTitleFromUri(href) ?? href;
 }
 
 function noteTitleFromUri(uri: string): string | undefined {
@@ -126,10 +91,12 @@ function errorMessage(error: unknown): string {
   return 'Unknown error';
 }
 
-function getActiveMarkdownRelativePath(): string | undefined {
+function getActiveMarkdownRelativePath(workspaceRoot: string): string | undefined {
   const uri = getActiveMarkdownUri();
   if (!uri) return undefined;
-  return vscode.workspace.asRelativePath(uri);
+  const relPath = relative(workspaceRoot, uri.fsPath).replace(/\\/g, '/');
+  if (!relPath || relPath === '..' || relPath.startsWith('../')) return undefined;
+  return relPath;
 }
 
 function getActiveMarkdownUri(): vscode.Uri | undefined {
@@ -143,4 +110,30 @@ function getActiveMarkdownUri(): vscode.Uri | undefined {
 
 function isMarkdownUri(uri: vscode.Uri): boolean {
   return uri.scheme === 'file' && uri.fsPath.toLowerCase().endsWith('.md');
+}
+
+function forwardLinkTreeItem(link: WikiLink): vscode.TreeItem {
+  const item = new vscode.TreeItem(formatForwardLinkLabel(link));
+  item.description = `line ${link.line}`;
+  item.tooltip = link.href;
+  item.command = {
+    command: 'human-learning.openAnchor',
+    title: 'Open',
+    arguments: [link.href],
+  };
+  item.iconPath = new vscode.ThemeIcon('arrow-right');
+  return item;
+}
+
+function backlinkTreeItem(link: WikiLink): vscode.TreeItem {
+  const item = new vscode.TreeItem(`${link.sourcePath}:${link.line}`);
+  item.description = link.label || 'reference';
+  item.tooltip = link.href;
+  item.command = {
+    command: 'human-learning.openAnchor',
+    title: 'Open',
+    arguments: [link.sourcePath],
+  };
+  item.iconPath = new vscode.ThemeIcon('arrow-left');
+  return item;
 }

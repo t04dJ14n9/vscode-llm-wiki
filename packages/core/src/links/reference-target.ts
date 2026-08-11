@@ -49,11 +49,13 @@ export function classifyReferenceTarget(uri: string): ReferenceTarget {
   }
 
   if (extension === 'md') {
+    const lines = parseLineFragment(fragment);
     return withoutUndefined({
       kind: 'note',
       uri: cleaned,
       path: decodedPath,
-      heading: fragment ? decodeURIComponent(fragment) : undefined,
+      heading: fragment && !lines ? decodeURIComponent(fragment) : undefined,
+      lines,
     });
   }
 

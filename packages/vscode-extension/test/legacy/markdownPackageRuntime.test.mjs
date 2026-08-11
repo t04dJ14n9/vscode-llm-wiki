@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
 
-const repoRoot = path.resolve(import.meta.dirname, '../../..');
+const repoRoot = path.resolve(import.meta.dirname, '../../../..');
 const markdownDist = path.join(repoRoot, 'packages/vscode-markdown-extension/dist');
 const sqlJsRuntime = path.join(markdownDist, 'node_modules/sql.js');
 

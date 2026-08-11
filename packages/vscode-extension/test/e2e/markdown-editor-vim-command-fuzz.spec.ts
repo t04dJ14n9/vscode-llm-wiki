@@ -115,6 +115,27 @@ test.describe('Human Learning Markdown expanded Vim command fuzzing', () => {
     }
   });
 
+  test('non-Vim multi-key typing stays anchored when replacing text creates a temporary list marker', async ({ page }) => {
+    await openHarness(page);
+    await prepareEditor(page, {
+      text: ' `() b() beta $x$\t``',
+      cursor: 17,
+      vimMode: false,
+    });
+
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      view.dispatch({ selection: { anchor: 1, head: 17 } });
+      view.focus();
+    });
+    await page.keyboard.type('**', { delay: 0 });
+
+    await expectEditorState(page, {
+      text: ' **\t``',
+      cursor: 3,
+    }, 'multi-key replacement remains anchored while list rendering updates');
+  });
+
   test('Vim j and k move by document lines from a clean cursor column', async ({ page }) => {
     await openHarness(page);
     const text = 'alpha beta\ngamma delta\nlast line';
@@ -629,6 +650,140 @@ test.describe('Human Learning Markdown expanded Vim command fuzzing', () => {
       text: 'alpha beta\ngamma delta\nlast line',
       cursor: 'alp'.length,
     }, 'non-vim ArrowUp returns to the previous document-line column');
+  });
+
+  test('non-Vim vertical arrows retain native movement within wrapped document lines', async ({ page }) => {
+    await openHarness(page);
+    await page.setViewportSize({ width: 360, height: 640 });
+    const text = `${'wrapped words '.repeat(18)}end\nsecond document line`;
+    await prepareEditor(page, {
+      text,
+      cursor: 0,
+      vimMode: false,
+    });
+
+    await page.keyboard.press('ArrowDown');
+    const wrappedState = await page.evaluate(() => {
+      const view = window.__cmView;
+      return {
+        head: view.state.selection.main.head,
+        lineNumber: view.state.doc.lineAt(view.state.selection.main.head).number,
+      };
+    });
+    expect(wrappedState.lineNumber).toBe(1);
+    expect(wrappedState.head).toBeGreaterThan(0);
+
+    await page.keyboard.press('ArrowUp');
+    await expectEditorState(page, {
+      text,
+      cursor: 0,
+    }, 'non-vim ArrowUp returns within the wrapped document line');
+  });
+
+  test('non-Vim vertical arrows retain native movement when leaving a wrapped line', async ({ page }) => {
+    await openHarness(page);
+    await page.setViewportSize({ width: 360, height: 640 });
+    const text = `${'wrapped words '.repeat(18)}end\nsecond document line with room`;
+    await prepareEditor(page, {
+      text,
+      cursor: text.indexOf('\n') - 3,
+      vimMode: false,
+    });
+
+    const before = await page.evaluate(() => {
+      const view = window.__cmView;
+      const line = view.state.doc.line(1);
+      const range = view.state.selection.main;
+      const visualFrom = view.moveToLineBoundary(range, false, true).head;
+      const nativeTarget = view.moveVertically(range, true);
+      return {
+        visualFrom,
+        lineFrom: line.from,
+        nativeHead: nativeTarget.head,
+        nativeLine: view.state.doc.lineAt(nativeTarget.head).number,
+      };
+    });
+    expect(before.visualFrom).toBeGreaterThan(before.lineFrom);
+    expect(before.nativeLine).toBe(2);
+
+    await page.keyboard.press('ArrowDown');
+    await expect.poll(() => page.evaluate(() => window.__cmView.state.selection.main.head))
+      .toBe(before.nativeHead);
+  });
+
+  test('non-Vim vertical arrows restore the goal column after crossing a short line', async ({ page }) => {
+    await openHarness(page);
+    const text = '0123456789\nx\nabcdefghij';
+    await prepareEditor(page, {
+      text,
+      cursor: 8,
+      vimMode: false,
+    });
+
+    await page.keyboard.press('ArrowDown');
+    await expectEditorState(page, {
+      text,
+      cursor: '0123456789\nx'.length,
+    }, 'non-vim ArrowDown clamps to the short line');
+
+    await page.keyboard.press('ArrowDown');
+    await expectEditorState(page, {
+      text,
+      cursor: '0123456789\nx\nabcdefgh'.length,
+    }, 'non-vim ArrowDown restores the goal column');
+
+    await page.keyboard.press('ArrowUp');
+    await expectEditorState(page, {
+      text,
+      cursor: '0123456789\nx'.length,
+    }, 'non-vim ArrowUp clamps to the short line');
+
+    await page.keyboard.press('ArrowUp');
+    await expectEditorState(page, {
+      text,
+      cursor: 8,
+    }, 'non-vim ArrowUp restores the goal column');
+  });
+
+  test('non-Vim vertical arrows respect native targets across rendered block widgets', async ({ page }) => {
+    await openHarness(page);
+    const text = [
+      'Before',
+      '',
+      '```mermaid',
+      'graph TD',
+      '  A --> B',
+      '```',
+      '',
+      'After',
+    ].join('\n');
+    await prepareEditor(page, {
+      text,
+      cursor: 'Before\n'.length,
+      vimMode: false,
+    });
+    await expect(page.locator('.cm-hybrid-mermaid-block')).toBeVisible();
+
+    const nativeTargetLine = await page.evaluate(() => {
+      const view = window.__cmView;
+      const nativeTarget = view.moveVertically(view.state.selection.main, true);
+      return view.state.doc.lineAt(nativeTarget.head).number;
+    });
+    expect(nativeTargetLine).toBeGreaterThan(3);
+
+    await page.keyboard.press('ArrowDown');
+    const actual = await page.evaluate(() => {
+      const view = window.__cmView;
+      const line = view.state.doc.lineAt(view.state.selection.main.head);
+      return {
+        lineNumber: line.number,
+        offset: view.state.selection.main.head - line.from,
+      };
+    });
+    expect(actual).toEqual({
+      lineNumber: nativeTargetLine,
+      offset: 0,
+    });
   });
 });
 

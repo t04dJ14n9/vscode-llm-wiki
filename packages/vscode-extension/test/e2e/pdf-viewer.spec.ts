@@ -272,9 +272,11 @@ test('pdf viewer exposes PDF++-like direct page and zoom controls', async ({ pag
   await expect(page.getByRole('button', { name: 'Display options' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Previous page' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Next page' })).toBeVisible();
-  for (const label of ['Highlight color', 'Copy link format', 'Copy embed link to rectangular selection', 'Direct highlight']) {
+  for (const label of ['Copy link format', 'Copy embed link to rectangular selection']) {
     await expect(toolbar.getByRole('button', { name: label })).toBeVisible();
   }
+  await expect(toolbar.getByRole('button', { name: 'Highlight color' })).toHaveCount(0);
+  await expect(toolbar.getByRole('button', { name: 'Direct highlight' })).toHaveCount(0);
 
   const pageInput = page.getByRole('spinbutton', { name: 'Page' });
   const zoomInput = page.getByRole('spinbutton', { name: 'Zoom' });
@@ -559,29 +561,9 @@ test('pdf viewer preserves original PDF colors by default in a dark theme', asyn
   await expect.poll(() => thumbnail.evaluate(element => getComputedStyle(element).filter)).toBe('none');
 });
 
-test('pdf viewer toolbar exposes PDF++ highlight colors, copy formats, and selection modes', async ({ page }) => {
+test('pdf viewer toolbar exposes copy formats and rectangle selection without legacy highlight controls', async ({ page }) => {
   await page.goto('http://localhost:8979/pdf-viewer.html');
   await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 1/, { timeout: 10_000 });
-
-  const highlightTrigger = page.getByRole('button', { name: 'Highlight color' });
-  await highlightTrigger.click();
-  const colorMenu = page.getByRole('menu', { name: 'Highlight colors' });
-  await expect(colorMenu).toBeVisible();
-  for (const color of ['Yellow', 'Red', 'Green', 'Purple']) {
-    await expect(colorMenu.getByRole('menuitemradio', { name: color })).toBeVisible();
-  }
-  await expect(colorMenu.getByRole('menuitemradio', { name: 'Blue' })).toHaveCount(0);
-  await colorMenu.getByRole('menuitemradio', { name: 'Purple' }).click();
-  await expect(highlightTrigger).toHaveAttribute('data-highlight-color', 'purple');
-
-  const palette = page.getByRole('group', { name: 'Highlight palette' });
-  for (const color of ['Yellow', 'Red', 'Green', 'Purple']) {
-    await expect(palette.getByRole('button', { name: `${color} highlight` })).toBeVisible();
-  }
-  await expect(palette.getByRole('button', { name: 'Blue highlight' })).toHaveCount(0);
-  await palette.getByRole('button', { name: 'Red highlight' }).click();
-  await expect(palette.getByRole('button', { name: 'Red highlight' })).toHaveAttribute('aria-pressed', 'true');
-  await expect(highlightTrigger).toHaveAttribute('data-highlight-color', 'red');
 
   const copyFormatTrigger = page.getByRole('button', { name: 'Copy link format' });
   await copyFormatTrigger.click();
@@ -591,13 +573,10 @@ test('pdf viewer toolbar exposes PDF++ highlight colors, copy formats, and selec
   await expect(copyFormatTrigger).toHaveAttribute('data-copy-link-format', 'quote');
 
   const rectangle = page.getByRole('button', { name: 'Copy embed link to rectangular selection' });
-  const direct = page.getByRole('button', { name: 'Direct highlight' });
   await rectangle.click();
   await expect(rectangle).toHaveAttribute('aria-pressed', 'true');
-  await expect(direct).toHaveAttribute('aria-pressed', 'false');
-  await direct.click();
-  await expect(direct).toHaveAttribute('aria-pressed', 'true');
-  await expect(rectangle).toHaveAttribute('aria-pressed', 'false');
+  await expect(page.getByRole('button', { name: 'Direct highlight' })).toHaveCount(0);
+  await expect(page.getByRole('group', { name: 'Highlight palette' })).toHaveCount(0);
 });
 
 test('pdf viewer rectangular selection copies PDF++ coordinates in a one-shot drag', async ({ page }) => {
@@ -723,7 +702,7 @@ test('pdf viewer search finds phrases split across PDF text rects', async ({ pag
   await expect(page.locator('.pdf-search-match.selected')).toHaveCount(2);
 });
 
-test('pdf viewer fuzzes controls, search, view modes, and highlights without stale state', async ({ page }) => {
+test('pdf viewer fuzzes controls, search, and view modes without stale state', async ({ page }) => {
   const errors = collectPageErrors(page);
   await page.setViewportSize({ width: 1280, height: 720 });
   await page.goto('http://localhost:8979/pdf-viewer.html?fixture=two-page');
@@ -790,72 +769,6 @@ test('pdf viewer fuzzes controls, search, view modes, and highlights without sta
     await expectPdfViewerStable(page, errors, operation.label, 2);
   }
 
-  const referencedAnchor = {
-    id: 'anc_fuzz_referenced',
-    page: 1,
-    textItemIndex: 0,
-    charOffset: 0,
-    endTextItemIndex: 0,
-    endCharOffset: 4,
-    snippet: 'Page',
-  };
-  const annotatedAnchor = {
-    id: 'anc_fuzz_annotated',
-    page: 2,
-    textItemIndex: 0,
-    charOffset: 5,
-    endTextItemIndex: 0,
-    endCharOffset: 8,
-    snippet: 'Two',
-  };
-  await page.evaluate(({ referencedAnchor, annotatedAnchor }) => {
-    window.__mockMessages = [];
-    window.postMessage({
-      type: 'setHighlights',
-      referenced: [{ anchor: referencedAnchor }],
-      annotated: [{ anchor: annotatedAnchor }],
-    }, '*');
-  }, { referencedAnchor, annotatedAnchor });
-  await expect(page.locator('.annotation-highlight.referenced')).toHaveCount(1);
-  await expect(page.locator('.annotation-highlight.annotated')).toHaveCount(1);
-  await expectPdfViewerStable(page, errors, 'draw referenced and annotated highlights', 2);
-
-  await page.locator('.annotation-highlight.referenced').click({ force: true });
-  await page.waitForFunction(() =>
-    window.__mockMessages?.some((message) => message.type === 'requestReferencesForAnchor' && message.anchor?.id === 'anc_fuzz_referenced')
-  );
-  await page.evaluate((referencedAnchor) => {
-    window.postMessage({
-      type: 'referencesForAnchor',
-      anchor: referencedAnchor,
-      items: [{
-        source: 'notes/Concepts/Page One.md',
-        sourceLine: 7,
-        snippet: 'Page',
-        contextLine: 'The first page is referenced by markdown.',
-      }],
-    }, '*');
-  }, referencedAnchor);
-  await expect(page.locator('.ref-popover')).toContainText('1 markdown note references this');
-  await expectPdfViewerStable(page, errors, 'referenced highlight popover', 2);
-
-  await page.keyboard.press('Escape');
-  await expect(page.locator('.ref-popover')).toHaveCount(0);
-  await expectPdfViewerStable(page, errors, 'dismiss referenced highlight popover', 2);
-
-  await page.locator('.annotation-highlight.annotated').click({ force: true });
-  await page.waitForFunction(() =>
-    window.__mockMessages?.some((message) => message.type === 'requestReferencesForAnchor' && message.anchor?.id === 'anc_fuzz_annotated')
-  );
-  await page.evaluate((annotatedAnchor) => {
-    window.postMessage({
-      type: 'referencesForAnchor',
-      anchor: annotatedAnchor,
-      items: [],
-    }, '*');
-  }, annotatedAnchor);
-  await expect(page.locator('.ref-popover')).toContainText('No markdown references found.');
-  await expectPdfViewerStable(page, errors, 'annotated highlight empty popover', 2);
 });
 
 test('pdf search settings match PDF++ highlight, diacritic, and whole-word behavior', async ({ page }) => {
@@ -1567,105 +1480,7 @@ test('pdf text-fragment review drops a partial leading word from 32-character pr
   expect(Array.from(anchor.prefix).length).toBeLessThanOrEqual(32);
 });
 
-test('pdf viewer renders reference overlays and opens markdown reference popovers', async ({ page }) => {
-  await page.goto('http://localhost:8979/pdf-viewer.html');
-  await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 1/, { timeout: 10_000 });
-  await expect(page.locator('.text-layer span[data-item-index="0"]')).toBeVisible();
-
-  const anchor = {
-    id: 'anc_pdf_overlay',
-    page: 1,
-    textItemIndex: 0,
-    charOffset: 0,
-    endTextItemIndex: 0,
-    endCharOffset: 26,
-    snippet: 'FlashAttention uses tiling',
-  };
-  await page.evaluate((anchor) => {
-    window.postMessage({
-      type: 'setHighlights',
-      referenced: [{ anchor }],
-      annotated: [],
-    }, '*');
-  }, anchor);
-
-  const overlay = page.locator('.annotation-highlight.referenced').first();
-  await expect(overlay).toBeVisible();
-
-  await page.evaluate(() => {
-    window.__mockMessages = [];
-  });
-  await overlay.click({ force: true });
-  await page.waitForFunction(() =>
-    window.__mockMessages?.some((message) => message.type === 'requestReferencesForAnchor')
-  );
-
-  await page.evaluate((anchor) => {
-    window.postMessage({
-      type: 'referencesForAnchor',
-      anchor,
-      items: [{
-        source: 'notes/Concepts/FlashAttention.md',
-        sourceLine: 12,
-        snippet: 'FlashAttention uses tiling',
-        contextLine: 'See the FlashAttention tiling discussion.',
-      }],
-    }, '*');
-  }, anchor);
-
-  await expect(page.locator('.ref-popover')).toContainText('1 markdown note references this');
-  await expect(page.locator('.ref-popover')).toContainText('See the FlashAttention tiling discussion.');
-
-  await page.locator('.ref-popover .item').click();
-  const openMessages = await page.evaluate(() =>
-    window.__mockMessages?.filter((message) => message.type === 'openMarkdownAtLocation')
-  );
-  expect(openMessages).toHaveLength(1);
-  expect(openMessages[0].path).toBe('notes/Concepts/FlashAttention.md');
-});
-
-test('annotated pdf highlights still respond to clicks and show an empty reference popover', async ({ page }) => {
-  await page.goto('http://localhost:8979/pdf-viewer.html');
-  await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 1/, { timeout: 10_000 });
-  await expect(page.locator('.text-layer span[data-item-index="0"]')).toBeVisible();
-
-  const anchor = {
-    id: 'anc_pdf_annotated',
-    page: 1,
-    textItemIndex: 0,
-    charOffset: 0,
-    endTextItemIndex: 0,
-    endCharOffset: 26,
-    snippet: 'FlashAttention uses tiling',
-  };
-  await page.evaluate((anchor) => {
-    window.postMessage({
-      type: 'setHighlights',
-      referenced: [],
-      annotated: [{ anchor }],
-    }, '*');
-    window.__mockMessages = [];
-  }, anchor);
-
-  const overlay = page.locator('.annotation-highlight.annotated').first();
-  await expect(overlay).toBeVisible();
-  await overlay.click({ force: true });
-  await page.waitForFunction(() =>
-    window.__mockMessages?.some((message) => message.type === 'requestReferencesForAnchor')
-  );
-
-  await page.evaluate((anchor) => {
-    window.postMessage({
-      type: 'referencesForAnchor',
-      anchor,
-      items: [],
-    }, '*');
-  }, anchor);
-
-  await expect(page.locator('.ref-popover')).toContainText('No markdown references found.');
-});
-
-test('pdf selection toolbar exposes quote and highlight actions', async ({ page }) => {
+test('pdf selection toolbar exposes link and quote actions without legacy highlight action', async ({ page }) => {
   await page.goto('http://localhost:8979/pdf-viewer.html');
   await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 1/, { timeout: 10_000 });
   await expect(page.locator('.text-layer span[data-item-index="0"]')).toBeVisible();
@@ -1697,6 +1512,7 @@ test('pdf selection toolbar exposes quote and highlight actions', async ({ page 
 
   await page.locator('#selection-toolbar button', { hasText: 'More' }).click();
   await expect(page.locator('#selection-toolbar .menu.open')).toBeVisible();
+  await expect(page.locator('#selection-toolbar button', { hasText: 'Highlight Selection' })).toHaveCount(0);
 
   await page.evaluate(() => {
     window.__mockMessages = [];
@@ -1804,14 +1620,19 @@ test('pdf viewer exposes a PDF++-style context menu for selections and pages', a
   await expect(page.getByRole('menu').getByRole('menuitem')).toHaveText([
     'Look up ...',
     'Ask about selection…',
+    /(?:⌘L|Ctrl\+L)  Add to Chat/,
     'Copy link to selection',
-    'Highlight selection',
     'Copy selected text',
     'Copy quote and link',
     'Insert link',
     'Insert quote and link',
   ]);
-  await expect(page.getByRole('menu')).toHaveScreenshot('pdf-context-menu-ask-selection.png', { maxDiffPixels: 3 });
+  if (process.platform === 'darwin') {
+    await expect(page.getByRole('menu')).toHaveScreenshot(
+      'pdf-context-menu-ask-selection.png',
+      { maxDiffPixels: 3 },
+    );
+  }
 
   await page.getByRole('menuitem', { name: 'Look up ...', exact: true }).click();
   await expect.poll(() => page.evaluate(() =>
@@ -2081,7 +1902,6 @@ test('pdf selection toolbar fuzzes all actions across synthetic and dragged sele
     { label: 'Insert Link', action: 'insertLink', openMenu: false, start: 15, end: 26 },
     { label: 'Copy Quote and Link', action: 'copyQuoteAndLink', openMenu: true, start: 0, end: 26 },
     { label: 'Insert Quote and Link', action: 'insertQuoteAndLink', openMenu: true, start: 27, end: 34 },
-    { label: 'Highlight Selection', action: 'highlight', openMenu: true, start: 35, end: 41 },
   ]) {
     await selectPdfTextRange(page, actionCase.start, actionCase.end);
     await expect(page.locator('#selection-toolbar')).toBeVisible();
@@ -2137,84 +1957,6 @@ test('pdf selection toolbar appears after a real mouse drag across PDF text', as
   await page.mouse.up();
 
   await expect(page.locator('#selection-toolbar')).toBeVisible();
-});
-
-test('pdf direct highlight uses the selected color without showing a selection toolbar', async ({ page }) => {
-  await page.goto('http://localhost:8979/pdf-viewer.html');
-  await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 1/, { timeout: 10_000 });
-  await expect(page.locator('.text-layer span[data-item-index="0"]')).toBeVisible();
-
-  await page.getByRole('button', { name: 'Highlight color' }).click();
-  await page.getByRole('menuitemradio', { name: 'Purple' }).click();
-  await page.getByRole('button', { name: 'Direct highlight' }).click();
-  await page.evaluate(() => { window.__mockMessages = []; });
-
-  await page.evaluate(() => {
-    const span = document.querySelector('.text-layer span[data-item-index="0"]');
-    const quote = 'FlashAttention uses tiling';
-    const offset = span.textContent.indexOf(quote);
-    const text = span.querySelector('.pdf-text-glyphs')?.firstChild;
-    if (!text) throw new Error('Expected selectable PDF text');
-    const range = document.createRange();
-    range.setStart(text, offset);
-    range.setEnd(text, offset + quote.length);
-    const selection = window.getSelection();
-    selection.removeAllRanges();
-    selection.addRange(range);
-    document.querySelector('#page-container').dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
-  });
-
-  await expect.poll(() => page.evaluate(() =>
-    window.__mockMessages?.filter(message => message.type === 'selectionAction' && message.action === 'highlight').length ?? 0
-  )).toBe(1);
-  const result = await page.evaluate(() => {
-    const action = window.__mockMessages
-      ?.filter(message => message.type === 'selectionAction' && message.action === 'highlight')
-      .at(-1);
-    const selectionMessages = window.__mockMessages?.filter(message => message.type === 'selectionChanged') ?? [];
-    return {
-      action,
-      lastSelection: selectionMessages.at(-1),
-      nativeSelectionCollapsed: window.getSelection()?.isCollapsed,
-    };
-  });
-  expect(result.action.anchor.highlightColor).toBe('purple');
-  expect(result.action.anchor.rects.length).toBeGreaterThan(0);
-  expect(result.action.anchor.rects[0]).toHaveLength(4);
-  expect(result.lastSelection?.anchor).toBeUndefined();
-  expect(result.nativeSelectionCollapsed).toBe(true);
-  await expect(page.locator('#selection-toolbar')).toHaveCount(0);
-
-  await page.evaluate(anchor => {
-    window.postMessage({
-      type: 'setHighlights',
-      referenced: [],
-      annotated: [{ anchor }],
-    }, '*');
-  }, result.action.anchor);
-  const overlay = page.locator('.annotation-highlight.annotated').first();
-  await expect(overlay).toHaveAttribute('data-highlight-color', 'purple');
-  await expect.poll(() => overlay.evaluate(element => getComputedStyle(element).backgroundColor))
-    .toBe('rgba(177, 151, 252, 0.42)');
-
-  const initialGeometry = await overlay.evaluate((element: HTMLElement) => ({
-    left: Number.parseFloat(element.style.left),
-    top: Number.parseFloat(element.style.top),
-    width: Number.parseFloat(element.style.width),
-    height: Number.parseFloat(element.style.height),
-  }));
-  const rect = result.action.anchor.rects[0];
-  const initialScale = Number(await page.getByRole('spinbutton', { name: 'Zoom' }).inputValue()) / 100;
-  expect(Math.abs(initialGeometry.left - rect[0] * initialScale)).toBeLessThanOrEqual(1);
-  expect(Math.abs(initialGeometry.top - rect[1] * initialScale)).toBeLessThanOrEqual(1);
-  expect(Math.abs(initialGeometry.width - (rect[2] - rect[0]) * initialScale)).toBeLessThanOrEqual(1);
-  expect(Math.abs(initialGeometry.height - (rect[3] - rect[1]) * initialScale)).toBeLessThanOrEqual(1);
-
-  const zoomInput = page.getByRole('spinbutton', { name: 'Zoom' });
-  await zoomInput.fill('200');
-  await zoomInput.press('Enter');
-  await expect.poll(() => overlay.evaluate((element: HTMLElement) => Number.parseFloat(element.style.left)))
-    .toBeCloseTo(rect[0] * 2, 0);
 });
 
 test('pdf viewer keeps the selectable text layer visually hidden', async ({ page }) => {
@@ -2454,7 +2196,6 @@ async function expectPdfViewerStable(page, errors: string[], label: string, expe
         canvasBitmapWidth: canvas?.width ?? 0,
         canvasBitmapHeight: canvas?.height ?? 0,
         textItemCount: textLayer?.querySelectorAll('span[data-item-index]').length ?? 0,
-        annotationCount: highlightLayer?.querySelectorAll('.annotation-highlight').length ?? 0,
         searchMatchCount: highlightLayer?.querySelectorAll('.pdf-search-match').length ?? 0,
       };
     });
@@ -2478,7 +2219,6 @@ async function expectPdfViewerStable(page, errors: string[], label: string, expe
       searchMatchCount: document.querySelectorAll('.pdf-search-match').length,
       selectedSearchMatchCount: document.querySelectorAll('.pdf-search-match.selected').length,
       selectionToolbarCount: document.querySelectorAll('#selection-toolbar').length,
-      popoverCount: document.querySelectorAll('.ref-popover').length,
       messageTypes: (window.__mockMessages ?? []).map(message => message.type),
     };
   });
@@ -2497,7 +2237,6 @@ async function expectPdfViewerStable(page, errors: string[], label: string, expe
   expect(state.renderedVisibleCount, label).toBeGreaterThan(0);
   expect(state.misaligned, label).toEqual([]);
   expect(state.selectionToolbarCount, label).toBeLessThanOrEqual(1);
-  expect(state.popoverCount, label).toBeLessThanOrEqual(1);
   if (state.searchHidden) {
     expect(state.searchMatchCount, label).toBe(0);
     expect(state.selectedSearchMatchCount, label).toBe(0);

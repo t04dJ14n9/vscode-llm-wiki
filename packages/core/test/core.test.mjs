@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, mkdirSync, readFileSync, unlinkSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, mkdirSync, readFileSync, readdirSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -501,6 +501,12 @@ test('parses native markdown reference targets without generating hl URIs', () =
     path: 'raw/code/attention.cu',
     lines: { start: 42, end: 57 },
   });
+  assert.deepEqual(classifyReferenceTarget('notes/Concepts/Attention.md#L4-L5'), {
+    kind: 'note',
+    uri: 'notes/Concepts/Attention.md#L4-L5',
+    path: 'notes/Concepts/Attention.md',
+    lines: { start: 4, end: 5 },
+  });
   const selectionUri = 'raw/pdf/flash-attention.pdf#page=7:~:text=before-,selected%20text,-after';
   assert.deepEqual(classifyReferenceTarget(selectionUri), {
     kind: 'pdf',
@@ -698,20 +704,57 @@ test('persisting a web page snapshot creates a durable web target and DOM anchor
   });
 });
 
-test('generated agent instructions prefer qmd and native markdown links', () => {
+test('generated agent instructions describe the editor workflow without a dedicated CLI', () => {
   const root = makeVault();
+  const commandsDir = join(root, '.claude', 'commands');
+  mkdirSync(commandsDir, { recursive: true });
+  writeFileSync(
+    join(commandsDir, 'hl-ingest.md'),
+    'Run `hl ingest` on the current file and report what was indexed.',
+  );
+  writeFileSync(
+    join(commandsDir, 'hl-repair-links.md'),
+    'Run `hl links check --fix` and report any remaining broken links.',
+  );
+  writeFileSync(
+    join(commandsDir, 'hl-today.md'),
+    'Run `hl today` to generate a daily study summary.',
+  );
   generateAgentInstructions(root);
 
   const agents = readFileSync(join(root, 'AGENTS.md'), 'utf8');
   const skill = readFileSync(join(root, '.agents', 'skills', 'human-learning', 'SKILL.md'), 'utf8');
+  const codexConfig = readFileSync(join(root, '.codex', 'config.toml'), 'utf8');
+  const explainSelection = readFileSync(join(commandsDir, 'hl-explain-selection.md'), 'utf8');
   assert.match(agents, /native Markdown\/Obsidian links/);
-  assert.match(skill, /qmd/);
-  assert.match(skill, /Qwen/);
+  assert.match(agents, /Markdown Outline and PDF Outline/);
+  assert.match(agents, /Add to Chat/);
+  assert.match(skill, /selection\.png/);
+  assert.match(explainSelection, /selection\.png/);
+  assert.deepEqual(readdirSync(commandsDir), ['hl-explain-selection.md']);
   for (const generated of [agents, skill]) {
     assert.match(generated, /#page=N:~:text=/);
     assert.match(generated, /#page=N/);
     assert.doesNotMatch(generated, /[?&](?:anchor|chunk)=/);
     assert.doesNotMatch(generated, /PDF chunks|chunk link/i);
     assert.doesNotMatch(generated, /hl:\/\//);
+    assert.doesNotMatch(generated, /\bCLI\b|\bhl (?:search|ingest|links|anchor|context|today|status|doctor)\b/i);
   }
+  assert.doesNotMatch(codexConfig, /allow_hl_cli|\[tools\]/);
+});
+
+test('generated agent instructions preserve customized legacy Claude commands', () => {
+  const root = makeVault();
+  const commandsDir = join(root, '.claude', 'commands');
+  mkdirSync(commandsDir, { recursive: true });
+  const customized = 'Use the team-specific ingestion workflow and keep its audit log.';
+  writeFileSync(join(commandsDir, 'hl-ingest.md'), customized);
+
+  generateAgentInstructions(root);
+
+  assert.equal(readFileSync(join(commandsDir, 'hl-ingest.md'), 'utf8'), customized);
+  assert.match(
+    readFileSync(join(commandsDir, 'hl-explain-selection.md'), 'utf8'),
+    /selection\.png/,
+  );
 });

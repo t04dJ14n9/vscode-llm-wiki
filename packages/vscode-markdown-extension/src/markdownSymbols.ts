@@ -27,7 +27,11 @@ class MarkdownOutlineItem extends vscode.TreeItem {
         : vscode.TreeItemCollapsibleState.None,
     );
     this.children = node.children.map(child => new MarkdownOutlineItem(child, document));
-    this.iconPath = new vscode.ThemeIcon('blank');
+    this.id = markdownOutlineItemId(document.uri, node);
+    this.iconPath = new vscode.ThemeIcon('symbol-string');
+    this.accessibilityInformation = {
+      label: `${node.title}, heading level ${node.level}`,
+    };
     const offset = document.offsetAt(new vscode.Position(node.line, node.textStart));
     this.command = {
       command: 'human-learning.revealInMarkdownEditor',
@@ -86,7 +90,10 @@ export function registerMarkdownOutlineProvider(context: vscode.ExtensionContext
 export function registerMarkdownOutlineTreeProvider(context: vscode.ExtensionContext): MarkdownOutlineTreeProvider {
   const provider = new MarkdownOutlineTreeProvider();
   context.subscriptions.push(
-    vscode.window.registerTreeDataProvider('hl-outline', provider),
+    vscode.window.createTreeView('hl-outline', {
+      treeDataProvider: provider,
+      showCollapseAll: true,
+    }),
     vscode.window.onDidChangeActiveTextEditor(() => provider.refresh()),
     vscode.window.tabGroups.onDidChangeTabs(() => provider.refresh()),
     vscode.workspace.onDidChangeTextDocument(event => {
@@ -97,6 +104,10 @@ export function registerMarkdownOutlineTreeProvider(context: vscode.ExtensionCon
     }),
   );
   return provider;
+}
+
+function markdownOutlineItemId(uri: vscode.Uri, node: HeadingNode): string {
+  return `markdown-outline:${uri.toString()}:${node.line}:${node.level}`;
 }
 
 function parseMarkdownHeadings(text: string): HeadingEntry[] {

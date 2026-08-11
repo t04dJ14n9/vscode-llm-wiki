@@ -12,14 +12,18 @@
     --vscode-panel-border: #3e3e3e;
     --vscode-button-secondaryBackground: #3a3d41;
     --vscode-button-secondaryForeground: #cccccc;
+    --vscode-button-secondaryHoverBackground: #45494e;
     --vscode-button-background: #007acc;
     --vscode-button-foreground: #ffffff;
+    --vscode-button-hoverBackground: #0062a3;
     --vscode-errorForeground: #f48771;
     --vscode-input-background: #1e1e1e;
     --vscode-input-foreground: #d4d4d4;
     --vscode-focusBorder: #007fd4;
     --vscode-editorWidget-background: #252526;
     --vscode-descriptionForeground: #9d9d9d;
+    --vscode-input-placeholderForeground: #a6a6a6;
+    --vscode-toolbar-hoverBackground: rgba(90, 93, 94, .31);
   }
   html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; }
   body { background: var(--vscode-editor-background); color: var(--vscode-editor-foreground); }
@@ -59,17 +63,9 @@
   .toolbar-number span { padding-right: 5px; color: var(--vscode-descriptionForeground); white-space: nowrap; }
   #page-input { width: 36px; }
   #page-total { min-width: 30px; }
-  .toolbar-color-dot { display: inline-block; width: 12px; height: 12px; border-radius: 50%; background: #ffd54f; box-shadow: 0 0 0 1px rgba(255,255,255,.35); }
-  .toolbar-palette { display: inline-flex; align-items: center; gap: 1px; }
-  #toolbar .toolbar-palette .palette-color { min-width: 22px; width: 22px; padding: 0; }
-  #toolbar .toolbar-palette .palette-color[aria-pressed="true"] { background: rgba(127,127,127,.24); box-shadow: inset 0 -2px 0 var(--vscode-focusBorder); }
-  .palette-color[data-palette-highlight-color="red"] .toolbar-color-dot { background: #ff6b6b; }
-  .palette-color[data-palette-highlight-color="green"] .toolbar-color-dot { background: #69db7c; }
-  .palette-color[data-palette-highlight-color="purple"] .toolbar-color-dot { background: #b197fc; }
   .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; }
   .toolbar-menu { position: fixed; top: 42px; z-index: 60; min-width: 210px; padding: 5px; border: 1px solid var(--vscode-panel-border); border-radius: 5px; background: var(--vscode-editorWidget-background); box-shadow: 0 6px 20px rgba(0,0,0,.4); font: 12px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
   #display-menu { left: 112px; }
-  #highlight-color-menu { right: 106px; }
   #copy-link-format-menu { right: 54px; }
   .toolbar-menu.hidden { display: none; }
   .toolbar-menu .menu-section { padding: 4px 8px 2px; color: var(--vscode-descriptionForeground); font-size: 11px; }
@@ -210,25 +206,43 @@
     justify-content: center;
     margin: 0;
     padding: 0;
-    border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border, #454545));
+    border: 1px solid var(--vscode-contrastBorder, var(--vscode-widget-border, var(--vscode-panel-border, #454545)));
     border-radius: 5px;
     appearance: none;
     -webkit-appearance: none;
-    background: var(--vscode-editorWidget-background, var(--vscode-sideBar-background, #252526));
-    color: var(--vscode-icon-foreground, var(--vscode-foreground, var(--vscode-editor-foreground, #cccccc)));
+    background: var(--vscode-button-secondaryBackground, #3a3d41);
+    color: var(--vscode-button-secondaryForeground, #ffffff);
     box-shadow: 0 2px 8px var(--vscode-widget-shadow, rgba(0,0,0,.38));
     cursor: pointer;
     transition: left 120ms ease, background-color 80ms ease, border-color 80ms ease;
   }
   #pdf-history-back[hidden] { display: none; }
   #pdf-sidebar:not([hidden]) ~ #pdf-history-back { left: 254px; }
-  #pdf-history-back:hover { background: var(--vscode-toolbar-hoverBackground, rgba(90,93,94,.31)); }
-  #pdf-history-back:active { background: var(--vscode-toolbar-activeBackground, rgba(90,93,94,.48)); }
-  #pdf-history-back:focus-visible { outline: 1px solid var(--vscode-focusBorder, #007fd4); outline-offset: 2px; }
+  #pdf-history-back:hover { background: var(--vscode-button-secondaryHoverBackground, #45494e); }
+  #pdf-history-back:active {
+    background: var(--vscode-button-secondaryHoverBackground, #45494e);
+    box-shadow: inset 0 1px 2px rgba(0,0,0,.35);
+  }
+  #pdf-history-back:focus-visible { outline: 2px solid var(--vscode-focusBorder, #007fd4); outline-offset: 2px; }
   #pdf-history-back svg { display: block; pointer-events: none; }
   body[data-reduce-animation="on"] #pdf-history-back { transition: none; }
   @media (prefers-reduced-motion: reduce) {
     body[data-reduce-animation="system"] #pdf-history-back { transition: none; }
+  }
+  @media (forced-colors: active) {
+    #pdf-history-back {
+      border-color: ButtonText;
+      background: ButtonFace;
+      color: ButtonText;
+      box-shadow: none;
+      forced-color-adjust: none;
+    }
+    #pdf-history-back:hover,
+    #pdf-history-back:active {
+      border-color: Highlight;
+      background: Highlight;
+      color: HighlightText;
+    }
   }
   #page-container { display: flex; flex-direction: column; align-items: safe center; gap: 12px; padding: 12px; }
   #page-container.scroll-horizontal { width: max-content; min-width: 100%; min-height: 100%; flex-direction: row; align-items: flex-start; }
@@ -309,11 +323,6 @@
   #page-container.rectangle-mode .page-wrapper { cursor: crosshair; }
   #page-container.rectangle-mode .text-layer { pointer-events: none; user-select: none; }
   .rectangle-selection-overlay { position: absolute; z-index: 15; box-sizing: border-box; border: 1px dashed var(--vscode-focusBorder); background: rgba(0, 127, 212, .16); pointer-events: none; }
-  .annotation-highlight { pointer-events: auto; transition: filter .12s, background-color .12s; }
-  body[data-reduce-animation="on"] .annotation-highlight { transition: none; }
-  @media (prefers-reduced-motion: reduce) {
-    body[data-reduce-animation="system"] .annotation-highlight { transition: none; }
-  }
   .pdf-destination-focus {
     position: absolute;
     z-index: 13;
@@ -340,6 +349,72 @@
     background: rgba(177, 151, 252, .48);
     outline-color: rgba(177, 151, 252, .9);
   }
+  .selection-toolbar {
+    position: absolute;
+    z-index: 20;
+    display: flex;
+    gap: 4px;
+    padding: 4px;
+    transform: translateX(-50%);
+    border: 1px solid var(--vscode-panel-border);
+    border-radius: 6px;
+    background: var(--vscode-editorWidget-background);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, .3);
+    font: 12px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  }
+  .selection-toolbar button {
+    border: 0;
+    border-radius: 4px;
+    padding: 4px 8px;
+    background: var(--vscode-button-background);
+    color: var(--vscode-button-foreground);
+    font: inherit;
+    white-space: nowrap;
+    cursor: pointer;
+  }
+  .selection-toolbar button:hover {
+    background: var(--vscode-button-hoverBackground, var(--vscode-button-background));
+  }
+  .selection-toolbar button:focus-visible {
+    outline: 2px solid var(--vscode-focusBorder);
+    outline-offset: 1px;
+  }
+  .selection-toolbar .secondary {
+    background: var(--vscode-button-secondaryBackground);
+    color: var(--vscode-button-secondaryForeground);
+  }
+  .selection-toolbar .secondary:hover {
+    background: var(--vscode-button-secondaryHoverBackground, var(--vscode-button-secondaryBackground));
+  }
+  .selection-toolbar .cursor-chat-action {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .selection-toolbar .cursor-chat-action .add-to-chat-shortcut {
+    display: inline-flex;
+    height: 18px;
+    align-items: center;
+    padding: 0 4px;
+    border-radius: 4px;
+    background: var(--vscode-toolbar-hoverBackground);
+    color: var(--vscode-input-placeholderForeground);
+    font-size: 11px;
+  }
+  .selection-toolbar .menu {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    display: none;
+    min-width: 180px;
+    flex-direction: column;
+    gap: 3px;
+    padding: 4px;
+    border: 1px solid var(--vscode-panel-border);
+    border-radius: 6px;
+    background: var(--vscode-editorWidget-background);
+  }
+  .selection-toolbar .menu.open { display: flex; }
 </style>
 </head>
 <body>
@@ -360,16 +435,8 @@
       <button id="next" type="button" aria-label="Next page">›</button>
     </div>
     <span class="toolbar-spacer"></span>
-    <div class="toolbar-palette" role="group" aria-label="Highlight palette">
-      <button class="palette-color" type="button" aria-label="Yellow highlight" aria-pressed="true" data-palette-highlight-color="yellow"><span class="toolbar-color-dot"></span></button>
-      <button class="palette-color" type="button" aria-label="Red highlight" aria-pressed="false" data-palette-highlight-color="red"><span class="toolbar-color-dot"></span></button>
-      <button class="palette-color" type="button" aria-label="Green highlight" aria-pressed="false" data-palette-highlight-color="green"><span class="toolbar-color-dot"></span></button>
-      <button class="palette-color" type="button" aria-label="Purple highlight" aria-pressed="false" data-palette-highlight-color="purple"><span class="toolbar-color-dot"></span></button>
-      <button id="highlight-color" type="button" aria-label="Highlight color" aria-controls="highlight-color-menu" aria-haspopup="menu" aria-expanded="false" data-highlight-color="yellow">⌄</button>
-    </div>
     <button id="copy-link-format" type="button" aria-label="Copy link format" aria-controls="copy-link-format-menu" aria-haspopup="menu" aria-expanded="false" data-copy-link-format="link">🔗⌄</button>
     <button id="rectangle-selection" type="button" aria-label="Copy embed link to rectangular selection" title="Copy embed link to rectangular selection" aria-pressed="false">▱</button>
-    <button id="direct-highlight" type="button" aria-label="Direct highlight" aria-pressed="false">✎</button>
     <span id="page-info" class="sr-only" aria-live="polite"></span>
   </div>
   <div id="display-menu" class="toolbar-menu hidden" role="menu" aria-label="Display options">
@@ -389,12 +456,6 @@
     <button type="button" role="menuitemradio" aria-checked="false" data-display-action="reduce-animation-off">Off</button>
     <button type="button" role="menuitemradio" aria-checked="true" data-display-action="reduce-animation-system">System</button>
     <button type="button" role="menuitem" data-display-action="defaults">Defaults</button>
-  </div>
-  <div id="highlight-color-menu" class="toolbar-menu hidden" role="menu" aria-label="Highlight colors">
-    <button type="button" role="menuitemradio" aria-checked="true" data-highlight-color="yellow">Yellow</button>
-    <button type="button" role="menuitemradio" aria-checked="false" data-highlight-color="red">Red</button>
-    <button type="button" role="menuitemradio" aria-checked="false" data-highlight-color="green">Green</button>
-    <button type="button" role="menuitemradio" aria-checked="false" data-highlight-color="purple">Purple</button>
   </div>
   <div id="copy-link-format-menu" class="toolbar-menu hidden" role="menu" aria-label="Copy link format">
     <button type="button" role="menuitemradio" aria-checked="true" data-copy-link-format="link">Link only</button>
@@ -438,6 +499,7 @@
     window.__mockMessages = [];
     window.__mockState = {};
     window.__pdfiumWasmUrl = '/dist/pdfium.wasm';
+    window.__humanLearningAddToCursorChat = true;
     window.acquireVsCodeApi = () => ({
       postMessage: async (message) => {
         window.__mockMessages.push(message);

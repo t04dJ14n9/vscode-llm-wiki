@@ -1150,6 +1150,7 @@ const linkTextMark = Decoration.mark({ class: 'cm-hybrid-link-text' });
 const tagMark = Decoration.mark({ class: 'cm-hybrid-tag' });
 const footnoteRefMark = Decoration.mark({ class: 'cm-hybrid-footnote-ref' });
 const footnoteDefLabelMark = Decoration.mark({ class: 'cm-hybrid-footnote-def-label' });
+const sourceLine = Decoration.line({ class: 'cm-hybrid-source-line' });
 const blockquoteLine = Decoration.line({ class: 'cm-hybrid-blockquote-line' });
 const listLine = Decoration.line({ class: 'cm-hybrid-list-line' });
 const taskLine = Decoration.line({ class: 'cm-hybrid-task-list-line' });
@@ -1270,6 +1271,9 @@ function buildHybridDecorations(state: EditorState): DecorationSet {
       decorations,
       setextHeadingLevelForLine(state.doc, line.number),
     );
+    if (active.has(line.number)) {
+      decorations.push(sourceLine.range(line.from));
+    }
     if (!active.has(line.number)) {
       if (isSetextHeadingUnderlineLine(state.doc, line.number)) {
         hideRenderedLineSource(line.from, line.to, decorations);
@@ -1282,6 +1286,7 @@ function buildHybridDecorations(state: EditorState): DecorationSet {
           referenceDefinitions,
           referenceDefinitionSpans,
           decorations,
+          false,
         );
       }
     } else if (!activeLineKeepsBlockSource(
@@ -1299,6 +1304,7 @@ function buildHybridDecorations(state: EditorState): DecorationSet {
         referenceDefinitions,
         referenceDefinitionSpans,
         renderedLineDecorations,
+        true,
       );
       const revealedSpans = activeInlineRevealSpans(
         state,
@@ -1345,6 +1351,10 @@ function activeInlineRevealSpans(
   referenceDefinitions: ReturnType<typeof markdownReferenceDefinitions>,
 ): Span[] {
   const sourceSpans = inlineSourceSpans(lineFrom, text, referenceDefinitions);
+  const compactLinkLabels = [
+    ...markdownLinkSourceSpans(lineFrom, text),
+    ...markdownReferenceLinkSourceSpans(lineFrom, text, referenceDefinitions),
+  ].filter(link => !link.image);
   const revealed: Span[] = [];
   for (const range of state.selection.ranges) {
     const selectionFrom = Math.max(lineFrom, Math.min(range.from, range.to));
@@ -1353,11 +1363,28 @@ function activeInlineRevealSpans(
     for (const span of sourceSpans) {
       const containsCaret = range.empty
         && range.head >= span.from
-        && range.head <= span.to;
+        && range.head < span.to;
       const overlapsSelection = !range.empty
         && selectionFrom < span.to
         && selectionTo > span.from;
-      if (containsCaret || overlapsSelection) revealed.push(span);
+      if (!containsCaret && !overlapsSelection) continue;
+
+      const compactLabel = compactLinkLabels.find(link => (
+        link.from === span.from
+        && link.to === span.to
+        && (
+          range.empty
+            ? range.head >= link.labelFrom && range.head <= link.labelTo
+            : range.from >= link.labelFrom && range.to <= link.labelTo
+        )
+      ));
+      // A caret in the already-visible label should not expand the hidden URL
+      // into the line. Besides being calmer to read, this prevents a wrapped
+      // destination from moving the following line when the caret enters or
+      // leaves the link. Moving into the brackets/destination still reveals
+      // the complete source so it remains editable.
+      if (compactLabel) continue;
+      revealed.push(span);
     }
   }
   return uniqueSpans(revealed);
@@ -1380,6 +1407,8 @@ function inlineSourceSpans(
   ];
 
   for (const pattern of [
+    /^\s*(?:>\s*)+/g,
+    /^(?:\s*(?:>\s*)+)?\s*(?:[-*+]|\d+[.)])\s+(?:\[[^\]]\]\s+)?/g,
     /!?\[\[[^\]\n]+\]\]/g,
     /\*\*(?=\S)(.+?\S)\*\*/g,
     /(?<![A-Za-z0-9_])__(?=\S)(.+?\S)__(?![A-Za-z0-9_])/g,
@@ -1388,6 +1417,7 @@ function inlineSourceSpans(
     /~~(?=\S)(.+?\S)~~/g,
     /==(?=\S)(.+?\S)==/g,
     /\[\^[^\]\s]+\]/g,
+    /(?<![A-Za-z0-9_/#])#(?=[A-Za-z0-9_/-]*[A-Za-z_])(?:[A-Za-z0-9_-]+(?:\/[A-Za-z0-9_-]+)*)/g,
     /<([A-Za-z][A-Za-z0-9:-]*)(?:\s+[^<>]*?)?>.*?<\/\1>/g,
   ]) {
     for (const match of text.matchAll(pattern)) {
@@ -1900,6 +1930,7 @@ function decorateRenderedLine(
   referenceDefinitions: ReturnType<typeof markdownReferenceDefinitions>,
   referenceDefinitionSpans: Span[],
   decorations: Range<Decoration>[],
+  renderActiveMarkdownLinks: boolean,
 ): void {
   const reserved: Span[] = [];
 
@@ -1964,7 +1995,9 @@ function decorateRenderedLine(
   renderInlineHtml(lineFrom, text, decorations, reserved);
   renderFootnotes(lineFrom, text, decorations, reserved);
   renderInlineCode(lineFrom, text, decorations, reserved);
-  renderMarkdownLinks(lineFrom, text, referenceDefinitions, decorations, reserved);
+  if (renderActiveMarkdownLinks) {
+    renderMarkdownLinks(lineFrom, text, referenceDefinitions, decorations, reserved);
+  }
   renderObsidianTags(lineFrom, text, decorations, reserved);
   renderInlineMath(lineFrom, text, decorations, reserved);
   renderDelimited(lineFrom, text, /\*\*\*(?=\S)(.+?\S)\*\*\*/g, 3, [boldMark, italicMark], decorations, reserved);

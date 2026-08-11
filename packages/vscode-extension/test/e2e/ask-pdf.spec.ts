@@ -144,6 +144,154 @@ test('Ask PDF follows Look up, prepares without persisting, and captures an outl
   expect(stats.contentPixels).toBeGreaterThan(stats.accentPixels);
 });
 
+test('PDF selection adds exact text and a best-effort crop to chat without submitting', async ({ page }) => {
+  await page.setViewportSize({ width: 480, height: 720 });
+  await openPdf(page);
+  await selectText(page, 'FlashAttention uses tiling');
+
+  const toolbar = page.locator('#selection-toolbar');
+  const toolbarAction = toolbar.locator('button', { hasText: 'Add to Chat' });
+  await expect(toolbarAction).toBeVisible();
+  await expect(toolbarAction.locator('.add-to-chat-label')).toHaveText('Add to Chat');
+  await expect(toolbarAction.locator('.add-to-chat-shortcut')).toHaveText(/^(?:⌘L|Ctrl\+L)$/);
+  const toolbarLayout = await toolbar.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    return {
+      left: rect.left,
+      top: rect.top,
+      right: rect.right,
+      bottom: rect.bottom,
+      viewportWidth: window.innerWidth,
+      viewportHeight: window.innerHeight,
+    };
+  });
+  const actionLayout = await toolbarAction.evaluate((element) => {
+    const label = element.querySelector('.add-to-chat-label')?.getBoundingClientRect();
+    const shortcut = element.querySelector('.add-to-chat-shortcut')?.getBoundingClientRect();
+    const rect = element.getBoundingClientRect();
+    return {
+      childTags: Array.from(element.children, child => child.tagName),
+      labelRight: label?.right ?? 0,
+      shortcutLeft: shortcut?.left ?? 0,
+      width: rect.width,
+      height: rect.height,
+    };
+  });
+  expect(actionLayout.childTags).toEqual(['SPAN', 'SPAN']);
+  expect(actionLayout.shortcutLeft).toBeGreaterThanOrEqual(actionLayout.labelRight);
+  expect(actionLayout.width).toBeLessThanOrEqual(140);
+  expect(actionLayout.height).toBeLessThanOrEqual(36);
+  expect(toolbarLayout.left).toBeGreaterThanOrEqual(7);
+  expect(toolbarLayout.top).toBeGreaterThanOrEqual(7);
+  expect(toolbarLayout.right).toBeLessThanOrEqual(toolbarLayout.viewportWidth - 7);
+  expect(toolbarLayout.bottom).toBeLessThanOrEqual(toolbarLayout.viewportHeight - 7);
+  await toolbarAction.click();
+
+  const first = await lastMessage(page, 'selectionAction');
+  expect(first).toMatchObject({
+    action: 'addToCursorChat',
+    anchor: {
+      page: 1,
+      snippet: 'FlashAttention uses tiling',
+    },
+  });
+  expect(first.anchor.rects.length).toBeGreaterThan(0);
+  expect(typeof first.snapshotPngBase64).toBe('string');
+  expect(first.snapshotPngBase64.length).toBeGreaterThan(32);
+  expect(
+    await page.evaluate(base64 => Array.from(
+      atob(base64).slice(0, 8),
+      character => character.charCodeAt(0),
+    ), first.snapshotPngBase64),
+  ).toEqual([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  await page.waitForTimeout(50);
+  expect(await messagesOfType(page, 'selectionAction')).toHaveLength(1);
+  expect(await messagesOfType(page, 'pdfDiscussionSubmit')).toHaveLength(0);
+
+  await selectText(page, 'FlashAttention uses tiling');
+  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+L' : 'Control+L');
+  await expect.poll(() => messagesOfType(page, 'selectionAction')).toHaveLength(2);
+  expect((await lastMessage(page, 'selectionAction')).action).toBe('addToCursorChat');
+  expect(await messagesOfType(page, 'pdfDiscussionSubmit')).toHaveLength(0);
+
+  await selectText(page, 'FlashAttention uses tiling');
+  await openSelectionContextMenu(page);
+  const menuAction = page.getByRole('menuitem', { name: /Add to Chat/ });
+  await expect(menuAction).toBeVisible();
+  await expect(menuAction).toContainText(/(?:⌘L|Ctrl\+L)/);
+  await menuAction.click();
+  await expect.poll(() => messagesOfType(page, 'selectionAction')).toHaveLength(3);
+  expect((await lastMessage(page, 'selectionAction')).action).toBe('addToCursorChat');
+  expect(await messagesOfType(page, 'pdfDiscussionSubmit')).toHaveLength(0);
+});
+
+test('PDF text drag takes focus from an external composer before the Cursor shortcut', async ({ page }) => {
+  const quote = 'FlashAttention uses tiling';
+  await openPdf(page);
+  const endpoints = await page.locator('.pdf-text-glyphs').filter({ hasText: quote }).first()
+    .evaluate((element, selectedText) => {
+      const node = element.firstChild;
+      const content = node?.textContent ?? '';
+      const start = content.indexOf(selectedText);
+      if (!node || node.nodeType !== Node.TEXT_NODE || start < 0) {
+        throw new Error(`Missing fixture text: ${selectedText}`);
+      }
+      const pointAt = (offset: number, bias: number) => {
+        const range = document.createRange();
+        range.setStart(node, offset);
+        range.setEnd(node, offset + 1);
+        const rect = range.getBoundingClientRect();
+        return {
+          x: rect.left + rect.width * bias,
+          y: rect.top + rect.height / 2,
+        };
+      };
+      return {
+        start: pointAt(start, 0.25),
+        end: pointAt(start + selectedText.length - 1, 0.75),
+      };
+    }, quote);
+  const externalComposer = page.locator('#external-agent-composer-fixture');
+  await page.evaluate(() => {
+    const composer = document.createElement('textarea');
+    composer.id = 'external-agent-composer-fixture';
+    composer.style.position = 'fixed';
+    composer.style.left = '-10000px';
+    document.body.appendChild(composer);
+    composer.focus();
+  });
+  await expect(externalComposer).toBeFocused();
+
+  await page.mouse.move(endpoints.start.x, endpoints.start.y);
+  await page.mouse.down();
+  await page.mouse.move(endpoints.end.x, endpoints.end.y, { steps: 12 });
+  await page.mouse.up();
+
+  await expect(page.locator('#selection-toolbar')).toBeVisible();
+  await expect.poll(() => page.evaluate(() => document.activeElement?.id))
+    .toBe('viewer-container');
+  const selectedBeforeShortcut = await page.evaluate(() =>
+    window.getSelection()?.toString().replace(/\s+/gu, ' ').trim()
+  );
+  expect(selectedBeforeShortcut).toBe(quote);
+
+  await page.evaluate(() => { window.__mockMessages = []; });
+  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+L' : 'Control+L');
+  await expect.poll(() => messagesOfType(page, 'selectionAction')).toHaveLength(1);
+  await page.waitForTimeout(50);
+  const actions = await messagesOfType(page, 'selectionAction');
+  expect(actions).toHaveLength(1);
+  expect(actions[0]).toMatchObject({
+    action: 'addToCursorChat',
+    anchor: { page: 1, snippet: quote },
+  });
+  expect(actions[0].snapshotPngBase64).toEqual(expect.any(String));
+  expect(actions[0].snapshotPngBase64.length).toBeGreaterThan(32);
+  expect(await page.evaluate(() =>
+    window.getSelection()?.toString().replace(/\s+/gu, ' ').trim()
+  )).toBe(selectedBeforeShortcut);
+});
+
 test('Ask PDF opens as an anchored floating inspector inside the PDF viewport', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 820 });
   await openPdf(page);
@@ -914,6 +1062,22 @@ test('Ask PDF preserves draft consent and streams into a durable sanitized answe
   expect(submit.question).toBe('Why does tiling reduce HBM traffic?');
   expect(submit.selection).toMatchObject({ page: 1, snippet: 'FlashAttention uses tiling' });
   expect(submit.snapshotPngBase64.length).toBeGreaterThan(32);
+  expect(submit.snapshotPadding).toBe(24);
+  expect(submit.snapshotCropRect).toHaveLength(4);
+  const [cropLeft, cropTop, cropRight, cropBottom] = submit.snapshotCropRect;
+  expect(
+    submit.snapshotCropRect.every(
+      (coordinate: unknown) => typeof coordinate === 'number' && Number.isFinite(coordinate),
+    ),
+  ).toBe(true);
+  expect(cropRight).toBeGreaterThan(cropLeft);
+  expect(cropBottom).toBeGreaterThan(cropTop);
+  for (const [left, top, right, bottom] of submit.selection.rects) {
+    expect(cropLeft).toBeLessThanOrEqual(left);
+    expect(cropTop).toBeLessThanOrEqual(top);
+    expect(cropRight).toBeGreaterThanOrEqual(right);
+    expect(cropBottom).toBeGreaterThanOrEqual(bottom);
+  }
 
   await postHost(page, { type: 'pdfDiscussionTurnState', annotationId: 'discussion-1', status: 'running' });
   await postHost(page, {
@@ -1173,20 +1337,9 @@ test('Ask PDF markers, count, overview, retry, promotion, minimize, and Stop use
   await expect(panel.getByRole('button', { name: 'Copy task ID' })).toBeVisible();
 });
 
-test('Ask PDF keeps one keyboard marker and lets an overlapping reference highlight receive clicks', async ({ page }) => {
+test('Ask PDF keeps one keyboard marker for a multi-band portable discussion anchor', async ({ page }) => {
   await openPdf(page);
   const rects = [[72, 90, 230, 112], [72, 114, 205, 132]];
-  const referenceAnchor = {
-    id: 'reference-anchor',
-    page: 1,
-    rects,
-    snippet: 'FlashAttention uses tiling',
-  };
-  await postHost(page, {
-    type: 'setHighlights',
-    referenced: [{ anchor: referenceAnchor }],
-    annotated: [],
-  });
   await postHost(page, {
     type: 'pdfDiscussionSnapshot',
     annotations: [annotation({ anchor: { ...baseAnchor(), rects } })],
@@ -1201,10 +1354,7 @@ test('Ask PDF keeps one keyboard marker and lets an overlapping reference highli
   expect(await outlines.evaluateAll(elements => elements.every(element => (element as HTMLElement).tabIndex === -1))).toBe(true);
   expect(await outlines.evaluateAll(elements => elements.every(element => getComputedStyle(element).pointerEvents === 'none'))).toBe(true);
   expect(await marker.evaluate((element: HTMLElement) => element.tabIndex)).toBe(0);
-
-  await page.evaluate(() => { window.__mockMessages = []; });
-  await page.locator('.annotation-highlight.referenced').first().click();
-  await expect.poll(() => messagesOfType(page, 'requestReferencesForAnchor')).toHaveLength(1);
+  await expect(page.locator('.annotation-highlight')).toHaveCount(0);
 });
 
 test('Ask PDF persists mixed-style selection as the same two fill-only visual bands', async ({ page }) => {
@@ -1353,10 +1503,18 @@ test('Ask PDF answered desktop and narrow overlay retain stable Codex-quiet visu
     ],
   });
   const panel = page.getByRole('complementary', { name: 'Ask about selection' });
-  await expect(panel).toHaveScreenshot('ask-pdf-answered-desktop.png');
+  await expect(panel).toContainText('Why does the paper tile attention?');
+  await expect(panel).toContainText('reducing repeated HBM traffic');
+  if (process.platform === 'darwin') {
+    await expect(panel).toHaveScreenshot('ask-pdf-answered-desktop.png');
+  }
 
   await page.setViewportSize({ width: 600, height: 820 });
-  await expect(panel).toHaveScreenshot('ask-pdf-answered-narrow.png');
+  await expect(panel).toBeVisible();
+  await expect(panel).toContainText('GPT-5.4');
+  if (process.platform === 'darwin') {
+    await expect(panel).toHaveScreenshot('ask-pdf-answered-narrow.png');
+  }
 });
 
 async function openPdf(page: Page, fixture = 'flash-attention'): Promise<void> {

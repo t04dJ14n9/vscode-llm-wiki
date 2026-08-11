@@ -410,6 +410,59 @@ test('page-level crop-origin inference preserves already aligned narrow links', 
   ], { width: 504, height: 720 }), links);
 });
 
+test('DDIA page 115 keeps Chapter 2 and Figure 3-9 links on their own glyphs', () => {
+  const links = [
+    // Captured EmbedPDF annotation geometry from DDIA page 115, in source
+    // order. Entries 6 and 8 target Chapter 2 and Figure 3-9.
+    { left: 262.8999938965, top: 273.141998291, width: 10.0800170898, height: 10.5 },
+    { left: 277.7579956055, top: 273.141998291, width: 10.0800170898, height: 10.5 },
+    { left: 292.6159973145, top: 273.141998291, width: 10.0800170898, height: 10.5 },
+    { left: 321.7919921875, top: 354.7420043945, width: 10.0800170898, height: 10.5 },
+    { left: 337.2550048828, top: 354.7420043945, width: 10.0799865723, height: 10.5 },
+    { left: 235.3070068359, top: 367.342010498, width: 10.0799865723, height: 10.5 },
+    { left: 136.3489990234, top: 412.7510070801, width: 41.9179992676, height: 10.5 },
+    { left: 143.3059997559, top: 463.1510009766, width: 10.0800018311, height: 10.5 },
+    { left: 175.7369995117, top: 481.7510070801, width: 43.9869995117, height: 10.5 },
+  ];
+  const textRects = [
+    { left: 72, top: 270, width: 360, height: 14 },
+    { left: 72, top: 352, width: 360, height: 14 },
+    { left: 72, top: 364, width: 360, height: 14 },
+    { left: 72, top: 410, width: 360, height: 14 },
+    { left: 72, top: 460, width: 360, height: 14 },
+    { left: 72, top: 479, width: 360, height: 14 },
+    { left: 136, top: 410, width: 42, height: 14 }, // Chapter 2
+    { left: 280, top: 447, width: 50, height: 15 }, // star schema (ordinary prose)
+    { left: 72, top: 479, width: 103, height: 14 }, // The example schema in
+    { left: 176, top: 479, width: 44, height: 14 }, // Figure 3-9
+  ];
+
+  const aligned = navigation.alignPdfLinkRectsToTextLayer(
+    links,
+    textRects,
+    { width: 504, height: 661.464 },
+  );
+
+  assert.equal(aligned.length, links.length);
+  assert.equal(aligned[6].left, links[6].left);
+  assert.equal(aligned[8].left, links[8].left);
+
+  const glyphs = [
+    { left: 83.51, top: 410, width: 42, height: 14 }, // unrelated prose
+    { left: 136, top: 410, width: 42, height: 14 }, // Chapter 2
+    { left: 122.898, top: 479, width: 44, height: 14 }, // ordinary "schema"
+    { left: 176, top: 479, width: 44, height: 14 }, // Figure 3-9
+  ];
+  assert.deepEqual(
+    navigation.pdfLinkHitRects(aligned[6], glyphs).map(rect => rect.left),
+    [links[6].left],
+  );
+  assert.deepEqual(
+    navigation.pdfLinkHitRects(aligned[8], glyphs).map(rect => rect.left),
+    [176],
+  );
+});
+
 test('single shifted body link aligns to its unique text run instead of an overlapping prior row', () => {
   const link = {
     left: 103.1729965209961,

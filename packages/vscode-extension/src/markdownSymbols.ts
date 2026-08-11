@@ -51,7 +51,11 @@ class MarkdownOutlineItem extends vscode.TreeItem {
         : vscode.TreeItemCollapsibleState.None,
     );
     this.children = node.children.map(child => new MarkdownOutlineItem(child, document));
-    this.iconPath = new vscode.ThemeIcon('blank');
+    this.id = markdownOutlineItemId(document.uri, node);
+    this.iconPath = new vscode.ThemeIcon('symbol-string');
+    this.accessibilityInformation = {
+      label: `${node.title}, heading level ${node.level}`,
+    };
     const offset = document.offsetAt(new vscode.Position(node.line, node.textStart));
     this.command = {
       command: 'human-learning.revealInMarkdownEditor',
@@ -72,6 +76,7 @@ class PdfOutlineItem extends vscode.TreeItem {
   constructor(
     readonly node: PdfOutlineEntry,
     readonly uri: vscode.Uri,
+    path: string,
   ) {
     super(
       node.title,
@@ -79,7 +84,10 @@ class PdfOutlineItem extends vscode.TreeItem {
         ? vscode.TreeItemCollapsibleState.Expanded
         : vscode.TreeItemCollapsibleState.None,
     );
-    this.children = node.children.map(child => new PdfOutlineItem(child, uri));
+    this.id = `pdf-outline:${uri.toString()}:${path}`;
+    this.children = node.children.map(
+      (child, index) => new PdfOutlineItem(child, uri, `${path}.${index}`),
+    );
     this.iconPath = new vscode.ThemeIcon('bookmark');
     if (node.destination) {
       this.description = `p. ${node.destination.pageIndex + 1}`;
@@ -133,7 +141,7 @@ export class MarkdownOutlineTreeProvider implements vscode.TreeDataProvider<vsco
       if (outline.length === 0) {
         return [new vscode.TreeItem('(no PDF outline)')];
       }
-      return outline.map(item => new PdfOutlineItem(item, activeUri));
+      return outline.map((item, index) => new PdfOutlineItem(item, activeUri, String(index)));
     }
 
     const document = activeUri && isMarkdownUri(activeUri)
@@ -163,7 +171,12 @@ export function registerMarkdownOutlineTreeProvider(
 ): MarkdownOutlineTreeProvider {
   const provider = new MarkdownOutlineTreeProvider(pdfOutlineSource);
   const subscriptions: vscode.Disposable[] = [
-    vscode.window.registerTreeDataProvider('hl-outline', provider),
+    ...['hl-markdown-outline', 'hl-pdf-outline'].map(viewId =>
+      vscode.window.createTreeView(viewId, {
+        treeDataProvider: provider,
+        showCollapseAll: true,
+      })
+    ),
     vscode.window.onDidChangeActiveTextEditor(() => provider.refresh()),
     vscode.window.tabGroups.onDidChangeTabs(() => provider.refresh()),
     vscode.workspace.onDidChangeTextDocument(event => {
@@ -178,6 +191,10 @@ export function registerMarkdownOutlineTreeProvider(
   }
   context.subscriptions.push(...subscriptions);
   return provider;
+}
+
+function markdownOutlineItemId(uri: vscode.Uri, node: HeadingNode): string {
+  return `markdown-outline:${uri.toString()}:${node.line}:${node.level}`;
 }
 
 function parseMarkdownHeadings(text: string): HeadingEntry[] {

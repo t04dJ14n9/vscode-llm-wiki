@@ -934,6 +934,7 @@ function pdfLinkHorizontalOffset(
   lines: readonly PdfTextLine[],
   verticalOffset: number,
 ): number {
+  if (Math.abs(verticalOffset) < 4) return 0;
   let lowerBound = Number.NEGATIVE_INFINITY;
   let upperBound = Number.POSITIVE_INFINITY;
   const centerOffsets: number[] = [];
@@ -952,7 +953,7 @@ function pdfLinkHorizontalOffset(
     upperBound = Math.min(upperBound, line.left - link.left);
   }
 
-  const preferred = Math.abs(verticalOffset) >= 4 ? -verticalOffset : 0;
+  const preferred = -verticalOffset;
   if (
     Number.isFinite(lowerBound)
     && Number.isFinite(upperBound)

@@ -78,29 +78,35 @@ export function buildPdfSelectionLines(selectionGlyphs: PdfSelectionGlyph[][]): 
   }
 
   const lines: PdfSelectionLine[] = [];
-  const verticallySorted = candidates.sort((left, right) => (
-    left.glyph.looseRect[1] - right.glyph.looseRect[1]
+  const dominantFirst = candidates.sort((left, right) => (
+    (right.glyph.looseRect[3] - right.glyph.looseRect[1])
+    - (left.glyph.looseRect[3] - left.glyph.looseRect[1])
+    || left.glyph.looseRect[1] - right.glyph.looseRect[1]
     || left.glyph.looseRect[0] - right.glyph.looseRect[0]
     || left.itemIndex - right.itemIndex
     || left.glyph.offsetStart - right.glyph.offsetStart
   ));
 
-  for (const candidate of verticallySorted) {
+  for (const candidate of dominantFirst) {
     const [, top, , bottom] = candidate.glyph.looseRect;
     const center = (top + bottom) / 2;
     const height = bottom - top;
     let matchingLine: PdfSelectionLine | undefined;
     let matchingDistance = Number.POSITIVE_INFINITY;
+    let satellite = false;
 
     for (const line of lines) {
-      const overlap = Math.min(line.bottom, bottom) - Math.max(line.top, top);
       const minimumHeight = Math.min(line.height, height);
       const centerDistance = Math.abs(line.center - center);
-      const sameLine = overlap >= minimumHeight * 0.35
-        || centerDistance <= Math.max(1, minimumHeight * 0.55);
-      if (sameLine && centerDistance < matchingDistance) {
+      const sameLine = centerDistance <= Math.max(1, minimumHeight * 0.55);
+      const overlap = Math.min(line.bottom, bottom) - Math.max(line.top, top);
+      const isSatellite = height <= line.height * 0.82
+        && overlap > 0
+        && centerDistance <= line.height * 0.8;
+      if ((sameLine || isSatellite) && centerDistance < matchingDistance) {
         matchingLine = line;
         matchingDistance = centerDistance;
+        satellite = isSatellite;
       }
     }
 
@@ -116,19 +122,24 @@ export function buildPdfSelectionLines(selectionGlyphs: PdfSelectionGlyph[][]): 
       continue;
     }
 
-    matchingLine.top = Math.min(matchingLine.top, top);
-    matchingLine.bottom = Math.max(matchingLine.bottom, bottom);
-    matchingLine.center = (
-      matchingLine.center * matchingLine.count + center
-    ) / (matchingLine.count + 1);
-    matchingLine.height = (
-      matchingLine.height * matchingLine.count + height
-    ) / (matchingLine.count + 1);
+    if (!satellite) {
+      matchingLine.center = (
+        matchingLine.center * matchingLine.count + center
+      ) / (matchingLine.count + 1);
+      matchingLine.height = (
+        matchingLine.height * matchingLine.count + height
+      ) / (matchingLine.count + 1);
+      matchingLine.top = matchingLine.center - matchingLine.height / 2;
+      matchingLine.bottom = matchingLine.center + matchingLine.height / 2;
+    }
     matchingLine.count++;
     matchingLine.glyphs.push(candidate);
   }
 
-  return lines;
+  return lines.sort((left, right) => (
+    left.center - right.center
+    || left.glyphs[0]!.glyph.looseRect[0] - right.glyphs[0]!.glyph.looseRect[0]
+  ));
 }
 
 export function previousSelectablePdfTextItem(textRects: any[], itemIndex: number): number {
@@ -152,6 +163,7 @@ export function pdfTextItemsJoinWord(
   leftIndex: number,
   rightIndex: number,
 ): boolean {
+  if (textRects[leftIndex]?.wordJoinAfter === true) return true;
   for (let index = leftIndex + 1; index < rightIndex; index++) {
     if (isPdfWordJoinMarker(String(textRects[index]?.content ?? ''))) return true;
   }

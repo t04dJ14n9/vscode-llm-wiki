@@ -29,6 +29,11 @@ const server = createServer((_req, res) => {
     return;
   }
 
+  if (url.pathname === '/fixtures/ddia-local.pdf') {
+    serveFile(join(__dirname, '..', '..', '..', '..', 'demo-vault', 'raw', 'pdf', 'ddia.pdf'), 'application/pdf', res);
+    return;
+  }
+
   if (url.pathname === '/fixtures/two-page.pdf') {
     serveBuffer(twoPagePdfFixture(), 'application/pdf', res);
     return;
@@ -61,6 +66,16 @@ const server = createServer((_req, res) => {
 
   if (url.pathname === '/fixtures/mixed-style-selection.pdf') {
     serveBuffer(mixedStyleSelectionPdfFixture(), 'application/pdf', res);
+    return;
+  }
+
+  if (url.pathname === '/fixtures/short-row-selection.pdf') {
+    serveBuffer(shortRowSelectionPdfFixture(), 'application/pdf', res);
+    return;
+  }
+
+  if (url.pathname === '/fixtures/formula-selection.pdf') {
+    serveBuffer(formulaSelectionPdfFixture(), 'application/pdf', res);
     return;
   }
 
@@ -269,6 +284,34 @@ function mixedStyleSelectionPdfFixture() {
   return pdfFixture(objects);
 }
 
+function shortRowSelectionPdfFixture() {
+  const objects = [
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 700 260] /Resources << /Font << /F1 7 0 R >> >> /Contents [4 0 R 5 0 R 6 0 R] >>',
+    pdfStream('BT /F1 16 Tf 48 190 Td (The preceding row is intentionally much longer than the row below.) Tj ET'),
+    pdfStream('BT /F1 16 Tf 48 160 Td (Short.) Tj ET'),
+    pdfStream('BT /F1 16 Tf 48 130 Td (The following row is also long enough to challenge nearest-glyph hit testing.) Tj ET'),
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+  ];
+  return pdfFixture(objects);
+}
+
+function formulaSelectionPdfFixture() {
+  const objects = [
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 360 240] /Resources << /Font << /F1 9 0 R >> >> /Contents [4 0 R 5 0 R 6 0 R 7 0 R 8 0 R] >>',
+    pdfStream('BT /F1 24 Tf 48 140 Td (E=mc) Tj ET'),
+    pdfStream('BT /F1 14 Tf 110 153 Td (2) Tj ET'),
+    pdfStream('BT /F1 24 Tf 124 140 Td ( + H) Tj ET'),
+    pdfStream('BT /F1 14 Tf 174 133 Td (2) Tj ET'),
+    pdfStream('BT /F1 24 Tf 183 140 Td (O) Tj ET'),
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+  ];
+  return pdfFixture(objects);
+}
+
 function unicodeSelectorPdfFixture() {
   const toUnicode = [
     '/CIDInit /ProcSet findresource begin',
@@ -325,10 +368,14 @@ function internalDestinationsPdfFixture() {
       '0 0 1 rg BT /F1 14 Tf 42 360 Td (Figure 11.1 detail) Tj ET',
       '0 0 1 rg BT /F1 14 Tf 42 220 Td (Section 12.2) Tj ET',
     ].join('\n')),
-    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 600] /Resources << /Font << /F1 11 0 R >> >> /Contents 10 0 R >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 600] /Resources << /Font << /F1 11 0 R >> >> /Contents 10 0 R /Annots [18 0 R] >>',
     pdfStream([
       'BT /F1 18 Tf 42 500 Td (Section 12.2 target) Tj ET',
       'BT /F1 12 Tf 42 474 Td (The named destination should align the section here.) Tj ET',
+      '0 0 1 rg BT /F1 12 Tf 42 400 Td (See Figure 3-12 source reference above the figure.) Tj ET',
+      'q 0.95 g 42 200 216 150 re f 0.2 G 42 200 216 150 re S Q',
+      '0 g BT /F1 12 Tf 80 270 Td (Figure artwork region) Tj ET',
+      'BT /F1 12 Tf 42 170 Td (Figure 3-12. Caption below the artwork.) Tj ET',
     ].join('\n')),
     '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
     '<< /Names [(section.12.2) [9 0 R /XYZ 42 516 0]] >>',
@@ -337,6 +384,7 @@ function internalDestinationsPdfFixture() {
     '<< /Title (Internal destinations) /Parent 14 0 R /Dest [3 0 R /Fit] /First 16 0 R /Last 16 0 R /Count 1 >>',
     '<< /Title (Section 12.2) /Parent 15 0 R /Dest (section.12.2) >>',
     '<< /Type /Annot /Subtype /Link /Rect [40 350 174 374] /Border [0 0 0] /Contents (Figure 11.1 detail) /Dest [7 0 R /XYZ 42 302 0] >>',
+    '<< /Type /Annot /Subtype /Link /Rect [64 390 132 406] /Border [0 0 0] /Contents (Figure 3-12 source reference) /Dest [9 0 R /XYZ 42 370 0] >>',
   ];
   return pdfFixture(objects);
 }

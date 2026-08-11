@@ -90,51 +90,67 @@ const TYPE_TEXT_FRAGMENTS = [
 test.describe('Human Learning Markdown deterministic keystroke fuzzing', () => {
   test.setTimeout(180_000);
 
-  test('plain editor keystroke sequences match the generated final markdown text model', async ({ page }) => {
+  test('Vim inserts after a rendered wikilink without entering its closing brackets', async ({ page }) => {
     await openHarness(page);
+    const text = 'Links stay editable beside [[Wiki Note]] and more.';
+    const cursor = text.indexOf(']]') + 2;
+    await prepareEditor(page, { text, cursor, vimMode: true });
+    await enterVimInsertModeAt(page, cursor);
+    await page.keyboard.type('`', { delay: 0 });
 
-    const testSets = generateEditTestSets({
-      count: PLAIN_TESTSET_COUNT,
-      operationsPerTestSet: PLAIN_OPERATIONS_PER_TESTSET,
-      seedBase: 0x5000,
-    });
-
-    for (const testSet of testSets) {
-      await test.step(`plain seed ${testSet.seed}`, async () => {
-        await prepareEditor(page, {
-          text: testSet.initialText,
-          cursor: testSet.initialCursor,
-          vimMode: false,
-        });
-        await runEditOperations(page, testSet, 'plain');
-        await expectEditorMatches(page, testSet, 'plain');
-      });
-    }
+    await expectEditorState(page, {
+      text: 'Links stay editable beside [[Wiki Note]]` and more.',
+      cursor: cursor + 1,
+    }, 'Vim insert at the half-open end of a rendered wikilink');
   });
 
-  test('Vim insert-mode keystroke sequences match the generated final markdown text model', async ({ page }) => {
-    await openHarness(page);
+  const plainBatches = chunkTestSets(generateEditTestSets({
+    count: PLAIN_TESTSET_COUNT,
+    operationsPerTestSet: PLAIN_OPERATIONS_PER_TESTSET,
+    seedBase: 0x5000,
+  }), 12);
+  for (const [batchIndex, testSets] of plainBatches.entries()) {
+    test(`plain editor keystroke sequences match the generated final markdown text model (batch ${batchIndex + 1}/${plainBatches.length})`, async ({ page }) => {
+      await openHarness(page);
 
-    const testSets = generateEditTestSets({
-      count: VIM_INSERT_TESTSET_COUNT,
-      operationsPerTestSet: VIM_INSERT_OPERATIONS_PER_TESTSET,
-      seedBase: 0x7000,
-      keepInitialCursorInsideText: true,
-    });
-
-    for (const testSet of testSets) {
-      await test.step(`vim insert seed ${testSet.seed}`, async () => {
-        await prepareEditor(page, {
-          text: testSet.initialText,
-          cursor: testSet.initialCursor,
-          vimMode: true,
+      for (const testSet of testSets) {
+        await test.step(`plain seed ${testSet.seed}`, async () => {
+          await prepareEditor(page, {
+            text: testSet.initialText,
+            cursor: testSet.initialCursor,
+            vimMode: false,
+          });
+          await runEditOperations(page, testSet, 'plain');
+          await expectEditorMatches(page, testSet, 'plain');
         });
-        await enterVimInsertModeAt(page, testSet.initialCursor);
-        await runEditOperations(page, testSet, 'vim insert');
-        await expectEditorMatches(page, testSet, 'vim insert');
-      });
-    }
-  });
+      }
+    });
+  }
+
+  const vimInsertBatches = chunkTestSets(generateEditTestSets({
+    count: VIM_INSERT_TESTSET_COUNT,
+    operationsPerTestSet: VIM_INSERT_OPERATIONS_PER_TESTSET,
+    seedBase: 0x7000,
+    keepInitialCursorInsideText: true,
+  }), 16);
+  for (const [batchIndex, testSets] of vimInsertBatches.entries()) {
+    test(`Vim insert-mode keystroke sequences match the generated final markdown text model (batch ${batchIndex + 1}/${vimInsertBatches.length})`, async ({ page }) => {
+      await openHarness(page);
+
+      for (const testSet of testSets) {
+        await test.step(`vim insert seed ${testSet.seed}`, async () => {
+          await prepareEditor(page, {
+            text: testSet.initialText,
+            cursor: testSet.initialCursor,
+            vimMode: true,
+          });
+          await enterVimInsertModeAt(page, testSet.initialCursor);
+          await runEditOperations(page, testSet, 'vim insert');
+          await expectEditorMatches(page, testSet, 'vim insert');
+        });
+      }
+    });
+  }
 
   test('Vim normal-mode raw backtick sequences are no-ops for every generated testset', async ({ page }) => {
     await openHarness(page);
@@ -449,6 +465,14 @@ function seededRandom(seed: number): () => number {
 
 function randomInt(random: () => number, upperExclusive: number): number {
   return Math.floor(random() * upperExclusive);
+}
+
+function chunkTestSets<T>(testSets: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let index = 0; index < testSets.length; index += size) {
+    chunks.push(testSets.slice(index, index + size));
+  }
+  return chunks;
 }
 
 function formatOperation(operation: EditOperation | BacktickNoopOperation): string {

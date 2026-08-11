@@ -71,13 +71,26 @@ import {
   renderPdfTextLayer,
 } from './pdfTextLayer';
 import { showObsidianContextMenu } from './obsidianContextMenu';
-import { createPdfAskPanel, type PdfAskPanel, type PdfAskSelection } from './pdfAskPanel';
+import {
+  capturePdfSelectionCrop,
+  createPdfAskPanel,
+  type PdfAskPanel,
+  type PdfAskSelection,
+} from './pdfAskPanel';
 import { normalizePdfTextBands, type PdfRect } from './pdfTextBands';
 
 const vscode = acquireVsCodeApi();
+const addToCursorChatEnabled =
+  (window as typeof window & { __humanLearningAddToCursorChat?: unknown })
+    .__humanLearningAddToCursorChat === true;
 
-type HighlightColor = 'yellow' | 'red' | 'green' | 'purple';
 type PdfReduceAnimationSetting = 'on' | 'off' | 'system';
+type PdfTextSelectionAction =
+  | 'addToCursorChat'
+  | 'copyLink'
+  | 'insertLink'
+  | 'copyQuoteAndLink'
+  | 'insertQuoteAndLink';
 
 const PDF_PAGE_GAP_PX = 12;
 const PDF_FIT_HORIZONTAL_PADDING_PX = 24;
@@ -87,13 +100,7 @@ const PDF_WHEEL_GESTURE_IDLE_MS = 160;
 const PDF_PAGINATED_AXIS_LOCK_THRESHOLD = 6;
 const PDF_PAGE_PREFETCH_DELAY_MS = 0;
 const PDF_SCALE_REUSE_EPSILON = 0.0001;
-
-const HIGHLIGHT_COLORS: Record<HighlightColor, string> = {
-  yellow: 'rgba(255, 213, 79, 0.42)',
-  red: 'rgba(255, 107, 107, 0.42)',
-  green: 'rgba(105, 219, 124, 0.42)',
-  purple: 'rgba(177, 151, 252, 0.42)',
-};
+const PDF_DESTINATION_FOCUS_DURATION_MS = 2400;
 
 interface PdfAnchor {
   id?: string;
@@ -109,19 +116,6 @@ interface PdfAnchor {
   prefix?: string;
   suffix?: string;
   textFragment?: PdfTextFragment;
-  highlightColor?: HighlightColor;
-}
-
-interface HighlightSpec {
-  anchor: PdfAnchor;
-  kind: 'referenced' | 'annotated';
-}
-
-interface ReferenceListItem {
-  source: string;
-  sourceLine: number;
-  snippet?: string;
-  contextLine?: string;
 }
 
 interface PdfSearchMatch {
@@ -133,13 +127,24 @@ interface PdfSelectionDrag {
   pointerId: number;
   wrapper: HTMLElement;
   origin: PdfSelectionCaret;
+  originBefore: PdfSelectionCaret;
+  originAfter: PdfSelectionCaret;
   initialStart: PdfSelectionCaret;
   initialEnd: PdfSelectionCaret;
   anchor: PdfSelectionCaret;
   focus: PdfSelectionCaret;
   granularity: 'character' | 'word' | 'line';
+  startClientX: number;
+  startClientY: number;
+  moved: boolean;
   clientX: number;
   clientY: number;
+}
+
+interface PdfSelectionGlyphHit {
+  caret: PdfSelectionCaret;
+  before: PdfSelectionCaret;
+  after: PdfSelectionCaret;
 }
 
 interface PdfViewerStateV1 {
@@ -196,6 +201,13 @@ interface PdfViewLocation {
   fallbackScrollTop: number;
 }
 
+interface PdfDestinationFocusState {
+  destination: PdfDestinationObject;
+  label?: string;
+  startedAt?: number;
+  cleanupTimer?: number;
+}
+
 let engine: any;
 let pdfDoc: any;
 
@@ -235,10 +247,6 @@ class PdfViewer {
   private readonly pageVisibilityRatios = new Map<number, number>();
   private thumbnailObserver: IntersectionObserver | null = null;
   private pendingAnchor: PdfAnchor | null = null;
-  private highlights: HighlightSpec[] = [];
-  private pendingPopoverAnchor: PdfAnchor | null = null;
-  private pendingPopoverElement: HTMLElement | null = null;
-  private popoverCleanup: (() => void) | null = null;
   private loading = false;
   private loaded = false;
   private searchQuery = '';
@@ -263,9 +271,7 @@ class PdfViewer {
   private highlightAllSearchMatches = false;
   private matchDiacritics = false;
   private wholeWords = false;
-  private selectedHighlightColor: HighlightColor = 'yellow';
   private copyLinkFormat: 'link' | 'quote' = 'link';
-  private directHighlight = false;
   private rectangleSelection = false;
   private rectangleDrag: {
     pointerId: number;
@@ -300,6 +306,7 @@ class PdfViewer {
   private readonly pinchZoomPreviewPages = new Set<number>();
   private latestSelectionAnchor: PdfAnchor | null = null;
   private selectionUpdateTimer: number | undefined;
+  private selectionPaintFrame: number | undefined;
   private selectionState: PdfSelectionState | null = null;
   private selectionDrag: PdfSelectionDrag | null = null;
   private selectionClickCount = 0;
@@ -312,10 +319,12 @@ class PdfViewer {
   private readonly pdfNavigationHistory: PdfViewLocation[] = [];
   private pdfDestinationRunId = 0;
   private pendingPdfDestinationOrigin: PdfViewLocation | undefined;
+  private pdfDestinationFocus: PdfDestinationFocusState | undefined;
   private readonly viewerResizeObserver: ResizeObserver | null;
   private readonly askPanel: PdfAskPanel;
 
   constructor() {
+    this.container.tabIndex = -1;
     this.restoreViewerState();
     document.body.classList.toggle('pdf-adapt-theme', this.adaptToTheme);
     this.applyReduceAnimationSetting();
@@ -479,19 +488,13 @@ class PdfViewer {
         case 'toggleTwoPageView':
           void this.toggleTwoPageView();
           break;
-        case 'setHighlights':
-          this.highlights = [
-            ...(message.referenced ?? []).map((item: any) => ({ anchor: item.anchor, kind: 'referenced' as const })),
-            ...(message.annotated ?? []).map((item: any) => ({ anchor: item.anchor, kind: 'annotated' as const })),
-          ];
-          this.redrawAllHighlights();
-          break;
-        case 'referencesForAnchor':
-          this.showReferencePopover(message.anchor, message.items ?? []);
-          break;
         case 'pdfDiscussionOpenForSelection':
           this.openAskPdfForNativeSelection();
           break;
+        case 'addSelectionToCursorChat': {
+          this.addCurrentSelectionToCursorChat();
+          break;
+        }
         default:
           this.askPanel.handleHostMessage(message);
           break;
@@ -620,37 +623,6 @@ class PdfViewer {
       this.setDisplayMenuOpen(false);
     });
 
-    const colorTrigger = document.getElementById('highlight-color') as HTMLButtonElement | null;
-    const colorMenu = document.getElementById('highlight-color-menu');
-    const paletteButtons = Array.from(document.querySelectorAll<HTMLButtonElement>('[data-palette-highlight-color]'));
-    const selectHighlightColor = (value: unknown): void => {
-      this.selectedHighlightColor = normalizeHighlightColor(value) ?? 'yellow';
-      colorTrigger?.setAttribute('data-highlight-color', this.selectedHighlightColor);
-      for (const item of Array.from(colorMenu?.querySelectorAll<HTMLButtonElement>('[data-highlight-color]') ?? [])) {
-        item.setAttribute('aria-checked', String(item.dataset.highlightColor === this.selectedHighlightColor));
-      }
-      for (const item of paletteButtons) {
-        item.setAttribute('aria-pressed', String(item.dataset.paletteHighlightColor === this.selectedHighlightColor));
-      }
-    };
-    colorTrigger?.addEventListener('click', event => {
-      event.preventDefault();
-      event.stopPropagation();
-      const open = colorMenu?.classList.contains('hidden') ?? false;
-      colorMenu?.classList.toggle('hidden', !open);
-      colorTrigger.setAttribute('aria-expanded', String(open));
-    });
-    colorMenu?.addEventListener('click', event => {
-      const button = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-highlight-color]');
-      if (!button) return;
-      selectHighlightColor(button.dataset.highlightColor);
-      colorMenu.classList.add('hidden');
-      colorTrigger?.setAttribute('aria-expanded', 'false');
-    });
-    for (const button of paletteButtons) {
-      button.addEventListener('click', () => selectHighlightColor(button.dataset.paletteHighlightColor));
-    }
-
     const copyTrigger = document.getElementById('copy-link-format') as HTMLButtonElement | null;
     const copyMenu = document.getElementById('copy-link-format-menu');
     copyTrigger?.addEventListener('click', event => {
@@ -676,12 +648,6 @@ class PdfViewer {
     rectangleButton?.addEventListener('click', () => {
       this.setRectangleSelection(!this.rectangleSelection);
     });
-    const directButton = document.getElementById('direct-highlight') as HTMLButtonElement | null;
-    directButton?.addEventListener('click', () => {
-      this.directHighlight = directButton.getAttribute('aria-pressed') !== 'true';
-      directButton.setAttribute('aria-pressed', String(this.directHighlight));
-      if (this.directHighlight) this.setRectangleSelection(false);
-    });
 
     document.addEventListener('mousedown', event => {
       const target = event.target as Node;
@@ -690,16 +656,25 @@ class PdfViewer {
         && !displayButton?.contains(target)) {
         this.setDisplayMenuOpen(false);
       }
-      if (colorMenu && !colorMenu.classList.contains('hidden') && !colorMenu.contains(target) && !colorTrigger?.contains(target)) {
-        colorMenu.classList.add('hidden');
-        colorTrigger?.setAttribute('aria-expanded', 'false');
-      }
       if (copyMenu && !copyMenu.classList.contains('hidden') && !copyMenu.contains(target) && !copyTrigger?.contains(target)) {
         copyMenu.classList.add('hidden');
         copyTrigger?.setAttribute('aria-expanded', 'false');
       }
     });
     document.addEventListener('keydown', event => {
+      if (
+        addToCursorChatEnabled
+        && (event.metaKey || event.ctrlKey)
+        && !event.altKey
+        && !event.shiftKey
+        && event.key.toLowerCase() === 'l'
+        && !isEditableTarget(event.target)
+        && this.addCurrentSelectionToCursorChat()
+      ) {
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
       if (
         event.altKey
         && !event.metaKey
@@ -729,12 +704,6 @@ class PdfViewer {
         this.setDisplayMenuOpen(false);
         displayButton?.focus();
       }
-      if (event.key === 'Escape' && colorMenu && !colorMenu.classList.contains('hidden')) {
-        event.preventDefault();
-        colorMenu.classList.add('hidden');
-        colorTrigger?.setAttribute('aria-expanded', 'false');
-        colorTrigger?.focus();
-      }
       if (event.key === 'Escape' && copyMenu && !copyMenu.classList.contains('hidden')) {
         event.preventDefault();
         copyMenu.classList.add('hidden');
@@ -748,7 +717,6 @@ class PdfViewer {
       }
     });
     this.updateToolbarState();
-    selectHighlightColor(this.selectedHighlightColor);
   }
 
   private async commitPageInput(): Promise<void> {
@@ -825,10 +793,13 @@ class PdfViewer {
       const page = Number(layer?.dataset.page ?? 0);
       const state = this.pages.get(page);
       if (!layer || !wrapper || !state?.rendered) return;
-      const caret = this.hitTestSelectionCaret(state, event.clientX, event.clientY);
-      if (!caret) return;
+      const hit = this.hitTestSelectionGlyph(state, event.clientX, event.clientY);
+      if (!hit) return;
+      const { caret } = hit;
 
       event.preventDefault();
+      this.container.focus({ preventScroll: true });
+      this.cancelSelectionUpdate();
       document.getElementById('selection-toolbar')?.remove();
       const now = performance.now();
       const repeatsPreviousClick = page === this.selectionLastPointerDownPage
@@ -838,7 +809,7 @@ class PdfViewer {
           event.clientY - this.selectionLastPointerDownY,
         ) <= 6;
       const inferredClickCount = repeatsPreviousClick ? this.selectionClickCount + 1 : 1;
-      const clickCount = Math.max(Number(event.detail) || 1, inferredClickCount);
+      const clickCount = inferredClickCount;
       this.selectionClickCount = clickCount;
       this.selectionLastPointerDownAt = now;
       this.selectionLastPointerDownX = event.clientX;
@@ -860,11 +831,16 @@ class PdfViewer {
         pointerId: event.pointerId,
         wrapper,
         origin: caret,
+        originBefore: hit.before,
+        originAfter: hit.after,
         initialStart: anchor,
         initialEnd: focus,
         anchor,
         focus,
         granularity,
+        startClientX: event.clientX,
+        startClientY: event.clientY,
+        moved: false,
         clientX: event.clientX,
         clientY: event.clientY,
       };
@@ -899,6 +875,11 @@ class PdfViewer {
       }
       this.selectionDrag = null;
       this.stopSelectionAutoScroll();
+      if (drag.moved) {
+        this.selectionClickCount = 0;
+        this.selectionLastPointerDownAt = 0;
+        this.selectionLastPointerDownPage = 0;
+      }
       if (samePdfCaret(drag.anchor, drag.focus)) {
         window.getSelection()?.removeAllRanges();
         this.clearSelection();
@@ -912,17 +893,37 @@ class PdfViewer {
       this.selectionDrag = null;
       this.stopSelectionAutoScroll();
     }, true);
+    this.pageContainer.addEventListener('lostpointercapture', event => {
+      if (this.selectionDrag?.pointerId !== event.pointerId) return;
+      this.selectionDrag = null;
+      this.stopSelectionAutoScroll();
+      this.scheduleSelectionUpdate();
+    }, true);
   }
 
   private updateSelectionDragAtPoint(drag: PdfSelectionDrag, clientX: number, clientY: number): void {
     const state = this.pageStateForSelectionPoint(clientX, clientY, drag.focus.page);
     if (!state?.rendered) return;
-    const caret = this.hitTestSelectionCaret(state, clientX, clientY);
-    if (!caret) return;
+    const hit = this.hitTestSelectionGlyph(state, clientX, clientY);
+    if (!hit) return;
+    const { caret } = hit;
 
+    drag.moved ||= Math.hypot(
+      clientX - drag.startClientX,
+      clientY - drag.startClientY,
+    ) >= 1;
     if (drag.granularity === 'character') {
-      drag.anchor = drag.initialStart;
-      drag.focus = caret;
+      if (!drag.moved) {
+        drag.anchor = drag.initialStart;
+        drag.focus = drag.initialEnd;
+      } else {
+        const focusBeforeOrigin = comparePdfCarets(hit.after, drag.originBefore) <= 0;
+        const focusAfterOrigin = comparePdfCarets(hit.before, drag.originAfter) >= 0;
+        const backward = focusBeforeOrigin
+          || (!focusAfterOrigin && clientX < drag.startClientX);
+        drag.anchor = backward ? drag.originAfter : drag.originBefore;
+        drag.focus = backward ? hit.before : hit.after;
+      }
     } else {
       const unit = drag.granularity === 'line'
         ? this.lineSelectionAtCaret(state, caret)
@@ -959,10 +960,12 @@ class PdfViewer {
     return nearest?.state;
   }
 
-  private hitTestSelectionCaret(state: PageState, clientX: number, clientY: number): PdfSelectionCaret | undefined {
+  private hitTestSelectionGlyph(state: PageState, clientX: number, clientY: number): PdfSelectionGlyphHit | undefined {
     const bounds = state.wrapper.getBoundingClientRect();
-    const x = (clientX - bounds.left) / this.scale;
-    const y = (clientY - bounds.top) / this.scale;
+    const visualScaleX = bounds.width / Math.max(1, Number(state.pageObj.size.width));
+    const visualScaleY = bounds.height / Math.max(1, Number(state.pageObj.size.height));
+    const x = (clientX - bounds.left) / visualScaleX;
+    const y = (clientY - bounds.top) / visualScaleY;
     if (!state.selectionLines.length) return undefined;
     let bestLine: PdfSelectionLine | undefined;
     let bestLineDistance = Number.POSITIVE_INFINITY;
@@ -984,25 +987,40 @@ class PdfViewer {
     let best: { glyph: PdfSelectionGlyph; itemIndex: number } | undefined;
     let bestHorizontalDistance = Number.POSITIVE_INFINITY;
     let bestVerticalDistance = Number.POSITIVE_INFINITY;
+    let bestCenterDistance = Number.POSITIVE_INFINITY;
     for (const candidate of bestLine.glyphs) {
       const [left, top, right, bottom] = candidate.glyph.hitRect;
       const horizontalDistance = x < left ? left - x : x > right ? x - right : 0;
       const verticalDistance = y < top ? top - y : y > bottom ? y - bottom : 0;
+      const centerDistance = Math.abs(x - (left + right) / 2);
       if (
         horizontalDistance < bestHorizontalDistance
-        || (horizontalDistance === bestHorizontalDistance && verticalDistance < bestVerticalDistance)
+        || (
+          horizontalDistance === bestHorizontalDistance
+          && (
+            verticalDistance < bestVerticalDistance
+            || (verticalDistance === bestVerticalDistance && centerDistance < bestCenterDistance)
+          )
+        )
       ) {
         best = candidate;
         bestHorizontalDistance = horizontalDistance;
         bestVerticalDistance = verticalDistance;
+        bestCenterDistance = centerDistance;
       }
     }
     if (!best) return undefined;
     const [left, , right] = best.glyph.hitRect;
-    return {
+    const before = {
       page: state.pageNum,
       itemIndex: best.itemIndex,
-      offset: x < (left + right) / 2 ? best.glyph.offsetStart : best.glyph.offsetEnd,
+      offset: best.glyph.offsetStart,
+    };
+    const after = { ...before, offset: best.glyph.offsetEnd };
+    return {
+      caret: x < (left + right) / 2 ? before : after,
+      before,
+      after,
     };
   }
 
@@ -1070,8 +1088,13 @@ class PdfViewer {
 
   private setSelectionState(selection: PdfSelectionState): void {
     this.selectionState = selection;
-    this.applyNativeSelection(selection);
-    this.drawSelectionOverlays();
+    if (this.selectionPaintFrame !== undefined) return;
+    this.selectionPaintFrame = window.requestAnimationFrame(() => {
+      this.selectionPaintFrame = undefined;
+      if (!this.selectionState) return;
+      this.applyNativeSelection(this.selectionState);
+      this.drawSelectionOverlays();
+    });
   }
 
   private applyNativeSelection(selection: PdfSelectionState): Range | undefined {
@@ -1118,13 +1141,14 @@ class PdfViewer {
     if (!state) return;
     state.highlightLayer.querySelectorAll('.pdf-selection-rect').forEach(element => element.remove());
     if (!this.selectionState || !pdfSelectionContainsPage(this.selectionState, page)) return;
+    const interactionScale = state.interactionScale;
     for (const rect of this.selectionRectsForState(this.selectionState, page)) {
       const element = document.createElement('div');
       element.className = 'pdf-selection-rect';
-      element.style.left = formatCssPx(rect[0] * this.scale);
-      element.style.top = formatCssPx(rect[1] * this.scale);
-      element.style.width = formatCssPx((rect[2] - rect[0]) * this.scale);
-      element.style.height = formatCssPx((rect[3] - rect[1]) * this.scale);
+      element.style.left = formatCssPx(rect[0] * interactionScale);
+      element.style.top = formatCssPx(rect[1] * interactionScale);
+      element.style.width = formatCssPx((rect[2] - rect[0]) * interactionScale);
+      element.style.height = formatCssPx((rect[3] - rect[1]) * interactionScale);
       state.highlightLayer.appendChild(element);
     }
   }
@@ -1136,17 +1160,55 @@ class PdfViewer {
     if (page < start.page || page > end.page) return [];
     const startItemIndex = page === start.page ? start.itemIndex : 0;
     const endItemIndex = page === end.page ? end.itemIndex : Math.max(0, state.textRects.length - 1);
-    const rects: PdfRect[] = [];
-    for (let itemIndex = startItemIndex; itemIndex <= endItemIndex; itemIndex++) {
-      const from = page === start.page && itemIndex === start.itemIndex ? start.offset : 0;
-      const contentLength = String(state.textRects[itemIndex]?.content ?? '').length;
-      const to = page === end.page && itemIndex === end.itemIndex ? end.offset : contentLength;
-      for (const glyph of state.selectionGlyphs[itemIndex] ?? []) {
-        if (glyph.offsetEnd <= from || glyph.offsetStart >= to) continue;
-        rects.push(glyph.looseRect);
+    const lines = [...state.selectionLines].sort((left, right) => (
+      left.center - right.center || left.glyphs[0]!.glyph.looseRect[0] - right.glyphs[0]!.glyph.looseRect[0]
+    ));
+    const output: PdfRect[] = [];
+    for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+      const line = lines[lineIndex]!;
+      const selected = line.glyphs.filter(({ glyph, itemIndex }) => {
+        if (itemIndex < startItemIndex || itemIndex > endItemIndex) return false;
+        const from = page === start.page && itemIndex === start.itemIndex ? start.offset : 0;
+        const contentLength = String(state.textRects[itemIndex]?.content ?? '').length;
+        const to = page === end.page && itemIndex === end.itemIndex ? end.offset : contentLength;
+        return glyph.offsetEnd > from && glyph.offsetStart < to;
+      });
+      if (!selected.length) continue;
+
+      let top = Math.min(
+        line.center - line.height / 2,
+        ...selected.map(({ glyph }) => glyph.looseRect[1]),
+      );
+      let bottom = Math.max(
+        line.center + line.height / 2,
+        ...selected.map(({ glyph }) => glyph.looseRect[3]),
+      );
+      const previous = lines[lineIndex - 1];
+      const next = lines[lineIndex + 1];
+      if (previous) top = Math.max(top, (previous.center + line.center) / 2 + 0.25);
+      if (next) bottom = Math.min(bottom, (line.center + next.center) / 2 - 0.25);
+      if (bottom <= top) {
+        top = line.center - 0.125;
+        bottom = line.center + 0.125;
       }
+
+      const segments: Array<[number, number]> = [];
+      for (const { glyph } of selected.sort((left, right) => (
+        left.glyph.looseRect[0] - right.glyph.looseRect[0]
+        || left.glyph.looseRect[2] - right.glyph.looseRect[2]
+      ))) {
+        const [left, , right] = glyph.looseRect;
+        const segment = segments[segments.length - 1];
+        if (!segment || left - segment[1] > Math.max(4, line.height * 1.2)) {
+          segments.push([left, right]);
+        } else {
+          segment[0] = Math.min(segment[0], left);
+          segment[1] = Math.max(segment[1], right);
+        }
+      }
+      for (const [left, right] of segments) output.push([left, top, right, bottom]);
     }
-    return normalizePdfTextBands(rects);
+    return output;
   }
 
   private selectionAutoScrollDelta(clientX: number, clientY: number): { left: number; top: number } {
@@ -1208,8 +1270,6 @@ class PdfViewer {
     document.getElementById('rectangle-selection')?.setAttribute('aria-pressed', String(enabled));
     this.pageContainer.classList.toggle('rectangle-mode', enabled);
     if (enabled) {
-      this.directHighlight = false;
-      document.getElementById('direct-highlight')?.setAttribute('aria-pressed', 'false');
       window.getSelection()?.removeAllRanges();
       this.clearSelection();
     } else if (!this.rectangleDrag) {
@@ -1897,10 +1957,10 @@ class PdfViewer {
       await this.drawPdfLinksForPage(state, layout, renderGeneration);
       if (renderGeneration !== state.renderGeneration) return;
       state.rendered = true;
-      this.drawHighlightsForPage(state.pageNum);
       this.drawSearchHighlightsForPage(state.pageNum);
       this.drawDiscussionMarkersForPage(state.pageNum);
       this.restoreSelectionForPage(state.pageNum);
+      this.redrawPdfDestinationFocus(state.pageNum);
     } catch (error) {
       console.error(`Failed to render page ${state.pageNum}`, error);
       if (renderGeneration === state.renderGeneration) state.rendered = sharpCanvasInstalled;
@@ -2025,8 +2085,7 @@ class PdfViewer {
   ): string {
     const right = link.left + link.width;
     const bottom = link.top + link.height;
-    return state.textRects
-      .filter(item => {
+    const items = state.textRects.filter(item => {
         const rect = item?.rect;
         const left = Number(rect?.origin?.x);
         const top = Number(rect?.origin?.y);
@@ -2035,10 +2094,10 @@ class PdfViewer {
         return [left, top, width, height].every(Number.isFinite)
           && Math.min(right, left + width) > Math.max(link.left, left)
           && Math.min(bottom, top + height) > Math.max(link.top, top);
-      })
-      .map(item => String(item.content ?? ''))
-      .join(' ')
-      .replace(/[\u00ad\u200b\u2060\ufeff\ufffe\uffff]/gu, '')
+      });
+    return buildPdfSearchIndex(items, 'geometry', false, true, true)
+      .map(character => character.value)
+      .join('')
       .replace(/\s+/gu, ' ')
       .trim()
       .slice(0, 160);
@@ -2086,30 +2145,35 @@ class PdfViewer {
     if (!Array.isArray(value) || typeof engine.getTextSlices !== 'function') return undefined;
     const slices: Array<{ pageIndex: number; charIndex: number; charCount: number }> = [];
     const targets: Array<{ runIndex: number; offset: number }> = [];
+    const result = new Map<number, string[]>();
     value.forEach((run, runIndex) => {
       const charIndex = Number(run?.charIndex);
       const charCount = Number(run?.charCount);
-      const visibleCount = Array.from(typeof run?.text === 'string' ? run.text : '').length;
+      const visibleText = typeof run?.text === 'string' ? run.text : '';
+      const visibleCharacters: string[] = Array.from(visibleText);
       if (
         !Number.isInteger(charIndex)
         || charIndex < 0
         || !Number.isInteger(charCount)
         || charCount <= 0
-        || charCount === visibleCount
       ) {
         return;
       }
-      for (let offset = 0; offset < charCount; offset++) {
-        slices.push({ pageIndex: state.pageNum - 1, charIndex: charIndex + offset, charCount: 1 });
-        targets.push({ runIndex, offset });
+
+      if (charCount !== visibleCharacters.length) {
+        result.set(runIndex, Array.from({ length: charCount }, () => ''));
+        for (let offset = 0; offset < charCount; offset++) {
+          slices.push({ pageIndex: state.pageNum - 1, charIndex: charIndex + offset, charCount: 1 });
+          targets.push({ runIndex, offset });
+        }
       }
     });
     if (!slices.length) return undefined;
     try {
       const values: string[] = await engine.getTextSlices(pdfDoc, slices).toPromise();
-      const result = new Map<number, string[]>();
       targets.forEach((target, index) => {
-        const characters = result.get(target.runIndex) ?? [];
+        const characters = result.get(target.runIndex);
+        if (!characters) return;
         characters[target.offset] = String(values[index] ?? '');
         result.set(target.runIndex, characters);
       });
@@ -2181,16 +2245,6 @@ class PdfViewer {
     vscode.postMessage({ type: 'selectionChanged', anchor });
     if (anchor.multiPage) {
       document.getElementById('selection-toolbar')?.remove();
-      return;
-    }
-    if (this.directHighlight) {
-      window.getSelection()?.removeAllRanges();
-      this.clearSelection();
-      vscode.postMessage({
-        type: 'selectionAction',
-        action: 'highlight',
-        anchor: { ...anchor, highlightColor: this.selectedHighlightColor },
-      });
       return;
     }
     this.showSelectionToolbar(anchor, this.selectionViewportRect(anchor) ?? range.getBoundingClientRect());
@@ -2358,13 +2412,16 @@ class PdfViewer {
   }
 
   private selectionViewportRect(anchor: PdfAnchor): DOMRect | undefined {
-    const wrapper = this.pages.get(anchor.page)?.wrapper.getBoundingClientRect();
+    const page = this.pages.get(anchor.page);
+    const wrapper = page?.wrapper.getBoundingClientRect();
     const rects = validPdfRects(anchor.rects);
-    if (!wrapper || !rects.length) return undefined;
-    const left = wrapper.left + Math.min(...rects.map(rect => rect[0])) * this.scale;
-    const top = wrapper.top + Math.min(...rects.map(rect => rect[1])) * this.scale;
-    const right = wrapper.left + Math.max(...rects.map(rect => rect[2])) * this.scale;
-    const bottom = wrapper.top + Math.max(...rects.map(rect => rect[3])) * this.scale;
+    if (!page || !wrapper || !rects.length) return undefined;
+    const scaleX = wrapper.width / Math.max(1, Number(page.pageObj.size.width));
+    const scaleY = wrapper.height / Math.max(1, Number(page.pageObj.size.height));
+    const left = wrapper.left + Math.min(...rects.map(rect => rect[0])) * scaleX;
+    const top = wrapper.top + Math.min(...rects.map(rect => rect[1])) * scaleY;
+    const right = wrapper.left + Math.max(...rects.map(rect => rect[2])) * scaleX;
+    const bottom = wrapper.top + Math.max(...rects.map(rect => rect[3])) * scaleY;
     return new DOMRect(left, top, right - left, bottom - top);
   }
 
@@ -2379,6 +2436,10 @@ class PdfViewer {
   private clearSelection(): void {
     this.cancelSelectionUpdate();
     this.stopSelectionAutoScroll();
+    if (this.selectionPaintFrame !== undefined) {
+      window.cancelAnimationFrame(this.selectionPaintFrame);
+      this.selectionPaintFrame = undefined;
+    }
     if (this.selectionToolbarPositionFrame !== undefined) {
       window.cancelAnimationFrame(this.selectionToolbarPositionFrame);
       this.selectionToolbarPositionFrame = undefined;
@@ -2505,35 +2566,55 @@ class PdfViewer {
   }
 
   private showSelectionContextMenu(clientX: number, clientY: number, anchor: PdfAnchor): void {
-    const postSelectionAction = (
-      action: 'copyLink' | 'insertLink' | 'copyQuoteAndLink' | 'insertQuoteAndLink' | 'highlight',
-    ) => {
-      const actionAnchor = action === 'highlight'
-        ? { ...anchor, highlightColor: this.selectedHighlightColor }
-        : anchor;
-      if (action === 'highlight') {
-        window.getSelection()?.removeAllRanges();
-        this.clearSelection();
-      }
-      vscode.postMessage({ type: 'selectionAction', action, anchor: actionAnchor });
-    };
-
     showObsidianContextMenu({
       clientX,
       clientY,
       items: [
         { label: 'Look up ...', onSelect: () => vscode.postMessage({ type: 'lookupSelection', text: anchor.snippet }) },
         { label: 'Ask about selection…', onSelect: () => this.openAskPdfForSelection(anchor) },
+        ...(addToCursorChatEnabled
+          ? [{
+              label: `${cursorSelectionShortcutLabel()}  Add to Chat`,
+              onSelect: () => this.postTextSelectionAction('addToCursorChat', anchor),
+            }]
+          : []),
         { type: 'separator' },
-        { label: 'Copy link to selection', onSelect: () => postSelectionAction('copyLink') },
-        { label: 'Highlight selection', onSelect: () => postSelectionAction('highlight') },
+        { label: 'Copy link to selection', onSelect: () => this.postTextSelectionAction('copyLink', anchor) },
         { label: 'Copy selected text', onSelect: () => vscode.postMessage({ type: 'copyText', text: anchor.snippet }) },
-        { label: 'Copy quote and link', onSelect: () => postSelectionAction('copyQuoteAndLink') },
+        { label: 'Copy quote and link', onSelect: () => this.postTextSelectionAction('copyQuoteAndLink', anchor) },
         { type: 'separator' },
-        { label: 'Insert link', onSelect: () => postSelectionAction('insertLink') },
-        { label: 'Insert quote and link', onSelect: () => postSelectionAction('insertQuoteAndLink') },
+        { label: 'Insert link', onSelect: () => this.postTextSelectionAction('insertLink', anchor) },
+        { label: 'Insert quote and link', onSelect: () => this.postTextSelectionAction('insertQuoteAndLink', anchor) },
       ],
     });
+  }
+
+  private postTextSelectionAction(action: PdfTextSelectionAction, anchor: PdfAnchor): void {
+    const message: Record<string, unknown> = { type: 'selectionAction', action, anchor };
+    if (action === 'addToCursorChat') {
+      try {
+        const page = this.pages.get(anchor.page);
+        const rects = validPdfRects(anchor.rects);
+        const crop = page && rects.length
+          ? capturePdfSelectionCrop({
+              canvas: page.canvas,
+              pageWidth: Number(page.pageObj.size.width),
+              pageHeight: Number(page.pageObj.size.height),
+            }, { page: anchor.page, rects })
+          : undefined;
+        if (crop?.startsWith('data:image/png;base64,')) {
+          message.snapshotPngBase64 = crop.slice('data:image/png;base64,'.length);
+        }
+      } catch {}
+    }
+    vscode.postMessage(message);
+  }
+
+  private addCurrentSelectionToCursorChat(): boolean {
+    const current = this.selectionAnchorFromNativeRange();
+    if (!current || current.anchor.multiPage) return false;
+    this.postTextSelectionAction('addToCursorChat', current.anchor);
+    return true;
   }
 
   private openAskPdfForNativeSelection(): void {
@@ -2576,7 +2657,7 @@ class PdfViewer {
 
     const addButton = (
       label: string,
-      action: 'copyLink' | 'insertLink' | 'copyQuoteAndLink' | 'insertQuoteAndLink' | 'highlight',
+      action: PdfTextSelectionAction,
       className = '',
     ) => {
       const button = document.createElement('button');
@@ -2586,15 +2667,7 @@ class PdfViewer {
       button.addEventListener('click', event => {
         event.preventDefault();
         event.stopPropagation();
-        if (action === 'highlight') window.getSelection()?.removeAllRanges();
-        const actionAnchor = action === 'highlight'
-          ? { ...anchor, highlightColor: this.selectedHighlightColor }
-          : anchor;
-        if (action === 'highlight') {
-          window.getSelection()?.removeAllRanges();
-          this.clearSelection();
-        }
-        vscode.postMessage({ type: 'selectionAction', action, anchor: actionAnchor });
+        this.postTextSelectionAction(action, anchor);
         toolbar.remove();
       });
       toolbar.appendChild(button);
@@ -2606,6 +2679,17 @@ class PdfViewer {
       this.copyLinkFormat === 'quote' ? 'copyQuoteAndLink' : 'copyLink',
     );
     addButton('Insert Link', 'insertLink', 'secondary');
+    if (addToCursorChatEnabled) {
+      const button = addButton('', 'addToCursorChat', 'secondary cursor-chat-action');
+      button.setAttribute('aria-label', `Add to Chat ${cursorSelectionShortcutLabel()}`);
+      const label = document.createElement('span');
+      label.className = 'add-to-chat-label';
+      label.textContent = 'Add to Chat';
+      const shortcut = document.createElement('span');
+      shortcut.className = 'add-to-chat-shortcut';
+      shortcut.textContent = cursorSelectionShortcutLabel();
+      button.append(label, shortcut);
+    }
 
     const menu = document.createElement('div');
     menu.className = 'menu';
@@ -2623,7 +2707,6 @@ class PdfViewer {
     for (const [label, action] of [
       ['Copy Quote and Link', 'copyQuoteAndLink'],
       ['Insert Quote and Link', 'insertQuoteAndLink'],
-      ['Highlight Selection', 'highlight'],
     ] as const) {
       const button = document.createElement('button');
       button.type = 'button';
@@ -2632,14 +2715,7 @@ class PdfViewer {
       button.addEventListener('click', event => {
         event.preventDefault();
         event.stopPropagation();
-        const actionAnchor = action === 'highlight'
-          ? { ...anchor, highlightColor: this.selectedHighlightColor }
-          : anchor;
-        if (action === 'highlight') {
-          window.getSelection()?.removeAllRanges();
-          this.clearSelection();
-        }
-        vscode.postMessage({ type: 'selectionAction', action, anchor: actionAnchor });
+        this.postTextSelectionAction(action, anchor);
         toolbar.remove();
       });
       menu.appendChild(button);
@@ -2795,111 +2871,6 @@ class PdfViewer {
     return highlights[0];
   }
 
-  private drawHighlightsForPage(pageNum: number): void {
-    const page = this.pages.get(pageNum);
-    if (!page) return;
-    page.highlightLayer.querySelectorAll('.annotation-highlight').forEach(element => element.remove());
-
-    for (const highlight of this.highlights) {
-      const anchor = highlight.anchor;
-      if (anchor.page !== pageNum || !anchorHasSelection(anchor)) continue;
-
-      const key = anchorKey(anchor);
-      const exactRects = normalizePdfTextBands(anchor.rects);
-      if (exactRects.length > 0) {
-        for (const rect of exactRects) {
-          this.appendAnnotationHighlight(
-            page,
-            highlight,
-            anchor,
-            key,
-            rect[0] * this.scale,
-            rect[1] * this.scale,
-            (rect[2] - rect[0]) * this.scale,
-            (rect[3] - rect[1]) * this.scale,
-          );
-        }
-        continue;
-      }
-      const start = anchor.textItemIndex ?? 0;
-      const end = anchor.endTextItemIndex ?? start;
-      const startOffset = anchor.charOffset ?? 0;
-      const endOffset = anchor.endCharOffset ?? ((anchor.charOffset ?? 0) + (anchor.length ?? 0));
-
-      for (let index = start; index <= end; index++) {
-        const item = page.textRects[index];
-        if (!item?.content) continue;
-        const contentLength = item.content.length;
-        const itemStart = index === start ? Math.max(0, startOffset) : 0;
-        const itemEnd = index === end ? Math.min(contentLength, endOffset) : contentLength;
-        if (itemEnd <= itemStart) continue;
-
-        const fullLeft = item.rect.origin.x * this.scale;
-        const fullTop = item.rect.origin.y * this.scale;
-        const fullWidth = item.rect.size.width * this.scale;
-        const fullHeight = item.rect.size.height * this.scale;
-        const perChar = fullWidth / contentLength;
-        this.appendAnnotationHighlight(
-          page,
-          highlight,
-          anchor,
-          key,
-          fullLeft + perChar * itemStart,
-          fullTop,
-          Math.max(4, perChar * (itemEnd - itemStart)),
-          fullHeight,
-        );
-      }
-    }
-  }
-
-  private appendAnnotationHighlight(
-    page: PageState,
-    highlight: HighlightSpec,
-    anchor: PdfAnchor,
-    key: string,
-    left: number,
-    top: number,
-    width: number,
-    height: number,
-  ): void {
-    const element = document.createElement('div');
-    element.className = `annotation-highlight ${highlight.kind}`;
-    const color = normalizeHighlightColor(anchor.highlightColor)
-      ?? (highlight.kind === 'referenced' ? 'green' : 'yellow');
-    element.dataset.highlightColor = color;
-    element.style.backgroundColor = HIGHLIGHT_COLORS[color];
-    element.dataset.anchorKey = key;
-    element.style.left = `${left}px`;
-    element.style.top = `${top}px`;
-    element.style.width = `${Math.max(1, width)}px`;
-    element.style.height = `${Math.max(1, height)}px`;
-    element.title = highlight.kind === 'referenced'
-      ? 'Click to see markdown notes referencing this'
-      : 'Click to inspect this PDF highlight';
-    element.addEventListener('mouseenter', () => this.setHighlightHover(page, key, true));
-    element.addEventListener('mouseleave', () => this.setHighlightHover(page, key, false));
-    element.addEventListener('click', event => {
-      event.stopPropagation();
-      this.pendingPopoverAnchor = anchor;
-      this.pendingPopoverElement = element;
-      vscode.postMessage({ type: 'requestReferencesForAnchor', anchor });
-    });
-    page.highlightLayer.appendChild(element);
-  }
-
-  private setHighlightHover(page: PageState, key: string, enabled: boolean): void {
-    for (const element of Array.from(page.highlightLayer.querySelectorAll(`[data-anchor-key="${CSS.escape(key)}"]`))) {
-      element.classList.toggle('hover-active', enabled);
-    }
-  }
-
-  private redrawAllHighlights(): void {
-    for (const [pageNum, page] of this.pages) {
-      if (page.rendered) this.drawHighlightsForPage(pageNum);
-    }
-  }
-
   private drawDiscussionMarkersForPage(pageNum: number): void {
     const page = this.pages.get(pageNum);
     if (!page?.rendered) return;
@@ -2949,89 +2920,6 @@ class PdfViewer {
     for (const [pageNum, page] of this.pages) {
       if (page.rendered) this.drawSearchHighlightsForPage(pageNum);
     }
-  }
-
-  private showReferencePopover(anchor: PdfAnchor, items: ReferenceListItem[]): void {
-    this.dismissPopover();
-    if (!this.pendingPopoverAnchor || !this.pendingPopoverElement) return;
-    if (anchorKey(this.pendingPopoverAnchor) !== anchorKey(anchor)) return;
-
-    const popover = document.createElement('div');
-    popover.className = 'ref-popover';
-    popover.id = 'ref-popover';
-    popover.style.position = 'fixed';
-    popover.style.zIndex = '1001';
-    popover.style.pointerEvents = 'auto';
-    const header = document.createElement('div');
-    header.className = 'header';
-    header.textContent = items.length === 1 ? '1 markdown note references this' : `${items.length} markdown notes reference this`;
-    popover.appendChild(header);
-
-    if (items.length === 0) {
-      const empty = document.createElement('div');
-      empty.className = 'empty';
-      empty.textContent = 'No markdown references found.';
-      popover.appendChild(empty);
-    } else {
-      for (const item of items) {
-        const row = document.createElement('div');
-        row.className = 'item';
-        row.tabIndex = 0;
-        const context = document.createElement('div');
-        context.className = 'context';
-        context.textContent = item.contextLine || item.snippet || '(empty line)';
-        const meta = document.createElement('div');
-        meta.className = 'meta';
-        meta.textContent = `${item.source}:${item.sourceLine}`;
-        row.append(context, meta);
-        row.addEventListener('click', () => {
-          vscode.postMessage({ type: 'openMarkdownAtLocation', path: item.source, line: item.sourceLine });
-          this.dismissPopover();
-        });
-        row.addEventListener('keydown', event => {
-          if (event.key === 'Enter' || event.key === ' ') row.click();
-        });
-        popover.appendChild(row);
-      }
-    }
-
-    document.body.appendChild(popover);
-    const rect = this.pendingPopoverElement.getBoundingClientRect();
-    popover.style.left = `${rect.left}px`;
-    popover.style.top = `${rect.bottom + 6}px`;
-    requestAnimationFrame(() => {
-      const box = popover.getBoundingClientRect();
-      if (box.right > window.innerWidth - 10) {
-        popover.style.left = `${Math.max(10, window.innerWidth - box.width - 10)}px`;
-      }
-      if (box.bottom > window.innerHeight - 10) {
-        popover.style.top = `${Math.max(10, rect.top - box.height - 6)}px`;
-      }
-    });
-
-    const onDown = (event: MouseEvent) => {
-      if (!popover.contains(event.target as Node)) this.dismissPopover();
-    };
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        this.dismissPopover();
-      }
-    };
-    setTimeout(() => {
-      document.addEventListener('mousedown', onDown);
-      document.addEventListener('keydown', onKey);
-    }, 0);
-    this.popoverCleanup = () => {
-      document.removeEventListener('mousedown', onDown);
-      document.removeEventListener('keydown', onKey);
-    };
-  }
-
-  private dismissPopover(): void {
-    document.getElementById('ref-popover')?.remove();
-    this.popoverCleanup?.();
-    this.popoverCleanup = null;
   }
 
   private handlePaginatedArrowKey(event: KeyboardEvent): boolean {
@@ -3577,6 +3465,15 @@ class PdfViewer {
   }
 
   private flashPdfDestination(destination: PdfDestinationObject, label?: string): void {
+    this.clearPdfDestinationFocus();
+    const focusState: PdfDestinationFocusState = { destination, label };
+    this.pdfDestinationFocus = focusState;
+    this.drawPdfDestinationFocus(focusState);
+  }
+
+  private drawPdfDestinationFocus(focusState: PdfDestinationFocusState): void {
+    if (this.pdfDestinationFocus !== focusState) return;
+    const { destination, label } = focusState;
     const targetPage = destination.pageIndex + 1;
     const state = this.pages.get(targetPage);
     if (!state) return;
@@ -3592,10 +3489,13 @@ class PdfViewer {
       state.pageObj,
       Boolean(pdfDoc?.normalizedRotation),
     );
+    const normalizeReferenceSeparators = (value: string): string => (
+      value.replace(/[\u2010-\u2015\u2212]/gu, '-')
+    );
     const textItems = state.textRects.flatMap(item => {
       const rect = finitePdfTextRect(item?.rect);
       return rect ? [{
-        content: String(item?.content ?? '')
+        content: normalizeReferenceSeparators(String(item?.content ?? ''))
           .replace(/[\u00ad\u200b\u2060\ufeff\ufffe\uffff]/gu, '')
           .replace(/\s+/gu, ' ')
           .trim(),
@@ -3605,19 +3505,24 @@ class PdfViewer {
     const textRects = textItems.map(item => item.rect);
     const pageWidth = Math.max(1, Number(state.pageObj.size.width));
     const pageHeight = Math.max(1, Number(state.pageObj.size.height));
-    const labelText = String(label ?? '')
+    const labelText = normalizeReferenceSeparators(String(label ?? ''))
       .replace(/[\u00ad\u200b\u2060\ufeff\ufffe\uffff]/gu, '')
       .replace(/\s+/gu, ' ')
       .trim();
-    const referenceTokens = [...labelText.matchAll(/\b\d+(?:\.\d+)+\b/gu)]
+    const referenceTokens = [...labelText.matchAll(/\b\d+(?:[.-]\d+)+\b/gu)]
       .map(match => match[0])
       .filter((token, index, tokens) => tokens.indexOf(token) === index);
     const semanticTarget = referenceTokens.flatMap((token, tokenIndex) => {
       const escaped = token.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+      const objectCaptionPrefix = new RegExp(
+        `^(?:figure|table)\\s*${escaped}\\s*[.:](?:\\s|$)`,
+        'iu',
+      );
       const objectPrefix = new RegExp(`^(?:figure|table)\\s*${escaped}\\b`, 'iu');
       const headingPrefix = new RegExp(`^(?:section\\s*)?${escaped}\\b`, 'iu');
       return textItems.flatMap(item => {
         if (!item.content.includes(token)) return [];
+        const objectCaption = objectCaptionPrefix.test(item.content);
         const bottom = item.rect.top + item.rect.height;
         const verticalDistance = target.y < item.rect.top
           ? item.rect.top - target.y
@@ -3627,13 +3532,15 @@ class PdfViewer {
         return [{
           ...item,
           tokenIndex,
-          rank: objectPrefix.test(item.content)
+          rank: objectCaption
             ? 0
-            : headingPrefix.test(item.content)
+            : objectPrefix.test(item.content)
               ? 1
-              : 2,
+              : headingPrefix.test(item.content)
+                ? 2
+                : 3,
           verticalDistance,
-          objectCaption: objectPrefix.test(item.content),
+          objectCaption,
         }];
       });
     }).sort((left, right) => (
@@ -3795,14 +3702,62 @@ class PdfViewer {
     const bottom = clamp(focusRect.top + focusRect.height + padding, top + 1, pageHeight);
     const focus = document.createElement('div');
     focus.className = 'pdf-destination-focus';
-    if (!this.shouldReduceAnimation()) focus.classList.add('animate');
     focus.ariaHidden = 'true';
     focus.style.left = formatCssPx(left * this.scale);
     focus.style.top = formatCssPx(top * this.scale);
     focus.style.width = formatCssPx((right - left) * this.scale);
     focus.style.height = formatCssPx((bottom - top) * this.scale);
     state.highlightLayer.appendChild(focus);
-    window.setTimeout(() => focus.remove(), 2400);
+
+    // Paint the cue once at full opacity before starting its fade. Adding the
+    // animation and its timeout in the insertion task allowed a busy or
+    // backgrounded renderer to expire the node without ever presenting it.
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        if (this.pdfDestinationFocus !== focusState || !focus.isConnected) return;
+        const now = performance.now();
+        if (focusState.startedAt === undefined) {
+          focusState.startedAt = now;
+          focusState.cleanupTimer = window.setTimeout(
+            () => this.clearPdfDestinationFocus(focusState),
+            PDF_DESTINATION_FOCUS_DURATION_MS,
+          );
+        }
+        const elapsed = now - focusState.startedAt;
+        if (elapsed >= PDF_DESTINATION_FOCUS_DURATION_MS) {
+          this.clearPdfDestinationFocus(focusState);
+          return;
+        }
+        if (!this.shouldReduceAnimation()) {
+          focus.style.animationDelay = `-${Math.max(0, elapsed)}ms`;
+          focus.addEventListener(
+            'animationend',
+            () => this.clearPdfDestinationFocus(focusState),
+            { once: true },
+          );
+          focus.classList.add('animate');
+        }
+      });
+    });
+  }
+
+  private redrawPdfDestinationFocus(pageNumber: number): void {
+    const focusState = this.pdfDestinationFocus;
+    if (!focusState || focusState.destination.pageIndex + 1 !== pageNumber) return;
+    this.drawPdfDestinationFocus(focusState);
+  }
+
+  private clearPdfDestinationFocus(focusState = this.pdfDestinationFocus): void {
+    if (!focusState || this.pdfDestinationFocus !== focusState) return;
+    if (focusState.cleanupTimer !== undefined) {
+      window.clearTimeout(focusState.cleanupTimer);
+    }
+    this.pdfDestinationFocus = undefined;
+    for (const page of this.pages.values()) {
+      page.highlightLayer
+        .querySelectorAll('.pdf-destination-focus')
+        .forEach(element => element.remove());
+    }
   }
 
   private async goBackInPdfHistory(): Promise<void> {
@@ -4067,7 +4022,6 @@ class PdfViewer {
       return;
     }
     this.currentPage = activePage;
-    this.redrawAllHighlights();
     this.redrawAllSearchHighlights();
     this.redrawAllDiscussionMarkers();
     this.refreshSelectionAfterRender();
@@ -4115,7 +4069,7 @@ class PdfViewer {
     const current = this.selectionAnchorFromState();
     if (!current) return;
     this.latestSelectionAnchor = current.anchor;
-    if (!this.directHighlight && !current.anchor.multiPage) {
+    if (!current.anchor.multiPage) {
       this.showSelectionToolbar(
         current.anchor,
         this.selectionViewportRect(current.anchor) ?? current.range.getBoundingClientRect(),
@@ -4499,6 +4453,10 @@ function isEditableTarget(value: EventTarget | null): boolean {
   return Boolean(element?.closest('input, textarea, select, [contenteditable="true"], [contenteditable=""]'));
 }
 
+function cursorSelectionShortcutLabel(): string {
+  return /Mac|iPhone|iPad/u.test(navigator.platform) ? '⌘L' : 'Ctrl+L';
+}
+
 function recordValue(value: unknown): Record<string, any> {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? value as Record<string, any>
@@ -4515,18 +4473,6 @@ function samePdfSelectionRange(left: PdfAnchor | null, right: PdfAnchor): boolea
     && left.endCharOffset === right.endCharOffset
     && left.snippet === right.snippet
   );
-}
-
-function anchorKey(anchor: PdfAnchor): string {
-  if (anchor.id) return anchor.id;
-  return [
-    anchor.page,
-    anchor.textItemIndex ?? 0,
-    anchor.charOffset ?? 0,
-    anchor.endTextItemIndex ?? anchor.textItemIndex ?? 0,
-    anchor.endCharOffset ?? ((anchor.charOffset ?? 0) + (anchor.length ?? 0)),
-    JSON.stringify(validPdfRects(anchor.rects)),
-  ].join(':');
 }
 
 function anchorHasSelection(anchor: PdfAnchor): boolean {
@@ -4553,12 +4499,6 @@ function validPdfRects(rects: unknown): PdfRect[] {
 
 function roundPdfCoordinate(value: number): number {
   return Math.round(value * 1000) / 1000;
-}
-
-function normalizeHighlightColor(value: unknown): HighlightColor | undefined {
-  return value === 'yellow' || value === 'red' || value === 'green' || value === 'purple'
-    ? value
-    : undefined;
 }
 
 function clamp(value: number, minimum: number, maximum: number): number {

@@ -45,7 +45,7 @@ export interface AskPdfConsentModel {
 }
 
 export interface AskPdfActionModel {
-  kind: 'retry' | 'promote' | 'open-task' | 'retry-open' | 'copy-task-id';
+  kind: 'retry' | 'open-note' | 'promote' | 'open-task' | 'retry-open' | 'copy-task-id';
   label: string;
   primary?: boolean;
 }
@@ -91,6 +91,7 @@ export type AskPdfViewEvent =
   | { type: 'navigateSource' }
   | { type: 'openTranscriptLink'; href: string }
   | { type: 'promote' }
+  | { type: 'openLearningNote' }
   | { type: 'openPromotedTask' }
   | { type: 'retryOpening' }
   | { type: 'copyTaskId' }
@@ -423,6 +424,7 @@ export function createAskPdfPanelView(
       button.addEventListener('click', () => {
         const typeByKind: Record<AskPdfActionModel['kind'], AskPdfViewEvent['type']> = {
           retry: 'retry',
+          'open-note': 'openLearningNote',
           promote: 'promote',
           'open-task': 'openPromotedTask',
           'retry-open': 'retryOpening',

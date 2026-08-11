@@ -1,13 +1,13 @@
 /// <reference path="./vscode.d.ts" />
 
-import { acceptCompletion, autocompletion, startCompletion } from '@codemirror/autocomplete';
+import { acceptCompletion, autocompletion, completionStatus, startCompletion } from '@codemirror/autocomplete';
 import type { Completion, CompletionContext, CompletionResult } from '@codemirror/autocomplete';
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
 import { markdown } from '@codemirror/lang-markdown';
 import { languages } from '@codemirror/language-data';
 import { bracketMatching, defaultHighlightStyle, foldGutter, syntaxHighlighting } from '@codemirror/language';
-import { Compartment, EditorSelection, EditorState, Prec } from '@codemirror/state';
-import type { Range, Text } from '@codemirror/state';
+import { Annotation, Compartment, EditorSelection, EditorState, Prec } from '@codemirror/state';
+import type { Range, SelectionRange, Text } from '@codemirror/state';
 import { search, searchKeymap } from '@codemirror/search';
 import { getCM, vim, Vim } from '@replit/codemirror-vim';
 import type { CodeMirrorV, InputStateInterface, MotionArgs, Pos, vimState } from '@replit/codemirror-vim';
@@ -256,8 +256,15 @@ function vimStateForEditorView(editorView: EditorView): { insertMode?: boolean }
   }).cm?.state?.vim;
 }
 
+const nonVimLogicalVerticalMove = Annotation.define<boolean>();
+const nonVimVerticalGoalColumns = new WeakMap<EditorView, number>();
+
 const vimBacktickGuard = ViewPlugin.define((editorView: EditorView) => {
   const keydown = (event: KeyboardEvent) => {
+    if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') {
+      nonVimVerticalGoalColumns.delete(editorView);
+    }
+    preserveHeadingTextBoundaryOnVimEscape(event, editorView);
     handleVimBacktickKeydown(event, editorView);
   };
   const beforeinput = (event: Event) => {
@@ -268,12 +275,52 @@ const vimBacktickGuard = ViewPlugin.define((editorView: EditorView) => {
   editorView.dom.addEventListener('keydown', keydown, true);
   editorView.dom.addEventListener('beforeinput', beforeinput, true);
   return {
+    update(update: ViewUpdate) {
+      const isLogicalVerticalMove = update.transactions.some(transaction => (
+        transaction.annotation(nonVimLogicalVerticalMove) === true
+      ));
+      if ((update.docChanged || update.selectionSet) && !isLogicalVerticalMove) {
+        nonVimVerticalGoalColumns.delete(editorView);
+      }
+    },
     destroy() {
+      nonVimVerticalGoalColumns.delete(editorView);
       editorView.dom.removeEventListener('keydown', keydown, true);
       editorView.dom.removeEventListener('beforeinput', beforeinput, true);
     },
   };
 });
+
+function preserveHeadingTextBoundaryOnVimEscape(
+  event: KeyboardEvent,
+  editorView: EditorView,
+): void {
+  if (!vimModeEnabled || event.key !== 'Escape') return;
+  if (!vimStateForEditorView(editorView)?.insertMode) return;
+
+  const selection = editorView.state.selection.main;
+  if (!selection.empty) return;
+  const line = editorView.state.doc.lineAt(selection.head);
+  const heading = /^( {0,3}#{1,6}\s+)/.exec(line.text);
+  if (!heading) return;
+
+  const contentFrom = line.from + heading[0].length;
+  if (selection.head !== contentFrom) return;
+
+  const restoreBoundary = () => {
+    if (vimStateForEditorView(editorView)?.insertMode !== false) return;
+    const currentSelection = editorView.state.selection.main;
+    if (!currentSelection.empty || currentSelection.head !== contentFrom - 1) return;
+    const currentLine = editorView.state.doc.lineAt(currentSelection.head);
+    if (currentLine.from !== line.from || currentLine.text !== line.text) return;
+    editorView.dispatch({
+      selection: EditorSelection.cursor(contentFrom),
+      scrollIntoView: true,
+    });
+  };
+  queueMicrotask(restoreBoundary);
+  window.setTimeout(restoreBoundary, 0);
+}
 
 function restoreEditorFocusAfterShortcut(editorView: EditorView): void {
   editorView.focus();
@@ -405,6 +452,8 @@ function createView(text: string, title?: string): EditorView {
         Prec.highest(keymap.of([
           { key: 'Ctrl-o', run: handleControlO, preventDefault: true },
           { key: 'Ctrl-O', run: handleControlO, preventDefault: true },
+          { key: 'ArrowUp', run: editorView => moveNonVimCursorByDocumentLine(editorView, -1) },
+          { key: 'ArrowDown', run: editorView => moveNonVimCursorByDocumentLine(editorView, 1) },
           { key: 'Enter', run: editorView => acceptCompletion(editorView) || handleObsidianEnter(editorView), preventDefault: true },
           { key: 'Backspace', run: handleObsidianListBackspace, preventDefault: true },
         ])),
@@ -476,7 +525,7 @@ function createView(text: string, title?: string): EditorView {
             height: '100%',
             backgroundColor: 'var(--vscode-editor-background)',
             color: 'var(--vscode-editor-foreground)',
-            fontFamily: 'var(--hl-editor-font-family, var(--vscode-editor-font-family, ui-monospace, Menlo, monospace))',
+            fontFamily: 'var(--vscode-font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif)',
             fontSize: 'var(--hl-editor-font-size, 16px)',
             fontWeight: 'var(--hl-editor-font-weight, var(--vscode-editor-font-weight, normal))',
             lineHeight: 'var(--hl-editor-line-height, 24px)',
@@ -513,6 +562,12 @@ function createView(text: string, title?: string): EditorView {
           '.cm-lineNumbers': {
             minWidth: '22px',
             width: '22px',
+            color: 'var(--vscode-editorLineNumber-foreground, var(--vscode-editorGutter-foreground))',
+            fontFamily: 'var(--vscode-editor-font-family, ui-monospace, Menlo, Monaco, Consolas, monospace)',
+            fontSize: 'var(--vscode-editor-font-size, 14px)',
+            fontWeight: 'var(--vscode-editor-font-weight, normal)',
+            fontVariantNumeric: 'tabular-nums',
+            letterSpacing: 'var(--hl-editor-letter-spacing, normal)',
           },
           '.cm-foldGutter': {
             minWidth: '18px',
@@ -539,9 +594,16 @@ function createView(text: string, title?: string): EditorView {
             padding: '0',
             lineHeight: 'var(--hl-editor-line-height, 24px)',
             textAlign: 'right',
+            cursor: 'default',
           },
           '.cm-cursor, .cm-dropCursor': {
             borderLeftColor: 'var(--vscode-editorCursor-foreground, currentColor)',
+          },
+          '.cm-selectionBackground': {
+            backgroundColor: 'var(--vscode-editor-inactiveSelectionBackground, rgba(127, 127, 127, 0.24))',
+          },
+          '&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground': {
+            backgroundColor: 'var(--vscode-editor-selectionBackground, rgba(38, 79, 120, 0.65))',
           },
           '.cm-panel.cm-vim-panel': {
             boxSizing: 'border-box',
@@ -758,8 +820,9 @@ function createView(text: string, title?: string): EditorView {
             display: 'inline-block',
             marginLeft: '4px',
             fontSize: '0.8em',
+            lineHeight: '1',
             opacity: '0.85',
-            verticalAlign: 'text-top',
+            verticalAlign: '0.15em',
           },
           '.cm-active-link-label': {
             color: 'var(--vscode-textLink-foreground)',
@@ -782,8 +845,9 @@ function createView(text: string, title?: string): EditorView {
             display: 'inline-block',
             marginLeft: '4px',
             fontSize: '0.8em',
+            lineHeight: '1',
             opacity: '0.85',
-            verticalAlign: 'text-top',
+            verticalAlign: '0.15em',
           },
           '.cm-active-bold': { fontWeight: '700' },
           '.cm-active-italic': { fontStyle: 'italic' },
@@ -798,7 +862,7 @@ function createView(text: string, title?: string): EditorView {
             borderRadius: '4px',
             padding: '1px 5px',
             color: 'var(--vscode-textPreformat-foreground, inherit)',
-            fontFamily: 'var(--vscode-editor-font-family, ui-monospace, Menlo, monospace)',
+            fontFamily: 'var(--hl-editor-font-family, var(--vscode-editor-font-family, ui-monospace, Menlo, monospace))',
           },
           '.cm-active-math-delimiter': {
             color: 'var(--vscode-symbolIcon-operatorForeground, #c586c0)',
@@ -815,9 +879,16 @@ function createView(text: string, title?: string): EditorView {
             padding: '0 4px',
             fontWeight: '500',
           },
-          '.cm-active-footnote-ref, .cm-active-footnote-def-label': {
+          '.cm-active-footnote-ref': {
             color: 'var(--vscode-textLink-foreground)',
             fontSize: '0.78em',
+            verticalAlign: 'super',
+            lineHeight: '0',
+            fontWeight: '600',
+          },
+          '.cm-active-footnote-def-label': {
+            color: 'var(--vscode-textLink-foreground)',
+            fontSize: '0.85em',
             verticalAlign: 'super',
             lineHeight: '0',
             fontWeight: '600',
@@ -1628,6 +1699,47 @@ function handleControlO(editorView: EditorView): boolean {
   return true;
 }
 
+function moveNonVimCursorByDocumentLine(
+  editorView: EditorView,
+  direction: -1 | 1,
+): boolean {
+  if (vimModeEnabled || completionStatus(editorView.state) != null) return false;
+  if (document.activeElement !== editorView.contentDOM) return false;
+  const selection = editorView.state.selection;
+  if (selection.ranges.length !== 1 || !selection.main.empty) return false;
+
+  const line = editorView.state.doc.lineAt(selection.main.head);
+  const nativeTarget = editorView.moveVertically(selection.main, direction > 0);
+  const targetLine = editorView.state.doc.lineAt(nativeTarget.head);
+  if (targetLine.number === line.number) return false;
+  if (
+    !isSingleVisualLine(editorView, selection.main, line.from, line.to)
+    || !isSingleVisualLine(editorView, nativeTarget, targetLine.from, targetLine.to)
+  ) {
+    return false;
+  }
+  const column = nonVimVerticalGoalColumns.get(editorView)
+    ?? selection.main.head - line.from;
+  nonVimVerticalGoalColumns.set(editorView, column);
+  editorView.dispatch({
+    selection: EditorSelection.cursor(targetLine.from + Math.min(column, targetLine.length)),
+    scrollIntoView: true,
+    annotations: nonVimLogicalVerticalMove.of(true),
+  });
+  return true;
+}
+
+function isSingleVisualLine(
+  editorView: EditorView,
+  range: SelectionRange,
+  lineFrom: number,
+  lineTo: number,
+): boolean {
+  const visualFrom = editorView.moveToLineBoundary(range, false, true).head;
+  const visualTo = editorView.moveToLineBoundary(range, true, true).head;
+  return visualFrom === lineFrom && visualTo === lineTo;
+}
+
 function ensureVimInsertMode(editorView: EditorView): void {
   if (!vimModeEnabled) return;
   if (enterVimInsertModeForView(editorView)) return;
@@ -1974,11 +2086,17 @@ function buildDecorations(view: EditorView): DecorationSet {
   const activeLines = getActiveLines(view);
   const activeSelectionRanges = getActiveSelectionRanges(view);
   const referenceDefinitions = markdownReferenceDefinitions(view.state.doc.toString());
+  const decoratedLines = new Set<number>();
 
   for (const { from, to } of view.visibleRanges) {
     let pos = from;
     while (pos <= to) {
       const line = view.state.doc.lineAt(pos);
+      if (decoratedLines.has(line.number)) {
+        pos = line.to + 1;
+        continue;
+      }
+      decoratedLines.add(line.number);
       if (isLineInsideFencedCodeBlock(view.state.doc, line.number)) {
         pos = line.to + 1;
         continue;
@@ -2148,18 +2266,18 @@ function collectActiveLineDecorations(
     rawLinkSourceSpans.push({ from: sourceFrom, to: sourceTo });
   }
 
-  addActiveInlineCodeMarks(lineFrom, text, decorations, reserved);
-  addActiveFootnoteMarks(lineFrom, text, decorations, reserved);
+  addActiveInlineCodeMarks(lineFrom, text, activeSelectionRanges, decorations, reserved);
+  addActiveFootnoteMarks(lineFrom, text, activeSelectionRanges, decorations, reserved);
   addActiveAutolinkMarks(lineFrom, text, decorations, reserved, rawLinkSourceSpans);
-  addActiveTagMarks(lineFrom, text, decorations, reserved);
-  addActiveDelimitedMarks(lineFrom, text, /\*\*\*(?=\S)(.+?\S)\*\*\*/g, 3, [activeBoldMark, activeItalicMark], decorations, reserved);
-  addActiveDelimitedMarks(lineFrom, text, /(?<![A-Za-z0-9_])___(?=\S)(.+?\S)___(?![A-Za-z0-9_])/g, 3, [activeBoldMark, activeItalicMark], decorations, reserved);
-  addActiveDelimitedMarks(lineFrom, text, /\*\*(?=\S)(.+?\S)\*\*/g, 2, [activeBoldMark], decorations, reserved);
-  addActiveDelimitedMarks(lineFrom, text, /(?<![A-Za-z0-9_])__(?=\S)(.+?\S)__(?![A-Za-z0-9_])/g, 2, [activeBoldMark], decorations, reserved);
-  addActiveDelimitedMarks(lineFrom, text, /(?<!\*)\*(?=\S)(.+?\S)\*(?!\*)/g, 1, [activeItalicMark], decorations, reserved);
-  addActiveDelimitedMarks(lineFrom, text, /(?<![A-Za-z0-9_])_(?=\S)(.+?\S)_(?![A-Za-z0-9_])/g, 1, [activeItalicMark], decorations, reserved);
-  addActiveDelimitedMarks(lineFrom, text, /~~(?=\S)(.+?\S)~~/g, 2, [activeStrikeMark], decorations, reserved);
-  addActiveDelimitedMarks(lineFrom, text, /==(?=\S)(.+?\S)==/g, 2, [activeHighlightMark], decorations, reserved);
+  addActiveTagMarks(lineFrom, text, activeSelectionRanges, decorations, reserved);
+  addActiveDelimitedMarks(lineFrom, text, /\*\*\*(?=\S)(.+?\S)\*\*\*/g, 3, activeSelectionRanges, [activeBoldMark, activeItalicMark], decorations, reserved);
+  addActiveDelimitedMarks(lineFrom, text, /(?<![A-Za-z0-9_])___(?=\S)(.+?\S)___(?![A-Za-z0-9_])/g, 3, activeSelectionRanges, [activeBoldMark, activeItalicMark], decorations, reserved);
+  addActiveDelimitedMarks(lineFrom, text, /\*\*(?=\S)(.+?\S)\*\*/g, 2, activeSelectionRanges, [activeBoldMark], decorations, reserved);
+  addActiveDelimitedMarks(lineFrom, text, /(?<![A-Za-z0-9_])__(?=\S)(.+?\S)__(?![A-Za-z0-9_])/g, 2, activeSelectionRanges, [activeBoldMark], decorations, reserved);
+  addActiveDelimitedMarks(lineFrom, text, /(?<!\*)\*(?=\S)(.+?\S)\*(?!\*)/g, 1, activeSelectionRanges, [activeItalicMark], decorations, reserved);
+  addActiveDelimitedMarks(lineFrom, text, /(?<![A-Za-z0-9_])_(?=\S)(.+?\S)_(?![A-Za-z0-9_])/g, 1, activeSelectionRanges, [activeItalicMark], decorations, reserved);
+  addActiveDelimitedMarks(lineFrom, text, /~~(?=\S)(.+?\S)~~/g, 2, activeSelectionRanges, [activeStrikeMark], decorations, reserved);
+  addActiveDelimitedMarks(lineFrom, text, /==(?=\S)(.+?\S)==/g, 2, activeSelectionRanges, [activeHighlightMark], decorations, reserved);
 }
 
 interface ActiveWikiLinkDisplayPlan {
@@ -2349,11 +2467,15 @@ function addActiveDelimitedMarks(
   text: string,
   pattern: RegExp,
   delimiterLength: number,
+  activeSelectionRanges: { from: number; to: number }[],
   marks: Decoration[],
   decorations: Range<Decoration>[],
   reserved: { from: number; to: number }[],
 ): void {
   for (const match of text.matchAll(pattern)) {
+    const sourceFrom = lineFrom + (match.index ?? 0);
+    const sourceTo = sourceFrom + match[0].length;
+    if (!selectionTouchesSource(activeSelectionRanges, sourceFrom, sourceTo)) continue;
     const from = lineFrom + (match.index ?? 0) + delimiterLength;
     const to = from + (match[1] ?? '').length;
     if (isEscapedAt(text, match.index ?? 0) || isEscapedAt(text, to - lineFrom)) continue;
@@ -2368,10 +2490,12 @@ function addActiveDelimitedMarks(
 function addActiveInlineCodeMarks(
   lineFrom: number,
   text: string,
+  activeSelectionRanges: { from: number; to: number }[],
   decorations: Range<Decoration>[],
   reserved: { from: number; to: number }[],
 ): void {
   for (const span of inlineCodeSourceSpans(lineFrom, text)) {
+    if (!selectionTouchesSource(activeSelectionRanges, span.from, span.to)) continue;
     const from = span.contentFrom;
     const to = span.contentTo;
     if (reserved.some(span => from < span.to && to > span.from)) continue;
@@ -2383,15 +2507,21 @@ function addActiveInlineCodeMarks(
 function addActiveFootnoteMarks(
   lineFrom: number,
   text: string,
+  activeSelectionRanges: { from: number; to: number }[],
   decorations: Range<Decoration>[],
   reserved: { from: number; to: number }[],
 ): void {
   const definition = text.match(/^(\s*)\[\^([^\]\s]+)\]:/);
   if (definition && !isEscapedAt(text, definition[1]!.length)) {
     const id = definition[2] ?? '';
+    const sourceFrom = lineFrom + definition[1]!.length;
+    const sourceTo = sourceFrom + definition[0].trimStart().length;
     const from = lineFrom + definition[1]!.length + 2;
     const to = from + id.length;
-    if (!reserved.some(span => from < span.to && to > span.from)) {
+    if (
+      selectionTouchesSource(activeSelectionRanges, sourceFrom, sourceTo)
+      && !reserved.some(span => from < span.to && to > span.from)
+    ) {
       decorations.push(activeFootnoteDefLabelMark.range(from, to));
       reserved.push({ from, to });
     }
@@ -2400,8 +2530,11 @@ function addActiveFootnoteMarks(
   for (const match of text.matchAll(/\[\^([^\]\s]+)\]/g)) {
     if (isEscapedAt(text, match.index ?? 0)) continue;
     const id = match[1] ?? '';
+    const sourceFrom = lineFrom + (match.index ?? 0);
+    const sourceTo = sourceFrom + match[0].length;
     const from = lineFrom + (match.index ?? 0) + 2;
     const to = from + id.length;
+    if (!selectionTouchesSource(activeSelectionRanges, sourceFrom, sourceTo)) continue;
     if (reserved.some(span => from < span.to && to > span.from)) continue;
     decorations.push(activeFootnoteRefMark.range(from, to));
     reserved.push({ from, to });
@@ -2428,6 +2561,7 @@ function addActiveAutolinkMarks(
 function addActiveTagMarks(
   lineFrom: number,
   text: string,
+  activeSelectionRanges: { from: number; to: number }[],
   decorations: Range<Decoration>[],
   reserved: { from: number; to: number }[],
 ): void {
@@ -2435,6 +2569,7 @@ function addActiveTagMarks(
     const from = lineFrom + (match.index ?? 0);
     const to = from + match[0].length;
     if (isEscapedAt(text, match.index ?? 0)) continue;
+    if (!selectionTouchesSource(activeSelectionRanges, from, to)) continue;
     if (reserved.some(span => from < span.to && to > span.from)) continue;
     decorations.push(activeTagMark.range(from, to));
     reserved.push({ from, to });
@@ -2466,7 +2601,7 @@ function selectionTouchesSource(
 ): boolean {
   return ranges.some(range => {
     if (range.from === range.to) {
-      return range.from >= sourceFrom && range.from <= sourceTo;
+      return range.from >= sourceFrom && range.from < sourceTo;
     }
     return range.from < sourceTo && range.to > sourceFrom;
   });

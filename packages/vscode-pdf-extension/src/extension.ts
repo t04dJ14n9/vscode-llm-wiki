@@ -4,7 +4,10 @@ import { dispatchUri } from './uriDispatcher';
 import { PdfEditorProvider } from './pdfEditorProvider';
 import { addSelectionToContext } from './agentContext';
 import { CodexAppServerClient } from './codexAppServerClient';
-import { PdfDiscussionController } from './pdfDiscussionController';
+import {
+  PDF_DISCUSSION_WORKSPACE_TRUST_MESSAGE,
+  PdfDiscussionController,
+} from './pdfDiscussionController';
 
 let pdfEditorProvider: PdfEditorProvider;
 let codexClient: CodexAppServerClient | undefined;
@@ -25,7 +28,10 @@ export function activate(context: vscode.ExtensionContext) {
     extensionVersion: extensionPackageVersion(context),
     logger: message => outputChannel.appendLine(message),
   });
-  pdfDiscussionController = new PdfDiscussionController({ client: codexClient });
+  pdfDiscussionController = new PdfDiscussionController({
+    client: codexClient,
+    isWorkspaceTrusted: () => vscode.workspace.isTrusted === true,
+  });
   context.subscriptions.push(codexClient, pdfDiscussionController);
 
   pdfEditorProvider = new PdfEditorProvider(context, {
@@ -63,6 +69,7 @@ export function activate(context: vscode.ExtensionContext) {
       });
     }),
     vscode.commands.registerCommand('human-learning.pdfAskSelection', async () => {
+      if (!requireWorkspaceTrust()) return;
       await pdfEditorProvider.openAskPdfForSelection();
     }),
     vscode.commands.registerCommand('human-learning.openPdfTarget', async (args?: { pdfPath?: string; page?: number; textFragment?: PdfTextFragment }) => {
@@ -100,6 +107,12 @@ export function activate(context: vscode.ExtensionContext) {
       ? `Human Learning PDF ready - vault at ${vaultRoot}`
       : `Human Learning PDF ready - document root at ${documentRoot}; annotations require \`hl init\``,
   );
+}
+
+function requireWorkspaceTrust(): boolean {
+  if (vscode.workspace.isTrusted === true) return true;
+  vscode.window.showWarningMessage(PDF_DISCUSSION_WORKSPACE_TRUST_MESSAGE);
+  return false;
 }
 
 function extensionPackageVersion(context: vscode.ExtensionContext): string {
