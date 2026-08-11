@@ -2,7 +2,7 @@
   "name": "@human-learning/core",
   "version": "0.1.0",
   "private": true,
-  "description": "Human Learning — core library (SQLite, workspace, sources, anchors, links, search)",
+  "description": "Human Learning — portable references and PDF discussion persistence",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
@@ -12,14 +12,10 @@
     "test": "pnpm build && node --test test/*.test.mjs"
   },
   "dependencies": {
-    "pdfjs-dist": "^4.0.0",
-    "sql.js": "^1.10.0",
-    "zod": "^3.23.0",
-    "yaml": "^2.4.0"
+    "zod": "^3.23.0"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
-    "@types/sql.js": "^1.4.0",
     "typescript": "^5.4.0"
   }
 }

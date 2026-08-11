@@ -1,7 +1,7 @@
 # PDF editor webview
 
-This package is the browser-side PDF editor shared by the combined Human
-Learning extension and the standalone PDF extension.
+This package is the browser-side PDF editor used by the combined Human Learning
+extension.
 
 ## Boundaries
 
@@ -10,11 +10,11 @@ Learning extension and the standalone PDF extension.
 - `src/webview/domain/` contains pure PDF policies and geometry. Domain modules
   must not import VS Code, browser globals, the PDF engine, or persistence.
 - `src/webview/pdfAskPanel*.ts` owns the annotation-scoped Ask PDF window.
-- `pdfEditorProvider.ts` remains in each extension package. Providers are host
-  adapters and may differ between the combined and standalone products.
+- `pdfEditorProvider.ts` remains in the combined extension. It is the host
+  adapter between VS Code and this browser-side package.
 
-The two extension builds must resolve `@human-learning/pdf-editor/webview`
-instead of maintaining mirrored implementations.
+The combined extension resolves `@human-learning/pdf-editor/webview` directly
+instead of maintaining a mirrored implementation.
 
 ## Dependency direction
 

@@ -18,32 +18,17 @@ const testFiles = [
 // These integration boundaries still expose untyped third-party data. Keep the
 // exception list explicit so new modules start with no-explicit-any enabled.
 const legacyUntypedFiles = [
-  'packages/cli/src/commands/doctor.ts',
-  'packages/cli/src/commands/hooks.ts',
-  'packages/core/src/db/connection.ts',
-  'packages/core/src/anchors/store.ts',
-  'packages/core/src/links/graph.ts',
-  'packages/core/src/search/search.ts',
-  'packages/core/src/sources/pdf-extract.ts',
-  'packages/core/src/workspace.ts',
   'packages/pdf-editor/src/webview/domain/pdfNavigation.ts',
   'packages/pdf-editor/src/webview/domain/pdfSearch.ts',
   'packages/pdf-editor/src/webview/domain/pdfSelection.ts',
   'packages/pdf-editor/src/webview/domain/pdfTextExtraction.ts',
   'packages/pdf-editor/src/webview/pdfAskPanel.ts',
   'packages/pdf-editor/src/webview/pdf-viewer.ts',
-  'packages/vscode-extension/src/embedpdf.d.ts',
   'packages/vscode-extension/src/markdownEditorProvider.ts',
   'packages/vscode-extension/src/pdfDiscussionController.ts',
   'packages/vscode-extension/src/pdfEditorProvider.ts',
   'packages/vscode-extension/webview-src/extensions/hybridMath.ts',
   'packages/vscode-extension/webview-src/markdown-editor.ts',
-  'packages/vscode-markdown-extension/src/markdownEditorProvider.ts',
-  'packages/vscode-markdown-extension/webview-src/extensions/hybridMath.ts',
-  'packages/vscode-markdown-extension/webview-src/markdown-editor.ts',
-  'packages/vscode-pdf-extension/src/embedpdf.d.ts',
-  'packages/vscode-pdf-extension/src/pdfDiscussionController.ts',
-  'packages/vscode-pdf-extension/src/pdfEditorProvider.ts',
 ];
 
 function scope(configs, files) {
@@ -56,7 +41,6 @@ export default [
     ignores: [
       '**/node_modules/**',
       '**/dist/**',
-      '**/dist-split/**',
       '**/coverage/**',
       '**/.vscode-test/**',
       '.cache/**',
@@ -231,41 +215,9 @@ export default [
     files: [
       'packages/pdf-editor/src/webview/pdf-viewer.ts',
       'packages/vscode-extension/webview-src/markdown-editor.ts',
-      'packages/vscode-markdown-extension/webview-src/markdown-editor.ts',
     ],
     rules: {
       '@typescript-eslint/triple-slash-reference': 'off',
-    },
-  },
-  {
-    name: 'workspace/dynamic-commonjs-loader',
-    files: ['packages/core/src/db/connection.ts'],
-    rules: {
-      'no-eval': 'off',
-    },
-  },
-  {
-    name: 'workspace/split-extension-boundaries',
-    files: [
-      'packages/vscode-markdown-extension/{src,webview-src}/**/*.ts',
-      'packages/vscode-pdf-extension/{src,webview-src}/**/*.ts',
-    ],
-    rules: {
-      'no-restricted-imports': [
-        'error',
-        {
-          patterns: [
-            {
-              group: [
-                '../../vscode-extension/*',
-                '../../vscode-extension/**',
-              ],
-              message:
-                'Split extensions must consume shared workspace packages instead of the combined extension source tree.',
-            },
-          ],
-        },
-      ],
     },
   },
 ];

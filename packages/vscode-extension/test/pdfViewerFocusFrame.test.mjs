@@ -6,10 +6,9 @@ import { fileURLToPath } from 'node:url';
 
 const testRoot = dirname(fileURLToPath(import.meta.url));
 
-test('combined, standalone, and fixture PDF viewports suppress the programmatic focus frame', () => {
+test('combined and fixture PDF viewports suppress the programmatic focus frame', () => {
   for (const relativePath of [
     '../src/pdfEditorProvider.ts',
-    '../../vscode-pdf-extension/src/pdfEditorProvider.ts',
     './e2e/pdf-viewer.html',
   ]) {
     const source = readFileSync(resolve(testRoot, relativePath), 'utf8');

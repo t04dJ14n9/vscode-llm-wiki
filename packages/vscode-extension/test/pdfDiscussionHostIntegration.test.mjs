@@ -8,8 +8,6 @@ import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const repoRoot = resolve(packageRoot, '../..');
-const standaloneRoot = join(repoRoot, 'packages', 'vscode-pdf-extension');
 
 function loadTsModule(root, relativePath, mocks = {}) {
   const filename = join(root, relativePath);
@@ -587,9 +585,8 @@ function assertMinimalWebviewAnnotation(annotation) {
   assert.doesNotMatch(JSON.stringify(annotation), /file:\/\/|\/vault\/|assets\/ann-1/);
 }
 
-test('combined and standalone providers enforce host path authority and typed discussion messaging', async () => {
+test('combined provider enforces host path authority and typed discussion messaging', async () => {
   await exerciseProvider(packageRoot);
-  await exerciseProvider(standaloneRoot);
 });
 
 test('combined provider persists an answered PDF discussion and opens its durable learning note', async () => {
@@ -749,8 +746,8 @@ test('combined provider persists an answered PDF discussion and opens its durabl
   );
 });
 
-test('both providers invalidate cached discussion stores for same-size, same-mtime PDF replacements', () => {
-  for (const root of [packageRoot, standaloneRoot]) {
+test('combined provider invalidates cached discussion stores for same-size, same-mtime PDF replacements', () => {
+  for (const root of [packageRoot]) {
     const tempRoot = mkdtempSync(join(tmpdir(), 'hl-pdf-provider-store-cache-'));
     const pdfPath = join(tempRoot, 'paper.pdf');
     const initialTime = new Date('2026-01-02T03:04:05.000Z');
@@ -813,9 +810,9 @@ test('both providers invalidate cached discussion stores for same-size, same-mti
   }
 });
 
-test('both providers list path-free snapshot metadata and lazy-load crop bytes from the active store', async () => {
+test('combined provider lists path-free snapshot metadata and lazy-loads crop bytes from the active store', async () => {
   const snapshotBytes = Buffer.from('persisted-png-bytes');
-  for (const root of [packageRoot, standaloneRoot]) {
+  for (const root of [packageRoot]) {
     const { harness, snapshotVerifications } = await createPersistedSnapshotTransportHarness(
       root,
       snapshotBytes,
@@ -858,8 +855,8 @@ test('both providers list path-free snapshot metadata and lazy-load crop bytes f
   }
 });
 
-test('both providers remove persisted asset paths from prepared annotation snapshots', async () => {
-  for (const root of [packageRoot, standaloneRoot]) {
+test('combined provider removes persisted asset paths from prepared annotation snapshots', async () => {
+  for (const root of [packageRoot]) {
     const { harness, snapshotVerifications } = await createPersistedSnapshotTransportHarness(
       root,
       Buffer.from('persisted-png-bytes'),
@@ -887,8 +884,8 @@ test('both providers remove persisted asset paths from prepared annotation snaps
   }
 });
 
-test('both providers keep lifecycle ownership and promotion attempts host-internal', async () => {
-  for (const root of [packageRoot, standaloneRoot]) {
+test('combined provider keeps lifecycle ownership and promotion attempts host-internal', async () => {
+  for (const root of [packageRoot]) {
     const { harness } = await createPersistedSnapshotTransportHarness(
       root,
       Buffer.from('persisted-png-bytes'),
@@ -935,10 +932,10 @@ test('both providers keep lifecycle ownership and promotion attempts host-intern
   }
 });
 
-test('both providers forward snapshot bytes and crop metadata to new discussion submissions', async () => {
+test('combined provider forwards snapshot bytes and crop metadata to new discussion submissions', async () => {
   const snapshotBytes = Buffer.from('selection-crop-png');
   const snapshotCropRect = [12, 24, 180, 240];
-  for (const root of [packageRoot, standaloneRoot]) {
+  for (const root of [packageRoot]) {
     const { harness, submissions } = await createSnapshotSubmitHarness(root);
     await harness.receive({
       type: 'pdfDiscussionSubmit',
@@ -961,11 +958,11 @@ test('both providers forward snapshot bytes and crop metadata to new discussion 
   }
 });
 
-test('both providers validate incoming crop base64 before decoding and accept exactly 5 MiB', async () => {
+test('combined provider validates incoming crop base64 before decoding and accepts exactly 5 MiB', async () => {
   const maxSnapshotBytes = 5 * 1024 * 1024;
   const atLimitBase64 = Buffer.alloc(maxSnapshotBytes, 0xa5).toString('base64');
   const overLimitBase64 = Buffer.alloc(maxSnapshotBytes + 1, 0xa5).toString('base64');
-  for (const root of [packageRoot, standaloneRoot]) {
+  for (const root of [packageRoot]) {
     const { harness, submissions } = await createSnapshotSubmitHarness(root);
     await harness.receive({
       type: 'pdfDiscussionSubmit',
@@ -1018,8 +1015,8 @@ test('both providers validate incoming crop base64 before decoding and accept ex
   }
 });
 
-test('both providers list Codex models and forward the selected model to submissions', async () => {
-  for (const root of [packageRoot, standaloneRoot]) {
+test('combined provider lists Codex models and forwards the selected model to submissions', async () => {
+  for (const root of [packageRoot]) {
     const { harness, submissions } = await createSnapshotSubmitHarness(root);
     await harness.receive({ type: 'pdfDiscussionListModels', requestId: 'models-1' });
     assert.deepEqual(harness.posted.at(-1), {
@@ -1067,8 +1064,8 @@ test('both providers list Codex models and forward the selected model to submiss
   }
 });
 
-test('both providers return a non-blocking empty catalog when Codex model discovery fails', async () => {
-  for (const root of [packageRoot, standaloneRoot]) {
+test('combined provider returns a non-blocking empty catalog when Codex model discovery fails', async () => {
+  for (const root of [packageRoot]) {
     const { harness } = await createSnapshotSubmitHarness(root, {
       modelError: new Error('Codex model catalog is unavailable.'),
     });
@@ -1082,8 +1079,8 @@ test('both providers return a non-blocking empty catalog when Codex model discov
   }
 });
 
-test('both providers require first-use consent before every action that starts Codex', async () => {
-  for (const root of [packageRoot, standaloneRoot]) {
+test('combined provider requires first-use consent before every action that starts Codex', async () => {
+  for (const root of [packageRoot]) {
     const { harness, controllerCalls } = await createCodexActionBoundaryHarness(root);
     for (const message of [
       {
@@ -1119,8 +1116,8 @@ test('both providers require first-use consent before every action that starts C
   }
 });
 
-test('both providers reject malformed consent values instead of treating them as granted', async () => {
-  for (const root of [packageRoot, standaloneRoot]) {
+test('combined provider rejects malformed consent values instead of treating them as granted', async () => {
+  for (const root of [packageRoot]) {
     for (const accepted of ['yes', 1, { accepted: true }]) {
       const { harness, controllerCalls } = await createCodexActionBoundaryHarness(root);
       await harness.receive({
@@ -1147,8 +1144,8 @@ test('both providers reject malformed consent values instead of treating them as
   }
 });
 
-test('both providers turn discussion-store construction failures into typed responses', async () => {
-  for (const root of [packageRoot, standaloneRoot]) {
+test('combined provider turns discussion-store construction failures into typed responses', async () => {
+  for (const root of [packageRoot]) {
     const { harness, controllerCalls } = await createCodexActionBoundaryHarness(root, {
       consentGranted: true,
       createStoreError: new Error('Ask PDF could not validate its annotation sidecar.'),
@@ -1163,8 +1160,8 @@ test('both providers turn discussion-store construction failures into typed resp
   }
 });
 
-test('both providers fall back to text-only when an annotation has no persisted crop', async () => {
-  for (const root of [packageRoot, standaloneRoot]) {
+test('combined provider falls back to text-only when an annotation has no persisted crop', async () => {
+  for (const root of [packageRoot]) {
     const { harness, snapshotVerifications } = await createPersistedSnapshotTransportHarness(
       root,
       undefined,
@@ -1184,9 +1181,9 @@ test('both providers fall back to text-only when an annotation has no persisted 
   }
 });
 
-test('both providers fall back to text-only for missing or invalid persisted crop bytes', async () => {
+test('combined provider falls back to text-only for missing or invalid persisted crop bytes', async () => {
   const maxSnapshotBytes = 5 * 1024 * 1024;
-  for (const root of [packageRoot, standaloneRoot]) {
+  for (const root of [packageRoot]) {
     const atLimit = await createPersistedSnapshotTransportHarness(
       root,
       Buffer.alloc(maxSnapshotBytes),
@@ -1237,8 +1234,8 @@ test('both providers fall back to text-only for missing or invalid persisted cro
   }
 });
 
-test('both manifests contribute Ask PDF without a default keybinding', () => {
-  for (const root of [packageRoot, standaloneRoot]) {
+test('combined manifest contributes Ask PDF without a default keybinding', () => {
+  for (const root of [packageRoot]) {
     const manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
     const command = manifest.contributes.commands.find(
       item => item.command === 'human-learning.pdfAskSelection',
@@ -1254,7 +1251,6 @@ test('both manifests contribute Ask PDF without a default keybinding', () => {
   }
 
   const combined = JSON.parse(readFileSync(join(packageRoot, 'package.json'), 'utf8'));
-  const standalone = JSON.parse(readFileSync(join(standaloneRoot, 'package.json'), 'utf8'));
   assert.equal(
     combined.contributes.configuration.properties['humanLearning.agent.codexCommand'].default,
     'codex',
@@ -1275,33 +1271,17 @@ test('both manifests contribute Ask PDF without a default keybinding', () => {
     'humanLearning.pdf.codexCommand' in combined.contributes.configuration.properties,
     false,
   );
-  assert.equal(
-    standalone.contributes.configuration.properties['humanLearning.pdf.codexCommand'].default,
-    'codex',
-  );
-  assert.equal(
-    standalone.contributes.configuration.properties['humanLearning.pdf.codexCommand'].scope,
-    'machine',
-  );
-  assert.deepEqual(
-    standalone.capabilities.untrustedWorkspaces,
-    {
-      supported: 'limited',
-      description: 'PDF viewing remains available, but Ask PDF is disabled until the workspace is trusted.',
-      restrictedConfigurations: ['humanLearning.pdf.codexCommand'],
-    },
-  );
 });
 
-test('both extension hosts create one shared client/controller, register the command, and own disposal', () => {
-  for (const root of [packageRoot, standaloneRoot]) {
+test('combined extension host creates one shared client/controller, registers the command, and owns disposal', () => {
+  for (const root of [packageRoot]) {
     const source = readFileSync(join(root, 'src', 'extension.ts'), 'utf8');
     assert.equal((source.match(/new CodexAppServerClient\s*\(/g) ?? []).length, 1);
     assert.equal((source.match(/new PdfDiscussionController\s*\(/g) ?? []).length, 1);
     assert.match(source, /human-learning\.pdfAskSelection/);
     assert.match(
       source,
-      root === packageRoot ? /humanLearning\.agent/ : /humanLearning\.pdf/,
+      /humanLearning\.agent/,
     );
     assert.match(source, /codexCommand/);
     assert.match(source, /isWorkspaceTrusted:\s*\(\)\s*=>\s*vscode\.workspace\.isTrusted\s*===\s*true/);

@@ -44,6 +44,10 @@ const pdfEditorWebviewEntry = require.resolve('@human-learning/pdf-editor/webvie
 });
 const pdfEditorPackageRoot = path.resolve(path.dirname(pdfEditorWebviewEntry), '../..');
 const pdfEditorWebviewTsConfig = path.join(pdfEditorPackageRoot, 'tsconfig.webview.json');
+const pdfiumPackageRoot = path.resolve(path.dirname(require.resolve(
+  '@embedpdf/pdfium',
+  { paths: [pdfEditorPackageRoot] },
+)), '..');
 
 const webviewPerformance = {
   maxAssetSize: webviewBundleBudget,
@@ -65,9 +69,6 @@ module.exports = [
     },
     resolve: {
       extensions: ['.ts', '.js'],
-      alias: {
-        '@human-learning/core$': path.resolve(__dirname, '../core/dist/lite.js'),
-      },
     },
     module: {
       rules: [tsRule()],
@@ -103,7 +104,7 @@ module.exports = [
       new CopyPlugin({
         patterns: [
           {
-            from: 'node_modules/@embedpdf/pdfium/dist/pdfium.wasm',
+            from: path.join(pdfiumPackageRoot, 'dist/pdfium.wasm'),
             to: 'pdfium.wasm',
           },
         ],

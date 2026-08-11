@@ -5,45 +5,39 @@ import { createRequire } from 'node:module';
 import { join, resolve } from 'node:path';
 
 const extensionRoot = resolve(import.meta.dirname, '..');
-const standaloneMarkdownRoot = resolve(extensionRoot, '../vscode-markdown-extension');
 const dist = join(extensionRoot, 'dist');
 const manifest = JSON.parse(readFileSync(join(extensionRoot, 'package.json'), 'utf8'));
 const require = createRequire(import.meta.url);
 
-test('combined and standalone Markdown builds share stable typography and selection contracts', () => {
+test('Markdown source retains stable typography and selection contracts', () => {
   for (const relativePath of [
     'webview-src/extensions/hybridCodeBlocks.ts',
     'webview-src/extensions/hybridRendering.ts',
     'webview-src/extensions/hybridStyles.ts',
   ]) {
-    const combinedSource = readFileSync(join(extensionRoot, relativePath), 'utf8');
-    const standaloneSource = readFileSync(join(standaloneMarkdownRoot, relativePath), 'utf8');
-    assert.equal(
-      combinedSource,
-      standaloneSource,
-      `${relativePath} drifted between Markdown delivery packages`,
-    );
+    const source = readFileSync(join(extensionRoot, relativePath), 'utf8');
     if (relativePath.endsWith('hybridCodeBlocks.ts')) {
-      assert.match(combinedSource, /formatActiveCodeBlockFence/);
-      assert.match(combinedSource, /blockIsActive/);
+      assert.match(source, /formatActiveCodeBlockFence/);
+      assert.match(source, /blockIsActive/);
     }
   }
 
-  for (const root of [extensionRoot, standaloneMarkdownRoot]) {
-    const source = readFileSync(join(root, 'webview-src/markdown-editor.ts'), 'utf8');
-    assert.match(source, /--vscode-editor-inactiveSelectionBackground/);
-    assert.match(source, /--vscode-editor-selectionBackground/);
-    assert.match(
-      source,
-      /\.cm-lineNumbers': \{[\s\S]{0,700}--vscode-editorLineNumber-foreground[\s\S]{0,700}--vscode-editor-font-family[\s\S]{0,700}--vscode-editor-font-size[\s\S]{0,700}fontVariantNumeric: 'tabular-nums'/,
-    );
-    assert.match(
-      source,
-      /\.cm-lineNumbers \.cm-gutterElement': \{[\s\S]{0,500}cursor: 'default'/,
-    );
-    assert.match(source, /\.cm-active-inline-code': \{[\s\S]{0,500}fontFamily: 'var\(--hl-editor-font-family/);
-    assert.match(source, /\.cm-active-footnote-def-label': \{[\s\S]{0,300}fontSize: '0\.85em'/);
-  }
+  const source = readFileSync(
+    join(extensionRoot, 'webview-src/markdown-editor.ts'),
+    'utf8',
+  );
+  assert.match(source, /--vscode-editor-inactiveSelectionBackground/);
+  assert.match(source, /--vscode-editor-selectionBackground/);
+  assert.match(
+    source,
+    /\.cm-lineNumbers': \{[\s\S]{0,700}--vscode-editorLineNumber-foreground[\s\S]{0,700}--vscode-editor-font-family[\s\S]{0,700}--vscode-editor-font-size[\s\S]{0,700}fontVariantNumeric: 'tabular-nums'/,
+  );
+  assert.match(
+    source,
+    /\.cm-lineNumbers \.cm-gutterElement': \{[\s\S]{0,500}cursor: 'default'/,
+  );
+  assert.match(source, /\.cm-active-inline-code': \{[\s\S]{0,500}fontFamily: 'var\(--hl-editor-font-family/);
+  assert.match(source, /\.cm-active-footnote-def-label': \{[\s\S]{0,300}fontSize: '0\.85em'/);
 });
 
 test('build emits all VS Code extension and webview runtime artifacts', () => {
