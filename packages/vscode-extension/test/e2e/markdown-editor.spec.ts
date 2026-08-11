@@ -5214,55 +5214,37 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
     await expect(page.locator('.cm-tooltip-autocomplete')).toBeVisible();
   });
 
-  test('Vim mode starts in insert mode for ordinary typing', async ({ page }) => {
+  test('Vim mode starts in normal mode and requires an insert command', async ({ page }) => {
     await page.goto('http://localhost:8979/test.html');
 
     await page.evaluate(() => {
       window.postMessage({ type: 'setVimMode', enabled: true }, '*');
-      window.postMessage({
-        type: 'setText',
-        text: [
-          '# First',
-          '',
-          'Alpha beta',
-          '',
-          '# Second',
-          '',
-          'Tail line',
-        ].join('\n'),
-      }, '*');
+      window.postMessage({ type: 'setText', text: 'Alpha beta' }, '*');
     });
 
     await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+    await page.waitForFunction(() => window.__cmView?.cm?.state?.vim);
+
+    expect(await page.evaluate(() =>
+      window.__cmView.cm.state.vim?.insertMode
+    )).toBe(false);
+
     await page.evaluate(() => {
       const view = window.__cmView;
-      const line = view.state.doc.line(3);
-      view.dispatch({ selection: { anchor: line.to } });
+      view.dispatch({ selection: { anchor: 0 } });
       view.focus();
     });
 
-    await page.keyboard.press('d');
-    await page.keyboard.press('d');
+    await page.keyboard.press('i');
+    await page.keyboard.type('X');
 
-    const cursor = await page.evaluate(() => {
-      const view = window.__cmView;
-      const head = view.state.selection.main.head;
-      const line = view.state.doc.lineAt(head);
-      return {
-        text: view.state.doc.toString(),
-        lineNumber: line.number,
-        column: head - line.from,
-        lineText: line.text,
-      };
-    });
-
-    expect(cursor.lineNumber).toBe(3);
-    expect(cursor.lineText).toBe('Alpha betadd');
-    expect(cursor.column).toBe('Alpha betadd'.length);
-    expect(cursor.text).toContain('Alpha betadd');
+    expect(await page.evaluate(() => ({
+      insertMode: window.__cmView.cm.state.vim?.insertMode,
+      text: window.__cmView.state.doc.toString(),
+    }))).toEqual({ insertMode: true, text: 'XAlpha beta' });
   });
 
-  test('Vim mode remains insert mode after clicking into the editor', async ({ page }) => {
+  test('Vim mode remains normal after clicking into the editor', async ({ page }) => {
     await page.goto('http://localhost:8979/test.html');
 
     await page.evaluate(() => {
@@ -5283,274 +5265,72 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
 
     await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
     await page.locator('.cm-line').nth(2).click();
-    await page.evaluate(() => {
-      const view = window.__cmView;
-      const line = view.state.doc.line(3);
-      view.dispatch({ selection: { anchor: line.to } });
-    });
 
-    await page.keyboard.press('i');
-    await page.keyboard.press('a');
-    await page.keyboard.press('s');
-    await page.keyboard.press('d');
-
-    let cursor = await page.evaluate(() => {
-      const view = window.__cmView;
-      const head = view.state.selection.main.head;
-      const line = view.state.doc.lineAt(head);
-      return {
-        text: view.state.doc.toString(),
-        lineNumber: line.number,
-        column: head - line.from,
-        lineText: line.text,
-      };
-    });
-
-    expect(cursor.lineNumber).toBe(3);
-    expect(cursor.lineText).toBe('Alpha betaiasd');
-    expect(cursor.column).toBe('Alpha betaiasd'.length);
-    expect(cursor.text).toContain('Alpha betaiasd');
-
-    await page.evaluate(() => {
-      window.postMessage({
-        type: 'setText',
-        text: [
-          '# First',
-          '',
-          'Alpha beta',
-          '',
-          '# Second',
-          '',
-          'Tail line',
-        ].join('\n'),
-      }, '*');
-    });
-    await page.waitForFunction(() => window.__cmView?.state.doc.line(3).text === 'Alpha beta');
-    await page.evaluate(() => {
-      const view = window.__cmView;
-      const line = view.state.doc.line(3);
-      view.dispatch({ selection: { anchor: line.to } });
-    });
-
-    await page.keyboard.press('-');
-    await page.keyboard.press('Space');
-
-    cursor = await page.evaluate(() => {
-      const view = window.__cmView;
-      const head = view.state.selection.main.head;
-      const line = view.state.doc.lineAt(head);
-      return {
-        text: view.state.doc.toString(),
-        lineNumber: line.number,
-        column: head - line.from,
-        lineText: line.text,
-      };
-    });
-
-    expect(cursor.lineNumber).toBe(3);
-    expect(cursor.lineText).toBe('Alpha beta- ');
-    expect(cursor.column).toBe('Alpha beta- '.length);
-    expect(cursor.text).toContain('Alpha beta- ');
+    expect(await page.evaluate(() =>
+      window.__cmView.cm.state.vim?.insertMode
+    )).toBe(false);
   });
 
-  test('Vim mode remains insert mode after host focus requests', async ({ page }) => {
+  test('Vim mode preserves insert and normal state across host focus requests', async ({ page }) => {
     await page.goto('http://localhost:8979/test.html');
 
     await page.evaluate(() => {
       window.postMessage({ type: 'setVimMode', enabled: true }, '*');
-      window.postMessage({
-        type: 'setText',
-        text: [
-          '# First',
-          '',
-          'Alpha beta',
-          '',
-          '# Second',
-          '',
-          'Tail line',
-        ].join('\n'),
-      }, '*');
-      window.postMessage({ type: 'focus' }, '*');
-    });
-
-    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
-    await page.waitForFunction(() => document.querySelector('.cm-editor')?.classList.contains('cm-focused'));
-    await page.evaluate(() => {
-      const view = window.__cmView;
-      const line = view.state.doc.line(3);
-      view.dispatch({ selection: { anchor: line.to } });
-    });
-
-    await page.keyboard.press('i');
-    await page.keyboard.press('a');
-    await page.keyboard.press('s');
-    await page.keyboard.press('d');
-
-    let cursor = await page.evaluate(() => {
-      const view = window.__cmView;
-      const head = view.state.selection.main.head;
-      const line = view.state.doc.lineAt(head);
-      return {
-        text: view.state.doc.toString(),
-        lineNumber: line.number,
-        column: head - line.from,
-        lineText: line.text,
-      };
-    });
-
-    expect(cursor.lineNumber).toBe(3);
-    expect(cursor.lineText).toBe('Alpha betaiasd');
-    expect(cursor.column).toBe('Alpha betaiasd'.length);
-    expect(cursor.text).toContain('Alpha betaiasd');
-
-    await page.evaluate(() => {
-      window.postMessage({
-        type: 'setText',
-        text: [
-          '# First',
-          '',
-          'Alpha beta',
-          '',
-          '# Second',
-          '',
-          'Tail line',
-        ].join('\n'),
-      }, '*');
-    });
-    await page.waitForFunction(() => window.__cmView?.state.doc.line(3).text === 'Alpha beta');
-    await page.evaluate(() => {
-      const view = window.__cmView;
-      const line = view.state.doc.line(3);
-      view.dispatch({ selection: { anchor: line.to } });
-    });
-
-    await page.keyboard.press('-');
-    await page.keyboard.press('Space');
-
-    cursor = await page.evaluate(() => {
-      const view = window.__cmView;
-      const head = view.state.selection.main.head;
-      const line = view.state.doc.lineAt(head);
-      return {
-        text: view.state.doc.toString(),
-        lineNumber: line.number,
-        column: head - line.from,
-        lineText: line.text,
-      };
-    });
-
-    expect(cursor.lineNumber).toBe(3);
-    expect(cursor.lineText).toBe('Alpha beta- ');
-    expect(cursor.column).toBe('Alpha beta- '.length);
-    expect(cursor.text).toContain('Alpha beta- ');
-  });
-
-  test('Vim mode returns to insert mode after host reveal requests', async ({ page }) => {
-    await page.goto('http://localhost:8979/test.html');
-
-    await page.evaluate(() => {
-      window.postMessage({ type: 'setVimMode', enabled: true }, '*');
-      window.postMessage({
-        type: 'setText',
-        text: [
-          '# First',
-          '',
-          'Alpha beta',
-          '',
-          '# Second',
-          '',
-          'Tail line',
-        ].join('\n'),
-      }, '*');
+      window.postMessage({ type: 'setText', text: 'Alpha beta' }, '*');
     });
 
     await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
     await page.locator('.cm-content').click();
+    await page.keyboard.press('i');
+    await page.evaluate(() => {
+      window.postMessage({ type: 'focus' }, '*');
+    });
+    expect(await page.evaluate(() =>
+      window.__cmView.cm.state.vim?.insertMode
+    )).toBe(true);
+
     await page.keyboard.press('Escape');
     await page.evaluate(() => {
+      window.postMessage({ type: 'focus' }, '*');
+    });
+    expect(await page.evaluate(() =>
+      window.__cmView.cm.state.vim?.insertMode
+    )).toBe(false);
+  });
+
+  test('Vim mode preserves insert and normal state across host reveal requests', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+
+    await page.evaluate(() => {
+      window.postMessage({ type: 'setVimMode', enabled: true }, '*');
+      window.postMessage({ type: 'setText', text: 'Alpha beta' }, '*');
+    });
+
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+    await page.locator('.cm-content').click();
+    await page.evaluate(() => {
       const view = window.__cmView;
-      const line = view.state.doc.line(3);
       window.postMessage({
         type: 'revealPosition',
-        anchor: line.to,
-        head: line.to,
+        anchor: view.state.doc.length,
+        head: view.state.doc.length,
       }, '*');
     });
-    await page.waitForFunction(() => {
-      const view = window.__cmView;
-      return view?.state.selection.main.head === view?.state.doc.line(3).to;
-    });
+    expect(await page.evaluate(() =>
+      window.__cmView.cm.state.vim?.insertMode
+    )).toBe(false);
 
     await page.keyboard.press('i');
-    await page.keyboard.press('a');
-    await page.keyboard.press('s');
-    await page.keyboard.press('d');
-
-    let cursor = await page.evaluate(() => {
-      const view = window.__cmView;
-      const head = view.state.selection.main.head;
-      const line = view.state.doc.lineAt(head);
-      return {
-        text: view.state.doc.toString(),
-        lineNumber: line.number,
-        column: head - line.from,
-        lineText: line.text,
-      };
-    });
-
-    expect(cursor.lineNumber).toBe(3);
-    expect(cursor.lineText).toBe('Alpha betaiasd');
-    expect(cursor.column).toBe('Alpha betaiasd'.length);
-    expect(cursor.text).toContain('Alpha betaiasd');
-
     await page.evaluate(() => {
-      window.postMessage({
-        type: 'setText',
-        text: [
-          '# First',
-          '',
-          'Alpha beta',
-          '',
-          '# Second',
-          '',
-          'Tail line',
-        ].join('\n'),
-      }, '*');
-    });
-    await page.waitForFunction(() => window.__cmView?.state.doc.line(3).text === 'Alpha beta');
-    await page.evaluate(() => {
-      const view = window.__cmView;
-      const line = view.state.doc.line(3);
       window.postMessage({
         type: 'revealPosition',
-        anchor: line.to,
-        head: line.to,
+        anchor: 0,
+        head: 0,
       }, '*');
     });
-    await page.waitForFunction(() => {
-      const view = window.__cmView;
-      return view?.state.selection.main.head === view?.state.doc.line(3).to;
-    });
-
-    await page.keyboard.press('-');
-    await page.keyboard.press('Space');
-
-    cursor = await page.evaluate(() => {
-      const view = window.__cmView;
-      const head = view.state.selection.main.head;
-      const line = view.state.doc.lineAt(head);
-      return {
-        text: view.state.doc.toString(),
-        lineNumber: line.number,
-        column: head - line.from,
-        lineText: line.text,
-      };
-    });
-
-    expect(cursor.lineNumber).toBe(3);
-    expect(cursor.lineText).toBe('Alpha beta- ');
-    expect(cursor.column).toBe('Alpha beta- '.length);
-    expect(cursor.text).toContain('Alpha beta- ');
+    expect(await page.evaluate(() =>
+      window.__cmView.cm.state.vim?.insertMode
+    )).toBe(true);
   });
 
   test('Vim mode inserts on the current preview line after pressing i from normal mode', async ({ page }) => {
@@ -5597,14 +5377,14 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
     });
 
     expect(cursor.lineNumber).toBe(3);
-    expect(cursor.lineText).toBe('Alpha betwhoamia');
-    expect(cursor.column).toBe('Alpha betwhoami'.length);
-    expect(cursor.text).toContain('Alpha betwhoamia');
+    expect(cursor.lineText).toBe('Alpha betawhoami');
+    expect(cursor.column).toBe('Alpha betawhoami'.length);
+    expect(cursor.text).toContain('Alpha betawhoami');
 
     const caret = await page.evaluate(() => {
       const cursor = document.querySelector<HTMLElement>('.cm-cursor');
       const activeLine = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
-        .find(line => line.textContent === 'Alpha betwhoamia');
+        .find(line => line.textContent === 'Alpha betawhoami');
       const cursorRect = cursor?.getBoundingClientRect();
       const activeLineRect = activeLine?.getBoundingClientRect();
       return {
@@ -5672,14 +5452,14 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
     });
 
     expect(cursor.lineNumber).toBe(11);
-    expect(cursor.lineText).toBe('Target paragrapwhoamih');
-    expect(cursor.column).toBe('Target paragrapwhoami'.length);
-    expect(cursor.text).toContain('Target paragrapwhoamih');
+    expect(cursor.lineText).toBe('Target paragraphwhoami');
+    expect(cursor.column).toBe('Target paragraphwhoami'.length);
+    expect(cursor.text).toContain('Target paragraphwhoami');
 
     const caret = await page.evaluate(() => {
       const cursor = document.querySelector<HTMLElement>('.cm-cursor');
       const activeLine = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
-        .find(line => line.textContent === 'Target paragrapwhoamih');
+        .find(line => line.textContent === 'Target paragraphwhoami');
       const cursorRect = cursor?.getBoundingClientRect();
       const activeLineRect = activeLine?.getBoundingClientRect();
       return {
@@ -6085,6 +5865,8 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
         view.focus();
       });
 
+      await page.keyboard.press('Escape');
+      await page.keyboard.press('a');
       await page.keyboard.press('Control+O');
       await page.keyboard.press(key);
       await page.waitForTimeout(100);
@@ -6298,6 +6080,8 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
         view.focus();
       });
 
+      await page.keyboard.press('Escape');
+      await page.keyboard.press('a');
       for (const key of sequence) {
         await page.keyboard.press(key);
       }

@@ -17,7 +17,7 @@ import {
 } from '@codemirror/state';
 import type { Range, SelectionRange, Text } from '@codemirror/state';
 import { search, searchKeymap } from '@codemirror/search';
-import { getCM, vim, Vim } from '@replit/codemirror-vim';
+import { vim, Vim } from '@replit/codemirror-vim';
 import type { CodeMirrorV, InputStateInterface, MotionArgs, Pos, vimState } from '@replit/codemirror-vim';
 import {
   Decoration,
@@ -1395,7 +1395,6 @@ function createView(text: string, title?: string): EditorView {
   });
   window.addEventListener('resize', () => updateCursorSelectionPrompt(editorView));
   queueInitialFocus(editorView, { retries: typeof title !== 'string' });
-  ensureVimInsertMode(editorView);
   return editorView;
 }
 
@@ -2335,23 +2334,6 @@ function isSingleVisualLine(
   return visualFrom === lineFrom && visualTo === lineTo;
 }
 
-function ensureVimInsertMode(editorView: EditorView): void {
-  if (!vimModeEnabled) return;
-  if (enterVimInsertModeForView(editorView)) return;
-
-  queueMicrotask(() => {
-    if (vimModeEnabled) enterVimInsertModeForView(editorView);
-  });
-}
-
-function enterVimInsertModeForView(editorView: EditorView): boolean {
-  const cm = getCM(editorView) as CodeMirrorV | null;
-  if (!cm?.state.vim) return false;
-  editorView.focus();
-  enterVimInsertMode(cm);
-  return true;
-}
-
 function enterVimInsertMode(cm: CodeMirrorV): void {
   if (cm.state.vim.insertMode) return;
   Vim.handleKey(cm, 'i', 'keyboard');
@@ -2599,7 +2581,6 @@ window.addEventListener('message', event => {
         scrollIntoView: true,
       });
       view.focus();
-      ensureVimInsertMode(view);
       break;
   }
 });
@@ -2740,7 +2721,6 @@ function applyVimMode(editorView: EditorView, enabled: boolean): void {
     effects: vimModeCompartment.reconfigure(enabled ? [vim()] : []),
   });
   editorView.focus();
-  ensureVimInsertMode(editorView);
 }
 
 function buildDecorations(view: EditorView): DecorationSet {
