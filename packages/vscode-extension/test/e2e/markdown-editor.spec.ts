@@ -11550,7 +11550,7 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
       view.dispatch({ selection: { anchor: linkPos } });
     });
     await page.keyboard.press('Escape');
-    await page.keyboard.press('Meta+Enter');
+    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+Enter' : 'Control+Enter');
 
     const openMessages = await page.evaluate(() => window.__mockMessages.filter((m) => m.type === 'openUri'));
     expect(openMessages).toEqual([{ type: 'openUri', uri: 'raw/paper.pdf#page=7' }]);
@@ -11575,7 +11575,7 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
       view.dispatch({ selection: { anchor: linkPos } });
     });
     await page.keyboard.press('Escape');
-    await page.keyboard.press('Meta+Enter');
+    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+Enter' : 'Control+Enter');
 
     const openMessages = await page.evaluate(() => window.__mockMessages.filter((m) => m.type === 'openUri'));
     expect(openMessages).toEqual([{ type: 'openUri', uri: 'https://example.com/docs' }]);

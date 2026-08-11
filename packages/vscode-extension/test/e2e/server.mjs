@@ -146,7 +146,10 @@ function flashAttentionPdfFixture() {
     '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>',
     pdfStream([
       'BT /F1 18 Tf 72 700 Td (FlashAttention uses tiling to reduce HBM accesses.) Tj ET',
-      'BT /F1 18 Tf 72 670 Td (It is standard attention with exact results.) Tj ET',
+      'BT /F1 10 Tf 72 680 Td (By splitting Q, K, V into blocks that fit in on-chip SRAM, the algorithm avoids materializing) Tj ET',
+      'BT /F1 10 Tf 72 660 Td (the full NxN attention matrix.) Tj ET',
+      'BT /F1 10 Tf 72 640 Td (Online softmax computes normalization incrementally across tiles.) Tj ET',
+      'BT /F1 10 Tf 72 620 Td (This yields 2-4x speedup over standard attention with exact results.) Tj ET',
     ].join('\n')),
     '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
   ];

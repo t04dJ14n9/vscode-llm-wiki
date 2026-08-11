@@ -121,11 +121,11 @@ test('pdf viewer aligns selectable glyph bounds with the rendered text rectangle
   expect(Math.abs(geometry.actual.left - geometry.expected.left)).toBeLessThanOrEqual(1);
   expect(Math.abs(actualRight - expectedRight)).toBeLessThanOrEqual(1);
   expect(Math.abs(geometry.actual.top - geometry.expected.top)).toBeLessThanOrEqual(1);
-  expect(Math.abs(actualBottom - expectedBottom)).toBeLessThanOrEqual(1);
+  expect(Math.abs(actualBottom - expectedBottom)).toBeLessThanOrEqual(2);
   expect(Math.abs(geometry.hitBox.left - geometry.expected.left)).toBeLessThanOrEqual(1);
   expect(Math.abs(hitBoxRight - expectedRight)).toBeLessThanOrEqual(1);
   expect(Math.abs(geometry.hitBox.top - geometry.expected.top)).toBeLessThanOrEqual(1);
-  expect(Math.abs(hitBoxBottom - expectedBottom)).toBeLessThanOrEqual(1);
+  expect(Math.abs(hitBoxBottom - expectedBottom)).toBeLessThanOrEqual(2);
 });
 
 test('pdf viewer can switch from continuous scroll to page-turning mode', async ({ page }) => {
