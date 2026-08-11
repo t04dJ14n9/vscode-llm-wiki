@@ -145,61 +145,70 @@ git commit -m "fix: start markdown Vim in normal mode"
 
 **Files:**
 - Create: `packages/vscode-extension/webview-src/markdownTheme.ts`
-- Create: `packages/vscode-extension/test/markdownThemeSource.test.mjs`
 - Modify: `packages/vscode-extension/webview-src/markdown-editor.ts:1-15`
 - Modify: `packages/vscode-extension/webview-src/markdown-editor.ts:825-832`
 - Modify: `packages/vscode-extension/webview-src/markdown-editor.ts:1066-1355`
+- Test: `packages/vscode-extension/test/e2e/markdown-editor.spec.ts`
 
 **Interfaces:**
 - Produces: `humanLearningHighlightStyle: HighlightStyle` from `markdownTheme.ts`.
 - Consumes: `HighlightStyle` from `@codemirror/language`, `tags` from `@lezer/highlight`, and semantic `--vscode-*` variables injected into the webview.
 
-- [ ] **Step 1: Add a failing source-policy test**
+- [ ] **Step 1: Add a failing computed-style test**
 
-Create `markdownThemeSource.test.mjs`:
+Add a real browser test that injects distinctive theme variables, renders an
+active TypeScript fence, and reads the computed token colors:
 
-```js
-import test from 'node:test';
-import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+```ts
+test('Markdown syntax colors follow semantic VS Code theme variables', async ({ page }) => {
+  await page.goto('http://localhost:8979/test.html');
+  await page.evaluate(() => {
+    const root = document.documentElement.style;
+    root.setProperty('--vscode-editor-foreground', 'rgb(231, 232, 233)');
+    root.setProperty('--vscode-descriptionForeground', 'rgb(151, 152, 153)');
+    root.setProperty('--vscode-symbolIcon-keywordForeground', 'rgb(101, 111, 121)');
+    root.setProperty('--vscode-symbolIcon-stringForeground', 'rgb(131, 141, 151)');
+    window.postMessage({
+      type: 'setText',
+      text: ['```ts', 'const theme = "adaptive"; // note', '```'].join('\\n'),
+    }, '*');
+  });
+  await page.waitForSelector('#editor .cm-content');
+  await page.evaluate(() => {
+    const view = window.__cmView;
+    view.dispatch({ selection: { anchor: view.state.doc.line(2).from } });
+  });
 
-const editorSource = readFileSync(resolve('webview-src/markdown-editor.ts'), 'utf8');
-const themeSource = readFileSync(resolve('webview-src/markdownTheme.ts'), 'utf8');
-
-test('Markdown syntax highlighting is owned by a semantic VS Code theme', () => {
-  assert.doesNotMatch(editorSource, /\bdefaultHighlightStyle\b/);
-  assert.match(editorSource, /\bhumanLearningHighlightStyle\b/);
-  assert.match(themeSource, /--vscode-textLink-foreground/);
-  assert.match(themeSource, /--vscode-descriptionForeground/);
-  assert.match(themeSource, /--vscode-errorForeground/);
-});
-
-test('Markdown text-color declarations have no fixed color fallback', () => {
-  for (const [file, source] of [
-    ['markdown-editor.ts', editorSource],
-    ['markdownTheme.ts', themeSource],
-  ]) {
-    const textColorValues = [
-      ...source.matchAll(/(?:^|\\s)(?:color|caretColor):\\s*'([^']+)'/gm),
-    ].map(match => match[1]);
-    for (const value of textColorValues) {
-      assert.doesNotMatch(value, /#[0-9a-f]{3,8}|rgba?\\(/i, `${file}: ${value}`);
-    }
-  }
+  const colors = await page.locator('.cm-line').nth(1).evaluate((line) => {
+    const colorOf = (text: string) => {
+      const element = [...line.querySelectorAll('span')]
+        .find(candidate => candidate.textContent === text);
+      return element ? getComputedStyle(element).color : '';
+    };
+    return {
+      keyword: colorOf('const'),
+      string: colorOf('"adaptive"'),
+      comment: colorOf('// note'),
+    };
+  });
+  expect(colors).toEqual({
+    keyword: 'rgb(101, 111, 121)',
+    string: 'rgb(131, 141, 151)',
+    comment: 'rgb(151, 152, 153)',
+  });
 });
 ```
 
-- [ ] **Step 2: Run the source-policy test to verify it fails**
+- [ ] **Step 2: Run the computed-style test to verify it fails**
 
 Run:
 
 ```bash
-node --test test/markdownThemeSource.test.mjs
+pnpm --filter human-learning-vscode exec playwright test test/e2e/markdown-editor.spec.ts --grep "syntax colors follow"
 ```
 
-Expected: FAIL because `markdownTheme.ts` is missing,
-`defaultHighlightStyle` remains imported, and fixed text-color fallbacks remain.
+Expected: FAIL because CodeMirror's fixed `defaultHighlightStyle` does not
+follow the injected semantic variables.
 
 - [ ] **Step 3: Create the semantic highlight module**
 
@@ -261,22 +270,30 @@ with `var(--vscode-editor-foreground)` or the relevant semantic variable.
 Leave fixed last-resort values only on non-text shadows, fills, selections, and
 highlight backgrounds.
 
-- [ ] **Step 5: Run source-policy, type, and build checks**
+- [ ] **Step 5: Audit remaining text declarations**
+
+Inspect every `color` and `caretColor` declaration in `markdown-editor.ts` and
+`markdownTheme.ts`. Replace fixed text fallbacks such as `#d4d4d4`, `#c586c0`,
+and `#4ec9b0` with semantic variables. Confirm fixed values remain only on
+non-text surfaces such as shadows, fills, selections, and highlight
+backgrounds.
+
+- [ ] **Step 6: Run browser, type, and build checks**
 
 Run:
 
 ```bash
-node --test test/markdownThemeSource.test.mjs
+pnpm --filter human-learning-vscode exec playwright test test/e2e/markdown-editor.spec.ts --grep "syntax colors follow"
 pnpm exec tsc -p packages/vscode-extension/tsconfig.json --pretty false --noEmit
 pnpm --filter human-learning-vscode build
 ```
 
 Expected: all commands exit zero.
 
-- [ ] **Step 6: Commit the semantic theme**
+- [ ] **Step 7: Commit the semantic theme**
 
 ```bash
-git add packages/vscode-extension/webview-src/markdownTheme.ts packages/vscode-extension/webview-src/markdown-editor.ts packages/vscode-extension/test/markdownThemeSource.test.mjs
+git add packages/vscode-extension/webview-src/markdownTheme.ts packages/vscode-extension/webview-src/markdown-editor.ts packages/vscode-extension/test/e2e/markdown-editor.spec.ts
 git commit -m "feat: use semantic colors in markdown"
 ```
 

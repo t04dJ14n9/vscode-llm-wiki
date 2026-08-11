@@ -140,7 +140,7 @@ failures, but it is not a complete accessibility-conformance test.
 - Theme tests set dark, light, and high-contrast CSS-variable fixtures and
   assert computed link, destination, caret, and representative syntax colors
   follow those variables.
-- A source audit test rejects `defaultHighlightStyle` and fixed font colors in
+- A source audit step rejects `defaultHighlightStyle` and fixed font colors in
   the Markdown editor while permitting bounded non-text fallback colors.
 - The full extension build, type-check, unit suite, and relevant browser tests
   must pass.
