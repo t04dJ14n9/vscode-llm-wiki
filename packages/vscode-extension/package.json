@@ -29,10 +29,7 @@
   "capabilities": {
     "untrustedWorkspaces": {
       "supported": "limited",
-      "description": "Markdown and PDF viewing remain available, but Ask PDF is disabled until the workspace is trusted.",
-      "restrictedConfigurations": [
-        "humanLearning.agent.codexCommand"
-      ]
+      "description": "Markdown and PDF viewing remain available in untrusted workspaces."
     }
   },
   "contributes": {
@@ -105,10 +102,6 @@
         "command": "human-learning.experimentalBrowser.sendSelection",
         "title": "Human Learning: Add Experimental Web Selection to Chat",
         "icon": "$(comment-discussion)"
-      },
-      {
-        "command": "human-learning.pdfAskSelection",
-        "title": "Human Learning: Ask PDF About Selection"
       },
       {
         "command": "human-learning.generateDailyNote",
@@ -379,17 +372,6 @@
           "icon": "$(book)"
         }
       ]
-    },
-    "configuration": {
-      "title": "Human Learning",
-      "properties": {
-        "humanLearning.agent.codexCommand": {
-          "type": "string",
-          "default": "codex",
-          "scope": "machine",
-          "description": "Command or absolute executable path used to start the local Codex app-server for learning discussions."
-        }
-      }
     },
     "configurationDefaults": {
       "workbench.editorAssociations": {

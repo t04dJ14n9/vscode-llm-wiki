@@ -12,7 +12,6 @@ import {
   handoffSelectionToAgent,
 } from './agentHandoff';
 import { BacklinksProvider } from './backlinksProvider';
-import { CodexAppServerClient } from './codexAppServerClient';
 import {
   captureActiveCursorBrowserSelection,
   cursorBrowserCaptureToSelectionContext,
@@ -32,10 +31,6 @@ import {
   registerMarkdownOutlineProvider,
   registerMarkdownOutlineTreeProvider,
 } from './markdownSymbols';
-import {
-  PDF_DISCUSSION_WORKSPACE_TRUST_MESSAGE,
-  PdfDiscussionController,
-} from './pdfDiscussionController';
 import { PdfEditorProvider } from './pdfEditorProvider';
 import { syncRepository } from './repositorySync';
 import type { SelectionContext } from './selectionContext';
@@ -46,9 +41,6 @@ let forwardLinksProvider: BacklinksProvider | undefined;
 let pdfEditorProvider: PdfEditorProvider | undefined;
 let markdownEditorProvider: MarkdownEditorProvider | undefined;
 let markdownOutlineProvider: MarkdownOutlineTreeProvider | undefined;
-let pdfDiscussionController: PdfDiscussionController | undefined;
-let codexClient: CodexAppServerClient | undefined;
-let codexOutputChannel: vscode.OutputChannel | undefined;
 let graphPanel: KnowledgeGraphPanel | undefined;
 let refreshTimer: NodeJS.Timeout | undefined;
 
@@ -68,8 +60,6 @@ export function activate(context: vscode.ExtensionContext): void {
     ? new LearningNoteStore(workspaceRoot)
     : undefined;
 
-  if (workspaceRoot) initializeCodex(context);
-
   registerLinkProvider(context);
   registerMarkdownOutlineProvider(context);
 
@@ -79,9 +69,9 @@ export function activate(context: vscode.ExtensionContext): void {
     globalStoragePath: context.globalStorageUri?.fsPath
       ?? context.extensionUri?.fsPath
       ?? workspaceRoot,
-    discussionController: pdfDiscussionController,
     learningNoteStore: learningNotes,
-    markdownInsertTarget: markdownEditorProvider,
+    // eslint-disable-next-line no-warning-comments
+    // TODO(ask-pdf): Re-enable after the provider-neutral “More detail” workflow and backend policy are specified.
   });
   markdownOutlineProvider = registerMarkdownOutlineTreeProvider(context, pdfEditorProvider);
   graphPanel = new KnowledgeGraphPanel();
@@ -150,23 +140,6 @@ export function activate(context: vscode.ExtensionContext): void {
       ? `Human Learning ready — Markdown, PDF, and Git-backed notes at ${workspaceRoot}`
       : 'Human Learning viewers ready — open a folder to enable learning notes and repository features.',
   );
-}
-
-function initializeCodex(context: vscode.ExtensionContext): void {
-  const executable = vscode.workspace
-    .getConfiguration('humanLearning.agent')
-    .get<string>('codexCommand', 'codex');
-  codexOutputChannel = vscode.window.createOutputChannel('Human Learning — Codex');
-  codexClient = new CodexAppServerClient({
-    executable,
-    extensionVersion: extensionPackageVersion(context),
-    logger: message => codexOutputChannel?.appendLine(message),
-  });
-  pdfDiscussionController = new PdfDiscussionController({
-    client: codexClient,
-    isWorkspaceTrusted: () => vscode.workspace.isTrusted === true,
-  });
-  context.subscriptions.push(codexOutputChannel, codexClient, pdfDiscussionController);
 }
 
 function registerCommands(
@@ -255,11 +228,6 @@ function registerCommands(
         vscode.Uri.file(discussion.note.absolutePath),
         MarkdownEditorProvider.viewType,
       );
-    }),
-    vscode.commands.registerCommand('human-learning.pdfAskSelection', async () => {
-      if (!requireWorkspaceRoot(workspaceRoot)) return;
-      if (!requireWorkspaceTrust()) return;
-      await pdfEditorProvider?.openAskPdfForSelection();
     }),
     vscode.commands.registerCommand('human-learning.addSelectionToContext', async () => {
       const root = requireWorkspaceRoot(workspaceRoot);
@@ -410,12 +378,6 @@ function requireWorkspaceRoot(
   return undefined;
 }
 
-function requireWorkspaceTrust(): boolean {
-  if (vscode.workspace.isTrusted === true) return true;
-  vscode.window.showWarningMessage(PDF_DISCUSSION_WORKSPACE_TRUST_MESSAGE);
-  return false;
-}
-
 async function runRepositorySync(workspaceRoot: string): Promise<void> {
   try {
     let result = await syncRepository(workspaceRoot);
@@ -479,22 +441,11 @@ function refreshAllViews(): void {
   if (typeof markdownOutlineProvider?.refresh === 'function') markdownOutlineProvider.refresh();
 }
 
-function extensionPackageVersion(context: vscode.ExtensionContext): string {
-  const packageJson = context.extension?.packageJSON as { version?: unknown } | undefined;
-  return typeof packageJson?.version === 'string' ? packageJson.version : '0.1.0';
-}
-
 export function deactivate(): void {
   if (refreshTimer) clearTimeout(refreshTimer);
   refreshTimer = undefined;
   graphPanel?.dispose();
-  pdfDiscussionController?.dispose();
-  codexClient?.dispose();
-  codexOutputChannel?.dispose();
   graphPanel = undefined;
-  pdfDiscussionController = undefined;
-  codexClient = undefined;
-  codexOutputChannel = undefined;
 }
 
 function getActiveMarkdownUri(): vscode.Uri | undefined {

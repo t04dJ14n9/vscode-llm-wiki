@@ -64,6 +64,13 @@ export default [
     },
   },
   {
+    name: 'workspace/intentional-ask-pdf-deferral-marker',
+    files: ['packages/vscode-extension/src/extension.ts'],
+    linterOptions: {
+      noInlineConfig: false,
+    },
+  },
+  {
     ...eslint.configs.recommended,
     name: 'workspace/javascript-recommended',
     files: javascriptFiles,

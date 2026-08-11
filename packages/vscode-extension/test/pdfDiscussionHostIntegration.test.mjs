@@ -1234,59 +1234,15 @@ test('combined provider falls back to text-only for missing or invalid persisted
   }
 });
 
-test('combined manifest contributes Ask PDF without a default keybinding', () => {
-  for (const root of [packageRoot]) {
-    const manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
-    const command = manifest.contributes.commands.find(
-      item => item.command === 'human-learning.pdfAskSelection',
-    );
-    assert.ok(command, `${manifest.name} is missing pdfAskSelection`);
-    assert.equal(command.title, 'Human Learning: Ask PDF About Selection');
-    assert.equal(
-      (manifest.contributes.keybindings ?? []).some(
-        binding => binding.command === 'human-learning.pdfAskSelection',
-      ),
-      false,
-    );
-  }
-
-  const combined = JSON.parse(readFileSync(join(packageRoot, 'package.json'), 'utf8'));
+test('combined manifest leaves Ask PDF unexposed', () => {
+  const manifest = JSON.parse(readFileSync(join(packageRoot, 'package.json'), 'utf8'));
   assert.equal(
-    combined.contributes.configuration.properties['humanLearning.agent.codexCommand'].default,
-    'codex',
-  );
-  assert.equal(
-    combined.contributes.configuration.properties['humanLearning.agent.codexCommand'].scope,
-    'machine',
-  );
-  assert.deepEqual(
-    combined.capabilities.untrustedWorkspaces,
-    {
-      supported: 'limited',
-      description: 'Markdown and PDF viewing remain available, but Ask PDF is disabled until the workspace is trusted.',
-      restrictedConfigurations: ['humanLearning.agent.codexCommand'],
-    },
-  );
-  assert.equal(
-    'humanLearning.pdf.codexCommand' in combined.contributes.configuration.properties,
+    manifest.contributes.commands.some(item => item.command === 'human-learning.pdfAskSelection'),
     false,
   );
-});
-
-test('combined extension host creates one shared client/controller, registers the command, and owns disposal', () => {
-  for (const root of [packageRoot]) {
-    const source = readFileSync(join(root, 'src', 'extension.ts'), 'utf8');
-    assert.equal((source.match(/new CodexAppServerClient\s*\(/g) ?? []).length, 1);
-    assert.equal((source.match(/new PdfDiscussionController\s*\(/g) ?? []).length, 1);
-    assert.match(source, /human-learning\.pdfAskSelection/);
-    assert.match(
-      source,
-      /humanLearning\.agent/,
-    );
-    assert.match(source, /codexCommand/);
-    assert.match(source, /isWorkspaceTrusted:\s*\(\)\s*=>\s*vscode\.workspace\.isTrusted\s*===\s*true/);
-    assert.match(source, /pdfAskSelection[\s\S]*requireWorkspaceTrust\(\)/);
-    assert.match(source, /subscriptions\.push\([^)]*codexClient|subscriptions\.push\(codexClient/s);
-    assert.match(source, /deactivate\(\)[\s\S]*dispose\(\)/);
-  }
+  assert.equal(
+    manifest.contributes.configuration?.properties?.['humanLearning.agent.codexCommand'],
+    undefined,
+  );
+  assert.doesNotMatch(JSON.stringify(manifest.capabilities), /Ask PDF/);
 });

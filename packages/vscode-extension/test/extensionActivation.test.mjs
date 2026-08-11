@@ -1638,7 +1638,6 @@ test('openLearningDiscussion opens the durable Markdown note without a chat pane
 test('combined activation treats any folder as a filesystem wiki without opening SQLite', async () => {
   const customEditorRegistrations = [];
   const providerOptions = [];
-  let askSelectionCount = 0;
   let outlineRegistrationCount = 0;
   let databaseOpenCount = 0;
   const vscode = createVscodeMock({
@@ -1672,9 +1671,6 @@ test('combined activation treats any folder as a filesystem wiki without opening
         static viewType = 'human-learning.pdfViewer';
         constructor(_context, options) {
           providerOptions.push(options);
-        }
-        async openAskPdfForSelection() {
-          askSelectionCount += 1;
         }
         getActiveWebview() {
           return undefined;
@@ -1719,9 +1715,6 @@ test('combined activation treats any folder as a filesystem wiki without opening
   assert.equal(providerOptions[0].vaultRoot, '/documents');
   assert.equal(providerOptions[0].documentRoot, '/documents');
   assert.equal(providerOptions[0].globalStoragePath, '/global-storage');
-  assert.equal(typeof vscode.__registeredCommands['human-learning.pdfAskSelection'], 'function');
-  await vscode.__registeredCommands['human-learning.pdfAskSelection']();
-  assert.equal(askSelectionCount, 1);
   assert.equal(outlineRegistrationCount, 1);
   assert.equal(databaseOpenCount, 0);
 });
@@ -1875,11 +1868,12 @@ test('no-folder activation keeps custom viewers read-only and gates repository l
   assert.equal(warningMessages.length, 4);
 });
 
-test('combined extension activation owns a dedicated Codex output channel and passes its logger', () => {
+test('production activation leaves Ask PDF and Codex uncomposed', () => {
   const outputChannels = [];
-  const clientOptions = [];
   const configurationSections = [];
-  let clientDisposeCount = 0;
+  const providerOptions = [];
+  let codexClientCount = 0;
+  let discussionControllerCount = 0;
   const vscode = createVscodeMock({
     executeCommandCalls: [],
     activeDocumentUri: undefined,
@@ -1887,74 +1881,26 @@ test('combined extension activation owns a dedicated Codex output channel and pa
   });
   vscode.workspace.getConfiguration = section => {
     configurationSections.push(section);
-    return {
-      get(key, fallback) {
-        assert.equal(key, 'codexCommand');
-        assert.equal(fallback, 'codex');
-        return '/opt/codex';
-      },
-    };
+    return { get: (_key, fallback) => fallback };
   };
   const mocks = createActivationMocks({ vscode });
   mocks['./codexAppServerClient'] = {
     CodexAppServerClient: class {
-      constructor(options) {
-        clientOptions.push(options);
-      }
-      dispose() {
-        clientDisposeCount += 1;
-      }
-    },
-  };
-
-  const { activate, deactivate } = loadTsModule('src/extension.ts', mocks);
-  activate({ subscriptions: [], extension: { packageJSON: { version: '7.6.5-test' } } });
-
-  assert.equal(outputChannels.length, 1);
-  assert.equal(outputChannels[0].name, 'Human Learning — Codex');
-  assert.equal(clientOptions.length, 1);
-  assert.equal(clientOptions[0].executable, '/opt/codex');
-  assert.equal(clientOptions[0].extensionVersion, '7.6.5-test');
-  assert.deepEqual(configurationSections, ['humanLearning.agent']);
-  assert.equal(typeof clientOptions[0].logger, 'function');
-  clientOptions[0].logger('safe diagnostic');
-  assert.deepEqual(outputChannels[0].lines, ['safe diagnostic']);
-
-  deactivate();
-  assert.equal(clientDisposeCount, 1);
-  assert.equal(outputChannels[0].disposeCount, 1);
-});
-
-test('combined Ask PDF stays inert until the workspace is trusted', async () => {
-  const warningMessages = [];
-  let askSelectionCount = 0;
-  let controllerOptions;
-  const vscode = createVscodeMock({
-    executeCommandCalls: [],
-    activeDocumentUri: undefined,
-    warningMessages,
-    workspaceTrusted: false,
-  });
-  const mocks = createActivationMocks({ vscode });
-  mocks['./pdfEditorProvider'] = {
-    PdfEditorProvider: class {
-      static viewType = 'human-learning.pdfViewer';
-      async openAskPdfForSelection() {
-        askSelectionCount += 1;
-      }
-      getActiveWebview() {
-        return undefined;
-      }
+      constructor() { codexClientCount += 1; }
+      dispose() {}
     },
   };
   mocks['./pdfDiscussionController'] = {
-    PDF_DISCUSSION_WORKSPACE_TRUST_MESSAGE:
-      'Trust this workspace before using Ask PDF with Codex.',
     PdfDiscussionController: class {
-      constructor(options) {
-        controllerOptions = options;
-      }
+      constructor() { discussionControllerCount += 1; }
       dispose() {}
+    },
+  };
+  mocks['./pdfEditorProvider'] = {
+    PdfEditorProvider: class {
+      static viewType = 'human-learning.pdfViewer';
+      constructor(_context, options) { providerOptions.push(options); }
+      getActiveWebview() { return undefined; }
     },
   };
 
@@ -1965,17 +1911,12 @@ test('combined Ask PDF stays inert until the workspace is trusted', async () => 
     globalStorageUri: { fsPath: '/global-storage' },
   });
 
-  assert.equal(controllerOptions.isWorkspaceTrusted(), false);
-  await vscode.__registeredCommands['human-learning.pdfAskSelection']();
-  assert.equal(askSelectionCount, 0);
-  assert.deepEqual(warningMessages, [
-    'Trust this workspace before using Ask PDF with Codex.',
-  ]);
-
-  vscode.workspace.isTrusted = true;
-  assert.equal(controllerOptions.isWorkspaceTrusted(), true);
-  await vscode.__registeredCommands['human-learning.pdfAskSelection']();
-  assert.equal(askSelectionCount, 1);
+  assert.equal(codexClientCount, 0);
+  assert.equal(discussionControllerCount, 0);
+  assert.equal(outputChannels.length, 0);
+  assert.equal(configurationSections.includes('humanLearning.agent'), false);
+  assert.equal(vscode.__registeredCommands['human-learning.pdfAskSelection'], undefined);
+  assert.equal(providerOptions[0].discussionController, undefined);
 });
 
 function createActivationMocks({ vscode, core = {} }) {
