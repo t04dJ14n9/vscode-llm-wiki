@@ -8041,11 +8041,16 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
     await page.evaluate(() => {
       window.postMessage({
         type: 'setText',
-        text: ['```text', 'bounded feedback', '```'].join('\n'),
+        text: ['```text', 'bounded feedback', '```', '', 'After'].join('\n'),
       }, '*');
     });
     const copyButton = page.locator('.cm-hybrid-codeblock-copy');
     const tooltip = page.locator('.cm-hybrid-codeblock-copy-tooltip');
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      view.dispatch({ selection: { anchor: view.state.doc.line(5).from } });
+    });
     await copyButton.click();
     await expect(tooltip).toHaveText('Copied');
     const motion = await tooltip.evaluate(element => {

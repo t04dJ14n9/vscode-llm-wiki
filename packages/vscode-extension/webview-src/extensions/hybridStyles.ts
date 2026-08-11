@@ -782,7 +782,7 @@ export function hybridStyles() {
     },
     '.cm-hybrid-codeblock-copy-tooltip': codeBlockCopyTooltipStyles,
     '.cm-hybrid-codeblock-copy.is-copied .cm-hybrid-codeblock-copy-tooltip': copiedCodeBlockCopyTooltipStyles,
-    '.cm-hybrid-codeblock-copy-reduced-motion .cm-hybrid-codeblock-copy-tooltip': reducedMotionCodeBlockCopyTooltipStyles,
+    '.cm-hybrid-codeblock-copy.cm-hybrid-codeblock-copy-reduced-motion .cm-hybrid-codeblock-copy-tooltip': reducedMotionCodeBlockCopyTooltipStyles,
     '.cm-hybrid-codeblock:hover .cm-hybrid-codeblock-copy, .cm-hybrid-codeblock:focus-within .cm-hybrid-codeblock-copy, .cm-hybrid-codeblock-copy:focus-visible': {
       opacity: '1',
     },
