@@ -973,13 +973,32 @@ test('selection overlay stays aligned while zoom retains the previous interactio
   });
   await expect(text).toHaveCount(1);
   await expect(text).toBeVisible();
-  const textBox = await text.boundingBox();
-  if (!textBox) throw new Error('Expected a selectable first-line text box');
-  await page.mouse.move(textBox.x + 1, textBox.y + textBox.height / 2);
+  const endpoints = await text.evaluate((element) => {
+    const textNode = element.querySelector('.pdf-text-glyphs')?.firstChild;
+    const content = textNode?.textContent ?? '';
+    if (!textNode || textNode.nodeType !== Node.TEXT_NODE || content.length === 0) {
+      throw new Error('Expected a selectable first-line text node');
+    }
+    const characterPoint = (offset: number, bias: number) => {
+      const range = document.createRange();
+      range.setStart(textNode, offset);
+      range.setEnd(textNode, offset + 1);
+      const rect = range.getBoundingClientRect();
+      return {
+        x: rect.left + rect.width * bias,
+        y: rect.top + rect.height / 2,
+      };
+    };
+    return {
+      start: characterPoint(0, 0.25),
+      end: characterPoint(content.length - 1, 0.75),
+    };
+  });
+  await page.mouse.move(endpoints.start.x, endpoints.start.y);
   await page.mouse.down();
-  await page.mouse.move(textBox.x + textBox.width - 1, textBox.y + textBox.height / 2, { steps: 8 });
+  await page.mouse.move(endpoints.end.x, endpoints.end.y, { steps: 12 });
   await page.mouse.up();
-  await expect(page.locator('#page-1 .pdf-selection-rect')).toHaveCount(1);
+  await expect(page.locator('#page-1 .pdf-selection-rect')).toBeVisible();
   const before = await selectionOverlaySnapshot(page, 1);
   expect(before.nativeText).toBe('First line starts the paragraph.');
 

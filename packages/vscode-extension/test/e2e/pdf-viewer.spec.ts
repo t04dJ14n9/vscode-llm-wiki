@@ -1371,14 +1371,24 @@ test('pdf glyph selection survives zoom rerender with the same canonical text an
     'Third line remains part of selection.',
     'Fourth line should not jump ahead.',
   ].join(' ');
-  const initialOverlay = await page.locator('#page-1 .pdf-selection-rect').first().boundingBox();
+  await expect.poll(() => page.evaluate(() => window.__mockMessages
+    ?.filter(message => message.type === 'selectionChanged' && message.anchor)
+    .at(-1)?.anchor?.snippet)).toBe(expected);
+  const overlay = page.locator('#page-1 .pdf-selection-rect').first();
+  await expect(overlay).toBeVisible();
+  const initialOverlay = await overlay.boundingBox();
   expect(initialOverlay).not.toBeNull();
 
+  const firstTextSpan = spans.first();
+  await firstTextSpan.evaluate(element => {
+    element.dataset.preZoomTextLayer = 'true';
+  });
   const zoom = page.getByRole('spinbutton', { name: 'Zoom' });
   const initialScale = Number(await zoom.inputValue()) / 100;
   await zoom.fill('200');
   await zoom.press('Enter');
   await expect(zoom).toHaveValue('200');
+  await expect(firstTextSpan).not.toHaveAttribute('data-pre-zoom-text-layer', 'true');
   await expect(page.locator('#selection-toolbar')).toBeVisible();
 
   const copiedText = await page.evaluate(() => {
@@ -1388,7 +1398,8 @@ test('pdf glyph selection survives zoom rerender with the same canonical text an
     return transfer.getData('text/plain');
   });
   expect(copiedText).toBe(expected);
-  const rerenderedOverlay = await page.locator('#page-1 .pdf-selection-rect').first().boundingBox();
+  await expect(overlay).toBeVisible();
+  const rerenderedOverlay = await overlay.boundingBox();
   expect(rerenderedOverlay).not.toBeNull();
   if (initialOverlay && rerenderedOverlay) {
     expect(Math.abs(rerenderedOverlay.width - initialOverlay.width * (2 / initialScale))).toBeLessThanOrEqual(2);
