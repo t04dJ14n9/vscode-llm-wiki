@@ -4,9 +4,36 @@ import Module from 'node:module';
 import { readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { ESLint } from 'eslint';
 import ts from 'typescript';
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+
+test('lint permits only the intentional Ask PDF deferral marker', async () => {
+  const sourcePath = join(packageRoot, 'src', 'extension.ts');
+  const source = readFileSync(sourcePath, 'utf8');
+  const eslint = new ESLint();
+
+  const [allowed] = await eslint.lintText(source, { filePath: sourcePath });
+  assert.equal(allowed.errorCount, 0);
+  assert.equal(allowed.warningCount, 0);
+
+  const [unrelatedTodo] = await eslint.lintText(
+    `${source}\n// eslint-disable-next-line no-warning-comments\n// TODO(unrelated): must fail\n`,
+    { filePath: sourcePath },
+  );
+  assert.ok(unrelatedTodo.messages.some(
+    message => message.ruleId === 'workspace-deferral/only-intentional-todo',
+  ));
+
+  const [inlineDisable] = await eslint.lintText(
+    `${source}\n// eslint-disable-next-line no-warning-comments\nvoid 0;\n`,
+    { filePath: sourcePath },
+  );
+  assert.ok(inlineDisable.messages.some(
+    message => message.message.includes('has no effect because you have \'noInlineConfig\''),
+  ));
+});
 
 function loadTsModule(relativePath, mocks = {}) {
   const filename = join(packageRoot, relativePath);

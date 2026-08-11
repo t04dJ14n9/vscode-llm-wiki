@@ -70,7 +70,6 @@ export function activate(context: vscode.ExtensionContext): void {
       ?? context.extensionUri?.fsPath
       ?? workspaceRoot,
     learningNoteStore: learningNotes,
-    // eslint-disable-next-line no-warning-comments
     // TODO(ask-pdf): Re-enable after the provider-neutral “More detail” workflow and backend policy are specified.
   });
   markdownOutlineProvider = registerMarkdownOutlineTreeProvider(context, pdfEditorProvider);
