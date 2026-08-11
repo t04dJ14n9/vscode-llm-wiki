@@ -461,3 +461,72 @@ Verify in Cursor:
 - [ ] **Step 5: Final review and integration commit if needed**
 
 Review `git status --short`, `git log --oneline -5`, and the implementation diff. Commit any verification-driven tracked fix with a scoped message. Leave ignored demo-vault rule edits in place locally.
+
+---
+
+### Task 6: Verify external agent-extension Add to Chat compatibility
+
+**Files:**
+- Verify: `packages/vscode-extension/src/agentHandoff.ts`
+- Verify: `packages/vscode-extension/test/agentHandoff.test.mjs`
+- Verify installed manifests under the Cursor and VS Code extension directories.
+- Create ignored evidence under this plan's `.superpowers/sdd/` workspace.
+
+**Interfaces:**
+- Consumes: `chatgpt.addFileToThread`, `claude-vscode.insertAtMention`, and `tencentcloud.codingcopilot.addToChat`.
+- Produces: a provider/host compatibility matrix for Cursor and VS Code without using Cursor's built-in Agent composer.
+
+- [ ] **Step 1: Verify installed extension identities and command contracts**
+
+For both Cursor and VS Code extension directories, record the installed extension ID, version, and manifest contribution for:
+
+```text
+openai.chatgpt                    chatgpt.addFileToThread
+Anthropic.claude-code             claude-vscode.insertAtMention
+Tencent-Cloud.coding-copilot      tencentcloud.codingcopilot.addToChat
+```
+
+If an extension is not installed, record `SKIPPED: not installed` for that host/provider pair.
+
+- [ ] **Step 2: Run the complete handoff test suite**
+
+```bash
+pnpm --filter human-learning-vscode build
+node --test packages/vscode-extension/test/agentHandoff.test.mjs
+```
+
+Expected: all routing, extension-ID filtering, attachment-shape, visible-editor preference, fallback-command, and no-submit tests pass.
+
+- [ ] **Step 3: Launch isolated Cursor and VS Code hosts**
+
+Launch each application with:
+
+- A unique temporary user-data directory.
+- Its normal external-extension directory.
+- A unique explicit remote-debugging port.
+- `--extensionDevelopmentPath=/Users/t04dj14n9/Code/human-learning/packages/vscode-extension`.
+- `/Users/t04dj14n9/Code/human-learning/demo-vault`.
+
+Record exact argv, PID/start time, CDP target list, active extension versions, and current Human Learning bundle hashes.
+
+- [ ] **Step 4: Exercise Add to Chat without the Cursor built-in Agent**
+
+For each available pair in this matrix:
+
+| Host | Codex | Claude Code | CodeBuddy |
+|---|---|---|---|
+| Cursor | verify | verify | verify |
+| VS Code | verify | verify | verify |
+
+Select a PDF passage, invoke Human Learning Add to Chat, choose or focus the named external agent, and verify:
+
+- The external extension's command is selected instead of Cursor Agent.
+- `selection.md` reaches the draft/context.
+- The optional `selection.png` is forwarded where that provider command accepts attachments.
+- No message is submitted automatically.
+
+If authentication, onboarding, or an unavailable UI prevents a live draft inspection, record `SKIPPED` with the exact command/extension presence evidence and blocker, as explicitly permitted by the user. A registered command that throws or receives the wrong arguments is a product failure, not a skip.
+
+- [ ] **Step 5: Preserve and review the compatibility matrix**
+
+Store timestamped logs, screenshots/state JSON, command observations, export hashes, and SHA-256 manifests in the ignored SDD workspace. Restore/close only isolated hosts and leave the user's active windows untouched.
