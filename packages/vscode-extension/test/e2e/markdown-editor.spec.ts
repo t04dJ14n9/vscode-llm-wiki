@@ -8012,6 +8012,12 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
     expect(feedback.border).toBe('rgb(85, 86, 87)');
     expect(await header.boundingBox()).toEqual(headerBefore);
 
+    await copyButton.click();
+    await page.waitForTimeout(700);
+    await copyButton.click();
+    await page.waitForTimeout(700);
+    await expect(tooltip).toHaveText('Copied');
+    await expect(copyButton).toHaveClass(/is-copied/);
     await expect(tooltip).toHaveText('', { timeout: 2_000 });
 
     await page.evaluate(() => {
@@ -8026,6 +8032,32 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
       window.__mockMessages?.filter(message => message.type === 'copyText').at(-1)?.text
     ))).toBe('const answer = 42;');
     await expect(tooltip).toHaveText('Copied');
+  });
+
+  test('code block copy feedback respects reduced motion', async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.goto('http://localhost:8979/test.html');
+    await waitForEditorBootstrap(page);
+    await page.evaluate(() => {
+      window.postMessage({
+        type: 'setText',
+        text: ['```text', 'bounded feedback', '```'].join('\n'),
+      }, '*');
+    });
+    const copyButton = page.locator('.cm-hybrid-codeblock-copy');
+    const tooltip = page.locator('.cm-hybrid-codeblock-copy-tooltip');
+    await copyButton.click();
+    await expect(tooltip).toHaveText('Copied');
+    const motion = await tooltip.evaluate(element => {
+      const style = getComputedStyle(element);
+      return {
+        transitionDuration: style.transitionDuration,
+        transform: style.transform,
+      };
+    });
+    expect(motion.transitionDuration.split(',').every(value => value.trim() === '0s')).toBe(true);
+    expect(motion.transform).toBe('none');
+    await expect(tooltip).toHaveText('', { timeout: 1_500 });
   });
 
   test('hybrid rendering turns fenced code blocks into Obsidian-like preview blocks until the block is active', async ({ page }) => {

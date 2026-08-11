@@ -16,6 +16,10 @@ import 'prismjs/components/prism-tsx.js';
 import 'prismjs/components/prism-yaml.js';
 import { dispatchCopyTextEvent, writeTextToClipboard } from '../webviewClipboard';
 
+const copyFeedbackEnterMs = 120;
+const copyFeedbackDwellMs = 1_000;
+const copyFeedbackExitMs = 120;
+
 export interface CodeBlockPreview {
   from: number;
   to: number;
@@ -58,6 +62,10 @@ class CodeBlockHeaderWidget extends WidgetType {
     copyButton.className = 'cm-hybrid-codeblock-copy';
     copyButton.setAttribute('aria-label', 'Copy code');
     copyButton.title = 'Copy code';
+    const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true;
+    if (reducedMotion) {
+      copyButton.classList.add('cm-hybrid-codeblock-copy-reduced-motion');
+    }
     const copyIcon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     copyIcon.classList.add('cm-hybrid-codeblock-copy-icon');
     copyIcon.setAttribute('viewBox', '0 0 16 16');
@@ -82,6 +90,29 @@ class CodeBlockHeaderWidget extends WidgetType {
     copyTooltip.setAttribute('aria-live', 'polite');
     copyTooltip.setAttribute('aria-atomic', 'true');
     copyButton.append(copyIcon, copyTooltip);
+    let copyFeedbackSequence = 0;
+
+    const showCopyFeedback = (): void => {
+      copyFeedbackSequence += 1;
+      const sequence = copyFeedbackSequence;
+      const enterMs = reducedMotion ? 0 : copyFeedbackEnterMs;
+      const exitMs = reducedMotion ? 0 : copyFeedbackExitMs;
+
+      copyButton.classList.remove('is-copied');
+      copyTooltip.textContent = 'Copied';
+      void copyTooltip.offsetWidth;
+      copyButton.classList.add('is-copied');
+
+      window.setTimeout(() => {
+        if (copyFeedbackSequence !== sequence) return;
+        copyButton.classList.remove('is-copied');
+      }, enterMs + copyFeedbackDwellMs);
+      window.setTimeout(() => {
+        if (copyFeedbackSequence !== sequence) return;
+        copyTooltip.textContent = '';
+      }, enterMs + copyFeedbackDwellMs + exitMs);
+    };
+
     copyButton.addEventListener('mousedown', event => {
       event.preventDefault();
       event.stopPropagation();
@@ -93,14 +124,7 @@ class CodeBlockHeaderWidget extends WidgetType {
         this.code,
         text => dispatchCopyTextEvent(view.dom, text),
       ).then(() => {
-        copyTooltip.textContent = 'Copied';
-        copyButton.classList.add('is-copied');
-        window.setTimeout(() => {
-          copyButton.classList.remove('is-copied');
-        }, 1_120);
-        window.setTimeout(() => {
-          copyTooltip.textContent = '';
-        }, 1_240);
+        showCopyFeedback();
       });
     });
 
