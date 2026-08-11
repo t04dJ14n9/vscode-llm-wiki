@@ -164,6 +164,65 @@ function discussionAnnotation(overrides = {}) {
   };
 }
 
+test('PDF discussion messages are ignored without a controller', async () => {
+  const { vscode, commands, clipboard } = createVscodeMock();
+  let storeConstructions = 0;
+  let writes = 0;
+  vscode.workspace.fs.writeFile = async () => { writes++; };
+  const context = {
+    extensionUri: uri('/extension'),
+    subscriptions: [],
+    globalState: {
+      get: () => false,
+      update: async () => undefined,
+    },
+  };
+  const { PdfEditorProvider } = loadTsModule(packageRoot, 'src/pdfEditorProvider.ts', {
+    vscode,
+    '@human-learning/core': {
+      pdfHref: (path, options) => `${path}#page=${options.page}`,
+    },
+    './pdfDiscussionController': {
+      createPdfDiscussionStoreForDocument() {
+        storeConstructions++;
+        return { store: {} };
+      },
+    },
+  });
+  const provider = new PdfEditorProvider(context, {
+    documentRoot: '/vault',
+    globalStoragePath: '/host/global',
+  });
+  const harness = createPanel();
+  await provider.resolveCustomEditor(
+    { uri: uri('/vault/docs/real.pdf'), dispose() {} },
+    harness.panel,
+    {},
+  );
+  commands.length = 0;
+
+  await harness.receive({ type: 'pdfDiscussionList', requestId: 'list-disabled' });
+  await harness.receive({
+    type: 'pdfDiscussionSubmit',
+    requestId: 'submit-disabled',
+    selection: {
+      page: 2,
+      snippet: 'selected',
+      rects: [[1, 2, 3, 4]],
+    },
+    question: 'Why?',
+  });
+
+  assert.equal(storeConstructions, 0);
+  assert.equal(writes, 0);
+  assert.deepEqual(commands, []);
+  assert.deepEqual(clipboard, []);
+  assert.deepEqual(
+    harness.posted.filter(message => String(message?.type).startsWith('pdfDiscussion')),
+    [],
+  );
+});
+
 async function exerciseProvider(root) {
   const { vscode, external, clipboard } = createVscodeMock({ openExternalResult: false });
   const routeCalls = [];

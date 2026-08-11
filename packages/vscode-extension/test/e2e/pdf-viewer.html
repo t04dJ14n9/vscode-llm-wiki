@@ -66,7 +66,6 @@
   .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; }
   .toolbar-menu { position: fixed; top: 42px; z-index: 60; min-width: 210px; padding: 5px; border: 1px solid var(--vscode-panel-border); border-radius: 5px; background: var(--vscode-editorWidget-background); box-shadow: 0 6px 20px rgba(0,0,0,.4); font: 12px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
   #display-menu { left: 112px; }
-  #copy-link-format-menu { right: 54px; }
   .toolbar-menu.hidden { display: none; }
   .toolbar-menu .menu-section { padding: 4px 8px 2px; color: var(--vscode-descriptionForeground); font-size: 11px; }
   .toolbar-menu button { display: flex; width: 100%; min-height: 26px; align-items: center; border: 0; border-radius: 3px; padding: 3px 8px 3px 24px; background: transparent; color: var(--vscode-editor-foreground); font: inherit; text-align: left; cursor: pointer; }
@@ -401,20 +400,6 @@
     color: var(--vscode-input-placeholderForeground);
     font-size: 11px;
   }
-  .selection-toolbar .menu {
-    position: absolute;
-    top: calc(100% + 6px);
-    right: 0;
-    display: none;
-    min-width: 180px;
-    flex-direction: column;
-    gap: 3px;
-    padding: 4px;
-    border: 1px solid var(--vscode-panel-border);
-    border-radius: 6px;
-    background: var(--vscode-editorWidget-background);
-  }
-  .selection-toolbar .menu.open { display: flex; }
 </style>
 </head>
 <body>
@@ -435,7 +420,6 @@
       <button id="next" type="button" aria-label="Next page">›</button>
     </div>
     <span class="toolbar-spacer"></span>
-    <button id="copy-link-format" type="button" aria-label="Copy link format" aria-controls="copy-link-format-menu" aria-haspopup="menu" aria-expanded="false" data-copy-link-format="link">🔗⌄</button>
     <button id="rectangle-selection" type="button" aria-label="Copy embed link to rectangular selection" title="Copy embed link to rectangular selection" aria-pressed="false">▱</button>
     <span id="page-info" class="sr-only" aria-live="polite"></span>
   </div>
@@ -456,10 +440,6 @@
     <button type="button" role="menuitemradio" aria-checked="false" data-display-action="reduce-animation-off">Off</button>
     <button type="button" role="menuitemradio" aria-checked="true" data-display-action="reduce-animation-system">System</button>
     <button type="button" role="menuitem" data-display-action="defaults">Defaults</button>
-  </div>
-  <div id="copy-link-format-menu" class="toolbar-menu hidden" role="menu" aria-label="Copy link format">
-    <button type="button" role="menuitemradio" aria-checked="true" data-copy-link-format="link">Link only</button>
-    <button type="button" role="menuitemradio" aria-checked="false" data-copy-link-format="quote">Quote and link</button>
   </div>
   <div id="pdf-search" class="pdf-search hidden" role="search" aria-label="Find in PDF">
     <input id="pdf-search-input" type="search" placeholder="Find" aria-label="Find in PDF" autocomplete="off">
@@ -500,6 +480,8 @@
     window.__mockState = {};
     window.__pdfiumWasmUrl = '/dist/pdfium.wasm';
     window.__humanLearningAddToCursorChat = true;
+    window.__humanLearningAskPdfEnabled =
+      new URLSearchParams(window.location.search).get('askPdf') === '1';
     window.acquireVsCodeApi = () => ({
       postMessage: async (message) => {
         window.__mockMessages.push(message);

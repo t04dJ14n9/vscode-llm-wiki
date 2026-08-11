@@ -83,14 +83,14 @@ const vscode = acquireVsCodeApi();
 const addToCursorChatEnabled =
   (window as typeof window & { __humanLearningAddToCursorChat?: unknown })
     .__humanLearningAddToCursorChat === true;
+const askPdfEnabled =
+  (window as typeof window & { __humanLearningAskPdfEnabled?: unknown })
+    .__humanLearningAskPdfEnabled === true;
 
 type PdfReduceAnimationSetting = 'on' | 'off' | 'system';
 type PdfTextSelectionAction =
   | 'addToCursorChat'
-  | 'copyLink'
-  | 'insertLink'
-  | 'copyQuoteAndLink'
-  | 'insertQuoteAndLink';
+  | 'copyLink';
 
 const PDF_PAGE_GAP_PX = 12;
 const PDF_FIT_HORIZONTAL_PADDING_PX = 24;
@@ -272,7 +272,6 @@ class PdfViewer {
   private highlightAllSearchMatches = false;
   private matchDiacritics = false;
   private wholeWords = false;
-  private copyLinkFormat: 'link' | 'quote' = 'link';
   private rectangleSelection = false;
   private rectangleDrag: {
     pointerId: number;
@@ -322,14 +321,14 @@ class PdfViewer {
   private pendingPdfDestinationOrigin: PdfViewLocation | undefined;
   private pdfDestinationFocus: PdfDestinationFocusState | undefined;
   private readonly viewerResizeObserver: ResizeObserver | null;
-  private readonly askPanel: PdfAskPanel;
+  private readonly askPanel?: PdfAskPanel;
 
   constructor() {
     this.container.tabIndex = -1;
     this.restoreViewerState();
     document.body.classList.toggle('pdf-adapt-theme', this.adaptToTheme);
     this.applyReduceAnimationSetting();
-    this.askPanel = createPdfAskPanel({
+    this.askPanel = askPdfEnabled ? createPdfAskPanel({
       vscode,
       toolbar: document.getElementById('toolbar')!,
       viewerShell: document.getElementById('viewer-shell')!,
@@ -369,7 +368,7 @@ class PdfViewer {
         }
       },
       redrawMarkers: () => this.redrawAllDiscussionMarkers(),
-    });
+    }) : undefined;
     this.setupMessages();
     this.setupToolbar();
     this.setupSearch();
@@ -490,14 +489,14 @@ class PdfViewer {
           void this.toggleTwoPageView();
           break;
         case 'pdfDiscussionOpenForSelection':
-          this.openAskPdfForNativeSelection();
+          if (askPdfEnabled) this.openAskPdfForNativeSelection();
           break;
         case 'addSelectionToCursorChat': {
           this.addCurrentSelectionToCursorChat();
           break;
         }
         default:
-          this.askPanel.handleHostMessage(message);
+          this.askPanel?.handleHostMessage(message);
           break;
       }
     });
@@ -624,27 +623,6 @@ class PdfViewer {
       this.setDisplayMenuOpen(false);
     });
 
-    const copyTrigger = document.getElementById('copy-link-format') as HTMLButtonElement | null;
-    const copyMenu = document.getElementById('copy-link-format-menu');
-    copyTrigger?.addEventListener('click', event => {
-      event.preventDefault();
-      event.stopPropagation();
-      const open = copyMenu?.classList.contains('hidden') ?? false;
-      copyMenu?.classList.toggle('hidden', !open);
-      copyTrigger.setAttribute('aria-expanded', String(open));
-    });
-    copyMenu?.addEventListener('click', event => {
-      const button = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-copy-link-format]');
-      if (!button) return;
-      this.copyLinkFormat = button.dataset.copyLinkFormat === 'quote' ? 'quote' : 'link';
-      copyTrigger?.setAttribute('data-copy-link-format', this.copyLinkFormat);
-      for (const item of Array.from(copyMenu.querySelectorAll<HTMLButtonElement>('[data-copy-link-format]'))) {
-        item.setAttribute('aria-checked', String(item === button));
-      }
-      copyMenu.classList.add('hidden');
-      copyTrigger?.setAttribute('aria-expanded', 'false');
-    });
-
     const rectangleButton = document.getElementById('rectangle-selection') as HTMLButtonElement | null;
     rectangleButton?.addEventListener('click', () => {
       this.setRectangleSelection(!this.rectangleSelection);
@@ -656,10 +634,6 @@ class PdfViewer {
         && !this.displayMenu.contains(target)
         && !displayButton?.contains(target)) {
         this.setDisplayMenuOpen(false);
-      }
-      if (copyMenu && !copyMenu.classList.contains('hidden') && !copyMenu.contains(target) && !copyTrigger?.contains(target)) {
-        copyMenu.classList.add('hidden');
-        copyTrigger?.setAttribute('aria-expanded', 'false');
       }
     });
     document.addEventListener('keydown', event => {
@@ -704,12 +678,6 @@ class PdfViewer {
         event.preventDefault();
         this.setDisplayMenuOpen(false);
         displayButton?.focus();
-      }
-      if (event.key === 'Escape' && copyMenu && !copyMenu.classList.contains('hidden')) {
-        event.preventDefault();
-        copyMenu.classList.add('hidden');
-        copyTrigger?.setAttribute('aria-expanded', 'false');
-        copyTrigger?.focus();
       }
       if (event.key === 'Escape' && (this.rectangleSelection || this.rectangleDrag)) {
         event.preventDefault();
@@ -2589,7 +2557,9 @@ class PdfViewer {
       clientY,
       items: [
         { label: 'Look up ...', onSelect: () => vscode.postMessage({ type: 'lookupSelection', text: anchor.snippet }) },
-        { label: 'Ask about selection…', onSelect: () => this.openAskPdfForSelection(anchor) },
+        ...(askPdfEnabled
+          ? [{ label: 'Ask about selection…', onSelect: () => this.openAskPdfForSelection(anchor) }]
+          : []),
         ...(addToCursorChatEnabled
           ? [{
               label: `${cursorSelectionShortcutLabel()}  Add to Chat`,
@@ -2599,10 +2569,6 @@ class PdfViewer {
         { type: 'separator' },
         { label: 'Copy link to selection', onSelect: () => this.postTextSelectionAction('copyLink', anchor) },
         { label: 'Copy selected text', onSelect: () => vscode.postMessage({ type: 'copyText', text: anchor.snippet }) },
-        { label: 'Copy quote and link', onSelect: () => this.postTextSelectionAction('copyQuoteAndLink', anchor) },
-        { type: 'separator' },
-        { label: 'Insert link', onSelect: () => this.postTextSelectionAction('insertLink', anchor) },
-        { label: 'Insert quote and link', onSelect: () => this.postTextSelectionAction('insertQuoteAndLink', anchor) },
       ],
     });
   }
@@ -2636,6 +2602,7 @@ class PdfViewer {
   }
 
   private openAskPdfForNativeSelection(): void {
+    if (!this.askPanel) return;
     const current = this.selectionAnchorFromNativeRange();
     if (!current) {
       this.askPanel.showSelectionError('Select text on one page');
@@ -2645,6 +2612,7 @@ class PdfViewer {
   }
 
   private openAskPdfForSelection(anchor: PdfAnchor): void {
+    if (!this.askPanel) return;
     const rects = validPdfRects(anchor.rects);
     if (!anchor.snippet?.trim() || !rects.length) {
       this.askPanel.showSelectionError('Select text on one page');
@@ -2692,11 +2660,7 @@ class PdfViewer {
       return button;
     };
 
-    addButton(
-      this.copyLinkFormat === 'quote' ? 'Copy Quote and Link' : 'Copy Link',
-      this.copyLinkFormat === 'quote' ? 'copyQuoteAndLink' : 'copyLink',
-    );
-    addButton('Insert Link', 'insertLink', 'secondary');
+    addButton('Copy Link', 'copyLink');
     if (addToCursorChatEnabled) {
       const button = addButton('', 'addToCursorChat', 'secondary cursor-chat-action');
       button.setAttribute('aria-label', `Add to Chat ${cursorSelectionShortcutLabel()}`);
@@ -2708,37 +2672,6 @@ class PdfViewer {
       shortcut.textContent = cursorSelectionShortcutLabel();
       button.append(label, shortcut);
     }
-
-    const menu = document.createElement('div');
-    menu.className = 'menu';
-    const more = document.createElement('button');
-    more.type = 'button';
-    more.textContent = 'More';
-    more.className = 'secondary';
-    more.addEventListener('click', event => {
-      event.preventDefault();
-      event.stopPropagation();
-      menu.classList.toggle('open');
-    });
-    toolbar.appendChild(more);
-
-    for (const [label, action] of [
-      ['Copy Quote and Link', 'copyQuoteAndLink'],
-      ['Insert Quote and Link', 'insertQuoteAndLink'],
-    ] as const) {
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.textContent = label;
-      button.className = 'secondary';
-      button.addEventListener('click', event => {
-        event.preventDefault();
-        event.stopPropagation();
-        this.postTextSelectionAction(action, anchor);
-        toolbar.remove();
-      });
-      menu.appendChild(button);
-    }
-    toolbar.appendChild(menu);
 
     document.body.appendChild(toolbar);
     requestAnimationFrame(() => this.positionSelectionToolbar(toolbar, rect));
@@ -2904,7 +2837,7 @@ class PdfViewer {
 
   private drawDiscussionMarkersForPage(pageNum: number): void {
     const page = this.pages.get(pageNum);
-    if (!page?.rendered) return;
+    if (!page?.rendered || !this.askPanel) return;
     this.askPanel.renderMarkersForPage(pageNum, page.highlightLayer, this.scale);
   }
 

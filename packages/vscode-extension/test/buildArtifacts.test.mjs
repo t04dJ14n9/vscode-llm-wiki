@@ -117,12 +117,23 @@ test('webview bundles do not depend on webpack automatic publicPath detection', 
   }
 });
 
-test('combined PDF bundle includes the Ask PDF panel protocol', () => {
-  const bundle = readFileSync(join(dist, 'pdf-viewer.js'), 'utf8');
-  assert.match(bundle, /pdfDiscussionPrepare/);
-  assert.match(bundle, /pdfDiscussionLoadSnapshot/);
-  assert.match(bundle, /Ask PDF/);
-  assert.match(bundle, /Ask about selection/);
+test('combined PDF artifacts retain dormant Ask protocol but omit removed selection actions', () => {
+  const pdfBundle = readFileSync(join(dist, 'pdf-viewer.js'), 'utf8');
+  const hostBundle = readFileSync(join(dist, 'extension.js'), 'utf8');
+  assert.match(pdfBundle, /pdfDiscussionPrepare/);
+  assert.match(pdfBundle, /pdfDiscussionLoadSnapshot/);
+  assert.match(pdfBundle, /Ask PDF/);
+  assert.match(pdfBundle, /Ask about selection/);
+  for (const artifact of [pdfBundle, hostBundle]) {
+    for (const removed of [
+      'Insert Quote and Link',
+      'Copy Quote and Link',
+      'Insert Link',
+      'copy-link-format',
+    ]) {
+      assert.equal(artifact.includes(removed), false);
+    }
+  }
 });
 
 test('webview webpack entries use VS Code webview size budgets', () => {

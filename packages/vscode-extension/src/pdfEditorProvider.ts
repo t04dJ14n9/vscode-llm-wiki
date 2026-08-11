@@ -41,9 +41,6 @@ interface PdfSelectionAnchor {
 type PdfSelectionAction =
   | 'addToCursorChat'
   | 'copyLink'
-  | 'insertLink'
-  | 'copyQuoteAndLink'
-  | 'insertQuoteAndLink'
   | 'copyRectEmbed';
 
 export interface PdfOutlineDestination {
@@ -80,10 +77,6 @@ interface PdfAnchorNavigation {
   textFragment?: PdfTextFragment;
 }
 
-interface MarkdownInsertTarget {
-  insertMarkdown(markdown: string): Promise<boolean>;
-}
-
 interface CachedPdfDiscussionStore {
   store: PdfDiscussionStore;
   fingerprint?: PdfFileFingerprint;
@@ -104,7 +97,6 @@ export interface PdfEditorProviderOptions {
   globalStoragePath?: string;
   discussionController?: PdfDiscussionController;
   learningNoteStore?: LearningNoteStore;
-  markdownInsertTarget?: MarkdownInsertTarget;
 }
 
 export const ADD_SELECTION_TO_CURSOR_CHAT_COMMAND =
@@ -149,7 +141,6 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
   private readonly globalStoragePath?: string;
   private readonly discussionController?: PdfDiscussionController;
   private readonly learningNoteStore?: LearningNoteStore;
-  private readonly markdownInsertTarget?: MarkdownInsertTarget;
   private readonly pdfOutlineListeners = new Set<(uri: vscode.Uri) => unknown>();
   readonly onDidChangePdfOutline: vscode.Event<vscode.Uri> = (listener, thisArgs, disposables) => {
     const wrapped = thisArgs
@@ -168,19 +159,16 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
   constructor(
     context: vscode.ExtensionContext,
     vaultRoot: string,
-    markdownInsertTarget?: MarkdownInsertTarget,
   );
   constructor(
     private readonly context: vscode.ExtensionContext,
     optionsOrVaultRoot: PdfEditorProviderOptions | string,
-    markdownInsertTarget?: MarkdownInsertTarget,
   ) {
     const options: PdfEditorProviderOptions = typeof optionsOrVaultRoot === 'string'
       ? {
           vaultRoot: optionsOrVaultRoot,
           documentRoot: optionsOrVaultRoot,
           globalStoragePath: context.globalStorageUri?.fsPath,
-          markdownInsertTarget,
         }
       : optionsOrVaultRoot;
     this.vaultRoot = options.vaultRoot;
@@ -188,7 +176,6 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
     this.globalStoragePath = options.globalStoragePath;
     this.discussionController = options.discussionController;
     this.learningNoteStore = options.learningNoteStore;
-    this.markdownInsertTarget = options.markdownInsertTarget;
     if (this.discussionController) {
       context.subscriptions.push(
         this.discussionController.onEvent(event => this.forwardDiscussionEvent(event)),
@@ -342,6 +329,7 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
 
     webview.onDidReceiveMessage(async (message: any) => {
       if (isPdfDiscussionMessage(message)) {
+        if (!this.discussionController) return;
         await this.handlePdfDiscussionMessage(webview, pdfUri, message);
         return;
       }
@@ -877,38 +865,11 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
     const portableUri = pdfHref(relPath, { page: selection.page, textFragment });
     const label = formatPdfLinkLabel(relPath, selection.page);
     const markdown = `[${escapeMarkdownLabel(label)}](${formatMarkdownDestination(portableUri)})`;
-    const quotedMarkdown = formatQuoteAndLink(selection.snippet, markdown);
 
     if (action === 'copyLink') {
       await vscode.env.clipboard.writeText(markdown);
       vscode.window.showInformationMessage('Human Learning PDF link copied');
-      return;
     }
-    if (action === 'copyQuoteAndLink') {
-      await vscode.env.clipboard.writeText(quotedMarkdown);
-      vscode.window.showInformationMessage('Human Learning PDF quote copied');
-      return;
-    }
-
-    const textToInsert = action === 'insertQuoteAndLink' ? quotedMarkdown : markdown;
-    if (await this.markdownInsertTarget?.insertMarkdown(textToInsert)) {
-      vscode.window.showInformationMessage('Human Learning PDF link inserted');
-      return;
-    }
-
-    const editor = vscode.window.visibleTextEditors.find(e => e.document.languageId === 'markdown');
-    if (!editor) {
-      await vscode.env.clipboard.writeText(textToInsert);
-      vscode.window.showWarningMessage('No markdown editor is visible. Link copied to clipboard.');
-      return;
-    }
-
-    await editor.edit(edit => {
-      for (const selection of editor.selections) {
-        edit.replace(selection, textToInsert);
-      }
-    });
-    vscode.window.showInformationMessage('Human Learning PDF link inserted');
   }
 
   private async updateActiveSelection(key: string, anchor: unknown): Promise<void> {
@@ -978,7 +939,6 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
     .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; }
     .toolbar-menu { position: fixed; top: 42px; z-index: 60; min-width: 210px; padding: 5px; border: 1px solid var(--vscode-panel-border); border-radius: 5px; background: var(--vscode-editorWidget-background); box-shadow: 0 6px 20px rgba(0,0,0,.4); font: 12px var(--vscode-font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif); }
     #display-menu { left: 112px; }
-    #copy-link-format-menu { right: 54px; }
     .toolbar-menu.hidden { display: none; }
     .toolbar-menu .menu-section { padding: 4px 8px 2px; color: var(--vscode-descriptionForeground); font-size: 11px; }
     .toolbar-menu button { display: flex; width: 100%; min-height: 26px; align-items: center; border: 0; border-radius: 3px; padding: 3px 8px 3px 24px; background: transparent; color: var(--vscode-editor-foreground); font: inherit; text-align: left; cursor: pointer; }
@@ -1201,8 +1161,6 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
     .selection-toolbar .secondary:hover { background: var(--vscode-button-secondaryHoverBackground, var(--vscode-button-secondaryBackground)); }
     .selection-toolbar .cursor-chat-action { display: inline-flex; align-items: center; gap: 6px; }
     .selection-toolbar .cursor-chat-action .add-to-chat-shortcut { display: inline-flex; align-items: center; height: 18px; padding: 0 4px; border: 0; border-radius: 4px; background: var(--vscode-toolbar-hoverBackground, rgba(127,127,127,.16)); color: var(--vscode-input-placeholderForeground, var(--vscode-descriptionForeground, inherit)); font: 11px var(--vscode-font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif); }
-    .selection-toolbar .menu { position: absolute; top: calc(100% + 6px); right: 0; min-width: 180px; display: none; flex-direction: column; gap: 3px; padding: 4px; border: 1px solid var(--vscode-panel-border); border-radius: 6px; background: var(--vscode-editorWidget-background); }
-    .selection-toolbar .menu.open { display: flex; }
     .error { padding: 24px; color: var(--vscode-errorForeground); }
   </style>
 </head>
@@ -1224,7 +1182,6 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
       <button id="next" type="button" aria-label="Next page">›</button>
     </div>
     <span class="toolbar-spacer"></span>
-    <button id="copy-link-format" type="button" aria-label="Copy link format" aria-controls="copy-link-format-menu" aria-haspopup="menu" aria-expanded="false" data-copy-link-format="link">🔗⌄</button>
     <button id="rectangle-selection" type="button" aria-label="Copy embed link to rectangular selection" title="Copy embed link to rectangular selection" aria-pressed="false">▱</button>
     <span id="page-info" class="sr-only" aria-live="polite"></span>
   </div>
@@ -1245,10 +1202,6 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
     <button type="button" role="menuitemradio" aria-checked="false" data-display-action="reduce-animation-off">Off</button>
     <button type="button" role="menuitemradio" aria-checked="true" data-display-action="reduce-animation-system">System</button>
     <button type="button" role="menuitem" data-display-action="defaults">Defaults</button>
-  </div>
-  <div id="copy-link-format-menu" class="toolbar-menu hidden" role="menu" aria-label="Copy link format">
-    <button type="button" role="menuitemradio" aria-checked="true" data-copy-link-format="link">Link only</button>
-    <button type="button" role="menuitemradio" aria-checked="false" data-copy-link-format="quote">Quote and link</button>
   </div>
   <div id="pdf-search" class="pdf-search hidden" role="search" aria-label="Find in PDF">
     <input id="pdf-search-input" type="search" placeholder="Find" aria-label="Find in PDF" autocomplete="off">
@@ -1286,6 +1239,7 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
   <script nonce="${nonce}">
     window.__pdfiumWasmUrl = "${wasmUri.toString()}";
     window.__humanLearningAddToCursorChat = true;
+    window.__humanLearningAskPdfEnabled = ${this.discussionController !== undefined};
   </script>
   <script nonce="${nonce}" src="${scriptUri.toString()}?v=${nonce}"></script>
 </body>
@@ -1663,9 +1617,6 @@ function normalizePdfPage(value: unknown): number | undefined {
 function isPdfSelectionAction(value: unknown): value is PdfSelectionAction {
   return value === 'addToCursorChat'
     || value === 'copyLink'
-    || value === 'insertLink'
-    || value === 'copyQuoteAndLink'
-    || value === 'insertQuoteAndLink'
     || value === 'copyRectEmbed';
 }
 
@@ -1711,10 +1662,4 @@ function escapeMarkdownLabel(input: string): string {
 
 function formatMarkdownDestination(uri: string): string {
   return /\s/.test(uri) ? `<${uri}>` : uri;
-}
-
-function formatQuoteAndLink(quote: string, markdownLink: string): string {
-  const normalized = quote.replace(/\s+/g, ' ').trim();
-  if (!normalized) return markdownLink;
-  return `> ${normalized}\n>\n> ${markdownLink}`;
 }

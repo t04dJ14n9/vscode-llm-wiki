@@ -337,9 +337,8 @@ test('PDF provider falls back to one visible PDF without guessing between visibl
   assert.equal(provider.getActivePdfUri(), secondUri);
 });
 
-test('PDF copy and insert link actions use portable URLs without persistence or highlight refreshes', async () => {
+test('PDF copy link action uses a portable URL without persistence or highlight refreshes', async () => {
   const clipboard = [];
-  const inserted = [];
   const pdfHrefCalls = [];
   const vscode = {
     workspace: {
@@ -374,7 +373,6 @@ test('PDF copy and insert link actions use portable URLs without persistence or 
   const provider = new PdfEditorProvider(
     { extensionUri: { fsPath: '/extension' } },
     '/vault',
-    { insertMarkdown: async markdown => { inserted.push(markdown); return true; } },
   );
   provider.refreshOpenPdfHighlights = async () => {
     throw new Error('non-highlight actions must not refresh persisted highlights');
@@ -391,15 +389,8 @@ test('PDF copy and insert link actions use portable URLs without persistence or 
     'copyLink',
     selection,
   );
-  await provider.handleSelectionAction(
-    { fsPath: '/vault/raw/pdf/paper.pdf' },
-    'insertQuoteAndLink',
-    selection,
-  );
-
   const link = '[paper.pdf p.3](raw/pdf/paper.pdf#page=3:~:text=before%20context-,Selected%20text,-after%20context)';
   assert.deepEqual(clipboard, [link]);
-  assert.deepEqual(inserted, [`> Selected text\n>\n> ${link}`]);
   assert.deepEqual(pdfHrefCalls, [
     {
       sourcePath: 'raw/pdf/paper.pdf',
@@ -412,18 +403,55 @@ test('PDF copy and insert link actions use portable URLs without persistence or 
         },
       },
     },
-    {
-      sourcePath: 'raw/pdf/paper.pdf',
-      options: {
-        page: 3,
-        textFragment: {
-          textStart: 'Selected text',
-          prefix: 'before context',
-          suffix: 'after context',
-        },
+  ]);
+});
+
+test('removed selection actions are rejected without clipboard or command side effects', async () => {
+  const clipboardWrites = [];
+  const commandCalls = [];
+  const vscode = {
+    workspace: {
+      asRelativePath: uri => uri.fsPath.replace('/vault/', ''),
+    },
+    env: {
+      clipboard: {
+        writeText: async text => { clipboardWrites.push(text); },
       },
     },
-  ]);
+    commands: {
+      executeCommand: async (...args) => { commandCalls.push(args); },
+    },
+    window: {
+      visibleTextEditors: [],
+      showInformationMessage: () => undefined,
+      showWarningMessage: () => undefined,
+    },
+    Uri: {
+      joinPath: (...parts) => ({ parts }),
+    },
+  };
+  const { PdfEditorProvider } = loadTsModule('src/pdfEditorProvider.ts', {
+    vscode,
+    '@human-learning/core': {
+      pdfHref: portablePdfHref,
+    },
+  });
+  const provider = new PdfEditorProvider(
+    { extensionUri: { fsPath: '/extension' } },
+    { documentRoot: '/vault' },
+  );
+  const pdfUri = { fsPath: '/vault/raw/pdf/paper.pdf' };
+  const selection = {
+    page: 3,
+    snippet: 'Selected text',
+  };
+
+  for (const action of ['insertLink', 'copyQuoteAndLink', 'insertQuoteAndLink']) {
+    await provider.handleSelectionAction(pdfUri, action, selection);
+  }
+
+  assert.deepEqual(clipboardWrites, []);
+  assert.deepEqual(commandCalls, []);
 });
 
 test('PDF provider transports page-scoped text fragments without database resolution', async () => {

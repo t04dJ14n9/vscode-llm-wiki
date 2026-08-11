@@ -272,9 +272,8 @@ test('pdf viewer exposes PDF++-like direct page and zoom controls', async ({ pag
   await expect(page.getByRole('button', { name: 'Display options' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Previous page' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Next page' })).toBeVisible();
-  for (const label of ['Copy link format', 'Copy embed link to rectangular selection']) {
-    await expect(toolbar.getByRole('button', { name: label })).toBeVisible();
-  }
+  await expect(toolbar.getByRole('button', { name: 'Copy embed link to rectangular selection' })).toBeVisible();
+  await expect(toolbar.getByRole('button', { name: 'Copy link format' })).toHaveCount(0);
   await expect(toolbar.getByRole('button', { name: 'Highlight color' })).toHaveCount(0);
   await expect(toolbar.getByRole('button', { name: 'Direct highlight' })).toHaveCount(0);
 
@@ -335,7 +334,7 @@ test('pdf viewer keeps the latest page navigation when an older render finishes 
 
 test('pdf viewer retains continuous-scroll page state across separate intersection batches', async ({ page }) => {
   await installIntersectionObserverHarness(page);
-  await page.goto('http://localhost:8979/pdf-viewer.html?fixture=four-page');
+  await page.goto('http://localhost:8979/pdf-viewer.html?fixture=four-page&askPdf=1');
   await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 4/, { timeout: 10_000 });
   await page.waitForTimeout(50);
 
@@ -380,7 +379,7 @@ test('pdf viewer retains continuous-scroll page state across separate intersecti
 test('Ask PDF keeps the latest annotation marker navigation when an older page render finishes last', async ({ page }) => {
   await page.setViewportSize({ width: 900, height: 220 });
   await installNavigationRaceHarness(page);
-  await page.goto('http://localhost:8979/pdf-viewer.html?fixture=four-page');
+  await page.goto('http://localhost:8979/pdf-viewer.html?fixture=four-page&askPdf=1');
   await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 4/, { timeout: 10_000 });
   const zoomInput = page.getByRole('spinbutton', { name: 'Zoom' });
   await zoomInput.fill('200');
@@ -561,22 +560,77 @@ test('pdf viewer preserves original PDF colors by default in a dark theme', asyn
   await expect.poll(() => thumbnail.evaluate(element => getComputedStyle(element).filter)).toBe('none');
 });
 
-test('pdf viewer toolbar exposes copy formats and rectangle selection without legacy highlight controls', async ({ page }) => {
+test('pdf viewer production surface exposes only live selection actions and keeps Ask PDF dormant', async ({ page }) => {
   await page.goto('http://localhost:8979/pdf-viewer.html');
   await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 1/, { timeout: 10_000 });
+  await expect(page.locator('.text-layer span[data-item-index="0"]')).toBeVisible();
 
-  const copyFormatTrigger = page.getByRole('button', { name: 'Copy link format' });
-  await copyFormatTrigger.click();
-  const copyMenu = page.getByRole('menu', { name: 'Copy link format' });
-  await expect(copyMenu.getByRole('menuitemradio', { name: 'Link only' })).toHaveAttribute('aria-checked', 'true');
-  await copyMenu.getByRole('menuitemradio', { name: 'Quote and link' }).click();
-  await expect(copyFormatTrigger).toHaveAttribute('data-copy-link-format', 'quote');
+  await page.evaluate(() => {
+    const span = document.querySelector<HTMLElement>('.text-layer span[data-item-index="0"]');
+    const quote = 'FlashAttention uses tiling';
+    const offset = span?.textContent?.indexOf(quote) ?? -1;
+    const text = span?.querySelector('.pdf-text-glyphs')?.firstChild;
+    if (!text || offset < 0) throw new Error('Expected selectable PDF text');
+    const range = document.createRange();
+    range.setStart(text, offset);
+    range.setEnd(text, offset + quote.length);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    document.querySelector('#page-container')?.dispatchEvent(new MouseEvent('mouseup', {
+      bubbles: true,
+      cancelable: true,
+    }));
+  });
+
+  await expect(page.locator('#selection-toolbar button')).toHaveText([
+    'Copy Link',
+    /Add to Chat/,
+  ]);
+  for (const label of [
+    'Ask about selection…',
+    'Insert Link',
+    'Copy Quote and Link',
+    'Insert Quote and Link',
+    'More',
+  ]) {
+    await expect(page.getByText(label, { exact: true })).toHaveCount(0);
+  }
+  await expect(page.getByRole('button', { name: 'Copy link format' })).toHaveCount(0);
 
   const rectangle = page.getByRole('button', { name: 'Copy embed link to rectangular selection' });
-  await rectangle.click();
-  await expect(rectangle).toHaveAttribute('aria-pressed', 'true');
-  await expect(page.getByRole('button', { name: 'Direct highlight' })).toHaveCount(0);
-  await expect(page.getByRole('group', { name: 'Highlight palette' })).toHaveCount(0);
+  await expect(rectangle).toBeVisible();
+
+  await page.evaluate(() => window.postMessage({
+    type: 'pdfDiscussionSnapshot',
+    annotations: [],
+    consentGranted: true,
+  }, '*'));
+  await expect(page.locator('.ask-pdf-panel, .pdf-discussion-marker')).toHaveCount(0);
+
+  await page.evaluate(() => {
+    const selection = window.getSelection();
+    if (!selection?.rangeCount) throw new Error('Expected an active PDF selection');
+    const rect = selection.getRangeAt(0).getBoundingClientRect();
+    const clientX = Math.round(rect.left + rect.width / 2);
+    const clientY = Math.round(rect.top + rect.height / 2);
+    const target = document.elementFromPoint(clientX, clientY);
+    if (!target) throw new Error('Expected a hit-test target inside the PDF selection');
+    target.dispatchEvent(new MouseEvent('contextmenu', {
+      bubbles: true,
+      cancelable: true,
+      clientX,
+      clientY,
+    }));
+  });
+  const menu = page.getByRole('menu');
+  await expect(menu).toBeVisible();
+  expect(await menu.getByRole('menuitem').allTextContents()).toEqual([
+    'Look up ...',
+    expect.stringMatching(/Add to Chat/),
+    'Copy link to selection',
+    'Copy selected text',
+  ]);
 });
 
 test('pdf viewer rectangular selection copies PDF++ coordinates in a one-shot drag', async ({ page }) => {
@@ -1575,7 +1629,7 @@ test('pdf text-fragment review drops a partial leading word from 32-character pr
   expect(Array.from(anchor.prefix).length).toBeLessThanOrEqual(32);
 });
 
-test('pdf selection toolbar exposes link and quote actions without legacy highlight action', async ({ page }) => {
+test('pdf selection toolbar emits the portable copy-link action', async ({ page }) => {
   await page.goto('http://localhost:8979/pdf-viewer.html');
   await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 1/, { timeout: 10_000 });
   await expect(page.locator('.text-layer span[data-item-index="0"]')).toBeVisible();
@@ -1605,20 +1659,16 @@ test('pdf selection toolbar exposes link and quote actions without legacy highli
   expect(latestSelectionMessage.anchor.snippet).toBe('FlashAttention uses tiling');
   expect(latestSelectionMessage.anchor.page).toBe(1);
 
-  await page.locator('#selection-toolbar button', { hasText: 'More' }).click();
-  await expect(page.locator('#selection-toolbar .menu.open')).toBeVisible();
-  await expect(page.locator('#selection-toolbar button', { hasText: 'Highlight Selection' })).toHaveCount(0);
-
   await page.evaluate(() => {
     window.__mockMessages = [];
   });
-  await page.locator('#selection-toolbar button', { hasText: 'Insert Quote and Link' }).click();
+  await page.locator('#selection-toolbar button', { hasText: 'Copy Link' }).click();
 
   const messages = await page.evaluate(() =>
     window.__mockMessages?.filter((message) => message.type === 'selectionAction')
   );
   expect(messages).toHaveLength(1);
-  expect(messages[0].action).toBe('insertQuoteAndLink');
+  expect(messages[0].action).toBe('copyLink');
   expect(messages[0].anchor.snippet).toBe('FlashAttention uses tiling');
 });
 
@@ -1714,21 +1764,10 @@ test('pdf viewer exposes a PDF++-style context menu for selections and pages', a
   await expect(page.locator('#selection-toolbar')).toHaveCount(0);
   await expect(page.getByRole('menu').getByRole('menuitem')).toHaveText([
     'Look up ...',
-    'Ask about selection…',
     /(?:⌘L|Ctrl\+L)  Add to Chat/,
     'Copy link to selection',
     'Copy selected text',
-    'Copy quote and link',
-    'Insert link',
-    'Insert quote and link',
   ]);
-  if (process.platform === 'darwin') {
-    await expect(page.getByRole('menu')).toHaveScreenshot(
-      'pdf-context-menu-ask-selection.png',
-      { maxDiffPixels: 3 },
-    );
-  }
-
   await page.getByRole('menuitem', { name: 'Look up ...', exact: true }).click();
   await expect.poll(() => page.evaluate(() =>
     window.__mockMessages?.filter(message => message.type === 'lookupSelection')
@@ -1993,17 +2032,11 @@ test('pdf selection toolbar fuzzes all actions across synthetic and dragged sele
   await expectPdfViewerStable(page, errors, 'selection fuzz initial document', 1);
 
   for (const actionCase of [
-    { label: 'Copy Link', action: 'copyLink', openMenu: false, start: 0, end: 14 },
-    { label: 'Insert Link', action: 'insertLink', openMenu: false, start: 15, end: 26 },
-    { label: 'Copy Quote and Link', action: 'copyQuoteAndLink', openMenu: true, start: 0, end: 26 },
-    { label: 'Insert Quote and Link', action: 'insertQuoteAndLink', openMenu: true, start: 27, end: 34 },
+    { label: 'Copy Link', action: 'copyLink', start: 0, end: 14 },
+    { label: 'Add to Chat', action: 'addToCursorChat', start: 15, end: 26 },
   ]) {
     await selectPdfTextRange(page, actionCase.start, actionCase.end);
     await expect(page.locator('#selection-toolbar')).toBeVisible();
-    if (actionCase.openMenu) {
-      await page.locator('#selection-toolbar button', { hasText: 'More' }).click();
-      await expect(page.locator('#selection-toolbar .menu.open')).toBeVisible();
-    }
     await page.evaluate(() => {
       window.__mockMessages = [];
     });
