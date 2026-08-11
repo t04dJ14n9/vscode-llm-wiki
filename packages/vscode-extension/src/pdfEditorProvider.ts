@@ -68,9 +68,16 @@ export interface PdfOutlineEntry {
 interface ActivePdfWebview {
   panel: vscode.WebviewPanel;
   pdfUri: vscode.Uri;
+  ready: boolean;
+  pendingAnchor?: PdfAnchorNavigation;
   selection?: PdfSelectionAnchor;
   outline?: PdfOutlineEntry[];
   postMessage(message: unknown): void;
+}
+
+interface PdfAnchorNavigation {
+  page?: number;
+  textFragment?: PdfTextFragment;
 }
 
 interface MarkdownInsertTarget {
@@ -193,6 +200,19 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
     return this.activeKey ? this.webviews.get(this.activeKey) : undefined;
   }
 
+  getActivePdfUri(): vscode.Uri | undefined {
+    const active = this.getActiveWebview();
+    if (active) return active.pdfUri;
+
+    let visible: ActivePdfWebview | undefined;
+    for (const candidate of this.webviews.values()) {
+      if (!candidate.panel.visible) continue;
+      if (visible) return undefined;
+      visible = candidate;
+    }
+    return visible?.pdfUri;
+  }
+
   getPdfOutline(uri: vscode.Uri): readonly PdfOutlineEntry[] | undefined {
     return this.webviews.get(uri.toString())?.outline;
   }
@@ -263,8 +283,12 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
   }
 
   async openPdfAtTarget(pdfPath: string, page?: number, textFragment?: PdfTextFragment): Promise<void> {
-    const decodedPath = decodePath(pdfPath);
-    const pdfUri = vscode.Uri.file(path.isAbsolute(decodedPath) ? decodedPath : path.join(this.documentRoot, decodedPath));
+    const resolvedPath = resolvePdfTargetPath(this.documentRoot, pdfPath);
+    if (!resolvedPath) {
+      vscode.window.showErrorMessage(`Cannot open PDF outside the document root: ${pdfPath}`);
+      return;
+    }
+    const pdfUri = vscode.Uri.file(resolvedPath);
     const key = pdfUri.toString();
 
     await vscode.commands.executeCommand('vscode.openWith', pdfUri, PdfEditorProvider.viewType);
@@ -276,9 +300,7 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
       ...(textFragment ? { textFragment } : {}),
     };
 
-    if (Object.keys(payload).length > 0) {
-      info.postMessage({ type: 'goToAnchor', anchor: payload });
-    }
+    if (Object.keys(payload).length > 0) this.postAnchorWhenReady(info, payload);
   }
 
   async openCustomDocument(
@@ -296,8 +318,9 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
   ): Promise<void> {
     const pdfUri = document.uri;
     const key = pdfUri.toString();
+    const webview = webviewPanel.webview;
 
-    webviewPanel.webview.options = {
+    webview.options = {
       enableScripts: true,
       localResourceRoots: [vscode.Uri.joinPath(this.context.extensionUri, 'dist')],
     };
@@ -305,8 +328,9 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
     const active: ActivePdfWebview = {
       panel: webviewPanel,
       pdfUri,
+      ready: false,
       postMessage: (message: unknown) => {
-        void webviewPanel.webview.postMessage(message);
+        void webview.postMessage(message);
       },
     };
     this.webviews.set(key, active);
@@ -316,15 +340,18 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
       await vscode.commands.executeCommand('setContext', 'humanLearningPdfHasSelection', false);
     }
 
-    webviewPanel.webview.onDidReceiveMessage(async (message: any) => {
+    webview.onDidReceiveMessage(async (message: any) => {
       if (isPdfDiscussionMessage(message)) {
-        await this.handlePdfDiscussionMessage(webviewPanel.webview, pdfUri, message);
+        await this.handlePdfDiscussionMessage(webview, pdfUri, message);
         return;
       }
       switch (message?.type) {
-        case 'ready':
-          await this.loadPdf(webviewPanel.webview, pdfUri);
+        case 'ready': {
+          active.ready = true;
+          await this.loadPdf(webview, pdfUri);
+          this.flushPendingAnchor(active);
           break;
+        }
         case 'selectionAction':
           await this.handleSelectionAction(
             pdfUri,
@@ -376,7 +403,7 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
       this.activeKey = key;
       await vscode.commands.executeCommand('setContext', 'humanLearningPdfOpen', true);
       await vscode.commands.executeCommand('setContext', 'humanLearningPdfHasSelection', Boolean(active.selection));
-      await this.sendPdfDiscussionState(webviewPanel.webview, pdfUri);
+      await this.sendPdfDiscussionState(webview, pdfUri);
       this.firePdfOutlineChanged(pdfUri);
     });
 
@@ -390,9 +417,7 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
       }
     });
 
-    webviewPanel.webview.html = this.getHtml(webviewPanel.webview);
-    setTimeout(() => void this.loadPdf(webviewPanel.webview, pdfUri), 750);
-    setTimeout(() => void this.loadPdf(webviewPanel.webview, pdfUri), 2000);
+    webview.html = this.getHtml(webview);
   }
 
   private firePdfOutlineChanged(uri: vscode.Uri): void {
@@ -903,6 +928,24 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
     }
     vscode.window.showErrorMessage('Timed out opening PDF webview');
     return undefined;
+  }
+
+  private postAnchorWhenReady(
+    active: ActivePdfWebview,
+    anchor: PdfAnchorNavigation,
+  ): void {
+    if (!active.ready) {
+      active.pendingAnchor = anchor;
+      return;
+    }
+    active.postMessage({ type: 'goToAnchor', anchor });
+  }
+
+  private flushPendingAnchor(active: ActivePdfWebview): void {
+    const anchor = active.pendingAnchor;
+    if (!anchor) return;
+    active.pendingAnchor = undefined;
+    active.postMessage({ type: 'goToAnchor', anchor });
   }
 
   private getHtml(webview: vscode.Webview): string {
@@ -1626,8 +1669,17 @@ function isPdfSelectionAction(value: unknown): value is PdfSelectionAction {
     || value === 'copyRectEmbed';
 }
 
-function decodePath(input: string): string {
-  return input.split('/').map(segment => decodeURIComponent(segment)).join('/');
+function resolvePdfTargetPath(documentRoot: string, pdfPath: string): string | undefined {
+  if (path.isAbsolute(pdfPath)) return pdfPath;
+  const root = path.resolve(documentRoot);
+  const candidate = path.resolve(root, pdfPath);
+  const fromRoot = path.relative(root, candidate);
+  if (
+    fromRoot === '..'
+    || fromRoot.startsWith(`..${path.sep}`)
+    || path.isAbsolute(fromRoot)
+  ) return undefined;
+  return candidate;
 }
 
 function formatPdfLinkLabel(relPath: string, page: number): string {

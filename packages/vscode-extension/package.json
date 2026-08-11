@@ -18,8 +18,10 @@
   ],
   "activationEvents": [
     "onStartupFinished",
+    "onUri",
     "onCustomEditor:human-learning.pdfViewer",
     "onCustomEditor:human-learning.markdownEditor",
+    "onCustomEditor:human-learning.anchorFile",
     "workspaceContains:**/*.md",
     "workspaceContains:**/*.pdf"
   ],
@@ -51,6 +53,16 @@
         "selector": [
           {
             "filenamePattern": "*.md"
+          }
+        ],
+        "priority": "default"
+      },
+      {
+        "viewType": "human-learning.anchorFile",
+        "displayName": "Human Learning Passage Link",
+        "selector": [
+          {
+            "filenamePattern": "*.hlanchor"
           }
         ],
         "priority": "default"

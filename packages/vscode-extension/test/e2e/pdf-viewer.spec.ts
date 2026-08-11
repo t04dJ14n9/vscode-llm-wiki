@@ -682,6 +682,26 @@ test('pdf viewer search bar finds text and uses compact VS Code find-widget layo
   await expect(page.locator('#pdf-search-count')).toHaveText('1 of 1');
 });
 
+test('pdf search publishes a cached current-page match before indexing a large document', async ({ page }) => {
+  await page.goto('http://localhost:8979/pdf-viewer.html?fixture=ddia-local');
+  await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 613/, { timeout: 15_000 });
+
+  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+F' : 'Control+F');
+  const input = page.locator('#pdf-search-input');
+  const immediateCount = await input.evaluate((element: HTMLInputElement) => {
+    element.value = 'a';
+    element.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: 'a' }));
+    return document.querySelector('#pdf-search-count')?.textContent ?? '';
+  });
+
+  expect(immediateCount).toBe('Searching…');
+  await expect(input).toHaveValue('a');
+  await expect(page.locator('#pdf-search-count')).toHaveText(
+    /^\d+ of \d+(?: · Searching…)?$/,
+    { timeout: 500 },
+  );
+});
+
 test('pdf viewer search finds phrases split across PDF text rects', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 720 });
   await page.goto('http://localhost:8979/pdf-viewer.html?fixture=split-search');
@@ -891,6 +911,16 @@ test('pdf goToAnchor scopes text-fragment matching to the requested page', async
   await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 2/, { timeout: 10_000 });
 
   await page.evaluate(() => {
+    const originalScrollIntoView = Element.prototype.scrollIntoView;
+    (window as unknown as { __hlAnchorScrollBehavior?: ScrollBehavior })
+      .__hlAnchorScrollBehavior = undefined;
+    Element.prototype.scrollIntoView = function scrollIntoView(options?: boolean | ScrollIntoViewOptions) {
+      if (this.classList.contains('anchor-highlight') && typeof options === 'object') {
+        (window as unknown as { __hlAnchorScrollBehavior?: ScrollBehavior })
+          .__hlAnchorScrollBehavior = options.behavior;
+      }
+      return originalScrollIntoView.call(this, options);
+    };
     window.postMessage({
       type: 'goToAnchor',
       page: 2,
@@ -901,6 +931,60 @@ test('pdf goToAnchor scopes text-fragment matching to the requested page', async
   await expect(page.locator('#page-info')).toHaveText(/Page 2 \/ 2/);
   await expect(page.locator('#page-1 .anchor-highlight')).toHaveCount(0);
   await expect(page.locator('#page-2 .anchor-highlight')).toHaveCount(1);
+  await expect.poll(() => page.evaluate(() =>
+    (window as unknown as { __hlAnchorScrollBehavior?: ScrollBehavior })
+      .__hlAnchorScrollBehavior
+  )).toBe('auto');
+});
+
+test('pdf goToAnchor keeps its requested page through stale intersection updates', async ({ page }) => {
+  await installIntersectionObserverHarness(page);
+  await page.goto('http://localhost:8979/pdf-viewer.html?fixture=four-page');
+  await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 4/, { timeout: 10_000 });
+
+  const zoomInput = page.getByRole('spinbutton', { name: 'Zoom' });
+  await zoomInput.fill('64');
+  await zoomInput.press('Enter');
+  await expect(zoomInput).toHaveValue('64');
+
+  const pageInput = page.locator('#page-input');
+  await pageInput.fill('3');
+  await pageInput.press('Enter');
+  await expect(page.locator('#page-info')).toHaveText(/Page 3 \/ 4/);
+  await page.evaluate(() => new Promise<void>(resolve => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+  }));
+
+  await page.evaluate(() => {
+    window.dispatchEvent(new MessageEvent('message', {
+      data: {
+        type: 'goToAnchor',
+        page: 4,
+        textFragment: { textStart: 'Page Four' },
+      },
+    }));
+    // This represents the observer batch that was computed for the old
+    // viewport while the target page is still rendering.
+    (window as any).__emitPdfPageIntersections([
+      [3, 0.9],
+      [4, 0.4],
+    ]);
+  });
+
+  await expect(page.locator('#page-4 .anchor-highlight')).toHaveCount(1);
+  await expect(page.locator('#page-info')).toHaveText(/Page 4 \/ 4/);
+  await expect(page.locator('#page-input')).toHaveValue('4');
+
+  await page.evaluate(() => new Promise<void>(resolve => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+  }));
+  await page.evaluate(() => {
+    (window as any).__emitPdfPageIntersections([
+      [3, 0.7],
+      [4, 0.7],
+    ]);
+  });
+  await expect(page.locator('#page-info')).toHaveText(/Page 4 \/ 4/);
 });
 
 test('pdf goToAnchor still changes page when its text fragment misses', async ({ page }) => {

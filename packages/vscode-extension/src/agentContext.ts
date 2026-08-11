@@ -12,12 +12,15 @@ import {
 } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
+import { pathToFileURL } from 'node:url';
 import type { SelectionContext } from './selectionContext';
 import {
   getBacklinks,
   getForwardLinks,
   loadFilesystemWiki,
 } from './filesystemWiki';
+import { encodeAnchorFile } from './anchorFileCodec';
+import { humanLearningOpenAnchorUri } from './anchorUris';
 import { notePathToUri } from './wikiLinks';
 
 export interface AddSelectionToContextOptions {
@@ -28,6 +31,7 @@ export interface SelectionContextExportResult {
   directoryPath: string;
   markdownPath: string;
   jsonPath: string;
+  anchorPath?: string;
 }
 
 const AGENT_CONTEXT_WIKI_LIMITS = {
@@ -61,13 +65,27 @@ export async function addSelectionToContext(
     return false;
   }
 
-  const anchorUri = activeSelection.anchorUri ?? `${notePathToUri(relPath)}#L${startLine}-L${endLine}`;
+  const anchorUri = activeSelection.anchorUri
+    ?? defaultSelectionAnchor(relPath, startLine, endLine);
+  const openUri = humanLearningOpenAnchorUri(anchorUri);
+  const anchorFile = /^https?:\/\//i.test(anchorUri)
+    ? undefined
+    : safeEncodeAnchorFile(anchorUri, vaultRoot);
+  const layout = secureExportLayout(vaultRoot);
+  const exportPaths = createSelectionExportPaths(layout, anchorFile?.fileName);
+  const chatUri = /^https?:\/\//i.test(anchorUri)
+    ? anchorUri
+    : exportPaths.anchorPath
+      ? pathToFileURL(exportPaths.anchorPath).toString()
+      : undefined;
   const fence = markdownFenceFor(text);
+  const sourceLabel = markdownLinkLabel(`${relPath} (${rangeLabel})`);
   const mdContent = `# Current Selection
 
-**Source**: ${relPath} (${rangeLabel})
-**Anchor**: ${anchorUri}
-**Visual evidence**: sibling \`selection.png\` when present
+**Source**: ${chatUri ? `[${sourceLabel}](<${chatUri}>)` : sourceLabel}
+${chatUri
+    ? '**Citation requirement**: In chat responses, reuse the exact Source link above. Do not construct a relative file or PDF link.\n'
+    : ''}**Visual evidence**: sibling \`selection.png\` when present
 
 ${fence}
 ${text}
@@ -78,6 +96,8 @@ ${fence}
   const jsonContent = {
     source: relPath,
     anchor_uri: anchorUri,
+    ...(openUri ? { open_uri: openUri } : {}),
+    ...(chatUri ? { chat_uri: chatUri } : {}),
     lines: { start: startLine, end: endLine },
     location: rangeLabel,
     text,
@@ -91,8 +111,13 @@ ${fence}
     })),
   };
   const jsonText = JSON.stringify(jsonContent, null, 2);
-  const layout = secureExportLayout(vaultRoot);
-  const exported = publishSelection(layout, mdContent, jsonText);
+  const exported = publishSelection(
+    layout,
+    exportPaths,
+    mdContent,
+    jsonText,
+    anchorFile?.text,
+  );
 
   await serializeAliasUpdate(() => {
     validateExportResult(exported);
@@ -125,6 +150,36 @@ function markdownFenceFor(text: string): string {
     longestRun = Math.max(longestRun, match[0].length);
   }
   return '`'.repeat(Math.max(3, longestRun + 1));
+}
+
+function defaultSelectionAnchor(
+  relPath: string,
+  startLine: number,
+  endLine: number,
+): string {
+  const lineFragment = `#L${startLine}-L${endLine}`;
+  return /\.md$/i.test(relPath)
+    ? `${notePathToUri(relPath)}${lineFragment}`
+    : `${relPath}${lineFragment}`;
+}
+
+function markdownLinkLabel(value: string): string {
+  return value
+    .replace(/[\r\n]+/g, ' ')
+    .replaceAll('\\', '\\\\')
+    .replaceAll('[', '\\[')
+    .replaceAll(']', '\\]');
+}
+
+function safeEncodeAnchorFile(
+  target: string,
+  vaultRoot: string,
+): ReturnType<typeof encodeAnchorFile> {
+  try {
+    return encodeAnchorFile(target, vaultRoot);
+  } catch {
+    return undefined;
+  }
 }
 
 export async function syncSelectionExportAttachment(
@@ -183,6 +238,8 @@ interface ExportLayout {
   exportsDir: string;
 }
 
+type SelectionExportPaths = SelectionContextExportResult;
+
 function secureExportLayout(vaultRoot: string): ExportLayout {
   const rootPath = resolve(vaultRoot);
   assertDirectory(rootPath);
@@ -205,18 +262,60 @@ function secureExportLayout(vaultRoot: string): ExportLayout {
   return { rootRealPath, agentDir, exportsDir: current };
 }
 
+function createSelectionExportPaths(
+  layout: ExportLayout,
+  anchorFileName?: string,
+): SelectionExportPaths {
+  if (
+    anchorFileName !== undefined
+    && !/^source-[a-f0-9]{64}\.hlanchor$/.test(anchorFileName)
+  ) {
+    throw new Error('Selection anchor filename is invalid.');
+  }
+  const directoryPath = join(layout.exportsDir, randomUUID());
+  return {
+    directoryPath,
+    markdownPath: join(directoryPath, 'selection.md'),
+    jsonPath: join(directoryPath, 'selection.json'),
+    ...(anchorFileName
+      ? { anchorPath: join(directoryPath, anchorFileName) }
+      : {}),
+  };
+}
+
 function publishSelection(
   layout: ExportLayout,
+  paths: SelectionExportPaths,
   markdown: string,
   json: string,
+  anchor?: string,
 ): SelectionContextExportResult {
-  const id = randomUUID();
-  const directoryPath = join(layout.exportsDir, id);
+  const directoryPath = resolve(paths.directoryPath);
+  const id = basename(directoryPath);
+  const anchorFileName = paths.anchorPath ? basename(paths.anchorPath) : undefined;
+  if (
+    dirname(directoryPath) !== layout.exportsDir
+    || id.startsWith('.')
+    || Boolean(anchorFileName) !== Boolean(anchor)
+    || (
+      anchorFileName !== undefined
+      && !/^source-[a-f0-9]{64}\.hlanchor$/.test(anchorFileName)
+    )
+    || resolve(paths.markdownPath) !== join(directoryPath, 'selection.md')
+    || resolve(paths.jsonPath) !== join(directoryPath, 'selection.json')
+    || (
+      paths.anchorPath !== undefined
+      && resolve(paths.anchorPath) !== join(directoryPath, anchorFileName ?? '')
+    )
+  ) throw new Error('Selection export paths are invalid.');
   const stagingPath = join(layout.exportsDir, `.${id}.${randomUUID()}.tmp`);
   mkdirSync(stagingPath, { mode: 0o700 });
   try {
     writeFileSync(join(stagingPath, 'selection.md'), markdown, { flag: 'wx', mode: 0o600 });
     writeFileSync(join(stagingPath, 'selection.json'), json, { flag: 'wx', mode: 0o600 });
+    if (anchorFileName && anchor) {
+      writeFileSync(join(stagingPath, anchorFileName), anchor, { flag: 'wx', mode: 0o600 });
+    }
     renameSync(stagingPath, directoryPath);
   } catch (error) {
     rmSync(stagingPath, { recursive: true, force: true });
@@ -224,11 +323,7 @@ function publishSelection(
   }
   assertDirectory(directoryPath);
   assertConfined(layout.rootRealPath, realpathSync(directoryPath));
-  return {
-    directoryPath,
-    markdownPath: join(directoryPath, 'selection.md'),
-    jsonPath: join(directoryPath, 'selection.json'),
-  };
+  return paths;
 }
 
 function validateExportResult(exported: SelectionContextExportResult): ExportLayout {
@@ -237,6 +332,9 @@ function validateExportResult(exported: SelectionContextExportResult): ExportLay
   const agentDir = dirname(exportsDir);
   const hlDir = dirname(agentDir);
   const rootPath = dirname(hlDir);
+  const anchorFileName = exported.anchorPath
+    ? basename(exported.anchorPath)
+    : undefined;
   if (
     basename(exportsDir) !== 'exports'
     || basename(agentDir) !== 'agent'
@@ -244,6 +342,14 @@ function validateExportResult(exported: SelectionContextExportResult): ExportLay
     || basename(directoryPath).startsWith('.')
     || resolve(exported.markdownPath) !== join(directoryPath, 'selection.md')
     || resolve(exported.jsonPath) !== join(directoryPath, 'selection.json')
+    || (
+      anchorFileName !== undefined
+      && !/^source-[a-f0-9]{64}\.hlanchor$/.test(anchorFileName)
+    )
+    || (
+      exported.anchorPath !== undefined
+      && resolve(exported.anchorPath) !== join(directoryPath, anchorFileName ?? '')
+    )
   ) throw new Error('Selection export paths are invalid.');
 
   assertDirectory(rootPath);
@@ -252,7 +358,11 @@ function validateExportResult(exported: SelectionContextExportResult): ExportLay
     assertDirectory(path);
     assertConfined(rootRealPath, realpathSync(path));
   }
-  for (const path of [exported.markdownPath, exported.jsonPath]) assertRegularFile(path);
+  for (const path of [
+    exported.markdownPath,
+    exported.jsonPath,
+    ...(exported.anchorPath ? [exported.anchorPath] : []),
+  ]) assertRegularFile(path);
   for (const name of ['selection.md', 'selection.json', 'selection.png']) {
     assertAliasTarget(join(agentDir, name));
   }

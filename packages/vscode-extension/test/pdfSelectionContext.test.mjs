@@ -266,13 +266,7 @@ test('combined PDF context keys clear on deactivation and restore with its selec
     },
     onDidDispose: () => ({ dispose() {} }),
   };
-  const originalSetTimeout = globalThis.setTimeout;
-  globalThis.setTimeout = () => 0;
-  try {
-    await provider.resolveCustomEditor({ uri: pdfUri }, panel, {});
-  } finally {
-    globalThis.setTimeout = originalSetTimeout;
-  }
+  await provider.resolveCustomEditor({ uri: pdfUri }, panel, {});
   await provider.updateActiveSelection(pdfUri.toString(), {
     page: 4,
     snippet: 'Selected text',
@@ -297,6 +291,50 @@ test('combined PDF context keys clear on deactivation and restore with its selec
     ['setContext', 'humanLearningPdfOpen', true],
     ['setContext', 'humanLearningPdfHasSelection', true],
   ]);
+});
+
+test('PDF provider falls back to one visible PDF without guessing between visible panels', () => {
+  const vscode = {
+    commands: {
+      executeCommand: async () => undefined,
+    },
+    Uri: {
+      joinPath: (...parts) => ({ parts }),
+    },
+  };
+  const { PdfEditorProvider } = loadTsModule('src/pdfEditorProvider.ts', {
+    vscode,
+    '@human-learning/core': { pdfHref: portablePdfHref },
+  });
+  const provider = new PdfEditorProvider(
+    { extensionUri: { fsPath: '/extension' }, subscriptions: [] },
+    '/vault',
+  );
+  const firstUri = {
+    fsPath: '/vault/raw/pdf/first.pdf',
+    toString: () => 'file:///vault/raw/pdf/first.pdf',
+  };
+  const secondUri = {
+    fsPath: '/vault/raw/pdf/second.pdf',
+    toString: () => 'file:///vault/raw/pdf/second.pdf',
+  };
+  provider.webviews.set(firstUri.toString(), {
+    panel: { visible: true },
+    pdfUri: firstUri,
+    postMessage: () => undefined,
+  });
+
+  assert.equal(provider.getActivePdfUri(), firstUri);
+
+  provider.webviews.set(secondUri.toString(), {
+    panel: { visible: true },
+    pdfUri: secondUri,
+    postMessage: () => undefined,
+  });
+  assert.equal(provider.getActivePdfUri(), undefined);
+
+  provider.activeKey = secondUri.toString();
+  assert.equal(provider.getActivePdfUri(), secondUri);
 });
 
 test('PDF copy and insert link actions use portable URLs without persistence or highlight refreshes', async () => {
@@ -422,6 +460,7 @@ test('PDF provider transports page-scoped text fragments without database resolu
     provider.webviews.set('file:///vault/raw/pdf/paper.pdf', {
       panel: {},
       pdfUri: { fsPath: '/vault/raw/pdf/paper.pdf' },
+      ready: true,
       postMessage: message => { posted.push(message); },
     });
 
@@ -435,6 +474,192 @@ test('PDF provider transports page-scoped text fragments without database resolu
       type: 'goToAnchor',
       anchor: { page: 7, textFragment },
     }]);
+  }
+});
+
+test('PDF provider preserves encoded path text and rejects literal traversal', async () => {
+  const commandCalls = [];
+  const errors = [];
+  const vscode = {
+    workspace: {
+      asRelativePath: uri => uri.fsPath.replace('/vault/', ''),
+    },
+    window: {
+      showErrorMessage: message => {
+        errors.push(message);
+      },
+    },
+    commands: {
+      executeCommand: async (...args) => {
+        commandCalls.push(args);
+      },
+    },
+    Uri: {
+      file: fsPath => ({ fsPath, toString: () => `file://${fsPath}` }),
+      joinPath: (...parts) => ({ parts }),
+    },
+  };
+  const { PdfEditorProvider } = loadTsModule('src/pdfEditorProvider.ts', {
+    vscode,
+    '@human-learning/core': { pdfHref: portablePdfHref },
+  });
+  const provider = new PdfEditorProvider({ extensionUri: { fsPath: '/extension' } }, '/vault');
+  provider.webviews.set('file:///vault/%2e%2e/secret.pdf', {
+    panel: {},
+    pdfUri: { fsPath: '/vault/%2e%2e/secret.pdf' },
+    ready: true,
+    postMessage: () => undefined,
+  });
+
+  await provider.openPdfAtTarget('%2e%2e/secret.pdf');
+  await provider.openPdfAtTarget('../secret.pdf');
+
+  assert.equal(commandCalls.length, 1);
+  assert.equal(commandCalls[0][0], 'vscode.openWith');
+  assert.equal(commandCalls[0][1].fsPath, '/vault/%2e%2e/secret.pdf');
+  assert.equal(commandCalls[0][2], 'human-learning.pdfViewer');
+  assert.deepEqual(errors, [
+    'Cannot open PDF outside the document root: ../secret.pdf',
+  ]);
+});
+
+test('PDF provider queues anchor navigation until a newly opened webview is ready', async () => {
+  const posted = [];
+  const commandCalls = [];
+  let receiveMessage;
+  const pdfUri = {
+    scheme: 'file',
+    fsPath: '/vault/raw/pdf/paper.pdf',
+    toString: () => 'file:///vault/raw/pdf/paper.pdf',
+  };
+  const vscode = {
+    workspace: {
+      asRelativePath: uri => uri.fsPath.replace('/vault/', ''),
+      fs: {
+        readFile: async () => Uint8Array.from([1, 2, 3]),
+      },
+    },
+    window: {
+      showErrorMessage: message => assert.fail(message),
+    },
+    commands: {
+      executeCommand: async (...args) => {
+        commandCalls.push(args);
+      },
+    },
+    Uri: {
+      file: () => pdfUri,
+      joinPath: (...parts) => ({ parts, toString: () => 'vscode-resource' }),
+    },
+  };
+  const { PdfEditorProvider } = loadTsModule('src/pdfEditorProvider.ts', {
+    vscode,
+    '@human-learning/core': { pdfHref: portablePdfHref },
+  });
+  const provider = new PdfEditorProvider(
+    { extensionUri: { fsPath: '/extension' }, subscriptions: [] },
+    '/vault',
+  );
+  const webview = {
+    options: {},
+    cspSource: 'vscode-webview:',
+    asWebviewUri: uri => uri,
+    onDidReceiveMessage: listener => {
+      receiveMessage = listener;
+      return { dispose() {} };
+    },
+    postMessage: async message => {
+      posted.push(message);
+      return true;
+    },
+  };
+  const panel = {
+    active: true,
+    webview,
+    onDidChangeViewState: () => ({ dispose() {} }),
+    onDidDispose: () => ({ dispose() {} }),
+  };
+  await provider.resolveCustomEditor({ uri: pdfUri }, panel, {});
+
+  const textFragment = { textStart: 'Selected text' };
+  await provider.openPdfAtTarget('raw/pdf/paper.pdf', 7, textFragment);
+  assert.equal(
+    posted.some(message => message.type === 'goToAnchor'),
+    false,
+    'navigation must wait for the webview message listener',
+  );
+
+  await receiveMessage({ type: 'ready' });
+
+  assert.deepEqual(
+    posted.map(message => message.type),
+    ['loadPdf', 'goToAnchor'],
+  );
+  assert.deepEqual(posted[1], {
+    type: 'goToAnchor',
+    anchor: { page: 7, textFragment },
+  });
+  assert.deepEqual(commandCalls.at(-1), [
+    'vscode.openWith',
+    pdfUri,
+    'human-learning.pdfViewer',
+  ]);
+});
+
+test('PDF provider does not schedule delayed loads that can outlive disposed webviews', async () => {
+  let disposePanel;
+  const pdfUri = {
+    scheme: 'file',
+    fsPath: '/vault/raw/pdf/paper.pdf',
+    toString: () => 'file:///vault/raw/pdf/paper.pdf',
+  };
+  const vscode = {
+    workspace: {
+      asRelativePath: uri => uri.fsPath.replace('/vault/', ''),
+      fs: {
+        readFile: async () => assert.fail('disposed delayed load must not read the PDF'),
+      },
+    },
+    window: {
+      showErrorMessage: message => assert.fail(message),
+    },
+    commands: {
+      executeCommand: async () => undefined,
+    },
+    Uri: {
+      joinPath: (...parts) => ({ parts, toString: () => 'vscode-resource' }),
+    },
+  };
+  const { PdfEditorProvider } = loadTsModule('src/pdfEditorProvider.ts', {
+    vscode,
+    '@human-learning/core': { pdfHref: portablePdfHref },
+  });
+  const provider = new PdfEditorProvider(
+    { extensionUri: { fsPath: '/extension' }, subscriptions: [] },
+    '/vault',
+  );
+  const panel = {
+    active: true,
+    webview: {
+      options: {},
+      cspSource: 'vscode-webview:',
+      asWebviewUri: uri => uri,
+      onDidReceiveMessage: () => ({ dispose() {} }),
+      postMessage: async () => true,
+    },
+    onDidChangeViewState: () => ({ dispose() {} }),
+    onDidDispose: listener => {
+      disposePanel = listener;
+      return { dispose() {} };
+    },
+  };
+  const originalSetTimeout = globalThis.setTimeout;
+  globalThis.setTimeout = () => assert.fail('PDF loading must wait for the webview ready handshake');
+  try {
+    await provider.resolveCustomEditor({ uri: pdfUri }, panel, {});
+    await disposePanel();
+  } finally {
+    globalThis.setTimeout = originalSetTimeout;
   }
 });
 

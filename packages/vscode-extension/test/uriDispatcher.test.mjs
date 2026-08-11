@@ -8,6 +8,7 @@ import {
   readFileSync,
   rmSync,
   symlinkSync,
+  writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -16,7 +17,25 @@ import ts from 'typescript';
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
+function productAnchorUri(target) {
+  return 'cursor://human-learning.human-learning-vscode/open-anchor?target='
+    + `v1.${Buffer.from(target, 'utf8').toString('base64url')}`;
+}
+
 function loadTsModule(relativePath, mocks = {}) {
+  const moduleMocks = {
+    './anchorUris': {
+      humanLearningAnchorTargetFromString: value => {
+        const prefix =
+          'cursor://human-learning.human-learning-vscode/open-anchor?target=';
+        if (!value.startsWith(prefix)) return undefined;
+        const encoded = value.slice(prefix.length);
+        if (!encoded.startsWith('v1.')) return undefined;
+        return Buffer.from(encoded.slice(3), 'base64url').toString('utf8');
+      },
+    },
+    ...mocks,
+  };
   const filename = join(packageRoot, relativePath);
   const source = readFileSync(filename, 'utf8');
   const { outputText } = ts.transpileModule(source, {
@@ -32,14 +51,14 @@ function loadTsModule(relativePath, mocks = {}) {
   mod.paths = Module._nodeModulePaths(dirname(filename));
   const originalLoad = Module._load;
   Module._load = function patchedLoad(request, parent, isMain) {
-    if (Object.prototype.hasOwnProperty.call(mocks, request)) {
+    if (Object.prototype.hasOwnProperty.call(moduleMocks, request)) {
       if (request === 'fs') {
         return {
           ...originalLoad.call(this, request, parent, isMain),
-          ...mocks[request],
+          ...moduleMocks[request],
         };
       }
-      return mocks[request];
+      return moduleMocks[request];
     }
     return originalLoad.call(this, request, parent, isMain);
   };
@@ -487,6 +506,171 @@ test('dispatchUri transports portable PDF text fragments without database lookup
   }
 });
 
+test('dispatchUri unwraps Human Learning product links before opening an anchored PDF', async () => {
+  const executeCommandCalls = [];
+  const classifiedUris = [];
+  const portableUri =
+    'raw/pdf/ddia.pdf#page=25:~:text=The%20Internet%20was%20done%20so%20well';
+  const productUri = productAnchorUri(portableUri);
+  const vscode = createVscodeMock({
+    executeCommandCalls,
+    openTextDocumentCalls: [],
+    showTextDocumentCalls: [],
+    document: undefined,
+  });
+  const { dispatchUri } = loadTsModule('src/uriDispatcher.ts', {
+    vscode,
+    '@human-learning/core': {
+      classifyReferenceTarget: uri => {
+        classifiedUris.push(uri);
+        return {
+          kind: 'pdf',
+          uri,
+          path: 'raw/pdf/ddia.pdf',
+          page: 25,
+          textFragment: { textStart: 'The Internet was done so well' },
+        };
+      },
+    },
+  });
+
+  await dispatchUri('/vault', productUri);
+
+  assert.deepEqual(classifiedUris, [portableUri]);
+  assert.deepEqual(executeCommandCalls, [[
+    'human-learning.openPdfTarget',
+    {
+      pdfPath: 'raw/pdf/ddia.pdf',
+      page: 25,
+      textFragment: { textStart: 'The Internet was done so well' },
+    },
+  ]]);
+});
+
+test('dispatchUri opens local anchor bridge file links with their dedicated editor', async () => {
+  const executeCommandCalls = [];
+  const errorMessages = [];
+  const anchorUri =
+    'file:///vault/.hl/agent/exports/export-1/'
+    + `source-${'a'.repeat(64)}.hlanchor`;
+  const vscode = createVscodeMock({
+    executeCommandCalls,
+    openTextDocumentCalls: [],
+    showTextDocumentCalls: [],
+    document: undefined,
+    errorMessages,
+  });
+  const { dispatchUri } = loadTsModule('src/uriDispatcher.ts', {
+    vscode,
+    '@human-learning/core': {
+      classifyReferenceTarget: uri => ({
+        kind: 'unknown',
+        uri,
+        path: uri,
+      }),
+    },
+  });
+
+  await dispatchUri('/vault', anchorUri);
+
+  assert.equal(executeCommandCalls.length, 1);
+  assert.equal(executeCommandCalls[0][0], 'vscode.openWith');
+  assert.equal(executeCommandCalls[0][1].toString(), anchorUri);
+  assert.equal(executeCommandCalls[0][2], 'human-learning.anchorFile');
+  assert.deepEqual(errorMessages, []);
+});
+
+test('trusted workspaces can open a final PDF file symlink without allowing symlinked directories', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'hl-uri-pdf-root-'));
+  const outside = mkdtempSync(join(tmpdir(), 'hl-uri-pdf-outside-'));
+  try {
+    mkdirSync(join(root, 'raw', 'pdf'), { recursive: true });
+    const outsidePdf = join(outside, 'paper.pdf');
+    writeFileSync(outsidePdf, '%PDF-1.7\n');
+    symlinkSync(outsidePdf, join(root, 'raw', 'pdf', 'paper.pdf'));
+    symlinkSync(outside, join(root, 'linked-pdfs'), 'dir');
+
+    const executeCommandCalls = [];
+    const errorMessages = [];
+    const vscode = createVscodeMock({
+      executeCommandCalls,
+      openTextDocumentCalls: [],
+      showTextDocumentCalls: [],
+      errorMessages,
+      document: undefined,
+      workspaceTrusted: true,
+    });
+    const { dispatchUri } = loadTsModule('src/uriDispatcher.ts', {
+      vscode,
+      '@human-learning/core': {
+        classifyReferenceTarget: uri => ({
+          kind: 'pdf',
+          uri,
+          path: uri.split('#')[0],
+          page: 2,
+        }),
+      },
+    });
+
+    await dispatchUri(root, 'raw/pdf/paper.pdf#page=2');
+    await dispatchUri(root, 'linked-pdfs/paper.pdf#page=2');
+
+    assert.deepEqual(executeCommandCalls, [[
+      'human-learning.openPdfTarget',
+      { pdfPath: 'raw/pdf/paper.pdf', page: 2 },
+    ]]);
+    assert.deepEqual(errorMessages, [
+      'Cannot open link outside the workspace: linked-pdfs/paper.pdf',
+    ]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
+  }
+});
+
+test('untrusted workspaces reject final PDF file symlinks', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'hl-uri-pdf-untrusted-root-'));
+  const outside = mkdtempSync(join(tmpdir(), 'hl-uri-pdf-untrusted-outside-'));
+  try {
+    mkdirSync(join(root, 'raw', 'pdf'), { recursive: true });
+    const outsidePdf = join(outside, 'paper.pdf');
+    writeFileSync(outsidePdf, '%PDF-1.7\n');
+    symlinkSync(outsidePdf, join(root, 'raw', 'pdf', 'paper.pdf'));
+
+    const executeCommandCalls = [];
+    const errorMessages = [];
+    const vscode = createVscodeMock({
+      executeCommandCalls,
+      openTextDocumentCalls: [],
+      showTextDocumentCalls: [],
+      errorMessages,
+      document: undefined,
+      workspaceTrusted: false,
+    });
+    const { dispatchUri } = loadTsModule('src/uriDispatcher.ts', {
+      vscode,
+      '@human-learning/core': {
+        classifyReferenceTarget: uri => ({
+          kind: 'pdf',
+          uri,
+          path: 'raw/pdf/paper.pdf',
+          page: 2,
+        }),
+      },
+    });
+
+    await dispatchUri(root, 'raw/pdf/paper.pdf#page=2');
+
+    assert.deepEqual(executeCommandCalls, []);
+    assert.deepEqual(errorMessages, [
+      'Cannot open link outside the workspace: raw/pdf/paper.pdf',
+    ]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
+  }
+});
+
 test('dispatchUri no longer resolves direct internal PDF anchor IDs', async () => {
   for (const relativePath of ['src/uriDispatcher.ts']) {
     const executeCommandCalls = [];
@@ -624,6 +808,7 @@ function createVscodeMock({
   executeCommand,
   openExternalCalls = [],
   errorMessages = [],
+  workspaceTrusted = true,
 }) {
   return {
     Uri: {
@@ -631,6 +816,7 @@ function createVscodeMock({
       parse: value => ({ toString: () => value }),
     },
     workspace: {
+      isTrusted: workspaceTrusted,
       openTextDocument: async (...args) => {
         openTextDocumentCalls.push(args);
         return document;

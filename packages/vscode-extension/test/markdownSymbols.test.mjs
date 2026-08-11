@@ -342,6 +342,38 @@ test('outline tree provider reads nested PDF bookmarks from the active custom PD
   ]]);
 });
 
+test('outline tree provider falls back to the active PDF source when the custom tab input omits its URI', async () => {
+  const uri = {
+    scheme: 'file',
+    fsPath: '/vault/books/rendering.pdf',
+    toString: () => 'file:///vault/books/rendering.pdf',
+  };
+  const vscode = createVscodeMock();
+  const { MarkdownOutlineTreeProvider } = loadTsModule('src/markdownSymbols.ts', { vscode });
+  const provider = new MarkdownOutlineTreeProvider({
+    getActivePdfUri: () => uri,
+    getPdfOutline: requestedUri => {
+      assert.equal(requestedUri, uri);
+      return [{
+        title: 'Active PDF bookmark',
+        destination: {
+          pageIndex: 24,
+          zoom: { mode: 3 },
+          view: [300],
+        },
+        children: [],
+      }];
+    },
+    onDidChangePdfOutline: () => ({ dispose() {} }),
+  });
+
+  const roots = await provider.getChildren();
+
+  assert.equal(roots.length, 1);
+  assert.equal(roots[0].label, 'Active PDF bookmark');
+  assert.equal(roots[0].description, 'p. 25');
+});
+
 test('outline tree provider distinguishes loading PDFs from PDFs without bookmarks', async () => {
   const uri = {
     scheme: 'file',

@@ -63,6 +63,26 @@ function loadTsModule(relativePath, mocks = {}) {
         cursorBrowserCaptureToSelectionContext: capture => capture,
       };
     }
+    if (request === './anchorUris') {
+      return {
+        humanLearningAnchorTarget: uri => {
+          if (
+            uri.scheme !== 'cursor'
+            || uri.authority !== 'human-learning.human-learning-vscode'
+            || uri.path !== '/open-anchor'
+          ) return undefined;
+          const encoded = new URLSearchParams(uri.query).get('target') ?? '';
+          return encoded.startsWith('v1.')
+            ? Buffer.from(encoded.slice(3), 'base64url').toString('utf8')
+            : undefined;
+        },
+      };
+    }
+    if (request === './anchorFileEditorProvider') {
+      return {
+        registerAnchorFileEditorProvider: () => undefined,
+      };
+    }
     if (request === './experimentalOwnedBrowser') {
       return {
         registerExperimentalOwnedBrowser: () => ({ dispose() {} }),
@@ -189,6 +209,67 @@ test('activation reopens an already-open markdown vault note in the custom edito
     ],
   );
   assert.equal(outlineRegisterCount, 1);
+});
+
+test('activation routes product URI anchor links through the Human Learning dispatcher', async () => {
+  const dispatchCalls = [];
+  const warningMessages = [];
+  const vscode = createVscodeMock({
+    executeCommandCalls: [],
+    activeDocumentUri: undefined,
+    warningMessages,
+  });
+  const mocks = createActivationMocks({ vscode });
+  mocks['./uriDispatcher'] = {
+    dispatchUri: async (...args) => {
+      dispatchCalls.push(args);
+    },
+  };
+  const { activate } = loadTsModule('src/extension.ts', mocks);
+
+  activate({ subscriptions: [] });
+
+  assert.equal(vscode.__registeredUriHandlers.length, 1);
+  const target =
+    'raw/pdf/ddia.pdf#page=25:~:text=The%20Internet%20was%20done%20so%20well';
+  const encodedTarget = `v1.${Buffer.from(target, 'utf8').toString('base64url')}`;
+  await vscode.__registeredUriHandlers[0].handleUri({
+    scheme: 'cursor',
+    authority: 'human-learning.human-learning-vscode',
+    path: '/open-anchor',
+    query: `target=${encodedTarget}`,
+  });
+  await vscode.__registeredUriHandlers[0].handleUri({
+    scheme: 'cursor',
+    authority: 'human-learning.human-learning-vscode',
+    path: '/unexpected',
+    query: `target=${encodedTarget}`,
+  });
+
+  assert.deepEqual(dispatchCalls, [['/vault', target]]);
+  assert.deepEqual(warningMessages, ['This Human Learning link is invalid.']);
+});
+
+test('activation registers one multi-root-aware immutable anchor-file bridge', () => {
+  const registrations = [];
+  const vscode = createVscodeMock({
+    executeCommandCalls: [],
+    activeDocumentUri: undefined,
+  });
+  const mocks = createActivationMocks({ vscode });
+  mocks['./anchorFileEditorProvider'] = {
+    registerAnchorFileEditorProvider: (context, options) => {
+      registrations.push({ context, options });
+    },
+  };
+  const { activate } = loadTsModule('src/extension.ts', mocks);
+  const context = { subscriptions: [] };
+
+  activate(context);
+
+  assert.equal(registrations.length, 1);
+  assert.equal(registrations[0].context, context);
+  assert.equal(registrations[0].options, undefined);
 });
 
 test('selection export follows the active Markdown or PDF tab and opens an agent handoff', async () => {
@@ -1969,11 +2050,13 @@ function createVscodeMock({
     dispose: () => undefined,
   };
   const registeredCommands = {};
+  const registeredUriHandlers = [];
   const activeEditorChangeHandlers = [];
   const tabChangeHandlers = [];
 
   return {
     __registeredCommands: registeredCommands,
+    __registeredUriHandlers: registeredUriHandlers,
     __fireActiveEditorChange: editor => {
       for (const handler of activeEditorChangeHandlers) handler(editor);
     },
@@ -2029,6 +2112,10 @@ function createVscodeMock({
         return channel;
       },
       registerCustomEditorProvider: () => ({ dispose() {} }),
+      registerUriHandler: handler => {
+        registeredUriHandlers.push(handler);
+        return { dispose() {} };
+      },
       registerTreeDataProvider: id => {
         treeProviderIds.push(id);
         return { dispose() {} };
@@ -2053,6 +2140,7 @@ function createVscodeMock({
       },
     },
     env: {
+      uriScheme: 'cursor',
       openExternal: async (...args) => {
         openExternalCalls.push(args);
         return true;

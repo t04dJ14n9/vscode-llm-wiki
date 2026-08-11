@@ -34,6 +34,8 @@ test('combined extension owns both editors and uses the shared PDF implementatio
   for (const file of [
     'package.json',
     'src/extension.ts',
+    'src/anchorFileCodec.ts',
+    'src/anchorFileEditorProvider.ts',
     'src/markdownEditorProvider.ts',
     'src/pdfEditorProvider.ts',
     'webview-src/markdown-editor.ts',
@@ -46,7 +48,11 @@ test('combined extension owns both editors and uses the shared PDF implementatio
   assert.equal(manifest.name, 'human-learning-vscode');
   assert.deepEqual(
     customEditorViewTypes(manifest).sort(),
-    ['human-learning.markdownEditor', 'human-learning.pdfViewer'],
+    [
+      'human-learning.anchorFile',
+      'human-learning.markdownEditor',
+      'human-learning.pdfViewer',
+    ],
   );
   assert.equal(
     manifest.dependencies?.['@human-learning/pdf-editor'],

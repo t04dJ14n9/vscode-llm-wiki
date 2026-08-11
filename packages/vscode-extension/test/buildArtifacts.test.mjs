@@ -154,6 +154,21 @@ test('manifest opens markdown notes in the Human Learning custom editor by defau
   );
 });
 
+test('manifest routes immutable Human Learning anchor bridge files to their dedicated editor', () => {
+  const anchorEditor = manifest.contributes.customEditors.find(
+    editor => editor.viewType === 'human-learning.anchorFile',
+  );
+  assert.ok(anchorEditor, 'missing Human Learning anchor-file custom editor contribution');
+  assert.equal(anchorEditor.priority, 'default');
+  assert.deepEqual(anchorEditor.selector, [{ filenamePattern: '*.hlanchor' }]);
+  assert.equal(
+    (manifest.activationEvents ?? []).includes(
+      'onCustomEditor:human-learning.anchorFile',
+    ),
+    true,
+  );
+});
+
 test('manifest contributes a command palette toggle for markdown Vim mode', () => {
   const toggleVimCommand = manifest.contributes.commands.find(
     command => command.command === 'human-learning.toggleVimMode',
@@ -205,6 +220,7 @@ test('manifest exposes selection export command while omitting Agent Context and
   assert.equal(commandIds.includes('human-learning.addSelectionToChat'), true);
   assert.equal(commandIds.includes('human-learning.addCursorBrowserSelectionToChat'), true);
   assert.equal(commandIds.includes('human-learning.experimentalBrowser.open'), true);
+  assert.equal((manifest.activationEvents ?? []).includes('onUri'), true);
   assert.equal(
     commandIds.includes('human-learning.experimentalBrowser.sendSelection'),
     true,

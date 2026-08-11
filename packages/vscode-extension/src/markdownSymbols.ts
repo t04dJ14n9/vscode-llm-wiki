@@ -36,6 +36,7 @@ export interface PdfOutlineEntry {
 
 export interface PdfOutlineSource {
   readonly onDidChangePdfOutline: vscode.Event<vscode.Uri>;
+  getActivePdfUri(): vscode.Uri | undefined;
   getPdfOutline(uri: vscode.Uri): readonly PdfOutlineEntry[] | undefined;
 }
 
@@ -129,7 +130,7 @@ export class MarkdownOutlineTreeProvider implements vscode.TreeDataProvider<vsco
     if (element instanceof MarkdownOutlineItem) return element.children;
     if (element instanceof PdfOutlineItem) return element.children;
 
-    const activeUri = getActiveOutlineUri();
+    const activeUri = getActiveOutlineUri() ?? this.pdfOutlineSource?.getActivePdfUri();
     if (activeUri && isPdfUri(activeUri)) {
       if (!this.pdfOutlineSource) {
         return [new vscode.TreeItem('(PDF outline unavailable)')];

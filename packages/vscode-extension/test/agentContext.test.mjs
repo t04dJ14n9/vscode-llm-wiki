@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import Module from 'node:module';
+import { createHash } from 'node:crypto';
 import {
   existsSync,
   mkdirSync,
@@ -11,13 +12,36 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
+function productAnchorUri(target) {
+  return 'cursor://human-learning.human-learning-vscode/open-anchor?target='
+    + `v1.${Buffer.from(target, 'utf8').toString('base64url')}`;
+}
+
+function encodedAnchorFile(target) {
+  const text = JSON.stringify({ version: 1, target }, null, 2);
+  return {
+    fileName: `source-${createHash('sha256').update(text).digest('hex')}.hlanchor`,
+    text,
+    payload: { version: 1, target },
+  };
+}
+
 function loadTsModule(relativePath, mocks = {}) {
+  const moduleMocks = {
+    './anchorFileCodec': {
+      encodeAnchorFile: encodedAnchorFile,
+    },
+    './anchorUris': {
+      humanLearningOpenAnchorUri: productAnchorUri,
+    },
+    ...mocks,
+  };
   const filename = join(packageRoot, relativePath);
   const source = readFileSync(filename, 'utf8');
   const { outputText } = ts.transpileModule(source, {
@@ -33,8 +57,8 @@ function loadTsModule(relativePath, mocks = {}) {
   mod.paths = Module._nodeModulePaths(dirname(filename));
   const originalLoad = Module._load;
   Module._load = function patchedLoad(request, parent, isMain) {
-    if (Object.prototype.hasOwnProperty.call(mocks, request)) {
-      return mocks[request];
+    if (Object.prototype.hasOwnProperty.call(moduleMocks, request)) {
+      return moduleMocks[request];
     }
     return originalLoad.call(this, request, parent, isMain);
   };
@@ -96,11 +120,34 @@ test('addSelectionToContext exports a custom markdown editor selection when no n
     assert.equal(dirname(exported.directoryPath), join(vaultRoot, '.hl', 'agent', 'exports'));
     assert.equal(readFileSync(exported.markdownPath, 'utf8'), markdown);
     assert.deepEqual(JSON.parse(readFileSync(exported.jsonPath, 'utf8')), json);
-    assert.match(markdown, /\*\*Source\*\*: notes\/Concepts\/Online Softmax\.md \(lines 5–7\)/);
+    assert.match(
+      markdown,
+      /\*\*Source\*\*: \[notes\/Concepts\/Online Softmax\.md \(lines 5–7\)\]\(<file:\/\//,
+    );
+    assert.match(
+      markdown,
+      /\*\*Citation requirement\*\*: In chat responses, reuse the exact Source link above\./,
+    );
+    assert.doesNotMatch(markdown, /\*\*(?:Open in Human Learning|Portable anchor)\*\*/);
     assert.match(markdown, /\*\*Visual evidence\*\*: sibling `selection\.png` when present/);
     assert.match(markdown, /## Standard Softmax\n\n\$softmax\(x_i\)\$/);
     assert.equal(json.source, 'notes/Concepts/Online Softmax.md');
     assert.equal(json.anchor_uri, 'hl://note/notes/Concepts/Online%20Softmax.md#L5-L7');
+    assert.equal(fileURLToPath(json.chat_uri), exported.anchorPath);
+    assert.equal(markdown.includes(`](<${json.chat_uri}>)`), true);
+    assert.deepEqual(
+      JSON.parse(readFileSync(exported.anchorPath, 'utf8')),
+      { version: 1, target: json.anchor_uri },
+    );
+    const anchorBytes = readFileSync(exported.anchorPath);
+    assert.equal(
+      basename(exported.anchorPath),
+      `source-${createHash('sha256').update(anchorBytes).digest('hex')}.hlanchor`,
+    );
+    assert.equal(
+      json.open_uri,
+      productAnchorUri(json.anchor_uri),
+    );
     assert.deepEqual(json.lines, { start: 5, end: 7 });
     assert.equal(json.text, '## Standard Softmax\n\n$softmax(x_i)$');
     assert.deepEqual(informationMessages, [
@@ -170,16 +217,30 @@ test('addSelectionToContext preserves explicit source labels and anchors for PDF
     assert.ok(exported);
     assert.equal(readFileSync(exported.markdownPath, 'utf8'), markdown);
     assert.deepEqual(JSON.parse(readFileSync(exported.jsonPath, 'utf8')), json);
-    assert.match(markdown, /\*\*Source\*\*: raw\/papers\/attention\.pdf \(page 2\)/);
     assert.match(
       markdown,
-      /\*\*Anchor\*\*: raw\/papers\/attention\.pdf#page=2:~:text=FlashAttention%20uses%20tiling/,
+      /\*\*Source\*\*: \[raw\/papers\/attention\.pdf \(page 2\)\]\(<file:\/\//,
     );
+    assert.match(
+      markdown,
+      /\*\*Citation requirement\*\*: In chat responses, reuse the exact Source link above\./,
+    );
+    assert.doesNotMatch(markdown, /raw\/papers\/attention\.pdf#page=2:~:text=/);
     assert.match(markdown, /FlashAttention uses tiling/);
     assert.equal(json.source, 'raw/papers/attention.pdf');
     assert.equal(
       json.anchor_uri,
       'raw/papers/attention.pdf#page=2:~:text=FlashAttention%20uses%20tiling',
+    );
+    assert.equal(
+      json.open_uri,
+      productAnchorUri(json.anchor_uri),
+    );
+    assert.equal(fileURLToPath(json.chat_uri), exported.anchorPath);
+    assert.equal(markdown.includes(`](<${json.chat_uri}>)`), true);
+    assert.deepEqual(
+      JSON.parse(readFileSync(exported.anchorPath, 'utf8')),
+      { version: 1, target: json.anchor_uri },
     );
     assert.deepEqual(json.lines, { start: 2, end: 2 });
     assert.equal(json.location, 'page 2');
@@ -193,6 +254,64 @@ test('addSelectionToContext preserves explicit source labels and anchors for PDF
     assert.deepEqual(informationMessages, [
       'Selection exported to .hl/agent/selection.md + .hl/agent/selection.json',
     ]);
+  } finally {
+    rmSync(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test('web selections keep their directly clickable HTTPS source instead of an anchor bridge', async () => {
+  const vaultRoot = mkdtempSync(join(tmpdir(), 'hl-agent-context-web-'));
+  const { addSelectionToContext } = loadAgentContext(vscodeMock(vaultRoot));
+  const anchorUri =
+    'https://example.com/article?edition=full#:~:text=selected%20web%20passage';
+  try {
+    const exported = await addSelectionToContext(vaultRoot, {
+      getActiveSelectionContext: () => ({
+        uri: { fsPath: join(vaultRoot, 'raw', 'web', 'article.html') },
+        text: 'selected web passage',
+        startLine: 1,
+        endLine: 1,
+        sourceLabel: 'Example article',
+        rangeLabel: 'selected passage',
+        anchorUri,
+      }),
+    });
+
+    assert.ok(exported);
+    const markdown = readFileSync(exported.markdownPath, 'utf8');
+    const json = JSON.parse(readFileSync(exported.jsonPath, 'utf8'));
+    assert.equal(json.chat_uri, anchorUri);
+    assert.equal(markdown.includes(`](<${anchorUri}>)`), true);
+    assert.equal(markdown.includes('.hlanchor'), false);
+  } finally {
+    rmSync(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test('native code selections export a clickable local code anchor bridge', async () => {
+  const vaultRoot = mkdtempSync(join(tmpdir(), 'hl-agent-context-code-'));
+  const { addSelectionToContext } = loadAgentContext(vscodeMock(vaultRoot));
+  try {
+    const exported = await addSelectionToContext(vaultRoot, {
+      getActiveSelectionContext: () => ({
+        uri: { fsPath: join(vaultRoot, 'raw', 'code', 'kernel.ts') },
+        text: 'const tile = 128;',
+        startLine: 3,
+        endLine: 4,
+      }),
+    });
+
+    assert.ok(exported);
+    assert.ok(exported.anchorPath);
+    const markdown = readFileSync(exported.markdownPath, 'utf8');
+    const json = JSON.parse(readFileSync(exported.jsonPath, 'utf8'));
+    assert.equal(json.anchor_uri, 'raw/code/kernel.ts#L3-L4');
+    assert.equal(fileURLToPath(json.chat_uri), exported.anchorPath);
+    assert.equal(markdown.includes(`](<${json.chat_uri}>)`), true);
+    assert.deepEqual(JSON.parse(readFileSync(exported.anchorPath, 'utf8')), {
+      version: 1,
+      target: json.anchor_uri,
+    });
   } finally {
     rmSync(vaultRoot, { recursive: true, force: true });
   }
@@ -279,6 +398,12 @@ test('concurrent selection exports publish distinct matched immutable snapshots 
       assert.match(markdown, new RegExp(json.text));
       assert.equal(dirname(exported.markdownPath), exported.directoryPath);
       assert.equal(dirname(exported.jsonPath), exported.directoryPath);
+      assert.equal(dirname(exported.anchorPath), exported.directoryPath);
+      assert.equal(fileURLToPath(json.chat_uri), exported.anchorPath);
+      assert.deepEqual(
+        JSON.parse(readFileSync(exported.anchorPath, 'utf8')),
+        { version: 1, target: json.anchor_uri },
+      );
     }
     const latestMarkdown = readFileSync(join(vaultRoot, '.hl', 'agent', 'selection.md'), 'utf8');
     const latestJson = JSON.parse(

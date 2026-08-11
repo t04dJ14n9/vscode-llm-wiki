@@ -3,8 +3,9 @@ import {
   classifyReferenceTarget,
   type PdfTextFragment,
 } from '@human-learning/core';
-import { existsSync, lstatSync, mkdirSync, writeFileSync } from 'fs';
+import { existsSync, lstatSync, mkdirSync, statSync, writeFileSync } from 'fs';
 import { isAbsolute, join, relative, resolve, sep } from 'path';
+import { humanLearningAnchorTargetFromString } from './anchorUris';
 
 export interface DispatchUriOptions {
   openWebTarget?(url: string): Promise<void> | void;
@@ -15,14 +16,24 @@ export async function dispatchUri(
   uri: string,
   options: DispatchUriOptions = {},
 ): Promise<void> {
-  const target = classifyReferenceTarget(uri);
+  const resolvedUri = humanLearningAnchorTargetFromString(uri) ?? uri;
+  const anchorFileUri = localAnchorFileUri(resolvedUri);
+  if (anchorFileUri) {
+    await vscode.commands.executeCommand(
+      'vscode.openWith',
+      anchorFileUri,
+      'human-learning.anchorFile',
+    );
+    return;
+  }
+  const target = classifyReferenceTarget(resolvedUri);
   if (
     !vaultRoot
     && target.kind !== 'web'
     && !(target.kind === 'pdf' && Boolean(target.path && isAbsolute(target.path)))
   ) {
     vscode.window.showErrorMessage(
-      `Open a workspace folder before opening this relative link: ${uri}`,
+      `Open a workspace folder before opening this relative link: ${resolvedUri}`,
     );
     return;
   }
@@ -88,7 +99,7 @@ export async function dispatchUri(
 
     case 'pdf': {
       if (!target.path) break;
-      if (!isAbsolute(target.path) && !workspaceFilePath(workspaceRoot, target.path)) {
+      if (!isAbsolute(target.path) && !workspacePdfFilePath(workspaceRoot, target.path)) {
         showOutsideWorkspaceError(target.path);
         return;
       }
@@ -107,7 +118,7 @@ export async function dispatchUri(
     }
 
     case 'web': {
-      await openWebTarget(workspaceRoot, target.url ?? uri, target.webTargetId, options);
+      await openWebTarget(workspaceRoot, target.url ?? resolvedUri, target.webTargetId, options);
       return;
     }
 
@@ -125,16 +136,39 @@ export async function dispatchUri(
           return;
         }
       }
-      if (/^https?:\/\//i.test(uri)) {
-        await openWebTarget(workspaceRoot, uri, undefined, options);
+      if (/^https?:\/\//i.test(resolvedUri)) {
+        await openWebTarget(workspaceRoot, resolvedUri, undefined, options);
         return;
       }
-      vscode.window.showErrorMessage(`Cannot open link target: ${uri}`);
+      vscode.window.showErrorMessage(`Cannot open link target: ${resolvedUri}`);
       return;
     }
   }
 
-  vscode.window.showErrorMessage(`Cannot open link target: ${uri}`);
+  vscode.window.showErrorMessage(`Cannot open link target: ${resolvedUri}`);
+}
+
+function localAnchorFileUri(value: string): vscode.Uri | undefined {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return undefined;
+  }
+  if (
+    url.protocol !== 'file:'
+    || Boolean(url.host)
+    || Boolean(url.search)
+    || Boolean(url.hash)
+    || !url.pathname.endsWith('.hlanchor')
+  ) {
+    return undefined;
+  }
+  try {
+    return vscode.Uri.parse(value, true);
+  } catch {
+    return undefined;
+  }
 }
 
 async function openWebTarget(
@@ -155,7 +189,15 @@ async function openPdfWithDefaultEditor(vaultRoot: string, pdfPath: string): Pro
   await vscode.commands.executeCommand('vscode.open', vscode.Uri.file(filePath));
 }
 
-function workspaceFilePath(workspaceRoot: string, candidatePath: string): string | undefined {
+interface WorkspaceFilePathOptions {
+  allowFinalFileSymlink?: boolean;
+}
+
+function workspaceFilePath(
+  workspaceRoot: string,
+  candidatePath: string,
+  options: WorkspaceFilePathOptions = {},
+): string | undefined {
   if (!candidatePath || isAbsolute(candidatePath)) return undefined;
   const root = resolve(workspaceRoot);
   const candidate = resolve(root, candidatePath);
@@ -167,24 +209,55 @@ function workspaceFilePath(workspaceRoot: string, candidatePath: string): string
   ) {
     return undefined;
   }
-  if (hasSymlinkedAncestor(root, candidate)) return undefined;
+  if (hasSymlinkedAncestor(root, candidate, options.allowFinalFileSymlink === true)) {
+    return undefined;
+  }
   return candidate;
 }
 
-function hasSymlinkedAncestor(root: string, candidate: string): boolean {
+function workspacePdfFilePath(
+  workspaceRoot: string,
+  candidatePath: string,
+): string | undefined {
+  return workspaceFilePath(workspaceRoot, candidatePath, {
+    allowFinalFileSymlink: vscode.workspace.isTrusted === true,
+  });
+}
+
+function hasSymlinkedAncestor(
+  root: string,
+  candidate: string,
+  allowFinalFileSymlink: boolean,
+): boolean {
   const fromRoot = relative(root, candidate);
   let current = root;
-  for (const segment of fromRoot.split(sep).filter(Boolean)) {
+  const segments = fromRoot.split(sep).filter(Boolean);
+  for (const [index, segment] of segments.entries()) {
     current = join(current, segment);
     if (!existsSync(current)) break;
     try {
-      if (lstatSync(current).isSymbolicLink()) return true;
+      if (!lstatSync(current).isSymbolicLink()) continue;
+      const isFinalSegment = index === segments.length - 1;
+      if (
+        allowFinalFileSymlink
+        && isFinalSegment
+        && symlinkResolvesToFile(current)
+      ) continue;
+      return true;
     } catch (error) {
       if (isNodeError(error, 'ENOENT')) break;
       throw error;
     }
   }
   return false;
+}
+
+function symlinkResolvesToFile(filePath: string): boolean {
+  try {
+    return statSync(filePath).isFile();
+  } catch {
+    return false;
+  }
 }
 
 function showOutsideWorkspaceError(candidatePath: string): void {

@@ -6,6 +6,8 @@ import {
   syncSelectionExportAttachment,
   type SelectionContextExportResult,
 } from './agentContext';
+import { registerAnchorFileEditorProvider } from './anchorFileEditorProvider';
+import { humanLearningAnchorTarget } from './anchorUris';
 import {
   handoffSelectionToAgent,
 } from './agentHandoff';
@@ -97,9 +99,20 @@ export function activate(context: vscode.ExtensionContext): void {
         supportsMultipleEditorsPerDocument: false,
       },
     ),
+    vscode.window.registerUriHandler({
+      async handleUri(uri): Promise<void> {
+        const target = humanLearningAnchorTarget(uri);
+        if (!target) {
+          vscode.window.showWarningMessage('This Human Learning link is invalid.');
+          return;
+        }
+        await dispatchUri(workspaceRoot, target);
+      },
+    }),
     graphPanel,
   ];
   context.subscriptions.push(...productDisposables);
+  registerAnchorFileEditorProvider(context);
 
   if (workspaceRoot) {
     backlinksProvider = new BacklinksProvider(workspaceRoot, 'backlinks');
