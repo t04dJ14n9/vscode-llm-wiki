@@ -7948,7 +7948,7 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
     expect(mathVisibility.mathLineText).not.toContain('$$softmax');
   });
 
-  test('code block copy reports success in a theme-aware tooltip without shifting layout', async ({ page }) => {
+  test('code block copy keeps feedback outside the button in an accessible rounded tooltip without shifting layout', async ({ page }) => {
     await page.goto('http://localhost:8979/test.html');
     await waitForEditorBootstrap(page);
     await page.evaluate(() => {
@@ -7990,26 +7990,39 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
     await expect(tooltip).toHaveAttribute('aria-atomic', 'true');
     await expect(copyButton).toHaveAttribute('aria-label', 'Copy code');
     await expect(copyButton).toHaveAttribute('title', 'Copy code');
+    await expect(copyButton).toHaveAccessibleName('Copy code');
     await expect(copyButton).toHaveClass(/is-copied/);
 
     const feedback = await page.evaluate(() => {
+      const header = document.querySelector<HTMLElement>('.cm-hybrid-codeblock-header')!;
       const button = document.querySelector<HTMLElement>('.cm-hybrid-codeblock-copy')!;
       const tooltip = document.querySelector<HTMLElement>('.cm-hybrid-codeblock-copy-tooltip')!;
       const buttonRect = button.getBoundingClientRect();
       const tooltipRect = tooltip.getBoundingClientRect();
       const style = getComputedStyle(tooltip);
+      const headerStyle = getComputedStyle(header);
       return {
+        isHeaderChild: tooltip.parentElement === header,
+        isButtonDescendant: button.contains(tooltip),
         tooltipBottom: tooltipRect.bottom,
         buttonTop: buttonRect.top,
         background: style.backgroundColor,
         foreground: style.color,
         border: style.borderColor,
+        headerTopLeftRadius: headerStyle.borderTopLeftRadius,
+        headerTopRightRadius: headerStyle.borderTopRightRadius,
       };
     });
+    // Catches an AX-tree regression where the live status is flattened into "Copy code".
+    expect(feedback.isHeaderChild).toBe(true);
+    expect(feedback.isButtonDescendant).toBe(false);
     expect(feedback.tooltipBottom).toBeLessThanOrEqual(feedback.buttonTop);
     expect(feedback.background).toBe('rgb(49, 50, 51)');
     expect(feedback.foreground).toBe('rgb(250, 250, 250)');
     expect(feedback.border).toBe('rgb(85, 86, 87)');
+    // Catches the header background painting square corners through its rounded container.
+    expect(feedback.headerTopLeftRadius).toBe('4px');
+    expect(feedback.headerTopRightRadius).toBe('4px');
     expect(await header.boundingBox()).toEqual(headerBefore);
 
     await copyButton.click();
@@ -8019,6 +8032,9 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
     await expect(tooltip).toHaveText('Copied');
     await expect(copyButton).toHaveClass(/is-copied/);
     await expect(tooltip).toHaveText('', { timeout: 2_000 });
+    // Catches hiding the empty live region with visibility:hidden, which removes it from AX.
+    await expect(tooltip).toBeAttached();
+    await expect(page.getByRole('status')).toHaveCount(1);
 
     await page.evaluate(() => {
       window.__mockMessages = [];

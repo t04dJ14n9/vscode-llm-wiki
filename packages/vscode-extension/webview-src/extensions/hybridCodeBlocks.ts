@@ -89,7 +89,7 @@ class CodeBlockHeaderWidget extends WidgetType {
     copyTooltip.setAttribute('role', 'status');
     copyTooltip.setAttribute('aria-live', 'polite');
     copyTooltip.setAttribute('aria-atomic', 'true');
-    copyButton.append(copyIcon, copyTooltip);
+    copyButton.append(copyIcon);
     let copyFeedbackSequence = 0;
 
     const showCopyFeedback = (): void => {
@@ -128,7 +128,7 @@ class CodeBlockHeaderWidget extends WidgetType {
       });
     });
 
-    header.append(label, copyButton);
+    header.append(label, copyButton, copyTooltip);
     inner.append(header);
     wrapper.appendChild(inner);
 
