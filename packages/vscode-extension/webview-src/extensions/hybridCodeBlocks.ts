@@ -76,7 +76,12 @@ class CodeBlockHeaderWidget extends WidgetType {
     copyFront.setAttribute('height', '10');
     copyFront.setAttribute('rx', '1.25');
     copyIcon.append(copyBack, copyFront);
-    copyButton.appendChild(copyIcon);
+    const copyTooltip = document.createElement('span');
+    copyTooltip.className = 'cm-hybrid-codeblock-copy-tooltip';
+    copyTooltip.setAttribute('role', 'status');
+    copyTooltip.setAttribute('aria-live', 'polite');
+    copyTooltip.setAttribute('aria-atomic', 'true');
+    copyButton.append(copyIcon, copyTooltip);
     copyButton.addEventListener('mousedown', event => {
       event.preventDefault();
       event.stopPropagation();
@@ -84,7 +89,19 @@ class CodeBlockHeaderWidget extends WidgetType {
     copyButton.addEventListener('click', event => {
       event.preventDefault();
       event.stopPropagation();
-      void writeTextToClipboard(this.code, text => dispatchCopyTextEvent(view.dom, text));
+      void writeTextToClipboard(
+        this.code,
+        text => dispatchCopyTextEvent(view.dom, text),
+      ).then(() => {
+        copyTooltip.textContent = 'Copied';
+        copyButton.classList.add('is-copied');
+        window.setTimeout(() => {
+          copyButton.classList.remove('is-copied');
+        }, 1_120);
+        window.setTimeout(() => {
+          copyTooltip.textContent = '';
+        }, 1_240);
+      });
     });
 
     header.append(label, copyButton);

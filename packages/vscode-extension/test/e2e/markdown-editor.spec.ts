@@ -7948,6 +7948,86 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
     expect(mathVisibility.mathLineText).not.toContain('$$softmax');
   });
 
+  test('code block copy reports success in a theme-aware tooltip without shifting layout', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+    await waitForEditorBootstrap(page);
+    await page.evaluate(() => {
+      document.documentElement.style.setProperty('--vscode-editorHoverWidget-background', '#313233');
+      document.documentElement.style.setProperty('--vscode-editorHoverWidget-foreground', '#fafafa');
+      document.documentElement.style.setProperty('--vscode-editorHoverWidget-border', '#555657');
+      window.postMessage({
+        type: 'setText',
+        text: ['```ts', 'const answer = 42;', '```', '', 'After'].join('\n'),
+      }, '*');
+      window.__copiedText = null;
+      Object.defineProperty(navigator, 'clipboard', {
+        configurable: true,
+        value: {
+          writeText: async (text: string) => {
+            window.__copiedText = text;
+          },
+        },
+      });
+    });
+
+    const header = page.locator('.cm-hybrid-codeblock-header');
+    const copyButton = page.locator('.cm-hybrid-codeblock-copy');
+    const tooltip = page.locator('.cm-hybrid-codeblock-copy-tooltip');
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      view.dispatch({ selection: { anchor: view.state.doc.line(5).from } });
+    });
+    await expect(copyButton).toBeVisible();
+    const headerBefore = await header.boundingBox();
+    await copyButton.click();
+
+    await expect.poll(() => page.evaluate(() => window.__copiedText))
+      .toBe('const answer = 42;');
+    await expect(tooltip).toHaveText('Copied');
+    await expect(tooltip).toHaveAttribute('role', 'status');
+    await expect(tooltip).toHaveAttribute('aria-live', 'polite');
+    await expect(tooltip).toHaveAttribute('aria-atomic', 'true');
+    await expect(copyButton).toHaveAttribute('aria-label', 'Copy code');
+    await expect(copyButton).toHaveAttribute('title', 'Copy code');
+    await expect(copyButton).toHaveClass(/is-copied/);
+
+    const feedback = await page.evaluate(() => {
+      const button = document.querySelector<HTMLElement>('.cm-hybrid-codeblock-copy')!;
+      const tooltip = document.querySelector<HTMLElement>('.cm-hybrid-codeblock-copy-tooltip')!;
+      const buttonRect = button.getBoundingClientRect();
+      const tooltipRect = tooltip.getBoundingClientRect();
+      const style = getComputedStyle(tooltip);
+      return {
+        tooltipBottom: tooltipRect.bottom,
+        buttonTop: buttonRect.top,
+        background: style.backgroundColor,
+        foreground: style.color,
+        border: style.borderColor,
+      };
+    });
+    expect(feedback.tooltipBottom).toBeLessThanOrEqual(feedback.buttonTop);
+    expect(feedback.background).toBe('rgb(49, 50, 51)');
+    expect(feedback.foreground).toBe('rgb(250, 250, 250)');
+    expect(feedback.border).toBe('rgb(85, 86, 87)');
+    expect(await header.boundingBox()).toEqual(headerBefore);
+
+    await expect(tooltip).toHaveText('', { timeout: 2_000 });
+
+    await page.evaluate(() => {
+      window.__mockMessages = [];
+      Object.defineProperty(navigator, 'clipboard', {
+        configurable: true,
+        value: undefined,
+      });
+    });
+    await copyButton.click();
+    await expect.poll(() => page.evaluate(() => (
+      window.__mockMessages?.filter(message => message.type === 'copyText').at(-1)?.text
+    ))).toBe('const answer = 42;');
+    await expect(tooltip).toHaveText('Copied');
+  });
+
   test('hybrid rendering turns fenced code blocks into Obsidian-like preview blocks until the block is active', async ({ page }) => {
     await page.goto('http://localhost:8979/test.html');
     await page.evaluate(() => {

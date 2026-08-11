@@ -1,5 +1,32 @@
 import { EditorView } from '@codemirror/view';
 
+const codeBlockCopyTooltipStyles = {
+  boxSizing: 'border-box',
+  position: 'absolute',
+  right: '0',
+  bottom: 'calc(100% + 6px)',
+  zIndex: '4',
+  pointerEvents: 'none',
+  whiteSpace: 'nowrap',
+  padding: '2px 7px',
+  border: '1px solid var(--vscode-editorHoverWidget-border, var(--vscode-contrastBorder, transparent))',
+  borderRadius: '4px',
+  color: 'var(--vscode-editorHoverWidget-foreground, var(--vscode-editor-foreground))',
+  backgroundColor: 'var(--vscode-editorHoverWidget-background, var(--vscode-editor-background))',
+  boxShadow: '0 2px 8px color-mix(in srgb, var(--vscode-editor-foreground) 18%, transparent)',
+  opacity: '0',
+  transform: 'translateY(4px)',
+  visibility: 'hidden',
+  transition: 'opacity 120ms ease, transform 120ms ease, visibility 0s linear 120ms',
+};
+
+const copiedCodeBlockCopyTooltipStyles = {
+  opacity: '1',
+  transform: 'translateY(0)',
+  visibility: 'visible',
+  transitionDelay: '0s',
+};
+
 export function hybridStyles() {
   return EditorView.baseTheme({
     '.cm-hybrid-heading-line': {
@@ -703,7 +730,7 @@ export function hybridStyles() {
       borderTopLeftRadius: '4px',
       borderTopRightRadius: '4px',
       backgroundColor: 'var(--hl-codeblock-background)',
-      overflow: 'hidden',
+      overflow: 'visible',
     },
     '.cm-hybrid-codeblock-header': {
       boxSizing: 'border-box',
@@ -748,6 +775,8 @@ export function hybridStyles() {
       stroke: 'currentColor',
       strokeWidth: '1.25',
     },
+    '.cm-hybrid-codeblock-copy-tooltip': codeBlockCopyTooltipStyles,
+    '.cm-hybrid-codeblock-copy.is-copied .cm-hybrid-codeblock-copy-tooltip': copiedCodeBlockCopyTooltipStyles,
     '.cm-hybrid-codeblock:hover .cm-hybrid-codeblock-copy, .cm-hybrid-codeblock:focus-within .cm-hybrid-codeblock-copy, .cm-hybrid-codeblock-copy:focus-visible': {
       opacity: '1',
     },
