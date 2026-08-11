@@ -148,6 +148,8 @@ git commit -m "fix: start markdown Vim in normal mode"
 - Modify: `packages/vscode-extension/webview-src/markdown-editor.ts:1-15`
 - Modify: `packages/vscode-extension/webview-src/markdown-editor.ts:825-832`
 - Modify: `packages/vscode-extension/webview-src/markdown-editor.ts:1066-1355`
+- Modify: `packages/vscode-extension/webview-src/extensions/hybridStyles.ts`
+- Modify: `packages/vscode-extension/test/e2e/test.html`
 - Test: `packages/vscode-extension/test/e2e/markdown-editor.spec.ts`
 
 **Interfaces:**
@@ -269,6 +271,11 @@ Replace fixed text fallbacks such as `#d4d4d4`, `#c586c0`, and `#4ec9b0`
 with `var(--vscode-editor-foreground)` or the relevant semantic variable.
 Leave fixed last-resort values only on non-text shadows, fills, selections, and
 highlight backgrounds.
+
+Replace the rendered fenced-code palette's fixed dark/light branches with the
+same `symbolIcon.*`, `descriptionForeground`, and `editor.foreground` roles.
+Map callout accent text through `charts.*`, editor status, and error theme
+tokens, with semantic foreground fallbacks instead of fixed hues.
 
 - [ ] **Step 5: Audit remaining text declarations**
 

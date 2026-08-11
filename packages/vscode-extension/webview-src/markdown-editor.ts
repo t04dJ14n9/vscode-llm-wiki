@@ -5,7 +5,7 @@ import type { Completion, CompletionContext, CompletionResult } from '@codemirro
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
 import { markdown } from '@codemirror/lang-markdown';
 import { languages } from '@codemirror/language-data';
-import { bracketMatching, defaultHighlightStyle, foldGutter, syntaxHighlighting } from '@codemirror/language';
+import { bracketMatching, foldGutter, syntaxHighlighting } from '@codemirror/language';
 import {
   Annotation,
   Compartment,
@@ -33,6 +33,7 @@ import {
 import { applyInsertText } from './insertText';
 import { copySelectionToClipboard, handleCopy, handlePaste } from './markdownClipboard';
 import { closeObsidianContextMenu, showObsidianContextMenu } from './obsidianContextMenu';
+import { humanLearningHighlightStyle } from './markdownTheme';
 import {
   hybridRendering,
   initialBodyPositionAfterFrontmatter,
@@ -827,7 +828,7 @@ function createView(text: string, title?: string): EditorView {
         history(),
         drawSelection(),
         markdown({ codeLanguages: languages }),
-        syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
+        syntaxHighlighting(humanLearningHighlightStyle, { fallback: true }),
         bracketMatching(),
         search({ top: true }),
         autocompletion({
@@ -1071,7 +1072,7 @@ function createView(text: string, title?: string): EditorView {
             padding: '4px 10px 4px 76px',
             borderTop: '1px solid var(--vscode-panel-border, #3e3e3e)',
             backgroundColor: 'var(--vscode-editorWidget-background, var(--vscode-sideBar-background, #252526))',
-            color: 'var(--vscode-editor-foreground, #d4d4d4)',
+            color: 'var(--vscode-editor-foreground)',
             boxShadow: '0 -2px 8px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.28))',
             fontFamily: 'var(--hl-editor-font-family, var(--vscode-editor-font-family, ui-monospace, Menlo, monospace))',
             fontSize: 'var(--hl-editor-font-size, var(--vscode-editor-font-size, 14px))',
@@ -1323,11 +1324,11 @@ function createView(text: string, title?: string): EditorView {
             fontFamily: 'var(--hl-editor-font-family, var(--vscode-editor-font-family, ui-monospace, Menlo, monospace))',
           },
           '.cm-active-math-delimiter': {
-            color: 'var(--vscode-symbolIcon-operatorForeground, #c586c0)',
+            color: 'var(--vscode-symbolIcon-operatorForeground, var(--vscode-editor-foreground))',
             fontWeight: '600',
           },
           '.cm-active-math-source': {
-            color: 'var(--vscode-symbolIcon-variableForeground, #4ec9b0)',
+            color: 'var(--vscode-symbolIcon-variableForeground, var(--vscode-editor-foreground))',
             fontStyle: 'italic',
           },
           '.cm-active-tag': {

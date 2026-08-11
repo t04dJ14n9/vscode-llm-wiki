@@ -5057,6 +5057,99 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
     expect(linkStyles.fontWeight).toBe('500');
   });
 
+  test('Markdown source and fenced-code colors follow semantic VS Code theme variables', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+
+    await page.evaluate(() => {
+      const root = document.documentElement.style;
+      root.setProperty('--vscode-editor-foreground', 'rgb(231, 232, 233)');
+      root.setProperty('--vscode-descriptionForeground', 'rgb(151, 152, 153)');
+      root.setProperty('--vscode-textLink-foreground', 'rgb(21, 121, 221)');
+      root.setProperty('--vscode-symbolIcon-keywordForeground', 'rgb(101, 111, 121)');
+      root.setProperty('--vscode-symbolIcon-stringForeground', 'rgb(131, 141, 151)');
+      root.setProperty('--vscode-symbolIcon-functionForeground', 'rgb(161, 121, 131)');
+      window.postMessage({
+        type: 'setText',
+        text: [
+          'Reference [docs](https://example.com/theme).',
+          '',
+          '```ts',
+          'const theme = getTheme("adaptive"); // note',
+          '```',
+        ].join('\n'),
+      }, '*');
+    });
+
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+    await expect(page.locator('.cm-hybrid-codeblock')).toBeVisible();
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      const line = view.state.doc.line(1);
+      view.dispatch({ selection: { anchor: line.from + line.text.indexOf('https') } });
+    });
+
+    const sourceColors = await page.locator('.cm-line').filter({ hasText: 'https://example.com/theme' }).evaluate((line) => {
+      const token = Array.from(line.querySelectorAll<HTMLElement>('span'))
+        .find(element => element.textContent?.includes('https://example.com/theme'));
+      return {
+        url: token ? getComputedStyle(token).color : '',
+        tokens: Array.from(line.querySelectorAll<HTMLElement>('span')).map(element => ({
+          text: element.textContent ?? '',
+          color: getComputedStyle(element).color,
+        })),
+      };
+    });
+
+    const codeColors = await page.locator('.cm-hybrid-codeblock-content-line')
+      .filter({ hasText: 'const theme' })
+      .evaluate((line) => {
+        const colorOf = (selector: string) => {
+          const token = line.querySelector<HTMLElement>(selector);
+          return token ? getComputedStyle(token).color : '';
+        };
+        return {
+          keyword: colorOf('.token.keyword'),
+          string: colorOf('.token.string'),
+          function: colorOf('.token.function'),
+          comment: colorOf('.token.comment'),
+        };
+      });
+
+    expect(sourceColors.url, JSON.stringify(sourceColors.tokens)).toBe('rgb(151, 152, 153)');
+    expect(codeColors).toEqual({
+      keyword: 'rgb(101, 111, 121)',
+      string: 'rgb(131, 141, 151)',
+      function: 'rgb(161, 121, 131)',
+      comment: 'rgb(151, 152, 153)',
+    });
+  });
+
+  test('Markdown callout accent text follows semantic VS Code theme variables', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+
+    await page.evaluate(() => {
+      document.documentElement.style.setProperty('--vscode-charts-blue', 'rgb(71, 81, 191)');
+      window.postMessage({
+        type: 'setText',
+        text: [
+          '> [!note] Theme-aware note',
+          '> Body',
+          '',
+          'Tail',
+        ].join('\n'),
+      }, '*');
+    });
+
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      const line = view.state.doc.line(4);
+      view.dispatch({ selection: { anchor: line.from } });
+    });
+    await expect(page.locator('.cm-hybrid-callout-title')).toBeVisible();
+    await expect(page.locator('.cm-hybrid-callout-title')).toHaveCSS('color', 'rgb(71, 81, 191)');
+  });
+
   test('active raw markdown lines render wikilinks with clean Obsidian labels', async ({ page }) => {
     await page.goto('http://localhost:8979/test.html');
 
@@ -7861,14 +7954,14 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
     expect(codeTheme.functionColor).toBe('rgb(220, 220, 170)');
     expect(codeTheme.typeColor).toBe('rgb(78, 201, 176)');
     expect(codeTheme.stringColor).toBe('rgb(206, 145, 120)');
-    expect(codeTheme.punctuationColor).toBe(codeTheme.lineColor);
+    expect(codeTheme.punctuationColor).toBe('rgb(128, 128, 128)');
+    expect(codeTheme.punctuationColor).not.toBe(codeTheme.lineColor);
     expect(codeTheme.plainIdentifierColor).toBe(codeTheme.lineColor);
     expect(codeTheme.keywordColor).toBe(codeTheme.keywordOuterColor);
     expect(codeTheme.functionColor).toBe(codeTheme.functionOuterColor);
     expect(codeTheme.typeColor).toBe(codeTheme.typeOuterColor);
     expect(codeTheme.punctuationColor).toBe(codeTheme.punctuationOuterColor);
     expect(codeTheme.stringColor).toBe(codeTheme.stringOuterColor);
-    expect(codeTheme.punctuationColor).not.toBe('rgb(128, 128, 128)');
     expect(new Set([
       codeTheme.lineColor,
       codeTheme.keywordColor,

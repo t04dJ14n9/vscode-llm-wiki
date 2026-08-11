@@ -108,7 +108,7 @@ export function hybridStyles() {
       backgroundColor: 'var(--vscode-textBlockQuote-background, transparent)',
     },
     '.cm-hybrid-callout': {
-      '--hl-callout-color': '#448aff',
+      '--hl-callout-color': 'var(--vscode-charts-blue, var(--vscode-textLink-foreground, var(--vscode-editor-foreground)))',
       display: 'block',
       margin: '0.35em 0 0.9em',
       padding: '10px 14px 12px',
@@ -117,18 +117,33 @@ export function hybridStyles() {
       backgroundColor: 'color-mix(in srgb, var(--hl-callout-color) 12%, transparent)',
       color: 'var(--vscode-editor-foreground)',
     },
-    '.cm-hybrid-callout-note': { '--hl-callout-color': '#448aff' },
-    '.cm-hybrid-callout-abstract, .cm-hybrid-callout-summary, .cm-hybrid-callout-tldr': { '--hl-callout-color': '#00b8d4' },
-    '.cm-hybrid-callout-info': { '--hl-callout-color': '#00b8d4' },
-    '.cm-hybrid-callout-todo': { '--hl-callout-color': '#00b8d4' },
-    '.cm-hybrid-callout-tip, .cm-hybrid-callout-hint, .cm-hybrid-callout-important': { '--hl-callout-color': '#00bfa5' },
-    '.cm-hybrid-callout-success, .cm-hybrid-callout-check, .cm-hybrid-callout-done': { '--hl-callout-color': '#00c853' },
-    '.cm-hybrid-callout-question, .cm-hybrid-callout-help, .cm-hybrid-callout-faq': { '--hl-callout-color': '#64dd17' },
-    '.cm-hybrid-callout-warning, .cm-hybrid-callout-caution, .cm-hybrid-callout-attention': { '--hl-callout-color': '#ff9100' },
-    '.cm-hybrid-callout-failure, .cm-hybrid-callout-fail, .cm-hybrid-callout-missing': { '--hl-callout-color': '#ff5252' },
-    '.cm-hybrid-callout-danger, .cm-hybrid-callout-error, .cm-hybrid-callout-bug': { '--hl-callout-color': '#ff1744' },
-    '.cm-hybrid-callout-example': { '--hl-callout-color': '#7c4dff' },
-    '.cm-hybrid-callout-quote, .cm-hybrid-callout-cite': { '--hl-callout-color': '#9e9e9e' },
+    '.cm-hybrid-callout-note': {
+      '--hl-callout-color': 'var(--vscode-charts-blue, var(--vscode-textLink-foreground, var(--vscode-editor-foreground)))',
+    },
+    '.cm-hybrid-callout-abstract, .cm-hybrid-callout-summary, .cm-hybrid-callout-tldr, .cm-hybrid-callout-info, .cm-hybrid-callout-todo': {
+      '--hl-callout-color': 'var(--vscode-charts-cyan, var(--vscode-textLink-foreground, var(--vscode-editor-foreground)))',
+    },
+    '.cm-hybrid-callout-tip, .cm-hybrid-callout-hint, .cm-hybrid-callout-important': {
+      '--hl-callout-color': 'var(--vscode-charts-green, var(--vscode-editorInfo-foreground, var(--vscode-editor-foreground)))',
+    },
+    '.cm-hybrid-callout-success, .cm-hybrid-callout-check, .cm-hybrid-callout-done': {
+      '--hl-callout-color': 'var(--vscode-testing-iconPassed, var(--vscode-charts-green, var(--vscode-editor-foreground)))',
+    },
+    '.cm-hybrid-callout-question, .cm-hybrid-callout-help, .cm-hybrid-callout-faq': {
+      '--hl-callout-color': 'var(--vscode-charts-yellow, var(--vscode-editorWarning-foreground, var(--vscode-editor-foreground)))',
+    },
+    '.cm-hybrid-callout-warning, .cm-hybrid-callout-caution, .cm-hybrid-callout-attention': {
+      '--hl-callout-color': 'var(--vscode-editorWarning-foreground, var(--vscode-editor-foreground))',
+    },
+    '.cm-hybrid-callout-failure, .cm-hybrid-callout-fail, .cm-hybrid-callout-missing, .cm-hybrid-callout-danger, .cm-hybrid-callout-error, .cm-hybrid-callout-bug': {
+      '--hl-callout-color': 'var(--vscode-errorForeground, var(--vscode-editor-foreground))',
+    },
+    '.cm-hybrid-callout-example': {
+      '--hl-callout-color': 'var(--vscode-charts-purple, var(--vscode-textLink-foreground, var(--vscode-editor-foreground)))',
+    },
+    '.cm-hybrid-callout-quote, .cm-hybrid-callout-cite': {
+      '--hl-callout-color': 'var(--vscode-descriptionForeground, var(--vscode-editor-foreground))',
+    },
     '.cm-hybrid-callout-title': {
       display: 'flex',
       alignItems: 'center',
@@ -533,7 +548,7 @@ export function hybridStyles() {
       boxShadow: 'inset 2px 0 0 var(--vscode-errorForeground, #f48771)',
     },
     '.cm-hybrid-math-error-title': {
-      color: 'var(--vscode-errorForeground, #f48771)',
+      color: 'var(--vscode-errorForeground, var(--vscode-editor-foreground))',
       fontWeight: '700',
       whiteSpace: 'nowrap',
     },
@@ -547,7 +562,7 @@ export function hybridStyles() {
       marginRight: '6px',
       borderRadius: '3px',
       backgroundColor: 'rgba(244, 135, 113, 0.16)',
-      color: 'var(--vscode-errorForeground, #f48771)',
+      color: 'var(--vscode-errorForeground, var(--vscode-editor-foreground))',
       fontSize: '10px',
       fontWeight: '700',
       lineHeight: '1',
@@ -579,11 +594,11 @@ export function hybridStyles() {
       whiteSpace: 'pre',
     },
     '.cm-hybrid-math-delimiter': {
-      color: 'var(--vscode-symbolIcon-operatorForeground, #c586c0)',
+      color: 'var(--vscode-symbolIcon-operatorForeground, var(--vscode-editor-foreground))',
       fontWeight: '600',
     },
     '.cm-hybrid-math-source': {
-      color: 'var(--vscode-symbolIcon-variableForeground, #4ec9b0)',
+      color: 'var(--vscode-symbolIcon-variableForeground, var(--vscode-editor-foreground))',
       fontStyle: 'italic',
     },
     '.cm-hybrid-mermaid-block': {
@@ -648,47 +663,25 @@ export function hybridStyles() {
     },
     '.cm-hybrid-mermaid-error': {
       margin: '0',
-      color: 'var(--vscode-errorForeground, #f48771)',
+      color: 'var(--vscode-errorForeground, var(--vscode-editor-foreground))',
       whiteSpace: 'pre-wrap',
     },
     '&': {
       '--hl-codeblock-background': 'var(--vscode-textCodeBlock-background, rgba(127, 127, 127, 0.10))',
-      '--hl-code-token-comment': '#6A9955',
-      '--hl-code-token-keyword': '#569CD6',
-      '--hl-code-token-string': '#CE9178',
-      '--hl-code-token-function': '#DCDCAA',
-      '--hl-code-token-number': '#B5CEA8',
-      '--hl-code-token-operator': 'var(--vscode-editor-foreground, #D4D4D4)',
-      '--hl-code-token-type': '#4EC9B0',
-      '--hl-code-token-property': '#9CDCFE',
-      '--hl-code-token-variable': '#9CDCFE',
-      '--hl-code-token-regex': '#D16969',
-      '--hl-code-token-tag': '#569CD6',
-    },
-    '.vscode-light &': {
-      '--hl-code-token-comment': '#008000',
-      '--hl-code-token-keyword': '#0000FF',
-      '--hl-code-token-string': '#A31515',
-      '--hl-code-token-function': '#795E26',
-      '--hl-code-token-number': '#098658',
-      '--hl-code-token-operator': 'var(--vscode-editor-foreground, #000000)',
-      '--hl-code-token-type': '#267F99',
-      '--hl-code-token-property': '#001080',
-      '--hl-code-token-variable': '#001080',
-      '--hl-code-token-regex': '#811F3F',
-      '--hl-code-token-tag': '#800000',
-    },
-    '.vscode-high-contrast &, .vscode-high-contrast-light &': {
       '--hl-code-token-comment': 'var(--vscode-descriptionForeground, var(--vscode-editor-foreground))',
-      '--hl-code-token-keyword': 'var(--vscode-textLink-foreground, var(--vscode-editor-foreground))',
-      '--hl-code-token-string': 'var(--vscode-terminal-ansiGreen, var(--vscode-editor-foreground))',
-      '--hl-code-token-function': 'var(--vscode-terminal-ansiYellow, var(--vscode-editor-foreground))',
-      '--hl-code-token-number': 'var(--vscode-terminal-ansiCyan, var(--vscode-editor-foreground))',
-      '--hl-code-token-type': 'var(--vscode-terminal-ansiBlue, var(--vscode-editor-foreground))',
-      '--hl-code-token-property': 'var(--vscode-terminal-ansiBrightBlue, var(--vscode-editor-foreground))',
-      '--hl-code-token-variable': 'var(--vscode-terminal-ansiBrightBlue, var(--vscode-editor-foreground))',
-      '--hl-code-token-regex': 'var(--vscode-terminal-ansiRed, var(--vscode-editor-foreground))',
-      '--hl-code-token-tag': 'var(--vscode-terminal-ansiBlue, var(--vscode-editor-foreground))',
+      '--hl-code-token-keyword': 'var(--vscode-symbolIcon-keywordForeground, var(--vscode-editor-foreground))',
+      '--hl-code-token-string': 'var(--vscode-symbolIcon-stringForeground, var(--vscode-editor-foreground))',
+      '--hl-code-token-function': 'var(--vscode-symbolIcon-functionForeground, var(--vscode-editor-foreground))',
+      '--hl-code-token-number': 'var(--vscode-symbolIcon-numberForeground, var(--vscode-editor-foreground))',
+      '--hl-code-token-boolean': 'var(--vscode-symbolIcon-booleanForeground, var(--vscode-editor-foreground))',
+      '--hl-code-token-operator': 'var(--vscode-symbolIcon-operatorForeground, var(--vscode-editor-foreground))',
+      '--hl-code-token-punctuation': 'var(--vscode-descriptionForeground, var(--vscode-editor-foreground))',
+      '--hl-code-token-type': 'var(--vscode-symbolIcon-classForeground, var(--vscode-editor-foreground))',
+      '--hl-code-token-namespace': 'var(--vscode-symbolIcon-namespaceForeground, var(--vscode-editor-foreground))',
+      '--hl-code-token-property': 'var(--vscode-symbolIcon-propertyForeground, var(--vscode-editor-foreground))',
+      '--hl-code-token-variable': 'var(--vscode-symbolIcon-variableForeground, var(--vscode-editor-foreground))',
+      '--hl-code-token-regex': 'var(--vscode-symbolIcon-stringForeground, var(--vscode-editor-foreground))',
+      '--hl-code-token-tag': 'var(--vscode-symbolIcon-keywordForeground, var(--vscode-editor-foreground))',
     },
     '.cm-hybrid-codeblock': {
       display: 'block',
@@ -811,14 +804,23 @@ export function hybridStyles() {
     '.cm-hybrid-prism-token.token.function, .cm-hybrid-prism-token.token.method': {
       color: 'var(--hl-code-token-function)',
     },
-    '.cm-hybrid-prism-token.token.number, .cm-hybrid-prism-token.token.boolean, .cm-hybrid-prism-token.token.constant': {
+    '.cm-hybrid-prism-token.token.number, .cm-hybrid-prism-token.token.constant': {
       color: 'var(--hl-code-token-number)',
     },
-    '.cm-hybrid-prism-token.token.operator, .cm-hybrid-prism-token.token.punctuation': {
+    '.cm-hybrid-prism-token.token.boolean': {
+      color: 'var(--hl-code-token-boolean)',
+    },
+    '.cm-hybrid-prism-token.token.operator': {
       color: 'var(--hl-code-token-operator)',
     },
-    '.cm-hybrid-prism-token.token.class-name, .cm-hybrid-prism-token.token.builtin, .cm-hybrid-prism-token.token.namespace': {
+    '.cm-hybrid-prism-token.token.punctuation': {
+      color: 'var(--hl-code-token-punctuation)',
+    },
+    '.cm-hybrid-prism-token.token.class-name, .cm-hybrid-prism-token.token.builtin': {
       color: 'var(--hl-code-token-type)',
+    },
+    '.cm-hybrid-prism-token.token.namespace': {
+      color: 'var(--hl-code-token-namespace)',
     },
     '.cm-hybrid-prism-token.token.property, .cm-hybrid-prism-token.token.attr-name, .cm-hybrid-prism-token.token.selector': {
       color: 'var(--hl-code-token-property)',
