@@ -43,12 +43,10 @@ This is a better fit for the learning workflow because:
 - there is no hidden index that can disagree with the repository;
 - a cloned repository is immediately usable.
 
-Some older, non-product packages still contain legacy database code. That code
-is not imported by the combined extension and should remain only for a concrete
-migration or compatibility need. The combined build aliases the small set of
-shared PDF/link types to
-[`packages/core/src/lite.ts`](../packages/core/src/lite.ts) and does not ship
-`sql.js`, a SQLite WASM asset, or a required `.hl/index.sqlite`.
+The legacy database packages and adapters have been removed. The combined
+extension consumes the small portable-reference and PDF-discussion surface
+from [`packages/core/src/index.ts`](../packages/core/src/index.ts) and does not
+ship `sql.js`, a SQLite WASM asset, or a required `.hl/index.sqlite`.
 
 ## 3. System overview
 
@@ -129,8 +127,8 @@ There are three clean boundaries:
 | Daily note and review plan | Yes | Generated Markdown with fixed review dates and TODO carry-forward |
 | Remote update and merge | Yes | Safe Git fetch/fast-forward/confirmed merge |
 | SQLite in the combined extension | No | Removed from its runtime and build |
-| Required MCP server | No | Optional integration surface only |
-| Required `hl` CLI | No | Optional automation/migration surface only |
+| MCP server | No | Removed; future integration only if a concrete consumer exists |
+| `hl` CLI | No | Removed; future automation should use filesystem-first APIs |
 | Mobile app | No | Explicitly out of scope |
 
 ## 5. Repository layout
@@ -388,8 +386,8 @@ fresh crop is attempted for this action; capture failure leaves the text
 handoff usable.
 
 PDF rendering uses the lightweight, file-backed discussion types from
-`core/lite`; it does not open or maintain a wiki database. The JSON-LD mirror
-does not become the sole canonical runtime store merely because it exists.
+`core`; it does not open or maintain a wiki database. The JSON-LD mirror does
+not become the sole canonical runtime store merely because it exists.
 
 ### Web path
 
@@ -573,10 +571,11 @@ implements a conservative pull workflow:
 The extension never pushes, commits, resets, stashes, or deletes files. This
 keeps generated learning notes under the learner's normal Git review process.
 
-## 11. MCP and CLI: what they are for
+## 11. Why the repository has no MCP server or CLI
 
-MCP and CLI are useful, but neither belongs in the interactive frontend's
-critical path.
+MCP and CLI can be useful integration styles, but neither belongs in the
+interactive frontend's critical path and neither currently has a concrete
+consumer.
 
 | Concern | MCP | CLI |
 | --- | --- | --- |
@@ -585,13 +584,15 @@ critical path.
 | Best use here | Agent interoperability with controlled wiki operations | Headless maintenance, migration, linting, and automation |
 | Required by the desktop extension | No | No |
 
-They can reuse the same filesystem parsing and note-writing functions, but they
-are access surfaces, not alternate persistence layers.
+The legacy implementations were removed because they depended on a second
+SQLite-backed runtime. A future integration can reuse the filesystem parsing
+and note-writing functions, but it must remain an access surface rather than an
+alternate persistence layer.
 
 ### MCP
 
 The Model Context Protocol lets an external agent discover and call structured
-tools. A Human Learning MCP server is useful when a separate agent needs
+tools. A future Human Learning MCP server could be useful when a separate agent needs
 operations such as:
 
 - search this wiki;
@@ -599,14 +600,14 @@ operations such as:
 - retrieve a source passage with provenance;
 - create or update a learning note through a controlled tool.
 
-It is an interoperability boundary for agents, not a UI framework and not a
+It would be an interoperability boundary for agents, not a UI framework or a
 requirement for the VS Code extension. The extension already has direct access
 to its workspace and should not start an MCP subprocess merely to read local
 files.
 
 ### CLI
 
-The `hl` CLI is useful for headless and scripted work:
+A future CLI would be justified only by a concrete headless workflow such as:
 
 - CI linting of links and note schemas;
 - bulk imports or migrations;
@@ -614,17 +615,15 @@ The `hl` CLI is useful for headless and scripted work:
 - repository health checks;
 - debugging and administrative operations.
 
-The learner should not need the CLI for ordinary reading, asking, annotating,
+The learner does not need a CLI for ordinary reading, asking, annotating,
 reviewing, graphing, or syncing in VS Code.
 
 ### SQLite decision
 
-For this desktop learning frontend, SQLite is absent from the active runtime.
-Keep legacy database code only while it serves a concrete migration or older
-adapter, then delete it when those consumers are retired. Do not create a
-second filesystem index that becomes required state; reparsing Markdown is fast
-enough for the expected personal-wiki scale, and an optional in-memory cache can
-be added later without changing persistence.
+SQLite and its legacy adapters have been removed. Do not create a second
+filesystem index that becomes required state; reparsing Markdown is fast enough
+for the expected personal-wiki scale, and an optional in-memory cache can be
+added later without changing persistence.
 
 ## 12. Security and reliability boundaries
 

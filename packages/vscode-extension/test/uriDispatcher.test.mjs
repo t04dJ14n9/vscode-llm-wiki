@@ -435,7 +435,7 @@ test('dispatchUri reveals Obsidian block references inside markdown notes', asyn
   ]);
 });
 
-test('all URI dispatchers transport portable PDF text fragments without database lookup', async () => {
+test('dispatchUri transports portable PDF text fragments without database lookup', async () => {
   const textFragment = {
     textStart: 'selected text',
     textEnd: 'range end',
@@ -444,11 +444,7 @@ test('all URI dispatchers transport portable PDF text fragments without database
   };
   const uri = 'raw/pdf/paper.pdf#page=7:~:text=before-,selected%20text,range%20end,-after';
 
-  for (const relativePath of [
-    'src/uriDispatcher.ts',
-    '../vscode-pdf-extension/src/uriDispatcher.ts',
-    '../vscode-markdown-extension/src/uriDispatcher.ts',
-  ]) {
+  for (const relativePath of ['src/uriDispatcher.ts']) {
     const executeCommandCalls = [];
     const vscode = createVscodeMock({
       executeCommandCalls,
@@ -491,12 +487,8 @@ test('all URI dispatchers transport portable PDF text fragments without database
   }
 });
 
-test('URI dispatchers no longer resolve direct internal PDF anchor IDs', async () => {
-  for (const relativePath of [
-    'src/uriDispatcher.ts',
-    '../vscode-pdf-extension/src/uriDispatcher.ts',
-    '../vscode-markdown-extension/src/uriDispatcher.ts',
-  ]) {
+test('dispatchUri no longer resolves direct internal PDF anchor IDs', async () => {
+  for (const relativePath of ['src/uriDispatcher.ts']) {
     const executeCommandCalls = [];
     const errorMessages = [];
     const vscode = createVscodeMock({
@@ -570,254 +562,11 @@ test('dispatchUri can route web targets into the Human Learning web browser inst
   assert.deepEqual(executeCommandCalls, []);
 });
 
-test('markdown-only dispatchUri opens PDFs with the default VS Code editor when PDF plugin command is missing', async () => {
-  const executeCommandCalls = [];
-  const vscode = createVscodeMock({
-    executeCommandCalls,
-    openTextDocumentCalls: [],
-    showTextDocumentCalls: [],
-    document: {
-      uri: { fsPath: '/vault/raw/pdf/paper.pdf' },
-      getText: () => '',
-      positionAt: () => ({ line: 0, character: 0 }),
-    },
-    executeCommand: async (...args) => {
-      executeCommandCalls.push(args);
-      if (args[0] === 'human-learning.openPdfTarget') {
-        throw new Error("command 'human-learning.openPdfTarget' not found");
-      }
-    },
-  });
-  const textFragment = {
-    textStart: 'selected text',
-    prefix: 'before',
-    suffix: 'after',
-  };
-  const { dispatchUri } = loadTsModule('../vscode-markdown-extension/src/uriDispatcher.ts', {
-    vscode,
-    '@human-learning/core': {
-      classifyReferenceTarget: () => ({
-        kind: 'pdf',
-        path: 'raw/pdf/paper.pdf',
-        page: 7,
-        textFragment,
-      }),
-      openDatabase: async () => ({}),
-      closeDatabase: () => undefined,
-      runMigrations: () => undefined,
-      resolveWebTarget: () => undefined,
-    },
-    fs: { existsSync: () => true },
-  });
-
-  await dispatchUri('/vault', 'raw/pdf/paper.pdf#page=7:~:text=before-,selected%20text,-after');
-
-  assert.deepEqual(executeCommandCalls, [
-    [
-      'human-learning.openPdfTarget',
-      {
-        pdfPath: 'raw/pdf/paper.pdf',
-        page: 7,
-        textFragment,
-      },
-    ],
-    [
-      'vscode.open',
-      { fsPath: '/vault/raw/pdf/paper.pdf' },
-    ],
-  ]);
-});
-
-test('standalone markdown dispatch resolves a relative PDF text fragment and falls back to the default editor', async () => {
-  const executeCommandCalls = [];
-  const textFragment = {
-    textStart: 'selected text',
-    prefix: 'before',
-    suffix: 'after',
-  };
-  const vscode = createVscodeMock({
-    executeCommandCalls,
-    openTextDocumentCalls: [],
-    showTextDocumentCalls: [],
-    document: {
-      uri: { fsPath: '/workspace/notes/Source.md' },
-      getText: () => '',
-      positionAt: () => ({ line: 0, character: 0 }),
-    },
-    executeCommand: async (...args) => {
-      executeCommandCalls.push(args);
-      if (args[0] === 'human-learning.openPdfTarget') {
-        throw new Error("command 'human-learning.openPdfTarget' not found");
-      }
-    },
-  });
-  const workspaceUri = { scheme: 'file', fsPath: '/workspace' };
-  vscode.workspace.workspaceFolders = [{ uri: workspaceUri }];
-  vscode.workspace.getWorkspaceFolder = () => ({ uri: workspaceUri });
-  vscode.window.activeTextEditor = {
-    document: {
-      uri: { scheme: 'file', fsPath: '/workspace/notes/Source.md' },
-    },
-  };
-  vscode.window.tabGroups = { activeTabGroup: { activeTab: undefined } };
-  const { dispatchStandaloneUri } = loadTsModule('../vscode-markdown-extension/src/uriDispatcher.ts', {
-    vscode,
-    '@human-learning/core': {
-      classifyReferenceTarget: () => ({
-        kind: 'pdf',
-        path: '../raw/pdf/paper.pdf',
-        page: 7,
-        textFragment,
-      }),
-      openDatabase: () => { throw new Error('standalone PDF dispatch must not open a database'); },
-      closeDatabase: () => undefined,
-      runMigrations: () => undefined,
-      resolveWebTarget: () => undefined,
-    },
-    fs: { existsSync: () => true },
-  });
-
-  await dispatchStandaloneUri('../raw/pdf/paper.pdf#page=7:~:text=before-,selected%20text,-after');
-
-  assert.deepEqual(executeCommandCalls, [
-    [
-      'human-learning.openPdfTarget',
-      {
-        pdfPath: '/workspace/raw/pdf/paper.pdf',
-        page: 7,
-        textFragment,
-      },
-    ],
-    [
-      'vscode.open',
-      { fsPath: '/workspace/raw/pdf/paper.pdf' },
-    ],
-  ]);
-});
-
-test('standalone markdown dispatch resolves beside an active note outside an unrelated workspace', async () => {
-  const executeCommandCalls = [];
-  const textFragment = {
-    textStart: 'selected text',
-    prefix: 'before',
-    suffix: 'after',
-  };
-  const vscode = createVscodeMock({
-    executeCommandCalls,
-    openTextDocumentCalls: [],
-    showTextDocumentCalls: [],
-    document: {
-      uri: { fsPath: '/external/notes/Source.md' },
-      getText: () => '',
-      positionAt: () => ({ line: 0, character: 0 }),
-    },
-  });
-  vscode.workspace.workspaceFolders = [{ uri: { scheme: 'file', fsPath: '/workspace' } }];
-  vscode.workspace.getWorkspaceFolder = () => undefined;
-  vscode.window.activeTextEditor = {
-    document: {
-      uri: { scheme: 'file', fsPath: '/external/notes/Source.md' },
-    },
-  };
-  vscode.window.tabGroups = { activeTabGroup: { activeTab: undefined } };
-  const { dispatchStandaloneUri } = loadTsModule('../vscode-markdown-extension/src/uriDispatcher.ts', {
-    vscode,
-    '@human-learning/core': {
-      classifyReferenceTarget: () => ({
-        kind: 'pdf',
-        path: 'paper.pdf',
-        page: 7,
-        textFragment,
-      }),
-      openDatabase: () => { throw new Error('standalone PDF dispatch must not open a database'); },
-      closeDatabase: () => undefined,
-      runMigrations: () => undefined,
-      resolveWebTarget: () => undefined,
-    },
-    fs: { existsSync: () => true },
-  });
-
-  await dispatchStandaloneUri('paper.pdf#page=7:~:text=before-,selected%20text,-after');
-
-  assert.deepEqual(executeCommandCalls, [[
-    'human-learning.openPdfTarget',
-    {
-      pdfPath: '/external/notes/paper.pdf',
-      page: 7,
-      textFragment,
-    },
-  ]]);
-});
-
-test('standalone markdown dispatch preserves a copied absolute portable PDF target', async () => {
-  const executeCommandCalls = [];
-  const pdfPath = '/Users/reader/Outside Workspace/paper.pdf';
-  const textFragment = { textStart: 'standalone selection' };
-  const vscode = createVscodeMock({
-    executeCommandCalls,
-    openTextDocumentCalls: [],
-    showTextDocumentCalls: [],
-    document: {
-      uri: { fsPath: '/workspace/notes/Source.md' },
-      getText: () => '',
-      positionAt: () => ({ line: 0, character: 0 }),
-    },
-    executeCommand: async (...args) => {
-      executeCommandCalls.push(args);
-      if (args[0] === 'human-learning.openPdfTarget') {
-        throw new Error("command 'human-learning.openPdfTarget' not found");
-      }
-    },
-  });
-  const workspaceUri = { scheme: 'file', fsPath: '/workspace' };
-  vscode.workspace.workspaceFolders = [{ uri: workspaceUri }];
-  vscode.workspace.getWorkspaceFolder = () => ({ uri: workspaceUri });
-  vscode.window.activeTextEditor = {
-    document: {
-      uri: { scheme: 'file', fsPath: '/workspace/notes/Source.md' },
-    },
-  };
-  vscode.window.tabGroups = { activeTabGroup: { activeTab: undefined } };
-  const { dispatchStandaloneUri } = loadTsModule('../vscode-markdown-extension/src/uriDispatcher.ts', {
-    vscode,
-    '@human-learning/core': {
-      classifyReferenceTarget: () => ({
-        kind: 'pdf',
-        path: pdfPath,
-        page: 7,
-        textFragment,
-      }),
-      openDatabase: () => { throw new Error('standalone PDF dispatch must not open a database'); },
-      closeDatabase: () => undefined,
-      runMigrations: () => undefined,
-      resolveWebTarget: () => undefined,
-    },
-    fs: { existsSync: () => true },
-  });
-
-  await dispatchStandaloneUri(`<${pdfPath}#page=7:~:text=standalone%20selection>`);
-
-  assert.deepEqual(executeCommandCalls, [
-    [
-      'human-learning.openPdfTarget',
-      { pdfPath, page: 7, textFragment },
-    ],
-    [
-      'vscode.open',
-      { fsPath: pdfPath },
-    ],
-  ]);
-});
-
-test('all URI dispatchers preserve absolute PDF paths in default-editor fallback', async () => {
+test('dispatchUri preserves absolute PDF paths in default-editor fallback', async () => {
   const textFragment = { textStart: 'selected text' };
   const pdfPath = '/external/papers/paper.pdf';
 
-  for (const relativePath of [
-    'src/uriDispatcher.ts',
-    '../vscode-pdf-extension/src/uriDispatcher.ts',
-    '../vscode-markdown-extension/src/uriDispatcher.ts',
-  ]) {
+  for (const relativePath of ['src/uriDispatcher.ts']) {
     const executeCommandCalls = [];
     const vscode = createVscodeMock({
       executeCommandCalls,

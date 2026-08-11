@@ -13,15 +13,6 @@
         "${workspaceFolder}/packages/vscode-extension/dist/**/*.js"
       ],
       "preLaunchTask": "Build HL Extension"
-    },
-    {
-      "name": "Run HL CLI",
-      "type": "node",
-      "request": "launch",
-      "program": "${workspaceFolder}/packages/cli/dist/main.js",
-      "args": ["status"],
-      "cwd": "${workspaceFolder}/demo-vault",
-      "preLaunchTask": "Build HL Packages"
     }
   ]
 }

@@ -569,8 +569,8 @@ export class CodexAppServerClient {
         'initialize',
         {
           clientInfo: {
-            name: 'human-learning-pdf',
-            title: 'Human Learning PDF',
+            name: 'human-learning-vscode',
+            title: 'Human Learning',
             version: this.extensionVersion,
           },
         },

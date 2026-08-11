@@ -8,7 +8,6 @@ import process from 'node:process';
 import ts from 'typescript';
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const repoRoot = resolve(packageRoot, '../..');
 const fixtureExecutable = join(packageRoot, 'test', 'fixtures', 'fake-codex-app-server.mjs');
 
 function loadClientModule(relativePath = 'src/codexAppServerClient.ts') {
@@ -153,7 +152,7 @@ test('accepts the live integration-name userAgent at the minimum supported versi
 
   assert.equal(
     initialized.userAgent,
-    'human-learning-pdf/0.144.1 (Mac OS 26.5.2; arm64) dumb (human-learning-pdf; 0.1.0)',
+    'human-learning-vscode/0.144.1 (Mac OS 26.5.2; arm64) dumb (human-learning-vscode; 0.1.0)',
   );
 });
 
@@ -621,19 +620,10 @@ test('dispose terminates the child, rejects pending work, and blocks later reque
   await waitFor(() => !isProcessAlive(fixturePid));
 });
 
-test('the full and standalone PDF client modules stay byte-identical and VS Code-free', () => {
+test('the Codex app-server client stays independent of the VS Code API', () => {
   const fullClientPath = join(packageRoot, 'src', 'codexAppServerClient.ts');
-  const pdfClientPath = join(
-    repoRoot,
-    'packages',
-    'vscode-pdf-extension',
-    'src',
-    'codexAppServerClient.ts',
-  );
   const fullClient = readFileSync(fullClientPath);
-  const pdfClient = readFileSync(pdfClientPath);
 
-  assert.deepEqual(pdfClient, fullClient);
   assert.doesNotMatch(fullClient.toString('utf8'), /from\s+['"]vscode['"]|require\(['"]vscode['"]\)/);
 });
 

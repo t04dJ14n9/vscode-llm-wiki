@@ -7,176 +7,95 @@ import { join, relative, resolve } from 'node:path';
 
 const extensionRoot = resolve(import.meta.dirname, '..');
 const repoRoot = resolve(extensionRoot, '../..');
-const packagesRoot = join(repoRoot, 'packages');
-const markdownRoot = join(packagesRoot, 'vscode-markdown-extension');
-const pdfRoot = join(packagesRoot, 'vscode-pdf-extension');
-const sharedPdfRoot = join(packagesRoot, 'pdf-editor');
+const sharedPdfRoot = join(repoRoot, 'packages', 'pdf-editor');
 const sharedPdfWebviewEntry = join(sharedPdfRoot, 'src/webview/pdf-viewer.ts');
 const require = createRequire(import.meta.url);
 
-test('shared PDF implementation and independent extension delivery surfaces exist', () => {
-  assertPackageFile(sharedPdfRoot, 'package.json');
-  assertPackageFile(sharedPdfRoot, 'src/webview/pdf-viewer.ts');
-  assertPackageFile(sharedPdfRoot, 'src/webview/pdfAskPanel.ts');
-  assertPackageFile(sharedPdfRoot, 'src/webview/pdfAskPanelStyles.ts');
-  assertPackageFile(sharedPdfRoot, 'src/webview/pdfAskPanelView.ts');
-  assertPackageFile(sharedPdfRoot, 'src/webview/pdfTextBands.ts');
-  assertPackageFile(sharedPdfRoot, 'src/webview/pdfTextLayer.ts');
-  assertPackageFile(sharedPdfRoot, 'src/webview/pdfLayout.ts');
-  assertPackageFile(sharedPdfRoot, 'src/webview/domain/pdfAskState.ts');
-  assertPackageFile(sharedPdfRoot, 'src/webview/domain/pdfNavigation.ts');
-  assertPackageFile(sharedPdfRoot, 'src/webview/domain/pdfOutline.ts');
-  assertPackageFile(sharedPdfRoot, 'src/webview/domain/pdfSearch.ts');
-  assertPackageFile(sharedPdfRoot, 'src/webview/domain/pdfSelection.ts');
-  assertPackageFile(sharedPdfRoot, 'src/webview/domain/pdfTextExtraction.ts');
-
-  assertPackageFile(extensionRoot, 'package.json');
-  assertPackageFile(extensionRoot, 'src/extension.ts');
-  assertPackageFile(extensionRoot, 'src/pdfEditorProvider.ts');
-  assertPackageFile(extensionRoot, 'webview-src/pdf-viewer.ts');
-  assertPackageFile(extensionRoot, 'webpack.config.js');
-
-  assertPackageFile(markdownRoot, 'package.json');
-  assertPackageFile(markdownRoot, 'src/extension.ts');
-  assertPackageFile(markdownRoot, 'src/markdownEditorProvider.ts');
-  assertPackageFile(markdownRoot, 'webview-src/markdown-editor.ts');
-  assertPackageFile(markdownRoot, 'webpack.config.js');
-
-  assertPackageFile(pdfRoot, 'package.json');
-  assertPackageFile(pdfRoot, 'src/extension.ts');
-  assertPackageFile(pdfRoot, 'src/pdfEditorProvider.ts');
-  assertPackageFile(pdfRoot, 'webview-src/pdf-viewer.ts');
-  assertPackageFile(pdfRoot, 'webpack.config.js');
-});
-
-test('combined and standalone builds resolve the canonical shared PDF webview entry', () => {
-  for (const packageRoot of [extensionRoot, pdfRoot]) {
-    const manifest = readJson(join(packageRoot, 'package.json'));
-    assert.equal(
-      manifest.dependencies?.['@human-learning/pdf-editor'],
-      'workspace:*',
-      `${manifest.name} must depend on the shared PDF editor package`,
-    );
-
-    const webpackPath = join(packageRoot, 'webpack.config.js');
-    const webpackSource = readFileSync(webpackPath, 'utf8');
-    assert.match(
-      webpackSource,
-      /@human-learning\/pdf-editor\/webview/,
-      `${relative(repoRoot, webpackPath)} must resolve the shared webview package entry`,
-    );
-
-    delete require.cache[require.resolve(webpackPath)];
-    const webpackConfigs = require(webpackPath);
-    const pdfViewerConfig = webpackConfigs.find(config => config.name === 'pdf-viewer');
-    assert.ok(pdfViewerConfig, `${manifest.name} must define a pdf-viewer build`);
-    assert.equal(
-      resolveWebpackEntry(packageRoot, pdfViewerConfig.entry),
-      sharedPdfWebviewEntry,
-      `${manifest.name} must build the canonical shared PDF webview source`,
-    );
+test('combined extension owns both editors and uses the shared PDF implementation', () => {
+  for (const file of [
+    'package.json',
+    'src/webview/pdf-viewer.ts',
+    'src/webview/pdfAskPanel.ts',
+    'src/webview/pdfAskPanelStyles.ts',
+    'src/webview/pdfAskPanelView.ts',
+    'src/webview/pdfTextBands.ts',
+    'src/webview/pdfTextLayer.ts',
+    'src/webview/pdfLayout.ts',
+    'src/webview/domain/pdfAskState.ts',
+    'src/webview/domain/pdfNavigation.ts',
+    'src/webview/domain/pdfOutline.ts',
+    'src/webview/domain/pdfSearch.ts',
+    'src/webview/domain/pdfSelection.ts',
+    'src/webview/domain/pdfTextExtraction.ts',
+  ]) {
+    assertPackageFile(sharedPdfRoot, file);
   }
-});
 
-test('shared PDF viewer exposes Cursor handoff only in the combined host', () => {
-  const sharedViewer = readFileSync(sharedPdfWebviewEntry, 'utf8');
-  const combinedHost = readFileSync(
-    join(extensionRoot, 'src', 'pdfEditorProvider.ts'),
-    'utf8',
-  );
-  const standaloneHost = readFileSync(
-    join(pdfRoot, 'src', 'pdfEditorProvider.ts'),
-    'utf8',
-  );
+  for (const file of [
+    'package.json',
+    'src/extension.ts',
+    'src/markdownEditorProvider.ts',
+    'src/pdfEditorProvider.ts',
+    'webview-src/markdown-editor.ts',
+    'webpack.config.js',
+  ]) {
+    assertPackageFile(extensionRoot, file);
+  }
 
-  assert.match(sharedViewer, /addToCursorChatEnabled/);
-  assert.match(combinedHost, /window\.__humanLearningAddToCursorChat = true/);
-  assert.doesNotMatch(standaloneHost, /__humanLearningAddToCursorChat/);
-});
-
-test('combined and standalone manifests retain their intended editor surfaces', () => {
-  const combinedManifest = readJson(join(extensionRoot, 'package.json'));
-  const markdownManifest = readJson(join(markdownRoot, 'package.json'));
-  const pdfManifest = readJson(join(pdfRoot, 'package.json'));
-
-  assert.equal(combinedManifest.name, 'human-learning-vscode');
+  const manifest = readJson(join(extensionRoot, 'package.json'));
+  assert.equal(manifest.name, 'human-learning-vscode');
   assert.deepEqual(
-    customEditorViewTypes(combinedManifest).sort(),
+    customEditorViewTypes(manifest).sort(),
     ['human-learning.markdownEditor', 'human-learning.pdfViewer'],
   );
-
-  assert.equal(markdownManifest.name, 'human-learning-markdown');
-  assert.equal(markdownManifest.private, undefined);
-  assert.equal(markdownManifest.main, 'dist/extension.js');
-  assert.deepEqual(customEditorViewTypes(markdownManifest), ['human-learning.markdownEditor']);
-  assert.equal(editorAssociation(markdownManifest, '*.md'), 'human-learning.markdownEditor');
-  assert.equal(editorAssociation(markdownManifest, '*.pdf'), undefined);
-
-  assert.equal(pdfManifest.name, 'human-learning-pdf');
-  assert.equal(pdfManifest.private, undefined);
-  assert.equal(pdfManifest.main, 'dist/extension.js');
-  assert.deepEqual(customEditorViewTypes(pdfManifest), ['human-learning.pdfViewer']);
-  assert.equal(editorAssociation(pdfManifest, '*.pdf'), 'human-learning.pdfViewer');
-  assert.equal(editorAssociation(pdfManifest, '*.md'), undefined);
+  assert.equal(
+    manifest.dependencies?.['@human-learning/pdf-editor'],
+    'workspace:*',
+  );
 });
 
-test('delivery packages do not duplicate the shared PDF webview implementation', async () => {
+test('combined build resolves the canonical shared PDF webview entry', () => {
+  const webpackPath = join(extensionRoot, 'webpack.config.js');
+  const webpackSource = readFileSync(webpackPath, 'utf8');
+  assert.match(webpackSource, /@human-learning\/pdf-editor\/webview/);
+
+  delete require.cache[require.resolve(webpackPath)];
+  const webpackConfigs = require(webpackPath);
+  const pdfViewerConfig = webpackConfigs.find(config => config.name === 'pdf-viewer');
+  assert.ok(pdfViewerConfig, 'combined extension must define a pdf-viewer build');
+  assert.equal(
+    resolveWebpackEntry(extensionRoot, pdfViewerConfig.entry),
+    sharedPdfWebviewEntry,
+  );
+});
+
+test('combined delivery does not duplicate shared PDF implementation modules', async () => {
   const combinedFiles = await sourceFiles(extensionRoot);
-  const markdownFiles = await sourceFiles(markdownRoot);
-  const pdfFiles = await sourceFiles(pdfRoot);
-
-  assertNoFile(markdownFiles, /(^|\/)(pdfEditorProvider\.ts|embedpdf\.d\.ts)$/);
-  assertNoFile(markdownFiles, /(^|\/)pdf-viewer\.ts$/);
-  assertNoSourceText(markdownRoot, markdownFiles, /@embedpdf\/|from ['"].*pdfEditorProvider|pdf-viewer/);
-
-  assertNoFile(pdfFiles, /(^|\/)(markdownEditorProvider\.ts|markdownSymbols\.ts|markdownHeadingSyntax\.ts)$/);
-  assertNoFile(pdfFiles, /(^|\/)(markdown-editor|markdownClipboard|markdownPaste|markdownSpans|markdownFences)\.ts$/);
-  assertNoSourceText(pdfRoot, pdfFiles, /@codemirror\/|from ['"].*markdownEditorProvider|markdown-editor/);
-
   const sharedImplementationFiles = /(^|\/)(pdfAskPanel|pdfAskPanelStyles|pdfAskPanelView|pdfTextBands|pdfTextLayer|pdfLayout|pdfAskState|pdfNavigation|pdfOutline|pdfSearch|pdfSelection|pdfTextExtraction)\.ts$/;
-  assertNoFile(combinedFiles, sharedImplementationFiles);
-  assertNoFile(pdfFiles, sharedImplementationFiles);
 
-  for (const packageRoot of [extensionRoot, pdfRoot]) {
-    const wrapper = readFileSync(join(packageRoot, 'webview-src/pdf-viewer.ts'), 'utf8');
-    const substantiveLines = wrapper
-      .split(/\r?\n/)
-      .map(line => line.trim())
-      .filter(Boolean);
-    assert.ok(
-      substantiveLines.length <= 5,
-      `${relative(repoRoot, packageRoot)} must not retain a full PDF viewer implementation`,
-    );
-    assert.match(wrapper, /@human-learning\/pdf-editor\/webview/);
-  }
+  assertNoFile(combinedFiles, sharedImplementationFiles);
+  assert.equal(
+    existsSync(join(extensionRoot, 'webview-src/pdf-viewer.ts')),
+    false,
+    'combined extension should build the shared entry directly without a forwarding wrapper',
+  );
 });
 
-test('source package dependencies are scoped to their owned implementation', () => {
-  const markdownManifest = readJson(join(markdownRoot, 'package.json'));
-  const pdfManifest = readJson(join(pdfRoot, 'package.json'));
+test('PDF engine and Markdown rendering dependencies belong to their source packages', () => {
+  const combinedManifest = readJson(join(extensionRoot, 'package.json'));
   const sharedPdfManifest = readJson(join(sharedPdfRoot, 'package.json'));
-
-  const markdownDependencies = Object.keys(markdownManifest.dependencies ?? {});
-  const pdfDependencies = Object.keys(pdfManifest.dependencies ?? {});
+  const combinedDependencies = Object.keys(combinedManifest.dependencies ?? {});
   const sharedPdfDependencies = Object.keys(sharedPdfManifest.dependencies ?? {});
 
   assert.equal(
-    markdownDependencies.some(dependency => dependency.startsWith('@embedpdf/')),
+    combinedDependencies.some(dependency => dependency.startsWith('@embedpdf/')),
     false,
-    'markdown package should not depend on the PDF engine packages',
+    'combined package should consume PDF engine dependencies through pdf-editor',
   );
-  assert.equal(
-    pdfDependencies.some(dependency => dependency.startsWith('@codemirror/')),
-    false,
-    'PDF package should not depend on the markdown editor packages',
-  );
-  assert.equal(pdfDependencies.includes('@mathjax/src'), false);
-  assert.equal(pdfDependencies.includes('mermaid'), false);
-  assert.equal(pdfDependencies.includes('turndown'), false);
+  assert.equal(combinedDependencies.includes('marked'), false);
   assert.equal(
     sharedPdfDependencies.some(dependency => dependency.startsWith('@embedpdf/')),
     true,
-    'shared PDF package must own its PDF engine dependencies',
   );
   assert.equal(sharedPdfDependencies.includes('dompurify'), true);
   assert.equal(sharedPdfDependencies.includes('marked'), true);
@@ -184,19 +103,15 @@ test('source package dependencies are scoped to their owned implementation', () 
 
 test('Ask PDF keeps the vetted Marked major on the repository Node 20 floor', () => {
   const rootManifest = readJson(join(repoRoot, 'package.json'));
+  const sharedPdfManifest = readJson(join(sharedPdfRoot, 'package.json'));
+  const version = sharedPdfManifest.dependencies?.marked;
+  const major = Number.parseInt(String(version).match(/\d+/)?.[0] ?? '', 10);
+
   assert.equal(rootManifest.engines.node, '>=20.19.0');
-  for (const root of [extensionRoot, pdfRoot, sharedPdfRoot]) {
-    const manifest = readJson(join(root, 'package.json'));
-    const version = manifest.dependencies?.marked;
-    if (version === undefined) {
-      continue;
-    }
-    const major = Number.parseInt(String(version).match(/\d+/)?.[0] ?? '', 10);
-    assert.ok(
-      Number.isFinite(major) && major <= 13,
-      `${manifest.name} must keep the vetted Marked major until its upgrade is reviewed`,
-    );
-  }
+  assert.ok(
+    Number.isFinite(major) && major <= 13,
+    'pdf-editor must keep the vetted Marked major until its upgrade is reviewed',
+  );
 });
 
 function assertPackageFile(packageRoot, file) {
@@ -220,47 +135,29 @@ function customEditorViewTypes(manifest) {
   return (manifest.contributes?.customEditors ?? []).map(editor => editor.viewType);
 }
 
-function editorAssociation(manifest, pattern) {
-  return manifest.contributes?.configurationDefaults?.['workbench.editorAssociations']?.[pattern];
-}
-
-async function sourceFiles(packageRoot) {
+async function sourceFiles(root) {
   const files = [];
-  for (const dir of ['src', 'webview-src']) {
-    const dirPath = join(packageRoot, dir);
-    if (!existsSync(dirPath)) {
-      continue;
-    }
-    await collectSourceFiles(packageRoot, dirPath, files);
+  for (const directory of ['src', 'webview-src']) {
+    const directoryRoot = join(root, directory);
+    if (!existsSync(directoryRoot)) continue;
+    await collect(directoryRoot, directory, files);
   }
-  return files.sort();
+  return files;
 }
 
-async function collectSourceFiles(packageRoot, dirPath, files) {
-  for (const entry of await readdir(dirPath, { withFileTypes: true })) {
-    const entryPath = join(dirPath, entry.name);
+async function collect(absoluteRoot, relativeRoot, files) {
+  for (const entry of await readdir(absoluteRoot, { withFileTypes: true })) {
+    const absolutePath = join(absoluteRoot, entry.name);
+    const relativePath = join(relativeRoot, entry.name).replaceAll('\\', '/');
     if (entry.isDirectory()) {
-      await collectSourceFiles(packageRoot, entryPath, files);
-      continue;
-    }
-    if (/\.(ts|tsx|js|mjs)$/.test(entry.name)) {
-      files.push(relative(packageRoot, entryPath));
+      await collect(absolutePath, relativePath, files);
+    } else if (entry.isFile()) {
+      files.push(relativePath);
     }
   }
 }
 
 function assertNoFile(files, pattern) {
-  const matches = files.filter(file => pattern.test(file));
-  assert.deepEqual(matches, []);
-}
-
-function assertNoSourceText(packageRoot, files, pattern) {
-  const matches = [];
-  for (const file of files) {
-    const text = readFileSync(join(packageRoot, file), 'utf8');
-    if (pattern.test(text)) {
-      matches.push(file);
-    }
-  }
-  assert.deepEqual(matches, []);
+  const match = files.find(file => pattern.test(file));
+  assert.equal(match, undefined, `unexpected duplicate implementation file: ${match}`);
 }

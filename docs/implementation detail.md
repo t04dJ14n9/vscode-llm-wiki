@@ -19,27 +19,16 @@ packages/pdf-editor
   src/webview/            PDF viewer and Ask PDF user interface
 
 packages/core
-  src/lite.ts             filesystem-only types/store used by the extension
+  src/index.ts            canonical types/store used by the extension
+  src/links/              portable reference parsing and serialization
   src/pdf-discussions/    v1 sidecar, portable JSON-LD mirror, and scan API
-  src/...                 legacy database/search modules, not in the release bundle
 ```
 
-The extension build compiles core first, then its Webpack configuration aliases
-`@human-learning/core` to `packages/core/dist/lite.js`, generated solely from
-`src/lite.ts`. That entry exports portable-link classification, the file-backed
-PDF discussion store, and the portable annotation mapper/scanner API. It
-deliberately excludes database, ingestion, search, embeddings, activity, and
-legacy review imports.
-
-The following monorepo packages remain for historical or optional workflows but
-are not shipped in the simplified release:
-
-```text
-packages/cli
-packages/mcp-server
-packages/vscode-markdown-extension
-packages/vscode-pdf-extension
-```
+The extension build compiles core first and consumes its one canonical entry.
+Core exports portable-link classification, the file-backed PDF discussion
+store, and the portable annotation mapper/scanner API. Database, ingestion,
+search, embeddings, activity, CLI, MCP, and split-extension surfaces have been
+removed.
 
 ## 2. Combined extension output
 
@@ -55,9 +44,6 @@ packages/vscode-pdf-extension
 
 The combined output does not include `sql.js`, `sql-wasm.wasm`, a SQLite
 binding, or a required `.hl/index.sqlite`.
-
-The split-package build scripts still exist for compatibility testing. They are
-not the simplified product or its packaging path.
 
 ## 3. Activation and host integration
 
@@ -389,16 +375,12 @@ keeps source links portable after clone or repository relocation.
 - Git sync refuses dirty state and requires consent for divergence.
 - Exact quotes and complete transcripts keep summaries auditable.
 
-## 15. MCP, CLI, and SQLite status
+## 15. Retired legacy surfaces
 
-MCP is useful as an optional structured tool boundary for external agents. The
-CLI is useful for headless migration, linting, import, diagnostics, or CI.
-Neither is called by the interactive extension.
-
-Database-backed core and old split-extension code remain only as legacy
-surfaces. They should not gain new product dependencies. Once concrete
-migration/compatibility consumers are retired, they can be deleted without
-changing the filesystem-first desktop architecture.
+The old CLI, MCP server, SQLite-backed core, and standalone Markdown/PDF
+extensions were removed after the combined extension became the sole product.
+Future automation should reuse the filesystem-first services and preserve the
+same Markdown, JSON, and Git source-of-truth model.
 
 ## 16. Verification
 

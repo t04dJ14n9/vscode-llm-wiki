@@ -24,9 +24,8 @@ the durable source of truth.
 | Graph, daily review, and safe Git update | Included |
 | Built-in agent provider | Local Codex app-server |
 | External agent handoff | Codex, Claude Code, Cursor Agent, and CodeBuddy |
-| MCP and `hl` CLI | Optional legacy/headless surfaces |
-| SQLite | Not used or shipped by the combined extension |
-| Standalone Markdown/PDF extensions | Legacy; excluded from the simplified release |
+| MCP, CLI, and SQLite | Removed; no parallel runtime or persistence layer |
+| Standalone Markdown/PDF extensions | Removed; the combined extension is the product |
 | Web or mobile app | Out of scope |
 
 No vault initialization is required. The extension works from the first
@@ -296,16 +295,11 @@ selected-composer probe only when available, and asks when the target is
 ambiguous. It never submits the draft, and external answers are not
 automatically persisted.
 
-## 12. Optional and legacy surfaces
+## 12. Removed legacy surfaces
 
-MCP can be useful when an external agent host needs discoverable, structured
-wiki tools. The `hl` CLI can be useful for scripted migration, linting, imports,
-or CI. Neither is required by the combined desktop workflow.
-
-The monorepo still contains database-backed core modules, the CLI, MCP server,
-and split Markdown/PDF packages for historical compatibility. The active
-combined extension imports the filesystem-only `core/lite` entry and excludes
-SQLite, `sql-wasm.wasm`, and `.hl/index.sqlite` from its runtime.
+The database-backed core, CLI, MCP server, and split Markdown/PDF packages have
+been removed. The combined extension and its shared libraries now represent
+the entire supported product surface.
 
 ## 13. Verification commands
 

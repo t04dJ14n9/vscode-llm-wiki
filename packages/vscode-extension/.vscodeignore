@@ -1,6 +1,5 @@
 .omc/**
 .vscode-test/**
-dist-split/**
 dist/src/**
 dist/webview-src/**
 dist/tsconfig.tsbuildinfo

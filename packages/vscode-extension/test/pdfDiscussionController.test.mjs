@@ -9,8 +9,6 @@ import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const repoRoot = resolve(packageRoot, '../..');
-const standaloneRoot = join(repoRoot, 'packages', 'vscode-pdf-extension');
 const fixtureExecutable = join(packageRoot, 'test', 'fixtures', 'fake-codex-app-server.mjs');
 
 function loadTsModule(root, relativePath, mocks = {}) {
@@ -268,11 +266,10 @@ async function waitFor(predicate, timeoutMs = 2_000) {
   }
 }
 
-test('protocol and controller sources are mirrored byte-for-byte and protocol is type-only safe', () => {
+test('discussion protocol is type-only safe', () => {
   for (const file of ['pdfDiscussionProtocol.ts', 'pdfDiscussionController.ts']) {
     const combined = readFileSync(join(packageRoot, 'src', file));
-    const standalone = readFileSync(join(standaloneRoot, 'src', file));
-    assert.deepEqual(standalone, combined, `${file} must stay byte-identical`);
+    assert.ok(combined.length > 0, `${file} must not be empty`);
   }
   const protocol = readFileSync(join(packageRoot, 'src', 'pdfDiscussionProtocol.ts'), 'utf8');
   assert.doesNotMatch(protocol, /^import(?!\s+type\b)/m);
@@ -1025,7 +1022,7 @@ test('ignores stale prior-turn notifications received before turn/start returns 
   assert.equal(completed.messages.at(-1).codexTurnId, 'turn-current');
 });
 
-test('routes standalone/external PDFs globally and imports matching global data only for a contained vault PDF', async t => {
+test('routes external PDFs globally and imports matching global data only for a contained vault PDF', async t => {
   const { createPdfDiscussionStoreForDocument, isPathInside } = controllerModule();
   const { PdfDiscussionStore, createPdfDiscussionSelectionKey } = coreModule();
   const root = await mkdtemp(join(tmpdir(), 'hl-pdf-routing-'));

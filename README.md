@@ -142,19 +142,14 @@ Git, VS Code API, and agent-process access. Codex threads are read-only; the
 extension performs the explicit, atomic learning-note write after an answer
 finishes.
 
-## MCP and CLI
+## Focused product surface
 
-MCP and the `hl` CLI are optional access surfaces, not dependencies of the
-desktop learning flow:
-
-- MCP can expose controlled wiki operations to an external agent host.
-- The CLI can support headless linting, migration, imports, health checks, or
-  CI automation.
-
-Ordinary reading, asking, annotating, graphing, reviewing, and syncing happen
-directly in the combined extension. The legacy CLI, MCP server, database-backed
-core modules, and standalone Markdown/PDF extension packages are excluded from
-the simplified release runtime.
+The repository contains only the combined desktop extension and the shared
+libraries it executes. The retired `hl` CLI, MCP server, SQLite index,
+database-backed services, and standalone editor packages have been removed.
+If a future headless or MCP integration has a concrete consumer, it should be
+built on the same filesystem-first APIs instead of reviving a parallel
+persistence layer.
 
 ## Repository packages
 
@@ -162,17 +157,12 @@ the simplified release runtime.
 packages/
 ├── vscode-extension/          # active combined VS Code/Cursor extension
 ├── pdf-editor/                # PDF webview shared by the combined extension
-├── core/                      # filesystem-only `lite` entry plus legacy modules
-├── cli/                       # optional legacy/headless surface
-├── mcp-server/                # optional legacy agent surface
-├── vscode-markdown-extension/ # legacy split package, not shipped
-└── vscode-pdf-extension/      # legacy split package, not shipped
+└── core/                      # portable references and PDF discussion storage
 ```
 
-The combined bundle aliases `@human-learning/core` to its filesystem-only
-`core/lite` entry. It ships `extension.js`, the Markdown, PDF, and experimental
-web-reader bundles, plus `pdfium.wasm`; it does not ship `sql.js`,
-`sql-wasm.wasm`, or require `.hl/index.sqlite`.
+The combined extension ships `extension.js`, the Markdown, PDF, and
+experimental web-reader bundles, plus `pdfium.wasm`. It does not ship
+`sql.js`, `sql-wasm.wasm`, or require `.hl/index.sqlite`.
 
 ## Development
 
@@ -181,10 +171,8 @@ Requirements: Node.js 20.19 or newer, pnpm 10, and VS Code or Cursor.
 ```bash
 pnpm install
 
-# Type-check and test the active product
-pnpm --filter human-learning-vscode exec tsc --noEmit
-pnpm --filter @human-learning/core test
-pnpm --filter human-learning-vscode test
+# Type-check and test the repository
+pnpm check
 
 # Run browser-level webview tests
 pnpm exec playwright test --config playwright.config.ts
@@ -195,10 +183,8 @@ Extension** debug configuration (`F5`). It builds the combined package and
 opens `demo-vault` in an Extension Development Host. The same extension entry
 point can be launched in Cursor.
 
-The root `pnpm build` and `pnpm test` commands also exercise the legacy
-monorepo packages. For work on the simplified release, prefer the scoped
-commands above. Split-extension compatibility is opt-in via
-`pnpm --filter human-learning-vscode test:legacy-split`.
+The root `pnpm build`, `pnpm test`, and `pnpm check` commands cover the complete
+repository.
 
 ## Documentation
 

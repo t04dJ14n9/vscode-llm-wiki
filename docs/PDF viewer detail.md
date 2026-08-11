@@ -213,10 +213,6 @@ pnpm --filter human-learning-vscode test
 pnpm exec playwright test --config playwright.config.ts
 ```
 
-`pnpm --filter human-learning-vscode test:legacy-split` is an optional
-compatibility check for the retired split-extension packages; it is not part of
-the combined product's runtime.
-
 The final desktop smoke test should be repeated in both VS Code and Cursor:
 
 1. select a multi-line PDF passage and open Ask PDF;
