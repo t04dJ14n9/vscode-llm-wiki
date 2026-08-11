@@ -9,6 +9,75 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
     );
   }
 
+  async function markdownCaretColors(
+    page: import('@playwright/test').Page,
+    cursorForeground: string,
+    editorForeground: string,
+  ): Promise<{
+    editorCaret: string;
+    cursor: string;
+    dropCursor: string;
+    searchCaret: string;
+    vimCaret: string;
+  }> {
+    await page.evaluate(({ cursor, editor }) => {
+      document.documentElement.style.setProperty('--vscode-editorCursor-foreground', cursor);
+      document.documentElement.style.setProperty('--vscode-editor-foreground', editor);
+      window.postMessage({ type: 'setText', text: 'Theme-derived caret colors.' }, '*');
+    }, { cursor: cursorForeground, editor: editorForeground });
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+    await page.click('.cm-content');
+    await page.waitForSelector('.cm-cursor', { timeout: 10_000 });
+    await page.evaluate(() => {
+      const editor = document.querySelector<HTMLElement>('.cm-editor');
+      const cursor = document.querySelector<HTMLElement>('.cm-cursor');
+      if (!editor || !cursor) throw new Error('Missing CodeMirror caret surfaces');
+      editor.style.color = '#abcdef';
+      cursor.style.color = '#abcdef';
+      const dropCursor = document.createElement('div');
+      dropCursor.className = 'cm-dropCursor';
+      dropCursor.style.color = '#abcdef';
+      editor.appendChild(dropCursor);
+    });
+
+    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+F' : 'Control+F');
+    const searchInput = page.locator('.cm-search input[name="search"]');
+    await expect(searchInput).toBeVisible();
+    const searchCaret = await searchInput.evaluate(input => {
+      (input as HTMLElement).style.color = '#abcdef';
+      return getComputedStyle(input).caretColor;
+    });
+    await page.keyboard.press('Escape');
+    await expect(searchInput).toHaveCount(0);
+
+    await page.evaluate(() => {
+      window.postMessage({ type: 'setVimMode', enabled: true }, '*');
+    });
+    await page.click('.cm-content');
+    await page.keyboard.press('Escape');
+    await page.keyboard.type(':');
+    const vimInput = page.locator('.cm-vim-panel input');
+    await expect(vimInput).toBeVisible();
+
+    return page.evaluate((capturedSearchCaret) => {
+      const editor = document.querySelector<HTMLElement>('.cm-editor');
+      const cursor = document.querySelector<HTMLElement>('.cm-cursor');
+      const dropCursor = document.querySelector<HTMLElement>('.cm-dropCursor');
+      const vimInput = document.querySelector<HTMLInputElement>('.cm-vim-panel input');
+      if (!editor || !cursor || !dropCursor || !vimInput) {
+        throw new Error('Missing Markdown caret surface');
+      }
+      vimInput.style.color = '#abcdef';
+      return {
+        editorCaret: getComputedStyle(editor).caretColor,
+        cursor: getComputedStyle(cursor).borderLeftColor,
+        dropCursor: getComputedStyle(dropCursor).borderLeftColor,
+        searchCaret: capturedSearchCaret,
+        vimCaret: getComputedStyle(vimInput).caretColor,
+      };
+    }, searchCaret);
+  }
+
   test('markdown editor loads, receives setText, and renders native source links as clickable widgets', async ({ page }) => {
     await page.goto('http://localhost:8979/test.html');
     await waitForEditorBootstrap(page);
@@ -846,6 +915,36 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
     await page.waitForFunction(() => !document.querySelector('.cm-editor')?.classList.contains('cm-focused'));
     await expect.poll(colors).toEqual(['rgba(127, 127, 127, 0.24)']);
     expect(await page.evaluate(() => window.__cmView.state.selection.main.empty)).toBe(false);
+  });
+
+  test('caret surfaces use the explicit VS Code cursor token', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+    await waitForEditorBootstrap(page);
+
+    const colors = await markdownCaretColors(page, '#123456', '#654321');
+
+    expect(colors).toEqual({
+      editorCaret: 'rgb(18, 52, 86)',
+      cursor: 'rgb(18, 52, 86)',
+      dropCursor: 'rgb(18, 52, 86)',
+      searchCaret: 'rgb(18, 52, 86)',
+      vimCaret: 'rgb(18, 52, 86)',
+    });
+  });
+
+  test('caret surfaces fall back to the VS Code editor foreground', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+    await waitForEditorBootstrap(page);
+
+    const colors = await markdownCaretColors(page, 'initial', '#654321');
+
+    expect(colors).toEqual({
+      editorCaret: 'rgb(101, 67, 33)',
+      cursor: 'rgb(101, 67, 33)',
+      dropCursor: 'rgb(101, 67, 33)',
+      searchCaret: 'rgb(101, 67, 33)',
+      vimCaret: 'rgb(101, 67, 33)',
+    });
   });
 
   test('markdown editor search panel uses compact VS Code find-widget layout', async ({ page }) => {

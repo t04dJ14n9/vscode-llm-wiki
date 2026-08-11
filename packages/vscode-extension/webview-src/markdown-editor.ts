@@ -815,6 +815,7 @@ function firstNonWhitespaceColumn(text: string): number {
 
 function createView(text: string, title?: string): EditorView {
   const initialBodyPosition = initialBodyPositionAfterFrontmatter(text);
+  const editorCaret = 'var(--vscode-editorCursor-foreground, var(--vscode-editor-foreground))';
   const editorView = new EditorView({
     parent: document.getElementById('editor')!,
     state: EditorState.create({
@@ -991,7 +992,7 @@ function createView(text: string, title?: string): EditorView {
             fontWeight: 'var(--hl-editor-font-weight, var(--vscode-editor-font-weight, normal))',
             lineHeight: 'var(--hl-editor-line-height, 24px)',
             letterSpacing: 'var(--hl-editor-letter-spacing, normal)',
-            caretColor: 'var(--vscode-editorCursor-foreground, currentColor)',
+            caretColor: editorCaret,
           },
           '.cm-scroller': {
             fontFamily: 'inherit',
@@ -1058,7 +1059,7 @@ function createView(text: string, title?: string): EditorView {
             cursor: 'default',
           },
           '.cm-cursor, .cm-dropCursor': {
-            borderLeftColor: 'var(--vscode-editorCursor-foreground, currentColor)',
+            borderLeftColor: editorCaret,
           },
           '.cm-selectionBackground': {
             backgroundColor: 'var(--vscode-editor-inactiveSelectionBackground, rgba(127, 127, 127, 0.24))',
@@ -1092,7 +1093,7 @@ function createView(text: string, title?: string): EditorView {
             WebkitAppearance: 'none',
             backgroundColor: 'transparent',
             color: 'inherit',
-            caretColor: 'var(--vscode-editorCursor-foreground, currentColor)',
+            caretColor: editorCaret,
             font: 'inherit',
           },
           '.cm-panel.cm-vim-panel input::selection': {
@@ -1139,6 +1140,7 @@ function createView(text: string, title?: string): EditorView {
             outline: '0',
             backgroundColor: 'var(--vscode-input-background, var(--vscode-editor-background))',
             color: 'var(--vscode-input-foreground, var(--vscode-editor-foreground))',
+            caretColor: editorCaret,
             font: 'inherit',
           },
           '.cm-panel.cm-search input.cm-textfield[name="search"]:focus': {
