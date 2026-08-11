@@ -25,7 +25,7 @@ const server = createServer((_req, res) => {
   }
 
   if (url.pathname === '/fixtures/flash-attention.pdf') {
-    serveFile(join(__dirname, '..', '..', '..', '..', 'demo-vault', 'raw', 'pdf', 'flash-attention.pdf'), 'application/pdf', res);
+    serveBuffer(flashAttentionPdfFixture(), 'application/pdf', res);
     return;
   }
 
@@ -138,6 +138,20 @@ function serveBuffer(data, contentType, res) {
 server.listen(8979, () => {
   process.stdout.write('E2E server listening on http://localhost:8979\n');
 });
+
+function flashAttentionPdfFixture() {
+  const objects = [
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>',
+    pdfStream([
+      'BT /F1 18 Tf 72 700 Td (FlashAttention uses tiling to reduce HBM accesses.) Tj ET',
+      'BT /F1 18 Tf 72 670 Td (It is standard attention with exact results.) Tj ET',
+    ].join('\n')),
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+  ];
+  return pdfFixture(objects);
+}
 
 function twoPagePdfFixture() {
   const objects = [
