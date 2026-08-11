@@ -554,6 +554,8 @@ const editorSettingToCssVariable = {
 const vimModeCompartment = new Compartment();
 const activeLinkLabelMark = Decoration.mark({ class: 'cm-active-link-label' });
 const activeExternalLinkLabelMark = Decoration.mark({ class: 'cm-active-link-label cm-active-external-link' });
+const activeLinkDestinationMark = Decoration.mark({ class: 'cm-active-link-destination' });
+const activeLinkPunctuationMark = Decoration.mark({ class: 'cm-active-link-punctuation' });
 const activeBoldMark = Decoration.mark({ class: 'cm-active-bold' });
 const activeItalicMark = Decoration.mark({ class: 'cm-active-italic' });
 const activeStrikeMark = Decoration.mark({ class: 'cm-active-strikethrough' });
@@ -1271,8 +1273,12 @@ function createView(text: string, title?: string): EditorView {
             verticalAlign: 'baseline',
           },
           '.cm-hl-link:hover': {
-            color: 'var(--vscode-textLink-activeForeground)',
+            color: 'var(--vscode-textLink-activeForeground, var(--vscode-textLink-foreground))',
             backgroundColor: 'transparent',
+          },
+          '.cm-hl-link:focus-visible, .cm-active-link-label:focus-visible': {
+            outline: '1px solid var(--vscode-contrastBorder, var(--vscode-focusBorder, currentColor))',
+            outlineOffset: '1px',
           },
           '.cm-hl-link.cm-external-link::after': {
             content: '"↗"',
@@ -1297,6 +1303,17 @@ function createView(text: string, title?: string): EditorView {
           '.cm-active-link-label.cm-active-link-label *': {
             color: 'inherit',
             opacity: '1',
+            fontWeight: 'inherit',
+          },
+          '.cm-active-link-label:hover': {
+            color: 'var(--vscode-textLink-activeForeground, var(--vscode-textLink-foreground))',
+          },
+          '.cm-active-link-destination, .cm-active-link-punctuation': {
+            color: 'var(--vscode-descriptionForeground, var(--vscode-editor-foreground))',
+            fontWeight: '400',
+          },
+          '.cm-active-link-destination *, .cm-active-link-punctuation *': {
+            color: 'inherit',
             fontWeight: 'inherit',
           },
           '.cm-active-external-link::after': {
@@ -2875,7 +2892,19 @@ function collectActiveLineDecorations(
     const from = link.labelFrom;
     const to = link.labelTo;
     decorations.push((isExternalUri(uri) ? activeExternalLinkLabelMark : activeLinkLabelMark).range(from, to));
-    reserved.push({ from, to });
+    if (link.destinationFrom < link.destinationTo) {
+      decorations.push(activeLinkDestinationMark.range(link.destinationFrom, link.destinationTo));
+    }
+    for (const range of [
+      { from: sourceFrom, to: link.labelFrom },
+      { from: link.labelTo, to: link.destinationFrom },
+      { from: link.destinationTo, to: sourceTo },
+    ]) {
+      if (range.from < range.to) {
+        decorations.push(activeLinkPunctuationMark.range(range.from, range.to));
+      }
+    }
+    reserved.push({ from: sourceFrom, to: sourceTo });
     rawLinkSourceSpans.push({ from: sourceFrom, to: sourceTo });
   }
 
@@ -2887,7 +2916,15 @@ function collectActiveLineDecorations(
     const from = link.labelFrom;
     const to = link.labelTo;
     decorations.push((isExternalUri(link.definition.destination) ? activeExternalLinkLabelMark : activeLinkLabelMark).range(from, to));
-    reserved.push({ from, to });
+    for (const range of [
+      { from: sourceFrom, to: link.labelFrom },
+      { from: link.labelTo, to: sourceTo },
+    ]) {
+      if (range.from < range.to) {
+        decorations.push(activeLinkPunctuationMark.range(range.from, range.to));
+      }
+    }
+    reserved.push({ from: sourceFrom, to: sourceTo });
     rawLinkSourceSpans.push({ from: sourceFrom, to: sourceTo });
   }
 

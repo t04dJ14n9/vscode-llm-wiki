@@ -5057,6 +5057,89 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
     expect(linkStyles.fontWeight).toBe('500');
   });
 
+  test('active Markdown links separate theme label, destination, punctuation, and focus colors', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+
+    await page.evaluate(() => {
+      window.postMessage({
+        type: 'setText',
+        text: [
+          'Read [docs](https://example.com/docs) now.',
+          '',
+          'Rendered [guide](https://example.com/guide).',
+        ].join('\n'),
+      }, '*');
+    });
+
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      const line = view.state.doc.line(1);
+      view.dispatch({ selection: { anchor: line.from + line.text.indexOf('https') } });
+    });
+
+    await expect(page.locator('.cm-active-link-label')).toHaveText('docs');
+    await expect(page.locator('.cm-active-link-destination')).toHaveText('https://example.com/docs');
+    await expect(page.locator('.cm-active-link-punctuation')).toHaveText(['[', '](', ')']);
+    await expect(page.locator('.cm-hl-link')).toHaveText('guide');
+
+    const palettes = [
+      {
+        name: 'dark',
+        link: 'rgb(51, 151, 251)',
+        secondary: 'rgb(161, 162, 163)',
+        focus: 'rgb(71, 171, 241)',
+      },
+      {
+        name: 'light',
+        link: 'rgb(11, 81, 171)',
+        secondary: 'rgb(91, 92, 93)',
+        focus: 'rgb(31, 101, 191)',
+      },
+      {
+        name: 'high contrast',
+        link: 'rgb(255, 255, 0)',
+        secondary: 'rgb(255, 255, 255)',
+        focus: 'rgb(0, 255, 255)',
+        contrast: 'rgb(255, 0, 255)',
+      },
+    ];
+
+    for (const palette of palettes) {
+      await page.evaluate((colors) => {
+        const root = document.documentElement.style;
+        root.setProperty('--vscode-textLink-foreground', colors.link);
+        root.setProperty('--vscode-descriptionForeground', colors.secondary);
+        root.setProperty('--vscode-focusBorder', colors.focus);
+        if (colors.contrast) {
+          root.setProperty('--vscode-contrastBorder', colors.contrast);
+        } else {
+          root.removeProperty('--vscode-contrastBorder');
+        }
+      }, palette);
+
+      await expect(page.locator('.cm-active-link-label'), palette.name).toHaveCSS('color', palette.link);
+      await expect(page.locator('.cm-active-link-destination'), palette.name).toHaveCSS('color', palette.secondary);
+      await expect(page.locator('.cm-active-link-punctuation').first(), palette.name).toHaveCSS('color', palette.secondary);
+
+      const renderedLink = page.locator('.cm-hl-link');
+      await renderedLink.focus();
+      const focusStyle = await renderedLink.evaluate((element) => {
+        const style = getComputedStyle(element);
+        return {
+          color: style.color,
+          focusVisible: element.matches(':focus-visible'),
+          outlineColor: style.outlineColor,
+          outlineStyle: style.outlineStyle,
+        };
+      });
+      expect(focusStyle.color, palette.name).toBe(palette.link);
+      expect(focusStyle.focusVisible, palette.name).toBe(true);
+      expect(focusStyle.outlineStyle, palette.name).toBe('solid');
+      expect(focusStyle.outlineColor, palette.name).toBe(palette.contrast ?? palette.focus);
+    }
+  });
+
   test('Markdown source and fenced-code colors follow semantic VS Code theme variables', async ({ page }) => {
     await page.goto('http://localhost:8979/test.html');
 
@@ -6318,6 +6401,10 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
           view.dispatch({ selection: { anchor: line.to } });
           view.focus();
         });
+        if (vimEnabled) {
+          await page.keyboard.press('Escape');
+          await page.keyboard.press('a');
+        }
 
         for (const [operationIndex, operation] of operations.entries()) {
           const label = `vim=${vimEnabled} case=${caseIndex} op=${operationIndex} ${operation.kind}`;
@@ -7468,6 +7555,16 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
 
   test('hybrid rendering keeps active single-line display math source with a rendered preview', async ({ page }) => {
     await page.goto('http://localhost:8979/test.html');
+    await page.evaluate(() => {
+      document.documentElement.style.setProperty(
+        '--vscode-symbolIcon-operatorForeground',
+        'rgb(121, 131, 141)',
+      );
+      document.documentElement.style.setProperty(
+        '--vscode-symbolIcon-variableForeground',
+        'rgb(151, 161, 171)',
+      );
+    });
 
     const doc = [
       'Before',
@@ -7540,8 +7637,8 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
     expect(activeMathStyles.delimiterCount).toBe(2);
     expect(activeMathStyles.delimiterTexts).toEqual(['$$', '$$']);
     expect(activeMathStyles.sourceText).toBe('softmax(x_i) = exp(x_i) / sum(exp(x_j))');
-    expect(activeMathStyles.sourceColor).not.toBe(activeMathStyles.lineColor);
-    expect(activeMathStyles.delimiterColor).not.toBe(activeMathStyles.lineColor);
+    expect(activeMathStyles.sourceColor).toBe('rgb(151, 161, 171)');
+    expect(activeMathStyles.delimiterColor).toBe('rgb(121, 131, 141)');
     expect(activeMathStyles.sourceFontStyle).toBe('italic');
   });
 
