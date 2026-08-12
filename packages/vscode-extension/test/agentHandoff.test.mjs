@@ -56,6 +56,46 @@ function extensionRegistry(...extensions) {
   };
 }
 
+class TestEventEmitter {
+  constructor() {
+    this.listeners = new Set();
+    this.disposeCount = 0;
+    this.event = listener => {
+      this.listeners.add(listener);
+      return {
+        dispose: () => this.listeners.delete(listener),
+      };
+    };
+  }
+
+  fire(value) {
+    for (const listener of [...this.listeners]) listener(value);
+  }
+
+  dispose() {
+    this.disposeCount += 1;
+    this.listeners.clear();
+  }
+}
+
+function deferred() {
+  let resolvePromise;
+  let rejectPromise;
+  const promise = new Promise((resolve, reject) => {
+    resolvePromise = resolve;
+    rejectPromise = reject;
+  });
+  return {
+    promise,
+    resolve: resolvePromise,
+    reject: rejectPromise,
+  };
+}
+
+function nextImmediate() {
+  return new Promise(resolve => setImmediate(resolve));
+}
+
 test('cold installed providers are visible before activation', () => {
   const vscode = {
     env: { appName: 'Visual Studio Code' },
@@ -65,9 +105,9 @@ test('cold installed providers are visible before activation', () => {
       installedExtension('TENCENT-CLOUD.CODING-COPILOT', ['tencentcloud.codingcopilot.addToChat']),
     ),
   };
-  const { getAgentSurfaceCapabilities } = loadAgentHandoff(vscode);
+  const { getImmediateAgentSurfaceCapabilities } = loadAgentHandoff(vscode);
 
-  assert.deepEqual(getAgentSurfaceCapabilities(), {
+  assert.deepEqual(getImmediateAgentSurfaceCapabilities(), {
     cursorAgent: false,
     providers: [
       { id: 'codex', label: 'Codex' },
@@ -84,18 +124,279 @@ test('focus-only Claude does not produce a handoff capability', () => {
       installedExtension('anthropic.claude-code', ['claude-vscode.focus']),
     ),
   };
-  const { getAgentSurfaceCapabilities } = loadAgentHandoff(vscode);
+  const { getImmediateAgentSurfaceCapabilities } = loadAgentHandoff(vscode);
 
-  assert.deepEqual(getAgentSurfaceCapabilities().providers, []);
+  assert.deepEqual(getImmediateAgentSurfaceCapabilities().providers, []);
 });
 
 test('cursor agent capability follows the host product name only', () => {
-  const { getAgentSurfaceCapabilities } = loadAgentHandoff({
+  const { getImmediateAgentSurfaceCapabilities } = loadAgentHandoff({
     env: { appName: 'Cursor' },
     extensions: extensionRegistry(),
   });
 
-  assert.equal(getAgentSurfaceCapabilities().cursorAgent, true);
+  assert.equal(getImmediateAgentSurfaceCapabilities().cursorAgent, true);
+});
+
+test('registry-only data command advertises an installed active provider', async () => {
+  const vscode = {
+    env: { appName: 'Visual Studio Code' },
+    commands: {
+      getCommands: async includeInternal => {
+        assert.equal(includeInternal, true);
+        return ['chatgpt.addFileToThread'];
+      },
+    },
+    extensions: extensionRegistry(
+      installedExtension('openai.chatgpt', [], { isActive: true }),
+    ),
+  };
+  const { resolveAgentSurfaceCapabilities } = loadAgentHandoff(vscode);
+
+  assert.deepEqual(await resolveAgentSurfaceCapabilities(), {
+    cursorAgent: false,
+    providers: [{ id: 'codex', label: 'Codex' }],
+  });
+});
+
+test('registered provider command without the expected extension is ignored', async () => {
+  const vscode = {
+    env: { appName: 'Visual Studio Code' },
+    commands: {
+      getCommands: async () => [
+        'chatgpt.addFileToThread',
+        'claude-vscode.insertAtMention',
+        'tencentcloud.codingcopilot.addToChat',
+      ],
+    },
+    extensions: extensionRegistry(),
+  };
+  const { resolveAgentSurfaceCapabilities } = loadAgentHandoff(vscode);
+
+  assert.deepEqual((await resolveAgentSurfaceCapabilities()).providers, []);
+});
+
+test('cold manifest capability survives command-registry failure', async () => {
+  const vscode = {
+    env: { appName: 'Visual Studio Code' },
+    commands: {
+      getCommands: async () => {
+        throw new Error('registry unavailable');
+      },
+    },
+    extensions: extensionRegistry(
+      installedExtension('openai.chatgpt', ['chatgpt.addFileToThread']),
+    ),
+  };
+  const { resolveAgentSurfaceCapabilities } = loadAgentHandoff(vscode);
+
+  assert.deepEqual((await resolveAgentSurfaceCapabilities()).providers, [
+    { id: 'codex', label: 'Codex' },
+  ]);
+});
+
+test('manifest and registry capabilities are deduplicated in canonical order', async () => {
+  const vscode = {
+    env: { appName: 'Visual Studio Code' },
+    commands: {
+      getCommands: async () => [
+        'chatgpt.addFileToThread',
+        'claude-code.insertAtMentioned',
+      ],
+    },
+    extensions: extensionRegistry(
+      installedExtension('openai.chatgpt', ['chatgpt.addFileToThread']),
+      installedExtension('anthropic.claude-code', []),
+      installedExtension(
+        'tencent-cloud.coding-copilot',
+        ['tencentcloud.codingcopilot.addToChat'],
+      ),
+    ),
+  };
+  const { resolveAgentSurfaceCapabilities } = loadAgentHandoff(vscode);
+
+  assert.deepEqual((await resolveAgentSurfaceCapabilities()).providers, [
+    { id: 'codex', label: 'Codex' },
+    { id: 'claude', label: 'Claude Code' },
+    { id: 'codebuddy', label: 'CodeBuddy' },
+  ]);
+});
+
+test('capability source exposes a cold snapshot before async refresh completes', async () => {
+  const registryQuery = deferred();
+  const extensionChanges = new TestEventEmitter();
+  let registryQueryCount = 0;
+  const vscode = {
+    EventEmitter: TestEventEmitter,
+    env: { appName: 'Visual Studio Code' },
+    commands: {
+      getCommands: includeInternal => {
+        assert.equal(includeInternal, true);
+        registryQueryCount += 1;
+        return registryQuery.promise;
+      },
+    },
+    extensions: {
+      ...extensionRegistry(
+        installedExtension(
+          'openai.chatgpt',
+          ['chatgpt.addFileToThread'],
+          { activate: async () => assert.fail('discovery must not activate Codex') },
+        ),
+        installedExtension(
+          'anthropic.claude-code',
+          [],
+          { activate: async () => assert.fail('discovery must not activate Claude') },
+        ),
+      ),
+      onDidChange: extensionChanges.event,
+    },
+  };
+  const { createAgentSurfaceCapabilitySource } = loadAgentHandoff(vscode);
+  const source = createAgentSurfaceCapabilitySource();
+  let changeCount = 0;
+  const changed = new Promise(resolve => {
+    source.onDidChange(() => {
+      changeCount += 1;
+      resolve();
+    });
+  });
+
+  assert.deepEqual(source.read().providers, [
+    { id: 'codex', label: 'Codex' },
+  ]);
+  source.read();
+  assert.equal(registryQueryCount, 1);
+
+  registryQuery.resolve(['claude-vscode.insertAtMention']);
+  await changed;
+
+  assert.equal(changeCount, 1);
+  assert.deepEqual(source.read().providers, [
+    { id: 'codex', label: 'Codex' },
+    { id: 'claude', label: 'Claude Code' },
+  ]);
+  source.read();
+  assert.equal(registryQueryCount, 2);
+  source.dispose();
+});
+
+test('newer capability refresh wins when command queries resolve out of order', async () => {
+  const queryA = deferred();
+  const queryB = deferred();
+  const queryResults = [queryA.promise, queryB.promise];
+  const extensionChanges = new TestEventEmitter();
+  const vscode = {
+    EventEmitter: TestEventEmitter,
+    env: { appName: 'Visual Studio Code' },
+    commands: {
+      getCommands: async () => queryResults.shift(),
+    },
+    extensions: {
+      ...extensionRegistry(
+        installedExtension('openai.chatgpt', []),
+        installedExtension('anthropic.claude-code', []),
+      ),
+      onDidChange: extensionChanges.event,
+    },
+  };
+  const { createAgentSurfaceCapabilitySource } = loadAgentHandoff(vscode);
+  const source = createAgentSurfaceCapabilitySource();
+  let changeCount = 0;
+  source.onDidChange(() => {
+    changeCount += 1;
+  });
+
+  const newerRefresh = source.refresh();
+  queryB.resolve(['claude-vscode.insertAtMention']);
+  await newerRefresh;
+  assert.deepEqual(source.read().providers, [
+    { id: 'claude', label: 'Claude Code' },
+  ]);
+
+  queryA.resolve(['chatgpt.addFileToThread']);
+  await nextImmediate();
+
+  assert.deepEqual(source.read().providers, [
+    { id: 'claude', label: 'Claude Code' },
+  ]);
+  assert.equal(changeCount, 1);
+  source.dispose();
+});
+
+test('extension change refreshes immediate and registry snapshots', async () => {
+  const installed = new Map();
+  const extensionChanges = new TestEventEmitter();
+  const vscode = {
+    EventEmitter: TestEventEmitter,
+    env: { appName: 'Visual Studio Code' },
+    commands: {
+      getCommands: async () => ['claude-code.insertAtMentioned'],
+    },
+    extensions: {
+      getExtension: id => installed.get(id.toLowerCase()),
+      onDidChange: extensionChanges.event,
+    },
+  };
+  const { createAgentSurfaceCapabilitySource } = loadAgentHandoff(vscode);
+  const source = createAgentSurfaceCapabilitySource();
+  await nextImmediate();
+  const changed = new Promise(resolve => source.onDidChange(resolve));
+
+  installed.set(
+    'anthropic.claude-code',
+    installedExtension('anthropic.claude-code', []),
+  );
+  extensionChanges.fire();
+  await changed;
+
+  assert.deepEqual(source.read().providers, [
+    { id: 'claude', label: 'Claude Code' },
+  ]);
+  source.dispose();
+});
+
+test('capability source disposal stops subscriptions, events, and future refreshes', async () => {
+  const extensionChanges = new TestEventEmitter();
+  let extensionSubscriptionDisposeCount = 0;
+  let registryQueryCount = 0;
+  const vscode = {
+    EventEmitter: TestEventEmitter,
+    env: { appName: 'Visual Studio Code' },
+    commands: {
+      getCommands: async () => {
+        registryQueryCount += 1;
+        return [];
+      },
+    },
+    extensions: {
+      ...extensionRegistry(),
+      onDidChange: listener => {
+        const subscription = extensionChanges.event(listener);
+        return {
+          dispose() {
+            extensionSubscriptionDisposeCount += 1;
+            subscription.dispose();
+          },
+        };
+      },
+    },
+  };
+  const { createAgentSurfaceCapabilitySource } = loadAgentHandoff(vscode);
+  const source = createAgentSurfaceCapabilitySource();
+  let changeCount = 0;
+  source.onDidChange(() => {
+    changeCount += 1;
+  });
+
+  source.dispose();
+  extensionChanges.fire();
+  source.read();
+  await source.refresh();
+
+  assert.equal(extensionSubscriptionDisposeCount, 1);
+  assert.equal(changeCount, 0);
+  assert.equal(registryQueryCount, 1);
 });
 
 test('explicit cold Codex handoff activates, refreshes commands, then attaches', async () => {

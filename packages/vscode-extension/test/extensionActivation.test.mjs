@@ -69,9 +69,11 @@ function loadTsModule(relativePath, mocks = {}) {
   Module._load = function patchedLoad(request, parent, isMain) {
     if (request === './agentHandoff') {
       return {
-        getAgentSurfaceCapabilities: () => ({
-          cursorAgent: false,
-          providers: [],
+        createAgentSurfaceCapabilitySource: () => ({
+          onDidChange: () => ({ dispose() {} }),
+          read: () => ({ cursorAgent: false, providers: [] }),
+          refresh: async () => undefined,
+          dispose() {},
         }),
         handoffSelectionToAgent: async () => undefined,
         handoffSelectionToAgentId: async () => false,
@@ -649,10 +651,6 @@ test('generic Add to Chat routes exact Markdown and PDF exports directly to Curs
       });
       return true;
     },
-    getAgentSurfaceCapabilities: () => ({
-      cursorAgent: true,
-      providers: [{ id: 'codex', label: 'Codex' }],
-    }),
   };
   mocks['./pdfEditorProvider'] = {
     PdfEditorProvider: class {
@@ -751,19 +749,41 @@ test('activation provides explicit agent capabilities to PDF hosts and sets the 
   for (const cursorAgent of [false, true]) {
     const executeCommandCalls = [];
     const providerOptions = [];
+    const providerActivations = [];
     const vscode = createVscodeMock({
       executeCommandCalls,
       activeDocumentUri: undefined,
     });
-    const onDidChange = () => ({ dispose() {} });
-    vscode.extensions = { onDidChange };
-    const getAgentSurfaceCapabilities = () => ({
+    vscode.extensions = {
+      getExtension: id => ({
+        id,
+        isActive: false,
+        activate: async () => providerActivations.push(id),
+      }),
+      onDidChange: () => ({ dispose() {} }),
+    };
+    const snapshot = {
       cursorAgent,
       providers: [{ id: 'codex', label: 'Codex' }],
-    });
+    };
+    let sourceReadCount = 0;
+    let sourceCreateCount = 0;
+    const onDidChange = () => ({ dispose() {} });
+    const source = {
+      onDidChange,
+      read() {
+        sourceReadCount += 1;
+        return snapshot;
+      },
+      refresh: async () => undefined,
+      dispose() {},
+    };
     const mocks = createActivationMocks({ vscode });
     mocks['./agentHandoff'] = {
-      getAgentSurfaceCapabilities,
+      createAgentSurfaceCapabilitySource: () => {
+        sourceCreateCount += 1;
+        return source;
+      },
       handoffSelectionToAgent: async () => undefined,
       handoffSelectionToAgentId: async () => false,
       handoffSelectionToCursor: async () => false,
@@ -781,10 +801,15 @@ test('activation provides explicit agent capabilities to PDF hosts and sets the 
     };
 
     const { activate } = loadTsModule('src/extension.ts', mocks);
-    activate({ subscriptions: [] });
+    const context = { subscriptions: [] };
+    activate(context);
 
-    assert.equal(providerOptions[0].agentCapabilities, getAgentSurfaceCapabilities);
+    assert.equal(sourceCreateCount, 1);
+    assert.ok(context.subscriptions.includes(source));
+    assert.deepEqual(providerOptions[0].agentCapabilities(), snapshot);
     assert.equal(providerOptions[0].onDidChangeAgentCapabilities, onDidChange);
+    assert.equal(sourceReadCount, 2);
+    assert.deepEqual(providerActivations, []);
     assert.deepEqual(
       executeCommandCalls.find(
         ([command, key]) => command === 'setContext' && key === 'humanLearningHostIsCursor',

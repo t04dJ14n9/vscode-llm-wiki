@@ -9,7 +9,7 @@ import {
 import { registerAnchorFileEditorProvider } from './anchorFileEditorProvider';
 import { humanLearningAnchorTarget } from './anchorUris';
 import {
-  getAgentSurfaceCapabilities,
+  createAgentSurfaceCapabilitySource,
   handoffSelectionToAgent,
   handoffSelectionToAgentId,
   handoffSelectionToCursor,
@@ -79,6 +79,8 @@ export function activate(context: vscode.ExtensionContext): void {
   registerLinkProvider(context);
   registerMarkdownOutlineProvider(context);
 
+  const agentCapabilitySource = createAgentSurfaceCapabilitySource();
+  context.subscriptions.push(agentCapabilitySource);
   markdownEditorProvider = new MarkdownEditorProvider(context, learningNotes);
   pdfEditorProvider = new PdfEditorProvider(context, {
     ...(workspaceRoot ? { vaultRoot: workspaceRoot, documentRoot: workspaceRoot } : {}),
@@ -86,14 +88,14 @@ export function activate(context: vscode.ExtensionContext): void {
       ?? context.extensionUri?.fsPath
       ?? workspaceRoot,
     learningNoteStore: learningNotes,
-    agentCapabilities: getAgentSurfaceCapabilities,
-    onDidChangeAgentCapabilities: vscode.extensions.onDidChange,
+    agentCapabilities: () => agentCapabilitySource.read(),
+    onDidChangeAgentCapabilities: agentCapabilitySource.onDidChange,
     // TODO(ask-pdf): Re-enable after the provider-neutral “More detail” workflow and backend policy are specified.
   });
   void vscode.commands.executeCommand(
     'setContext',
     'humanLearningHostIsCursor',
-    getAgentSurfaceCapabilities().cursorAgent,
+    agentCapabilitySource.read().cursorAgent,
   );
   markdownOutlineProvider = registerMarkdownOutlineTreeProvider(context, pdfEditorProvider);
   graphPanel = new KnowledgeGraphPanel();

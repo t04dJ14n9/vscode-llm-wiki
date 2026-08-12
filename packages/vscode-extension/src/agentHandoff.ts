@@ -14,6 +14,12 @@ export interface AgentSurfaceCapabilities {
   providers: AgentHandoffCapability[];
 }
 
+export interface AgentSurfaceCapabilitySource extends vscode.Disposable {
+  readonly onDidChange: vscode.Event<void>;
+  read(): AgentSurfaceCapabilities;
+  refresh(): Promise<void>;
+}
+
 interface AgentChoice extends vscode.QuickPickItem {
   id: AgentId;
   commands: readonly string[];
@@ -93,7 +99,9 @@ export async function handoffSelectionToCursor(
   );
 }
 
-export function getAgentSurfaceCapabilities(): AgentSurfaceCapabilities {
+function computeAgentSurfaceCapabilities(
+  registeredCommands: ReadonlySet<string>,
+): AgentSurfaceCapabilities {
   const appName = String(vscode.env?.appName ?? '').toLowerCase();
   return {
     cursorAgent: appName.includes('cursor'),
@@ -101,11 +109,95 @@ export function getAgentSurfaceCapabilities(): AgentSurfaceCapabilities {
       const extension = extensionForAgent(agent);
       if (!extension) return [];
       const contributedCommands = contributedCommandIds(extension);
-      return agent.commands.some(command => contributedCommands.has(command))
+      return agent.commands.some(command =>
+        contributedCommands.has(command) || registeredCommands.has(command)
+      )
         ? [{ id: agent.id, label: agent.label }]
         : [];
     }),
   };
+}
+
+export function getImmediateAgentSurfaceCapabilities(): AgentSurfaceCapabilities {
+  return computeAgentSurfaceCapabilities(new Set());
+}
+
+export async function resolveAgentSurfaceCapabilities(): Promise<AgentSurfaceCapabilities> {
+  let commands: readonly string[] = [];
+  try {
+    commands = await vscode.commands.getCommands(true);
+  } catch {
+    // Manifest capabilities remain valid when the command registry is unavailable.
+  }
+  return computeAgentSurfaceCapabilities(new Set(commands));
+}
+
+export function createAgentSurfaceCapabilitySource(): AgentSurfaceCapabilitySource {
+  const changeEmitter = new vscode.EventEmitter<void>();
+  let snapshot = getImmediateAgentSurfaceCapabilities();
+  let revision = 0;
+  let pendingRefreshes = 0;
+  let disposed = false;
+
+  const publish = (next: AgentSurfaceCapabilities): void => {
+    if (sameAgentSurfaceCapabilities(snapshot, next)) return;
+    snapshot = next;
+    changeEmitter.fire();
+  };
+
+  const refresh = async (): Promise<void> => {
+    if (disposed) return;
+    const refreshRevision = ++revision;
+    pendingRefreshes += 1;
+    try {
+      const next = await resolveAgentSurfaceCapabilities();
+      if (!disposed && refreshRevision === revision) publish(next);
+    } finally {
+      pendingRefreshes -= 1;
+    }
+  };
+
+  const scheduleRefresh = (): void => {
+    if (disposed || pendingRefreshes > 0) return;
+    void refresh();
+  };
+
+  const extensionSubscription = vscode.extensions.onDidChange(() => {
+    if (disposed) return;
+    revision += 1;
+    publish(getImmediateAgentSurfaceCapabilities());
+    void refresh();
+  });
+
+  scheduleRefresh();
+
+  return {
+    onDidChange: changeEmitter.event,
+    read() {
+      scheduleRefresh();
+      return snapshot;
+    },
+    refresh,
+    dispose() {
+      if (disposed) return;
+      disposed = true;
+      revision += 1;
+      extensionSubscription.dispose();
+      changeEmitter.dispose();
+    },
+  };
+}
+
+function sameAgentSurfaceCapabilities(
+  left: AgentSurfaceCapabilities,
+  right: AgentSurfaceCapabilities,
+): boolean {
+  return left.cursorAgent === right.cursorAgent
+    && left.providers.length === right.providers.length
+    && left.providers.every((provider, index) => {
+      const other = right.providers[index];
+      return provider.id === other?.id && provider.label === other.label;
+    });
 }
 
 export async function handoffSelectionToAgentId(

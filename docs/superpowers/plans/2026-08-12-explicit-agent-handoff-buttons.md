@@ -49,7 +49,15 @@ export interface AgentSurfaceCapabilities {
   providers: AgentHandoffCapability[];
 }
 
-export function getAgentSurfaceCapabilities(): AgentSurfaceCapabilities;
+export interface AgentSurfaceCapabilitySource extends vscode.Disposable {
+  readonly onDidChange: vscode.Event<void>;
+  read(): AgentSurfaceCapabilities;
+  refresh(): Promise<void>;
+}
+
+export function getImmediateAgentSurfaceCapabilities(): AgentSurfaceCapabilities;
+export function resolveAgentSurfaceCapabilities(): Promise<AgentSurfaceCapabilities>;
+export function createAgentSurfaceCapabilitySource(): AgentSurfaceCapabilitySource;
 
 export async function handoffSelectionToAgentId(
   agentId: ExternalAgentId,
@@ -91,7 +99,7 @@ Add these RED cases:
 
 ```js
 test('cold installed providers are visible before activation', () => {
-  const capabilities = getAgentSurfaceCapabilities();
+  const capabilities = getImmediateAgentSurfaceCapabilities();
   assert.deepEqual(capabilities, {
     cursorAgent: false,
     providers: [
@@ -103,7 +111,7 @@ test('cold installed providers are visible before activation', () => {
 });
 
 test('focus-only Claude does not produce a handoff capability', () => {
-  assert.deepEqual(getAgentSurfaceCapabilities().providers, []);
+  assert.deepEqual(getImmediateAgentSurfaceCapabilities().providers, []);
 });
 
 test('explicit cold Codex handoff activates, refreshes commands, then attaches', async () => {
@@ -138,7 +146,7 @@ Expected: FAIL because the capability and explicit-ID APIs do not exist, Claude
 still treats a focus command as a fallback, and no explicit activation path
 exists.
 
-- [ ] **Step 3: Implement manifest-based capabilities**
+- [ ] **Step 3: Implement cached manifest-and-registry capabilities**
 
 Refactor the provider registry so each external provider declares:
 
@@ -162,11 +170,17 @@ function contributedCommandIds(extension: vscode.Extension<unknown>): Set<string
 }
 ```
 
-`getAgentSurfaceCapabilities()` must:
+The capability source must:
 
-- inspect `vscode.extensions.getExtension()` synchronously;
+- publish a synchronous manifest-derived snapshot immediately;
+- asynchronously union `vscode.commands.getCommands(true)` with manifest
+  contributions without activating providers;
+- keep the expected installed extension ID as a mandatory gate;
+- refresh initially and after `vscode.extensions.onDidChange`;
+- discard out-of-order async refresh results and emit only semantic changes;
+- preserve valid manifest capabilities when command enumeration fails;
 - accept any configured extension-ID casing variant;
-- require at least one real provider data command in the manifest;
+- require at least one real provider data command in the manifest or registry;
 - ignore `isActive`;
 - return providers in Codex, Claude Code, CodeBuddy order;
 - compute `cursorAgent` from the host product name, not Cursor composer state.
@@ -295,7 +309,7 @@ git commit -m "fix: link selection visual evidence"
 - Consumes from Task 1:
 
 ```ts
-getAgentSurfaceCapabilities(): AgentSurfaceCapabilities;
+createAgentSurfaceCapabilitySource(): AgentSurfaceCapabilitySource;
 handoffSelectionToAgentId(
   agentId: ExternalAgentId,
   contextUri: vscode.Uri,
@@ -375,9 +389,9 @@ assert.deepEqual(cursorCalls, [{
 assert.deepEqual(pickerCalls, []);
 ```
 
-Also assert provider construction receives
-`agentCapabilities: getAgentSurfaceCapabilities` and
-`onDidChangeAgentCapabilities: vscode.extensions.onDidChange`.
+Also assert activation owns exactly one capability source, adds it to
+`context.subscriptions`, and provider construction receives a getter backed by
+`source.read()` plus `source.onDidChange`.
 Assert activation sets:
 
 ```js
@@ -447,8 +461,8 @@ Register:
 Keep the existing PDF re-request behavior when a command is invoked without an
 explicit selection.
 
-Set `humanLearningHostIsCursor` during activation from
-`getAgentSurfaceCapabilities().cursorAgent`. In `package.json`, add
+Set `humanLearningHostIsCursor` during activation from the capability source's
+immediate `read().cursorAgent` snapshot. In `package.json`, add
 `"enablement": "humanLearningHostIsCursor"` to the generic Add to Chat command
 and add `humanLearningHostIsCursor &&` to all of its menu/keybinding `when`
 clauses. Do not gate **Send Selection to Agent…**.
@@ -458,8 +472,8 @@ clauses. Do not gate **Send Selection to Agent…**.
 Pass these options when constructing `PdfEditorProvider`:
 
 ```ts
-agentCapabilities: getAgentSurfaceCapabilities,
-onDidChangeAgentCapabilities: vscode.extensions.onDidChange,
+agentCapabilities: () => agentCapabilitySource.read(),
+onDidChangeAgentCapabilities: agentCapabilitySource.onDidChange,
 ```
 
 In `PdfEditorProvider`:
