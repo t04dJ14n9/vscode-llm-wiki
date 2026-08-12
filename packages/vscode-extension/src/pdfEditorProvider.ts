@@ -1251,7 +1251,7 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
     }
     .pdf-search-match { position: absolute; border-radius: 2px; background: rgba(255, 214, 10, .40); outline: 1px solid rgba(255, 214, 10, .55); pointer-events: none; }
     .pdf-search-match.selected { background: rgba(177, 151, 252, .48); outline-color: rgba(177, 151, 252, .9); }
-    .selection-toolbar { position: absolute; transform: translateX(-50%); z-index: 20; display: flex; gap: 4px; padding: 4px; border: 1px solid var(--vscode-panel-border); border-radius: 6px; background: var(--vscode-editorWidget-background); box-shadow: 0 4px 16px rgba(0,0,0,.3); font: 12px var(--vscode-font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif); }
+    .selection-toolbar { position: absolute; transform: translateX(-50%); z-index: 20; display: flex; box-sizing: border-box; max-width: calc(100vw - 24px); flex-wrap: wrap; justify-content: center; gap: 4px; padding: 4px; border: 1px solid var(--vscode-panel-border); border-radius: 6px; background: var(--vscode-editorWidget-background); box-shadow: 0 4px 16px rgba(0,0,0,.3); font: 12px var(--vscode-font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif); }
     .selection-toolbar button { border: 0; border-radius: 4px; padding: 4px 8px; background: var(--vscode-button-background); color: var(--vscode-button-foreground); font: inherit; white-space: nowrap; cursor: pointer; }
     .selection-toolbar button:hover { background: var(--vscode-button-hoverBackground, var(--vscode-button-background)); }
     .selection-toolbar button:focus-visible { outline: 2px solid var(--vscode-focusBorder, #007fd4); outline-offset: 1px; }

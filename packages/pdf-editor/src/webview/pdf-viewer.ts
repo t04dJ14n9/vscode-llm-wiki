@@ -80,9 +80,6 @@ import {
 import { normalizePdfTextBands, type PdfRect } from './pdfTextBands';
 
 const vscode = acquireVsCodeApi();
-const addToCursorChatEnabled =
-  (window as typeof window & { __humanLearningAddToCursorChat?: unknown })
-    .__humanLearningAddToCursorChat === true;
 const askPdfEnabled =
   (window as typeof window & { __humanLearningAskPdfEnabled?: unknown })
     .__humanLearningAskPdfEnabled === true;
@@ -90,7 +87,19 @@ const askPdfEnabled =
 type PdfReduceAnimationSetting = 'on' | 'off' | 'system';
 type PdfTextSelectionAction =
   | 'addToCursorChat'
+  | 'sendToAgent'
   | 'copyLink';
+type ExternalAgentId = 'codex' | 'claude' | 'codebuddy';
+
+interface AgentHandoffCapability {
+  id: ExternalAgentId;
+  label: string;
+}
+
+interface AgentSurfaceCapabilities {
+  cursorAgent: boolean;
+  providers: AgentHandoffCapability[];
+}
 
 const PDF_PAGE_GAP_PX = 12;
 const PDF_FIT_HORIZONTAL_PADDING_PX = 24;
@@ -101,6 +110,12 @@ const PDF_PAGINATED_AXIS_LOCK_THRESHOLD = 6;
 const PDF_PAGE_PREFETCH_DELAY_MS = 0;
 const PDF_SCALE_REUSE_EPSILON = 0.0001;
 const PDF_DESTINATION_FOCUS_DURATION_MS = 2400;
+const EXTERNAL_AGENT_LABELS: Readonly<Record<ExternalAgentId, string>> = {
+  codex: 'Codex',
+  claude: 'Claude Code',
+  codebuddy: 'CodeBuddy',
+};
+const EXTERNAL_AGENT_ORDER = ['codex', 'claude', 'codebuddy'] as const;
 
 interface PdfAnchor {
   id?: string;
@@ -316,6 +331,10 @@ class PdfViewer {
   private selectionLastPointerDownPage = 0;
   private selectionAutoScrollFrame: number | undefined;
   private selectionToolbarPositionFrame: number | undefined;
+  private agentCapabilities: AgentSurfaceCapabilities = {
+    cursorAgent: false,
+    providers: [],
+  };
   private readonly pdfNavigationHistory: PdfViewLocation[] = [];
   private pdfDestinationRunId = 0;
   private pendingPdfDestinationOrigin: PdfViewLocation | undefined;
@@ -453,6 +472,9 @@ class PdfViewer {
     window.addEventListener('message', event => {
       const message = event.data;
       switch (message?.type) {
+        case 'agentHandoffCapabilities':
+          this.updateAgentHandoffCapabilities(message);
+          break;
         case 'loadPdf':
           void this.loadPdf(message.data);
           break;
@@ -492,7 +514,7 @@ class PdfViewer {
           if (askPdfEnabled) this.openAskPdfForNativeSelection();
           break;
         case 'addSelectionToCursorChat': {
-          this.addCurrentSelectionToCursorChat();
+          if (this.agentCapabilities.cursorAgent) this.addCurrentSelectionToCursorChat();
           break;
         }
         default:
@@ -500,6 +522,13 @@ class PdfViewer {
           break;
       }
     });
+  }
+
+  private updateAgentHandoffCapabilities(message: unknown): void {
+    this.agentCapabilities = normalizeAgentSurfaceCapabilities(message);
+    if (!document.getElementById('selection-toolbar') || !this.latestSelectionAnchor) return;
+    const rect = this.selectionViewportRect(this.latestSelectionAnchor);
+    if (rect) this.showSelectionToolbar(this.latestSelectionAnchor, rect);
   }
 
   private setupToolbar(): void {
@@ -638,7 +667,7 @@ class PdfViewer {
     });
     document.addEventListener('keydown', event => {
       if (
-        addToCursorChatEnabled
+        this.agentCapabilities.cursorAgent
         && (event.metaKey || event.ctrlKey)
         && !event.altKey
         && !event.shiftKey
@@ -2552,6 +2581,10 @@ class PdfViewer {
   }
 
   private showSelectionContextMenu(clientX: number, clientY: number, anchor: PdfAnchor): void {
+    const agentItems = this.agentCapabilities.providers.map(provider => ({
+      label: `Send to ${provider.label}`,
+      onSelect: () => this.postTextSelectionAction('sendToAgent', anchor, provider.id),
+    }));
     showObsidianContextMenu({
       clientX,
       clientY,
@@ -2560,12 +2593,13 @@ class PdfViewer {
         ...(askPdfEnabled
           ? [{ label: 'Ask about selection…', onSelect: () => this.openAskPdfForSelection(anchor) }]
           : []),
-        ...(addToCursorChatEnabled
+        ...(this.agentCapabilities.cursorAgent
           ? [{
               label: `${cursorSelectionShortcutLabel()}  Add to Chat`,
               onSelect: () => this.postTextSelectionAction('addToCursorChat', anchor),
             }]
           : []),
+        ...agentItems,
         { type: 'separator' },
         { label: 'Copy link to selection', onSelect: () => this.postTextSelectionAction('copyLink', anchor) },
         { label: 'Copy selected text', onSelect: () => vscode.postMessage({ type: 'copyText', text: anchor.snippet }) },
@@ -2573,9 +2607,14 @@ class PdfViewer {
     });
   }
 
-  private postTextSelectionAction(action: PdfTextSelectionAction, anchor: PdfAnchor): void {
+  private postTextSelectionAction(
+    action: PdfTextSelectionAction,
+    anchor: PdfAnchor,
+    agentId?: ExternalAgentId,
+  ): void {
     const message: Record<string, unknown> = { type: 'selectionAction', action, anchor };
-    if (action === 'addToCursorChat') {
+    if (action === 'sendToAgent' && agentId) message.agentId = agentId;
+    if (action === 'addToCursorChat' || action === 'sendToAgent') {
       try {
         const page = this.pages.get(anchor.page);
         const rects = validPdfRects(anchor.rects);
@@ -2645,6 +2684,7 @@ class PdfViewer {
       label: string,
       action: PdfTextSelectionAction,
       className = '',
+      agentId?: ExternalAgentId,
     ) => {
       const button = document.createElement('button');
       button.type = 'button';
@@ -2653,7 +2693,7 @@ class PdfViewer {
       button.addEventListener('click', event => {
         event.preventDefault();
         event.stopPropagation();
-        this.postTextSelectionAction(action, anchor);
+        this.postTextSelectionAction(action, anchor, agentId);
         toolbar.remove();
       });
       toolbar.appendChild(button);
@@ -2661,7 +2701,7 @@ class PdfViewer {
     };
 
     addButton('Copy Link', 'copyLink');
-    if (addToCursorChatEnabled) {
+    if (this.agentCapabilities.cursorAgent) {
       const button = addButton('', 'addToCursorChat', 'secondary cursor-chat-action');
       button.setAttribute('aria-label', `Add to Chat ${cursorSelectionShortcutLabel()}`);
       const label = document.createElement('span');
@@ -2671,6 +2711,9 @@ class PdfViewer {
       shortcut.className = 'add-to-chat-shortcut';
       shortcut.textContent = cursorSelectionShortcutLabel();
       button.append(label, shortcut);
+    }
+    for (const provider of this.agentCapabilities.providers) {
+      addButton(`Send to ${provider.label}`, 'sendToAgent', 'secondary', provider.id);
     }
 
     document.body.appendChild(toolbar);
@@ -4419,6 +4462,32 @@ function isEditableTarget(value: EventTarget | null): boolean {
 
 function cursorSelectionShortcutLabel(): string {
   return /Mac|iPhone|iPad/u.test(navigator.platform) ? '⌘L' : 'Ctrl+L';
+}
+
+function normalizeAgentSurfaceCapabilities(value: unknown): AgentSurfaceCapabilities {
+  const message = recordValue(value);
+  const providers = Array.isArray(message.providers) ? message.providers : [];
+  const accepted = new Set<ExternalAgentId>();
+  for (const candidate of providers) {
+    const provider = recordValue(candidate);
+    if (
+      !isExternalAgentId(provider.id)
+      || typeof provider.label !== 'string'
+      || !provider.label.trim()
+      || accepted.has(provider.id)
+    ) continue;
+    accepted.add(provider.id);
+  }
+  return {
+    cursorAgent: message.cursorAgent === true,
+    providers: EXTERNAL_AGENT_ORDER.flatMap(id =>
+      accepted.has(id) ? [{ id, label: EXTERNAL_AGENT_LABELS[id] }] : []
+    ),
+  };
+}
+
+function isExternalAgentId(value: unknown): value is ExternalAgentId {
+  return value === 'codex' || value === 'claude' || value === 'codebuddy';
 }
 
 function recordValue(value: unknown): Record<string, any> {

@@ -352,6 +352,10 @@
     position: absolute;
     z-index: 20;
     display: flex;
+    box-sizing: border-box;
+    max-width: calc(100vw - 24px);
+    flex-wrap: wrap;
+    justify-content: center;
     gap: 4px;
     padding: 4px;
     transform: translateX(-50%);
@@ -479,15 +483,30 @@
     window.__mockMessages = [];
     window.__mockState = {};
     window.__pdfiumWasmUrl = '/dist/pdfium.wasm';
-    window.__humanLearningAddToCursorChat = true;
-    window.__humanLearningAskPdfEnabled =
-      new URLSearchParams(window.location.search).get('askPdf') === '1';
+    const params = new URLSearchParams(window.location.search);
+    window.__humanLearningAskPdfEnabled = params.get('askPdf') === '1';
     window.acquireVsCodeApi = () => ({
       postMessage: async (message) => {
         window.__mockMessages.push(message);
         if (message.type !== 'ready') return;
 
-        const fixture = new URLSearchParams(window.location.search).get('fixture') || 'flash-attention';
+        window.postMessage({
+          type: 'agentHandoffCapabilities',
+          cursorAgent: params.get('host') === 'cursor',
+          providers: (params.get('agents') ?? '')
+            .split(',')
+            .filter(Boolean)
+            .map(id => ({
+              id,
+              label: id === 'codex'
+                ? 'Codex'
+                : id === 'claude'
+                  ? 'Claude Code'
+                  : 'CodeBuddy',
+            })),
+        }, '*');
+
+        const fixture = params.get('fixture') || 'flash-attention';
         const response = await fetch(`/fixtures/${fixture}.pdf`);
         if (!response.ok) throw new Error(`Failed to load fixture PDF: ${response.status}`);
         const bytes = new Uint8Array(await response.arrayBuffer());

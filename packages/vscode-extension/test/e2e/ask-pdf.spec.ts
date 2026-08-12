@@ -1518,7 +1518,7 @@ test('Ask PDF answered desktop and narrow overlay retain stable Codex-quiet visu
 });
 
 async function openPdf(page: Page, fixture = 'flash-attention'): Promise<void> {
-  await page.goto(`${PDF_URL}?fixture=${fixture}&askPdf=1`);
+  await page.goto(`${PDF_URL}?fixture=${fixture}&askPdf=1&host=cursor`);
   const expected = fixture === 'two-page' ? /Page 1 \/ 2/ : /Page 1 \/ 1/;
   await expect(page.locator('#page-info')).toHaveText(expected, { timeout: 10_000 });
   await expect(page.locator('.text-layer span[data-item-index]').first()).toBeVisible();

@@ -561,7 +561,7 @@ test('pdf viewer preserves original PDF colors by default in a dark theme', asyn
 });
 
 test('pdf viewer production surface exposes only live selection actions and keeps Ask PDF dormant', async ({ page }) => {
-  await page.goto('http://localhost:8979/pdf-viewer.html');
+  await page.goto('http://localhost:8979/pdf-viewer.html?host=cursor');
   await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 1/, { timeout: 10_000 });
   await expect(page.locator('.text-layer span[data-item-index="0"]')).toBeVisible();
 
@@ -631,6 +631,112 @@ test('pdf viewer production surface exposes only live selection actions and keep
     'Copy link to selection',
     'Copy selected text',
   ]);
+});
+
+test('stock VS Code shows only installed provider actions', async ({ page }) => {
+  await page.goto('http://localhost:8979/pdf-viewer.html?host=vscode&agents=codex,claude');
+  await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 1/, { timeout: 10_000 });
+
+  await selectPdfTextRange(page, 0, 26);
+  await expect(page.locator('#selection-toolbar button')).toHaveText([
+    'Copy Link',
+    'Send to Codex',
+    'Send to Claude Code',
+  ]);
+  await expect(page.getByText('Add to Chat', { exact: true })).toHaveCount(0);
+
+  await openPdfSelectionContextMenu(page);
+  await expect(page.getByRole('menu').getByRole('menuitem')).toHaveText([
+    'Look up ...',
+    'Send to Codex',
+    'Send to Claude Code',
+    'Copy link to selection',
+    'Copy selected text',
+  ]);
+});
+
+test('Cursor keeps Add to Chat and installed provider actions', async ({ page }) => {
+  await page.goto('http://localhost:8979/pdf-viewer.html?host=cursor&agents=codex,claude,codebuddy');
+  await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 1/, { timeout: 10_000 });
+
+  await selectPdfTextRange(page, 0, 26);
+  await expect(page.locator('#selection-toolbar button')).toHaveText([
+    'Copy Link',
+    /Add to Chat/,
+    'Send to Codex',
+    'Send to Claude Code',
+    'Send to CodeBuddy',
+  ]);
+});
+
+test('explicit provider action posts its ID and crop', async ({ page }) => {
+  await page.goto('http://localhost:8979/pdf-viewer.html?host=vscode&agents=codex');
+  await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 1/, { timeout: 10_000 });
+
+  await selectPdfTextRange(page, 0, 26);
+  await page.getByRole('button', { name: 'Send to Codex', exact: true }).click();
+  expect(await waitForSelectionAction(page, 'sendToAgent')).toMatchObject({
+    action: 'sendToAgent',
+    agentId: 'codex',
+    snapshotPngBase64: expect.any(String),
+  });
+});
+
+test('capability message validates and updates provider actions in an open viewer', async ({ page }) => {
+  await page.goto('http://localhost:8979/pdf-viewer.html?host=vscode&agents=claude');
+  await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 1/, { timeout: 10_000 });
+
+  await selectPdfTextRange(page, 0, 26);
+  await expect(page.locator('#selection-toolbar button')).toHaveText([
+    'Copy Link',
+    'Send to Claude Code',
+  ]);
+
+  await page.evaluate(() => window.postMessage({
+    type: 'agentHandoffCapabilities',
+    cursorAgent: true,
+    providers: [
+      { id: 'codebuddy', label: 'Spoofed CodeBuddy' },
+      { id: 'codex', label: 'Spoofed Codex' },
+      { id: 'codex', label: 'Duplicate Codex' },
+      { id: 'unknown', label: 'Unknown' },
+      { id: 'claude', label: '' },
+    ],
+  }, '*'));
+  await expect(page.locator('#selection-toolbar button')).toHaveText([
+    'Copy Link',
+    /Add to Chat/,
+    'Send to Codex',
+    'Send to CodeBuddy',
+  ]);
+
+  await openPdfSelectionContextMenu(page);
+  await expect(page.getByRole('menu').getByRole('menuitem')).toHaveText([
+    'Look up ...',
+    /Add to Chat/,
+    'Send to Codex',
+    'Send to CodeBuddy',
+    'Copy link to selection',
+    'Copy selected text',
+  ]);
+});
+
+test('expanded provider toolbar stays contained in a narrow pane', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 720 });
+  await page.goto('http://localhost:8979/pdf-viewer.html?host=cursor&agents=codex,claude,codebuddy');
+  await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 1/, { timeout: 10_000 });
+
+  await selectPdfTextRange(page, 0, 26);
+  const toolbar = page.locator('#selection-toolbar');
+  await expect(toolbar).toBeVisible();
+  const toolbarBox = await toolbar.boundingBox();
+  expect(toolbarBox).not.toBeNull();
+  if (!toolbarBox) return;
+  expect(toolbarBox.x).toBeGreaterThanOrEqual(12);
+  expect(toolbarBox.x + toolbarBox.width).toBeLessThanOrEqual(308);
+  for (const button of await toolbar.getByRole('button').all()) {
+    await expect(button).toBeVisible();
+  }
 });
 
 test('pdf viewer rectangular selection copies PDF++ coordinates in a one-shot drag', async ({ page }) => {
@@ -1718,7 +1824,7 @@ test('pdf native selection emits bounded word-safe text-fragment context', async
 
 test('pdf viewer exposes a PDF++-style context menu for selections and pages', async ({ page }) => {
   const quote = 'FlashAttention uses tiling';
-  await page.goto('http://localhost:8979/pdf-viewer.html');
+  await page.goto('http://localhost:8979/pdf-viewer.html?host=cursor');
   await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 1/, { timeout: 10_000 });
   await expect(page.locator('.text-layer span[data-item-index="0"]')).toBeVisible();
 
@@ -2026,7 +2132,7 @@ test('PDF++-style context menu uses page actions outside a non-collapsed selecti
 
 test('pdf selection toolbar fuzzes all actions across synthetic and dragged selections', async ({ page }) => {
   const errors = collectPageErrors(page);
-  await page.goto('http://localhost:8979/pdf-viewer.html');
+  await page.goto('http://localhost:8979/pdf-viewer.html?host=cursor');
   await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 1/, { timeout: 10_000 });
   await expect(page.locator('.text-layer span[data-item-index="0"]')).toBeVisible();
   await expectPdfViewerStable(page, errors, 'selection fuzz initial document', 1);
@@ -2388,6 +2494,25 @@ async function selectPdfTextRange(page, start: number, end: number) {
     span.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
     document.querySelector('#page-container')?.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
   }, { start, end });
+}
+
+async function openPdfSelectionContextMenu(page) {
+  await page.evaluate(() => {
+    const selection = window.getSelection();
+    if (!selection?.rangeCount) throw new Error('Expected an active PDF selection');
+    const rect = selection.getRangeAt(0).getBoundingClientRect();
+    const clientX = Math.round(rect.left + rect.width / 2);
+    const clientY = Math.round(rect.top + rect.height / 2);
+    const target = document.elementFromPoint(clientX, clientY);
+    if (!target) throw new Error('Expected a hit-test target inside the PDF selection');
+    target.dispatchEvent(new MouseEvent('contextmenu', {
+      bubbles: true,
+      cancelable: true,
+      clientX,
+      clientY,
+    }));
+  });
+  await expect(page.getByRole('menu')).toBeVisible();
 }
 
 async function waitForSelectionAction(page, action: string) {
