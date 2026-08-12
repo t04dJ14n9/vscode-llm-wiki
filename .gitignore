@@ -24,6 +24,7 @@ artifacts/
 
 .codegraph/
 .code-review-graph/
+.worktrees/
 .superpowers/
 .cursor/
 .omc/
