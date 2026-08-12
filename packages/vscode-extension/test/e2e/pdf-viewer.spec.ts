@@ -682,6 +682,66 @@ test('explicit provider action posts its ID and crop', async ({ page }) => {
   });
 });
 
+test('provider action reports a crop capture exception and stays text-only', async ({ page }) => {
+  await page.goto('http://localhost:8979/pdf-viewer.html?host=vscode&agents=codex');
+  await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 1/, { timeout: 10_000 });
+
+  await selectPdfTextRange(page, 0, 26);
+  await page.evaluate(() => {
+    HTMLCanvasElement.prototype.toDataURL = () => {
+      throw new DOMException('Canvas export unavailable');
+    };
+  });
+
+  await page.getByRole('button', { name: 'Send to Codex', exact: true }).click();
+  const providerAction = await waitForSelectionAction(page, 'sendToAgent');
+  expect(providerAction).toMatchObject({
+    action: 'sendToAgent',
+    agentId: 'codex',
+    cropCaptureFailed: true,
+  });
+  expect(providerAction).not.toHaveProperty('requestId');
+  expect(providerAction).not.toHaveProperty('snapshotPngBase64');
+
+  await page.evaluate(() => {
+    window.__mockMessages = [];
+    window.postMessage({
+      type: 'captureSelectionForAgent',
+      requestId: 'provider-capture-failed-1',
+    }, '*');
+  });
+  const correlatedAction = await waitForSelectionAction(page, 'addToCursorChat');
+  expect(correlatedAction).toMatchObject({
+    action: 'addToCursorChat',
+    requestId: 'provider-capture-failed-1',
+    cropCaptureFailed: true,
+  });
+  expect(correlatedAction).not.toHaveProperty('agentId');
+  expect(correlatedAction).not.toHaveProperty('snapshotPngBase64');
+});
+
+test('provider action omits crop failure when selection geometry is unavailable', async ({ page }) => {
+  await page.goto('http://localhost:8979/pdf-viewer.html?host=vscode&agents=codex');
+  await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 1/, { timeout: 10_000 });
+
+  await page.evaluate(() => {
+    Range.prototype.getClientRects = () => [] as unknown as DOMRectList;
+    HTMLCanvasElement.prototype.toDataURL = () => {
+      throw new DOMException('Canvas export should not be attempted');
+    };
+  });
+  await selectPdfTextRange(page, 0, 26);
+
+  await page.getByRole('button', { name: 'Send to Codex', exact: true }).click();
+  const action = await waitForSelectionAction(page, 'sendToAgent');
+  expect(action).toMatchObject({
+    action: 'sendToAgent',
+    agentId: 'codex',
+  });
+  expect(action).not.toHaveProperty('snapshotPngBase64');
+  expect(action).not.toHaveProperty('cropCaptureFailed');
+});
+
 test('stock VS Code honors provider capture requests but ignores direct Cursor requests', async ({ page }) => {
   await page.goto('http://localhost:8979/pdf-viewer.html?host=vscode&agents=codex');
   await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 1/, { timeout: 10_000 });

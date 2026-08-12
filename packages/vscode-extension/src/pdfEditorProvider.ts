@@ -407,6 +407,7 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
               message.anchor,
               message.snapshotPngBase64,
               pendingRequest.agentId,
+              message.cropCaptureFailed,
             );
             break;
           }
@@ -416,6 +417,7 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
             message.anchor,
             message.snapshotPngBase64,
             message.agentId,
+            message.cropCaptureFailed,
           );
           break;
         }
@@ -947,6 +949,7 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
     anchor: PdfSelectionAnchor,
     rawSnapshotPngBase64?: unknown,
     rawAgentId?: unknown,
+    rawCropCaptureFailed?: unknown,
   ): Promise<void> {
     if (!isPdfSelectionAction(action)) return;
     if (action === 'addToCursorChat' || action === 'sendToAgent') {
@@ -957,6 +960,11 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
       const selection = this.toSelectionContext(pdfUri, anchor);
       if (!selection) throw new Error('Cannot send an empty PDF selection to an agent');
       const snapshotPng = decodeCursorCropPngBase64(rawSnapshotPngBase64);
+      if (rawCropCaptureFailed === true) {
+        vscode.window.showWarningMessage(
+          'The selection crop could not be captured; the active agent will use text context only.',
+        );
+      }
       await vscode.commands.executeCommand(
         agentId ? ADD_SELECTION_TO_AGENT_COMMAND : ADD_SELECTION_TO_CURSOR_CHAT_COMMAND,
         {

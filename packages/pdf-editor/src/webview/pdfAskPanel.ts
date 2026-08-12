@@ -112,13 +112,15 @@ export function createPdfAskPanel(options: PdfAskPanelOptions): PdfAskPanel {
 export function capturePdfSelectionCrop(
   surface: PdfAskPageSurface,
   selection: PdfAskSelection,
+  options?: { throwOnCaptureError?: boolean },
 ): string | undefined {
-  return capturePdfSelectionSnapshot(surface, selection)?.dataUrl;
+  return capturePdfSelectionSnapshot(surface, selection, options)?.dataUrl;
 }
 
 function capturePdfSelectionSnapshot(
   surface: PdfAskPageSurface,
   selection: PdfAskSelection,
+  options?: { throwOnCaptureError?: boolean },
 ): PdfSelectionCrop | undefined {
   const rects = validRects(selection.rects);
   if (!rects.length || surface.canvas.width < 1 || surface.canvas.height < 1) return undefined;
@@ -181,7 +183,8 @@ function capturePdfSelectionSnapshot(
           cropRect: [left, top, right, bottom],
         };
       }
-    } catch {
+    } catch (cause) {
+      if (options?.throwOnCaptureError) throw cause;
       return undefined;
     }
     outputScale *= 0.72;

@@ -284,9 +284,10 @@ test('PDF explicit agent handoff routes normalized selection and validated crop 
   assert.deepEqual(Buffer.from(commands[0][1].snapshotPng), png);
 });
 
-test('stock VS Code explicit provider command requests a correlated selection capture', async () => {
+test('stock VS Code explicit provider capture warns only for a literal crop failure and stays text-only', async () => {
   const commands = [];
   const posted = [];
+  const warnings = [];
   let receiveMessage;
   const vscode = {
     workspace: {
@@ -297,6 +298,9 @@ test('stock VS Code explicit provider command requests a correlated selection ca
     },
     Uri: {
       joinPath: (...parts) => ({ parts, toString: () => 'vscode-resource' }),
+    },
+    window: {
+      showWarningMessage: message => { warnings.push(message); },
     },
   };
   const {
@@ -361,6 +365,7 @@ test('stock VS Code explicit provider command requests a correlated selection ca
       snippet: 'Selected PDF passage',
     },
     requestId,
+    cropCaptureFailed: true,
   });
 
   assert.deepEqual(posted.at(-1), { type: 'captureSelectionForAgent', requestId });
@@ -368,6 +373,31 @@ test('stock VS Code explicit provider command requests a correlated selection ca
   assert.equal(commands[0][0], ADD_SELECTION_TO_AGENT_COMMAND);
   assert.equal(commands[0][1].agentId, 'codex');
   assert.equal(commands[0][1].selection.text, 'Selected PDF passage');
+  assert.equal(Object.prototype.hasOwnProperty.call(commands[0][1], 'snapshotPng'), false);
+  assert.deepEqual(warnings, [
+    'The selection crop could not be captured; the active agent will use text context only.',
+  ]);
+
+  await receiveMessage({
+    type: 'selectionAction',
+    action: 'sendToAgent',
+    agentId: 'codex',
+    anchor: { page: 3, snippet: 'Selected PDF passage' },
+  });
+  await receiveMessage({
+    type: 'selectionAction',
+    action: 'sendToAgent',
+    agentId: 'codex',
+    anchor: { page: 3, snippet: 'Selected PDF passage' },
+    cropCaptureFailed: 'true',
+  });
+
+  assert.equal(commands.length, 3);
+  assert.equal(commands[1][0], ADD_SELECTION_TO_AGENT_COMMAND);
+  assert.equal(commands[2][0], ADD_SELECTION_TO_AGENT_COMMAND);
+  assert.equal(Object.prototype.hasOwnProperty.call(commands[1][1], 'snapshotPng'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(commands[2][1], 'snapshotPng'), false);
+  assert.equal(warnings.length, 1);
 });
 
 test('concurrent explicit PDF provider captures correlate by request ID without Cursor fallback', async () => {

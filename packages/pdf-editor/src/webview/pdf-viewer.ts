@@ -2632,12 +2632,14 @@ class PdfViewer {
               canvas: page.canvas,
               pageWidth: Number(page.pageObj.size.width),
               pageHeight: Number(page.pageObj.size.height),
-            }, { page: anchor.page, rects })
+            }, { page: anchor.page, rects }, { throwOnCaptureError: true })
           : undefined;
         if (crop?.startsWith('data:image/png;base64,')) {
           message.snapshotPngBase64 = crop.slice('data:image/png;base64,'.length);
         }
-      } catch {}
+      } catch {
+        message.cropCaptureFailed = true;
+      }
     }
     vscode.postMessage(message);
   }
