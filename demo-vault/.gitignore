@@ -4,8 +4,7 @@
 .cursor/
 .claude/settings.local.json
 .ingest-*/
-scripts/__pycache__/
-scripts/tests/__pycache__/
+__pycache__/
 *.tmp
 *.sqlite
 *.sqlite-shm

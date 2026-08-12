@@ -1,0 +1,4 @@
+interface:
+  display_name: "LLM Wiki Vault"
+  short_description: "Build and maintain source-backed LLM wikis"
+  default_prompt: "Use $llm-wiki to initialize or maintain a source-backed OKF LLM wiki vault."
