@@ -270,7 +270,7 @@ function registerCommands(
     }),
     vscode.commands.registerCommand(
       'human-learning.addSelectionToChat',
-      (input?: AddSelectionToChatInput) => addSelectionToChat(input, { kind: 'picker' }),
+      (input?: AddSelectionToChatInput) => addSelectionToChat(input, { kind: 'cursor' }),
     ),
     vscode.commands.registerCommand(
       'human-learning.addSelectionToCursorChat',

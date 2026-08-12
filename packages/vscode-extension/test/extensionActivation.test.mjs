@@ -416,6 +416,7 @@ test('selection export follows the active Markdown or PDF tab and opens an agent
 test('selection exports use the workspace folder that owns each selected document', async () => {
   const exports = [];
   const agentHandoffs = [];
+  const cursorHandoffs = [];
   let markdownCaptureCount = 0;
   let pdfCaptureCount = 0;
   let nativeGetTextCount = 0;
@@ -472,6 +473,10 @@ test('selection exports use the workspace folder that owns each selected documen
     handoffSelectionToAgent: async uri => {
       agentHandoffs.push(uri.fsPath);
       return 'codex';
+    },
+    handoffSelectionToCursor: async uri => {
+      cursorHandoffs.push(uri.fsPath);
+      return true;
     },
   };
   mocks['./markdownEditorProvider'] = {
@@ -563,12 +568,14 @@ test('selection exports use the workspace folder that owns each selected documen
   assert.deepEqual(agentHandoffs, [
     '/vault-b/.hl/agent/exports/export-1/selection.md',
     '/vault-a/.hl/agent/exports/export-2/selection.md',
-    '/vault-b/.hl/agent/exports/export-3/selection.md',
     '/vault-b/.hl/agent/exports/export-4/selection.md',
+  ]);
+  assert.deepEqual(cursorHandoffs, [
+    '/vault-b/.hl/agent/exports/export-3/selection.md',
   ]);
 });
 
-test('explicit agent and Cursor handoff routes export the exact selection and optional PDF crop', async () => {
+test('generic Add to Chat routes exact Markdown and PDF exports directly to Cursor while explicit routes stay explicit', async () => {
   const exports = [];
   const pickerCalls = [];
   const explicitCalls = [];
@@ -689,7 +696,13 @@ test('explicit agent and Cursor handoff routes export the exact selection and op
     { vaultRoot: '/vault', selection: pdfSelection },
     { vaultRoot: '/vault', selection: pdfSelection },
   ]);
-  assert.deepEqual(pickerCalls, [
+  assert.deepEqual(pickerCalls, []);
+  assert.deepEqual(explicitCalls, [{
+    agentId: 'codex',
+    markdownPath: '/vault/.hl/agent/exports/export-3/selection.md',
+    attachments: ['/vault/.hl/agent/exports/export-3/selection.png'],
+  }]);
+  assert.deepEqual(cursorCalls, [
     {
       markdownPath: '/vault/.hl/agent/exports/export-1/selection.md',
       attachments: [],
@@ -698,16 +711,11 @@ test('explicit agent and Cursor handoff routes export the exact selection and op
       markdownPath: '/vault/.hl/agent/exports/export-2/selection.md',
       attachments: ['/vault/.hl/agent/exports/export-2/selection.png'],
     },
+    {
+      markdownPath: '/vault/.hl/agent/exports/export-4/selection.md',
+      attachments: ['/vault/.hl/agent/exports/export-4/selection.png'],
+    },
   ]);
-  assert.deepEqual(explicitCalls, [{
-    agentId: 'codex',
-    markdownPath: '/vault/.hl/agent/exports/export-3/selection.md',
-    attachments: ['/vault/.hl/agent/exports/export-3/selection.png'],
-  }]);
-  assert.deepEqual(cursorCalls, [{
-    markdownPath: '/vault/.hl/agent/exports/export-4/selection.md',
-    attachments: ['/vault/.hl/agent/exports/export-4/selection.png'],
-  }]);
   assert.deepEqual(
     attachmentSyncs.map(({ exported, fileName, bytes }) => ({
       directoryPath: exported.directoryPath,
@@ -858,7 +866,7 @@ test('explicit agent command without selection re-requests the active PDF for th
 });
 
 test('Add to Chat falls back to immutable text when crop persistence fails', async () => {
-  const handoffs = [];
+  const cursorHandoffs = [];
   const warningMessages = [];
   const selection = {
     uri: { fsPath: '/vault/raw/papers/attention.pdf', scheme: 'file' },
@@ -886,12 +894,12 @@ test('Add to Chat falls back to immutable text when crop persistence fails', asy
     validateCursorCropPng: value => value,
   };
   mocks['./agentHandoff'] = {
-    handoffSelectionToAgent: async (contextUri, attachments) => {
-      handoffs.push({
+    handoffSelectionToCursor: async (contextUri, attachments) => {
+      cursorHandoffs.push({
         contextPath: contextUri.fsPath,
         attachmentPaths: attachments.map(uri => uri.fsPath),
       });
-      return 'codex';
+      return true;
     },
   };
 
@@ -902,7 +910,7 @@ test('Add to Chat falls back to immutable text when crop persistence fails', asy
     snapshotPng: Uint8Array.from([10, 20, 30]),
   });
 
-  assert.deepEqual(handoffs, [{
+  assert.deepEqual(cursorHandoffs, [{
     contextPath: '/vault/.hl/agent/exports/export-1/selection.md',
     attachmentPaths: [],
   }]);
