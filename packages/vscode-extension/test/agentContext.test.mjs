@@ -129,7 +129,10 @@ test('addSelectionToContext exports a custom markdown editor selection when no n
       /\*\*Citation requirement\*\*: In chat responses, reuse the exact Source link above\./,
     );
     assert.doesNotMatch(markdown, /\*\*(?:Open in Human Learning|Portable anchor)\*\*/);
-    assert.match(markdown, /\*\*Visual evidence\*\*: sibling `selection\.png` when present/);
+    assert.match(
+      markdown,
+      /\*\*Visual evidence\*\*: \[selection\.png\]\(\.\/selection\.png\) when present/,
+    );
     assert.match(markdown, /## Standard Softmax\n\n\$softmax\(x_i\)\$/);
     assert.equal(json.source, 'notes/Concepts/Online Softmax.md');
     assert.equal(json.anchor_uri, 'hl://note/notes/Concepts/Online%20Softmax.md#L5-L7');
@@ -508,10 +511,11 @@ test('a new selection export clears the prior crop alias but preserves its immut
 
     assert.ok(second);
     assert.equal(existsSync(latestCrop), false);
+    assert.equal(existsSync(join(vaultRoot, '.hl', 'agent', 'selection.png')), false);
     assert.deepEqual(readFileSync(immutableCrop), Buffer.from(bytes));
     assert.match(
-      readFileSync(join(vaultRoot, '.hl', 'agent', 'selection.md'), 'utf8'),
-      /generic selection B/,
+      readFileSync(second.markdownPath, 'utf8'),
+      /\[selection\.png\]\(\.\/selection\.png\) when present/,
     );
   } finally {
     rmSync(vaultRoot, { recursive: true, force: true });

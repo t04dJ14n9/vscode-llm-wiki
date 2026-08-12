@@ -85,7 +85,7 @@ export async function addSelectionToContext(
 **Source**: ${chatUri ? `[${sourceLabel}](<${chatUri}>)` : sourceLabel}
 ${chatUri
     ? '**Citation requirement**: In chat responses, reuse the exact Source link above. Do not construct a relative file or PDF link.\n'
-    : ''}**Visual evidence**: sibling \`selection.png\` when present
+    : ''}**Visual evidence**: [selection.png](./selection.png) when present
 
 ${fence}
 ${text}
