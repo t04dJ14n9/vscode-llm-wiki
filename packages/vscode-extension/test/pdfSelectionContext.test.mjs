@@ -225,6 +225,65 @@ test('PDF Cursor handoff routes exact selection and an optional validated crop t
   ]);
 });
 
+test('PDF explicit agent handoff routes normalized selection and validated crop only for known agents', async () => {
+  const commands = [];
+  const vscode = {
+    workspace: {
+      asRelativePath: uri => uri.fsPath.replace('/vault/', ''),
+    },
+    commands: {
+      executeCommand: async (...args) => { commands.push(args); },
+    },
+    Uri: {
+      joinPath: (...parts) => ({ parts }),
+    },
+  };
+  const {
+    ADD_SELECTION_TO_AGENT_COMMAND,
+    PdfEditorProvider,
+  } = loadTsModule('src/pdfEditorProvider.ts', {
+    vscode,
+    '@human-learning/core': { pdfHref: portablePdfHref },
+  });
+  const provider = new PdfEditorProvider(
+    { extensionUri: { fsPath: '/extension' } },
+    '/vault',
+  );
+  const pdfUri = { fsPath: '/vault/raw/pdf/paper.pdf' };
+  const anchor = {
+    page: 3,
+    prefix: 'before context',
+    suffix: 'after context',
+    snippet: ' Selected   PDF passage ',
+  };
+  const png = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+    'base64',
+  );
+
+  await provider.handleSelectionAction(
+    pdfUri,
+    'sendToAgent',
+    anchor,
+    png.toString('base64'),
+    'codex',
+  );
+  await provider.handleSelectionAction(
+    pdfUri,
+    'sendToAgent',
+    anchor,
+    png.toString('base64'),
+    'unknown',
+  );
+
+  assert.equal(ADD_SELECTION_TO_AGENT_COMMAND, 'human-learning.addSelectionToAgent');
+  assert.equal(commands.length, 1);
+  assert.equal(commands[0][0], ADD_SELECTION_TO_AGENT_COMMAND);
+  assert.equal(commands[0][1].agentId, 'codex');
+  assert.equal(commands[0][1].selection.text, 'Selected PDF passage');
+  assert.deepEqual(Buffer.from(commands[0][1].snapshotPng), png);
+});
+
 test('combined PDF context keys clear on deactivation and restore with its selection', async () => {
   const commands = [];
   let onDidChangeViewState;
@@ -621,9 +680,9 @@ test('PDF provider queues anchor navigation until a newly opened webview is read
 
   assert.deepEqual(
     posted.map(message => message.type),
-    ['loadPdf', 'goToAnchor'],
+    ['agentHandoffCapabilities', 'loadPdf', 'goToAnchor'],
   );
-  assert.deepEqual(posted[1], {
+  assert.deepEqual(posted[2], {
     type: 'goToAnchor',
     anchor: { page: 7, textFragment },
   });
@@ -632,6 +691,104 @@ test('PDF provider queues anchor navigation until a newly opened webview is read
     pdfUri,
     'human-learning.pdfViewer',
   ]);
+});
+
+test('agent handoff capabilities precede PDF loading and refresh across live webviews', async () => {
+  const firstPosted = [];
+  const secondPosted = [];
+  let receiveMessage;
+  let fireCapabilityChange;
+  const pdfUri = {
+    scheme: 'file',
+    fsPath: '/vault/raw/pdf/paper.pdf',
+    toString: () => 'file:///vault/raw/pdf/paper.pdf',
+  };
+  const capabilities = {
+    cursorAgent: true,
+    providers: [{ id: 'codex', label: 'Codex' }],
+  };
+  const vscode = {
+    workspace: {
+      asRelativePath: uri => uri.fsPath.replace('/vault/', ''),
+      fs: {
+        readFile: async () => Uint8Array.from([1, 2, 3]),
+      },
+    },
+    window: {
+      showErrorMessage: message => assert.fail(message),
+    },
+    commands: {
+      executeCommand: async () => undefined,
+    },
+    Uri: {
+      joinPath: (...parts) => ({ parts, toString: () => 'vscode-resource' }),
+    },
+  };
+  const { PdfEditorProvider } = loadTsModule('src/pdfEditorProvider.ts', {
+    vscode,
+    '@human-learning/core': { pdfHref: portablePdfHref },
+  });
+  const context = { extensionUri: { fsPath: '/extension' }, subscriptions: [] };
+  const provider = new PdfEditorProvider(context, {
+    documentRoot: '/vault',
+    agentCapabilities: () => capabilities,
+    onDidChangeAgentCapabilities: listener => {
+      fireCapabilityChange = listener;
+      return { dispose() {} };
+    },
+  });
+  const webview = {
+    options: {},
+    cspSource: 'vscode-webview:',
+    asWebviewUri: uri => uri,
+    onDidReceiveMessage: listener => {
+      receiveMessage = listener;
+      return { dispose() {} };
+    },
+    postMessage: async message => {
+      firstPosted.push(message);
+      return true;
+    },
+  };
+  const panel = {
+    active: true,
+    webview,
+    onDidChangeViewState: () => ({ dispose() {} }),
+    onDidDispose: () => ({ dispose() {} }),
+  };
+  await provider.resolveCustomEditor({ uri: pdfUri }, panel, {});
+  provider.webviews.set('file:///vault/raw/pdf/second.pdf', {
+    panel: { webview: { postMessage: async message => secondPosted.push(message) } },
+    pdfUri: { fsPath: '/vault/raw/pdf/second.pdf' },
+    ready: false,
+    postMessage: message => secondPosted.push(message),
+  });
+
+  await receiveMessage({ type: 'ready' });
+
+  assert.deepEqual(firstPosted.slice(0, 2).map(message => message.type), [
+    'agentHandoffCapabilities',
+    'loadPdf',
+  ]);
+  assert.deepEqual(firstPosted[0], {
+    type: 'agentHandoffCapabilities',
+    cursorAgent: true,
+    providers: [{ id: 'codex', label: 'Codex' }],
+  });
+
+  firstPosted.length = 0;
+  fireCapabilityChange();
+  assert.deepEqual(firstPosted, [{
+    type: 'agentHandoffCapabilities',
+    cursorAgent: true,
+    providers: [{ id: 'codex', label: 'Codex' }],
+  }]);
+  assert.deepEqual(secondPosted, [{
+    type: 'agentHandoffCapabilities',
+    cursorAgent: true,
+    providers: [{ id: 'codex', label: 'Codex' }],
+  }]);
+  assert.equal(context.subscriptions.length, 1);
 });
 
 test('PDF provider does not schedule delayed loads that can outlive disposed webviews', async () => {

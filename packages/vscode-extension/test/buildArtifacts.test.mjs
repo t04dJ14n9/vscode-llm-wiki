@@ -250,38 +250,33 @@ test('manifest exposes selection export command while omitting Agent Context and
   );
 });
 
-test('manifest exposes provider-neutral Add to Chat on Markdown and PDF selection surfaces', () => {
+test('manifest exposes generic Add to Chat only on Cursor while selection-to-agent remains product neutral', () => {
   const command = manifest.contributes.commands.find(
     item => item.command === 'human-learning.addSelectionToChat',
   );
   assert.equal(command?.title, 'Human Learning: Add to Chat');
+  assert.equal(command?.enablement, 'humanLearningHostIsCursor');
 
-  const titleItems = (manifest.contributes.menus['editor/title'] ?? [])
-    .filter(item => item.command === command.command);
-  assert.deepEqual(
-    titleItems.map(item => item.when).sort(),
-    [
-      "activeCustomEditorId == 'human-learning.markdownEditor'",
-      'humanLearningPdfOpen && humanLearningPdfHasSelection',
-    ],
+  const genericContributions = [
+    ...Object.values(manifest.contributes.menus ?? {}).flat(),
+    ...(manifest.contributes.keybindings ?? []),
+  ].filter(item => item.command === command.command);
+  assert.ok(genericContributions.length > 0);
+  assert.ok(genericContributions.every(
+    item => item.when.includes('humanLearningHostIsCursor'),
+  ));
+
+  const selectionCommand = manifest.contributes.commands.find(
+    item => item.command === 'human-learning.addSelectionToContext',
   );
-  assert.equal(
-    (manifest.contributes.menus['editor/context'] ?? []).some(
-      item => item.command === command.command
-        && item.when === 'editorLangId == markdown && editorHasSelection',
-    ),
-    true,
-  );
-  assert.equal(
-    (manifest.contributes.keybindings ?? []).some(
-      item => item.command === command.command
-        && item.key === 'ctrl+l'
-        && item.mac === 'cmd+l'
-        && item.when.includes('humanLearningMarkdownHasSelection')
-        && item.when.includes('humanLearningPdfHasSelection'),
-    ),
-    true,
-  );
+  assert.equal(selectionCommand?.enablement, undefined);
+  const selectionContributions = Object.values(manifest.contributes.menus ?? {})
+    .flat()
+    .filter(item => item.command === selectionCommand.command);
+  assert.ok(selectionContributions.length > 0);
+  assert.ok(selectionContributions.every(
+    item => !item.when.includes('humanLearningHostIsCursor'),
+  ));
   assert.equal(
     (manifest.activationEvents ?? []).includes('onView:human-learning.learningChat'),
     false,

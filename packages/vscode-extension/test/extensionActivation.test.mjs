@@ -51,6 +51,18 @@ function loadTsModule(relativePath, mocks = {}) {
   mod.paths = Module._nodeModulePaths(dirname(filename));
   const originalLoad = Module._load;
   Module._load = function patchedLoad(request, parent, isMain) {
+    if (request === './agentHandoff') {
+      return {
+        getAgentSurfaceCapabilities: () => ({
+          cursorAgent: false,
+          providers: [],
+        }),
+        handoffSelectionToAgent: async () => undefined,
+        handoffSelectionToAgentId: async () => false,
+        handoffSelectionToCursor: async () => false,
+        ...(mocks[request] ?? {}),
+      };
+    }
     if (Object.prototype.hasOwnProperty.call(mocks, request)) {
       return mocks[request];
     }
@@ -69,12 +81,6 @@ function loadTsModule(relativePath, mocks = {}) {
         PdfDiscussionController: class {
           dispose() {}
         },
-      };
-    }
-    if (request === './agentHandoff') {
-      return {
-        handoffSelectionToAgent: async () => undefined,
-        handoffSelectionToCursor: async () => false,
       };
     }
     if (request === './cursorCrop') {
@@ -546,9 +552,11 @@ test('selection exports use the workspace folder that owns each selected documen
   ]);
 });
 
-test('Add to Chat exports the exact selection and routes an optional PDF crop', async () => {
+test('explicit agent and Cursor handoff routes export the exact selection and optional PDF crop', async () => {
   const exports = [];
-  const handoffs = [];
+  const pickerCalls = [];
+  const explicitCalls = [];
+  const cursorCalls = [];
   const attachmentSyncs = [];
   const markdownSelection = {
     uri: { fsPath: '/vault/notes/attention.md', scheme: 'file' },
@@ -597,12 +605,31 @@ test('Add to Chat exports the exact selection and routes an optional PDF crop', 
   };
   mocks['./agentHandoff'] = {
     handoffSelectionToAgent: async (contextUri, attachments) => {
-      handoffs.push({
-        contextPath: contextUri.fsPath,
-        attachmentPaths: attachments.map(uri => uri.fsPath),
+      pickerCalls.push({
+        markdownPath: contextUri.fsPath,
+        attachments: attachments.map(uri => uri.fsPath),
       });
       return 'codex';
     },
+    handoffSelectionToAgentId: async (agentId, contextUri, attachments) => {
+      explicitCalls.push({
+        agentId,
+        markdownPath: contextUri.fsPath,
+        attachments: attachments.map(uri => uri.fsPath),
+      });
+      return true;
+    },
+    handoffSelectionToCursor: async (contextUri, attachments) => {
+      cursorCalls.push({
+        markdownPath: contextUri.fsPath,
+        attachments: attachments.map(uri => uri.fsPath),
+      });
+      return true;
+    },
+    getAgentSurfaceCapabilities: () => ({
+      cursorAgent: true,
+      providers: [{ id: 'codex', label: 'Codex' }],
+    }),
   };
   mocks['./pdfEditorProvider'] = {
     PdfEditorProvider: class {
@@ -630,31 +657,41 @@ test('Add to Chat exports the exact selection and routes an optional PDF crop', 
     selection: pdfSelection,
     snapshotPng,
   });
-  // Older webview bundles still send the legacy command id.
+  await vscode.__registeredCommands['human-learning.addSelectionToAgent']({
+    agentId: 'codex',
+    selection: pdfSelection,
+    snapshotPng,
+  });
   await vscode.__registeredCommands['human-learning.addSelectionToCursorChat']({
     selection: pdfSelection,
-    snapshotPng: Uint8Array.from([1, 2, 3]),
+    snapshotPng,
   });
 
   assert.deepEqual(exports, [
     { vaultRoot: '/vault', selection: markdownSelection },
     { vaultRoot: '/vault', selection: pdfSelection },
     { vaultRoot: '/vault', selection: pdfSelection },
+    { vaultRoot: '/vault', selection: pdfSelection },
   ]);
-  assert.deepEqual(handoffs, [
+  assert.deepEqual(pickerCalls, [
     {
-      contextPath: '/vault/.hl/agent/exports/export-1/selection.md',
-      attachmentPaths: [],
+      markdownPath: '/vault/.hl/agent/exports/export-1/selection.md',
+      attachments: [],
     },
     {
-      contextPath: '/vault/.hl/agent/exports/export-2/selection.md',
-      attachmentPaths: ['/vault/.hl/agent/exports/export-2/selection.png'],
-    },
-    {
-      contextPath: '/vault/.hl/agent/exports/export-3/selection.md',
-      attachmentPaths: [],
+      markdownPath: '/vault/.hl/agent/exports/export-2/selection.md',
+      attachments: ['/vault/.hl/agent/exports/export-2/selection.png'],
     },
   ]);
+  assert.deepEqual(explicitCalls, [{
+    agentId: 'codex',
+    markdownPath: '/vault/.hl/agent/exports/export-3/selection.md',
+    attachments: ['/vault/.hl/agent/exports/export-3/selection.png'],
+  }]);
+  assert.deepEqual(cursorCalls, [{
+    markdownPath: '/vault/.hl/agent/exports/export-4/selection.md',
+    attachments: ['/vault/.hl/agent/exports/export-4/selection.png'],
+  }]);
   assert.deepEqual(
     attachmentSyncs.map(({ exported, fileName, bytes }) => ({
       directoryPath: exported.directoryPath,
@@ -675,10 +712,62 @@ test('Add to Chat exports the exact selection and routes an optional PDF crop', 
       {
         directoryPath: '/vault/.hl/agent/exports/export-3',
         fileName: 'selection.png',
-        bytes: undefined,
+        bytes: snapshotPng,
+      },
+      {
+        directoryPath: '/vault/.hl/agent/exports/export-4',
+        fileName: 'selection.png',
+        bytes: snapshotPng,
       },
     ],
   );
+});
+
+test('activation provides explicit agent capabilities to PDF hosts and sets the product context', () => {
+  for (const cursorAgent of [false, true]) {
+    const executeCommandCalls = [];
+    const providerOptions = [];
+    const vscode = createVscodeMock({
+      executeCommandCalls,
+      activeDocumentUri: undefined,
+    });
+    const onDidChange = () => ({ dispose() {} });
+    vscode.extensions = { onDidChange };
+    const getAgentSurfaceCapabilities = () => ({
+      cursorAgent,
+      providers: [{ id: 'codex', label: 'Codex' }],
+    });
+    const mocks = createActivationMocks({ vscode });
+    mocks['./agentHandoff'] = {
+      getAgentSurfaceCapabilities,
+      handoffSelectionToAgent: async () => undefined,
+      handoffSelectionToAgentId: async () => false,
+      handoffSelectionToCursor: async () => false,
+    };
+    mocks['./pdfEditorProvider'] = {
+      PdfEditorProvider: class {
+        static viewType = 'human-learning.pdfViewer';
+        constructor(_context, options) {
+          providerOptions.push(options);
+        }
+        getActiveWebview() {
+          return undefined;
+        }
+      },
+    };
+
+    const { activate } = loadTsModule('src/extension.ts', mocks);
+    activate({ subscriptions: [] });
+
+    assert.equal(providerOptions[0].agentCapabilities, getAgentSurfaceCapabilities);
+    assert.equal(providerOptions[0].onDidChangeAgentCapabilities, onDidChange);
+    assert.deepEqual(
+      executeCommandCalls.find(
+        ([command, key]) => command === 'setContext' && key === 'humanLearningHostIsCursor',
+      ),
+      ['setContext', 'humanLearningHostIsCursor', cursorAgent],
+    );
+  }
 });
 
 test('PDF Cmd-L asks the active webview for the same crop-aware agent handoff', async () => {
@@ -2106,6 +2195,9 @@ function createVscodeMock({
         registeredCommands[command] = callback;
         return { dispose() {} };
       },
+    },
+    extensions: {
+      onDidChange: () => ({ dispose() {} }),
     },
     env: {
       uriScheme: 'cursor',

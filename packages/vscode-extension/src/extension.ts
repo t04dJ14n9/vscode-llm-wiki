@@ -9,7 +9,11 @@ import {
 import { registerAnchorFileEditorProvider } from './anchorFileEditorProvider';
 import { humanLearningAnchorTarget } from './anchorUris';
 import {
+  getAgentSurfaceCapabilities,
   handoffSelectionToAgent,
+  handoffSelectionToAgentId,
+  handoffSelectionToCursor,
+  type ExternalAgentId,
 } from './agentHandoff';
 import { BacklinksProvider } from './backlinksProvider';
 import {
@@ -54,6 +58,18 @@ interface AddSelectionToChatInput {
   snapshotPng?: Uint8Array;
 }
 
+interface AddSelectionToAgentInput extends AddSelectionToChatInput {
+  agentId: ExternalAgentId;
+}
+
+export const ADD_SELECTION_TO_AGENT_COMMAND =
+  'human-learning.addSelectionToAgent';
+
+type SelectionHandoffTarget =
+  | { kind: 'picker' }
+  | { kind: 'cursor' }
+  | { kind: 'agent'; agentId: ExternalAgentId };
+
 export function activate(context: vscode.ExtensionContext): void {
   const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   const learningNotes = workspaceRoot
@@ -70,8 +86,15 @@ export function activate(context: vscode.ExtensionContext): void {
       ?? context.extensionUri?.fsPath
       ?? workspaceRoot,
     learningNoteStore: learningNotes,
+    agentCapabilities: getAgentSurfaceCapabilities,
+    onDidChangeAgentCapabilities: vscode.extensions.onDidChange,
     // TODO(ask-pdf): Re-enable after the provider-neutral “More detail” workflow and backend policy are specified.
   });
+  void vscode.commands.executeCommand(
+    'setContext',
+    'humanLearningHostIsCursor',
+    getAgentSurfaceCapabilities().cursorAgent,
+  );
   markdownOutlineProvider = registerMarkdownOutlineTreeProvider(context, pdfEditorProvider);
   graphPanel = new KnowledgeGraphPanel();
 
@@ -126,6 +149,7 @@ export function activate(context: vscode.ExtensionContext): void {
         payload.selection,
         payload.attachment?.bytes,
         'The experimental browser crop could not be saved; the active agent will use text context only.',
+        { kind: 'picker' },
       );
       if (!sent) throw new Error('The browser selection could not be exported.');
     },
@@ -146,7 +170,10 @@ function registerCommands(
   workspaceRoot: string | undefined,
   learningNotes: LearningNoteStore | undefined,
 ): void {
-  const addSelectionToChat = async (input?: AddSelectionToChatInput): Promise<void> => {
+  const addSelectionToChat = async (
+    input: AddSelectionToChatInput | undefined,
+    target: SelectionHandoffTarget,
+  ): Promise<void> => {
     const root = requireWorkspaceRoot(workspaceRoot);
     if (!root) return;
     if (!input?.selection && isPdfUri(activeTabUri())) {
@@ -162,6 +189,7 @@ function registerCommands(
       input?.selection,
       input?.snapshotPng,
       'The selection crop could not be saved; the active agent will use text context only.',
+      target,
     );
   };
 
@@ -236,9 +264,21 @@ function registerCommands(
         await handoffSelectionToAgent(vscode.Uri.file(exported.markdownPath));
       }
     }),
-    vscode.commands.registerCommand('human-learning.addSelectionToChat', addSelectionToChat),
-    // Compatibility alias for existing webview messages and older keybindings.
-    vscode.commands.registerCommand('human-learning.addSelectionToCursorChat', addSelectionToChat),
+    vscode.commands.registerCommand(
+      'human-learning.addSelectionToChat',
+      (input?: AddSelectionToChatInput) => addSelectionToChat(input, { kind: 'picker' }),
+    ),
+    vscode.commands.registerCommand(
+      'human-learning.addSelectionToCursorChat',
+      (input?: AddSelectionToChatInput) => addSelectionToChat(input, { kind: 'cursor' }),
+    ),
+    vscode.commands.registerCommand(
+      ADD_SELECTION_TO_AGENT_COMMAND,
+      (input?: AddSelectionToAgentInput) => {
+        if (!isExternalAgentId(input?.agentId)) return;
+        return addSelectionToChat(input, { kind: 'agent', agentId: input.agentId });
+      },
+    ),
     vscode.commands.registerCommand(
       'human-learning.addCursorBrowserSelectionToChat',
       async () => {
@@ -256,6 +296,7 @@ function registerCommands(
           cursorBrowserCaptureToSelectionContext(capture),
           capture.snapshotPng,
           'The Cursor Browser crop could not be saved; the active agent will use text context only.',
+          { kind: 'picker' },
         );
       },
     ),
@@ -484,6 +525,7 @@ async function exportSelectionAndHandoff(
   selection: SelectionContext | undefined,
   snapshotPng: Uint8Array | undefined,
   cropFailureMessage: string,
+  target: SelectionHandoffTarget,
 ): Promise<boolean> {
   const exported = await exportCurrentSelection(workspaceRoot, selection);
   if (!exported) return false;
@@ -497,11 +539,14 @@ async function exportSelectionAndHandoff(
   } catch {
     vscode.window.showWarningMessage(cropFailureMessage);
   }
-  const agent = await handoffSelectionToAgent(
-    vscode.Uri.file(exported.markdownPath),
-    cropPath ? [vscode.Uri.file(cropPath)] : [],
-  );
-  return agent !== undefined;
+  const markdownUri = vscode.Uri.file(exported.markdownPath);
+  const attachments = cropPath ? [vscode.Uri.file(cropPath)] : [];
+  const sent = target.kind === 'cursor'
+    ? await handoffSelectionToCursor(markdownUri, attachments)
+    : target.kind === 'agent'
+      ? await handoffSelectionToAgentId(target.agentId, markdownUri, attachments)
+      : (await handoffSelectionToAgent(markdownUri, attachments)) !== undefined;
+  return sent;
 }
 
 async function activeCustomSelection(): Promise<SelectionContext | undefined> {
@@ -543,6 +588,10 @@ function isSelectionContext(value: unknown): value is SelectionContext {
     && (candidate.startLine ?? 0) > 0
     && (candidate.endLine ?? 0) >= (candidate.startLine ?? 0),
   );
+}
+
+function isExternalAgentId(value: unknown): value is ExternalAgentId {
+  return value === 'codex' || value === 'claude' || value === 'codebuddy';
 }
 
 function activeTabUri(): vscode.Uri | undefined {

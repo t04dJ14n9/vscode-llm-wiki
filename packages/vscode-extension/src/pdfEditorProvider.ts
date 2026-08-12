@@ -17,6 +17,11 @@ import {
 } from './pdfDiscussionController';
 import { decodeCursorCropPngBase64 } from './cursorCrop';
 import type {
+  AgentHandoffCapability,
+  AgentSurfaceCapabilities,
+  ExternalAgentId,
+} from './agentHandoff';
+import type {
   PdfDiscussionAnnotationSnapshot,
   PdfDiscussionHostToWebviewMessage,
   PdfDiscussionWebviewToHostMessage,
@@ -40,6 +45,7 @@ interface PdfSelectionAnchor {
 
 type PdfSelectionAction =
   | 'addToCursorChat'
+  | 'sendToAgent'
   | 'copyLink'
   | 'copyRectEmbed';
 
@@ -97,10 +103,14 @@ export interface PdfEditorProviderOptions {
   globalStoragePath?: string;
   discussionController?: PdfDiscussionController;
   learningNoteStore?: LearningNoteStore;
+  agentCapabilities?: () => AgentSurfaceCapabilities;
+  onDidChangeAgentCapabilities?: vscode.Event<void>;
 }
 
 export const ADD_SELECTION_TO_CURSOR_CHAT_COMMAND =
   'human-learning.addSelectionToCursorChat';
+export const ADD_SELECTION_TO_AGENT_COMMAND =
+  'human-learning.addSelectionToAgent';
 
 const PDF_DISCUSSION_CONSENT_KEY = 'humanLearning.pdf.askPdfConsent';
 
@@ -141,6 +151,7 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
   private readonly globalStoragePath?: string;
   private readonly discussionController?: PdfDiscussionController;
   private readonly learningNoteStore?: LearningNoteStore;
+  private readonly agentCapabilities: () => AgentSurfaceCapabilities;
   private readonly pdfOutlineListeners = new Set<(uri: vscode.Uri) => unknown>();
   readonly onDidChangePdfOutline: vscode.Event<vscode.Uri> = (listener, thisArgs, disposables) => {
     const wrapped = thisArgs
@@ -176,6 +187,17 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
     this.globalStoragePath = options.globalStoragePath;
     this.discussionController = options.discussionController;
     this.learningNoteStore = options.learningNoteStore;
+    this.agentCapabilities = options.agentCapabilities ?? (() => ({
+      cursorAgent: false,
+      providers: [],
+    }));
+    if (options.onDidChangeAgentCapabilities) {
+      context.subscriptions.push(
+        options.onDidChangeAgentCapabilities(
+          () => this.broadcastAgentHandoffCapabilities(),
+        ),
+      );
+    }
     if (this.discussionController) {
       context.subscriptions.push(
         this.discussionController.onEvent(event => this.forwardDiscussionEvent(event)),
@@ -336,6 +358,7 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
       switch (message?.type) {
         case 'ready': {
           active.ready = true;
+          this.postAgentHandoffCapabilities(webview);
           await this.loadPdf(webview, pdfUri);
           this.flushPendingAnchor(active);
           break;
@@ -346,6 +369,7 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
             message.action,
             message.anchor,
             message.snapshotPngBase64,
+            message.agentId,
           );
           break;
         case 'copyText': {
@@ -429,6 +453,43 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
     } catch (error) {
       vscode.window.showErrorMessage(`Failed to load PDF: ${String(error)}`);
     }
+  }
+
+  private postAgentHandoffCapabilities(webview: vscode.Webview): void {
+    void webview.postMessage(this.agentHandoffCapabilitiesMessage());
+  }
+
+  private broadcastAgentHandoffCapabilities(): void {
+    const message = this.agentHandoffCapabilitiesMessage();
+    for (const active of this.webviews.values()) {
+      active.postMessage(message);
+    }
+  }
+
+  private agentHandoffCapabilitiesMessage(): {
+    type: 'agentHandoffCapabilities';
+    cursorAgent: boolean;
+    providers: AgentHandoffCapability[];
+  } {
+    const capabilities = this.agentCapabilities();
+    const seen = new Set<ExternalAgentId>();
+    const providers = Array.isArray(capabilities?.providers)
+      ? capabilities.providers.flatMap(provider => {
+          if (
+            !isExternalAgentId(provider?.id)
+            || typeof provider.label !== 'string'
+            || !provider.label.trim()
+            || seen.has(provider.id)
+          ) return [];
+          seen.add(provider.id);
+          return [{ id: provider.id, label: provider.label.trim() }];
+        })
+      : [];
+    return {
+      type: 'agentHandoffCapabilities',
+      cursorAgent: capabilities?.cursorAgent === true,
+      providers,
+    };
   }
 
   private getDiscussionStore(pdfUri: vscode.Uri): PdfDiscussionStore | undefined {
@@ -837,16 +898,25 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
     action: unknown,
     anchor: PdfSelectionAnchor,
     rawSnapshotPngBase64?: unknown,
+    rawAgentId?: unknown,
   ): Promise<void> {
     if (!isPdfSelectionAction(action)) return;
-    if (action === 'addToCursorChat') {
+    if (action === 'addToCursorChat' || action === 'sendToAgent') {
+      const agentId = action === 'sendToAgent' && isExternalAgentId(rawAgentId)
+        ? rawAgentId
+        : undefined;
+      if (action === 'sendToAgent' && !agentId) return;
       const selection = this.toSelectionContext(pdfUri, anchor);
-      if (!selection) throw new Error('Cannot add an empty PDF selection to Cursor Chat');
+      if (!selection) throw new Error('Cannot send an empty PDF selection to an agent');
       const snapshotPng = decodeCursorCropPngBase64(rawSnapshotPngBase64);
-      await vscode.commands.executeCommand(ADD_SELECTION_TO_CURSOR_CHAT_COMMAND, {
-        selection,
-        ...(snapshotPng ? { snapshotPng } : {}),
-      });
+      await vscode.commands.executeCommand(
+        agentId ? ADD_SELECTION_TO_AGENT_COMMAND : ADD_SELECTION_TO_CURSOR_CHAT_COMMAND,
+        {
+          ...(agentId ? { agentId } : {}),
+          selection,
+          ...(snapshotPng ? { snapshotPng } : {}),
+        },
+      );
       return;
     }
     const relPath = vscode.workspace.asRelativePath(pdfUri);
@@ -1238,7 +1308,6 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
   </div>
   <script nonce="${nonce}">
     window.__pdfiumWasmUrl = "${wasmUri.toString()}";
-    window.__humanLearningAddToCursorChat = true;
     window.__humanLearningAskPdfEnabled = ${this.discussionController !== undefined};
   </script>
   <script nonce="${nonce}" src="${scriptUri.toString()}?v=${nonce}"></script>
@@ -1616,8 +1685,13 @@ function normalizePdfPage(value: unknown): number | undefined {
 
 function isPdfSelectionAction(value: unknown): value is PdfSelectionAction {
   return value === 'addToCursorChat'
+    || value === 'sendToAgent'
     || value === 'copyLink'
     || value === 'copyRectEmbed';
+}
+
+function isExternalAgentId(value: unknown): value is ExternalAgentId {
+  return value === 'codex' || value === 'claude' || value === 'codebuddy';
 }
 
 function resolvePdfTargetPath(documentRoot: string, pdfPath: string): string | undefined {

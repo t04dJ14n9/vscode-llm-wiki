@@ -86,7 +86,8 @@
       {
         "command": "human-learning.addSelectionToChat",
         "title": "Human Learning: Add to Chat",
-        "icon": "$(comment-discussion)"
+        "icon": "$(comment-discussion)",
+        "enablement": "humanLearningHostIsCursor"
       },
       {
         "command": "human-learning.addCursorBrowserSelectionToChat",
@@ -208,7 +209,7 @@
         "command": "human-learning.addSelectionToChat",
         "key": "ctrl+l",
         "mac": "cmd+l",
-        "when": "(activeCustomEditorId == 'human-learning.markdownEditor' && humanLearningMarkdownHasSelection) || (humanLearningPdfOpen && humanLearningPdfHasSelection)"
+        "when": "humanLearningHostIsCursor && ((activeCustomEditorId == 'human-learning.markdownEditor' && humanLearningMarkdownHasSelection) || (humanLearningPdfOpen && humanLearningPdfHasSelection))"
       },
       {
         "command": "human-learning.consumeVimHostShortcut",
@@ -274,7 +275,7 @@
         },
         {
           "command": "human-learning.addSelectionToChat",
-          "when": "activeCustomEditorId == 'human-learning.markdownEditor'",
+          "when": "humanLearningHostIsCursor && activeCustomEditorId == 'human-learning.markdownEditor'",
           "group": "navigation@2"
         },
         {
@@ -324,14 +325,14 @@
         },
         {
           "command": "human-learning.addSelectionToChat",
-          "when": "humanLearningPdfOpen && humanLearningPdfHasSelection",
+          "when": "humanLearningHostIsCursor && humanLearningPdfOpen && humanLearningPdfHasSelection",
           "group": "navigation@10"
         }
       ],
       "editor/context": [
         {
           "command": "human-learning.addSelectionToChat",
-          "when": "editorLangId == markdown && editorHasSelection",
+          "when": "humanLearningHostIsCursor && editorLangId == markdown && editorHasSelection",
           "group": "navigation@10"
         }
       ]
