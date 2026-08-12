@@ -274,7 +274,7 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
     const selectionKey = pdfSelectionAnchorKey(active.selection);
     if (!selectionKey) return;
     active.pendingSelectionAgentRequest = { agentId, selectionKey };
-    active.postMessage({ type: 'addSelectionToCursorChat' });
+    active.postMessage({ type: 'captureSelectionForAgent' });
   }
 
   async getActiveSelectionContext(): Promise<SelectionContext | undefined> {

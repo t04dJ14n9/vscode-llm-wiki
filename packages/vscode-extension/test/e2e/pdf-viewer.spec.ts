@@ -682,6 +682,29 @@ test('explicit provider action posts its ID and crop', async ({ page }) => {
   });
 });
 
+test('stock VS Code honors provider capture requests but ignores direct Cursor requests', async ({ page }) => {
+  await page.goto('http://localhost:8979/pdf-viewer.html?host=vscode&agents=codex');
+  await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 1/, { timeout: 10_000 });
+
+  await selectPdfTextRange(page, 0, 26);
+  await page.evaluate(() => {
+    window.__mockMessages = [];
+    window.postMessage({ type: 'captureSelectionForAgent' }, '*');
+  });
+  expect(await waitForSelectionAction(page, 'addToCursorChat')).toMatchObject({
+    action: 'addToCursorChat',
+    snapshotPngBase64: expect.any(String),
+  });
+
+  await page.evaluate(() => window.postMessage({ type: 'addSelectionToCursorChat' }, '*'));
+  await page.waitForTimeout(50);
+  await expect.poll(() => page.evaluate(() =>
+    window.__mockMessages?.filter(message =>
+      message.type === 'selectionAction' && message.action === 'addToCursorChat'
+    ).length
+  )).toBe(1);
+});
+
 test('capability message validates and updates provider actions in an open viewer', async ({ page }) => {
   await page.goto('http://localhost:8979/pdf-viewer.html?host=vscode&agents=claude');
   await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 1/, { timeout: 10_000 });

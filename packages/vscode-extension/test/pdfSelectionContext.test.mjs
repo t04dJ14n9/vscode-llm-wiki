@@ -284,7 +284,7 @@ test('PDF explicit agent handoff routes normalized selection and validated crop 
   assert.deepEqual(Buffer.from(commands[0][1].snapshotPng), png);
 });
 
-test('PDF explicit command re-request preserves its agent across the legacy crop capture reply', async () => {
+test('stock VS Code explicit provider command requests a correlated selection capture', async () => {
   const commands = [];
   const posted = [];
   let receiveMessage;
@@ -360,7 +360,7 @@ test('PDF explicit command re-request preserves its agent across the legacy crop
     },
   });
 
-  assert.deepEqual(posted.at(-1), { type: 'addSelectionToCursorChat' });
+  assert.deepEqual(posted.at(-1), { type: 'captureSelectionForAgent' });
   assert.equal(commands.length, 1);
   assert.equal(commands[0][0], ADD_SELECTION_TO_AGENT_COMMAND);
   assert.equal(commands[0][1].agentId, 'codex');

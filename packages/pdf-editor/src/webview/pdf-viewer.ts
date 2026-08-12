@@ -517,6 +517,9 @@ class PdfViewer {
           if (this.agentCapabilities.cursorAgent) this.addCurrentSelectionToCursorChat();
           break;
         }
+        case 'captureSelectionForAgent':
+          this.addCurrentSelectionToCursorChat();
+          break;
         default:
           this.askPanel?.handleHostMessage(message);
           break;
