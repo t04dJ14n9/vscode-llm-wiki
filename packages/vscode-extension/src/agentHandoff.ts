@@ -1,59 +1,80 @@
 import * as vscode from 'vscode';
 
-type AgentId = 'codex' | 'claude' | 'cursor' | 'codebuddy';
+export type ExternalAgentId = 'codex' | 'claude' | 'codebuddy';
+
+type AgentId = ExternalAgentId | 'cursor';
+
+export interface AgentHandoffCapability {
+  id: ExternalAgentId;
+  label: string;
+}
+
+export interface AgentSurfaceCapabilities {
+  cursorAgent: boolean;
+  providers: AgentHandoffCapability[];
+}
 
 interface AgentChoice extends vscode.QuickPickItem {
   id: AgentId;
-  command: string;
-  fallbackCommands?: readonly string[];
+  commands: readonly string[];
   extensionIds?: readonly string[];
+}
+
+interface AvailableAgentChoice extends AgentChoice {
+  command: string;
 }
 
 type AgentSurface = 'editor' | 'cursor-composer' | 'unknown';
 
 interface AgentTarget {
-  agent: AgentChoice;
+  agent: AvailableAgentChoice;
   surface: AgentSurface;
 }
 
 const CURSOR_COMMAND = 'composer.addfilestocomposer';
 const CURSOR_COMPOSERS_COMMAND = 'composer.getOrderedSelectedComposerIds';
 const CURSOR_OPEN_COMMAND = 'workbench.action.chat.open';
-const CLAUDE_INSERT_COMMAND = 'claude-vscode.insertAtMention';
+const CLAUDE_HANDOFF_COMMANDS = [
+  'claude-vscode.insertAtMention',
+  'claude-code.insertAtMentioned',
+] as const;
 
 const AGENTS: readonly AgentChoice[] = [
   {
     id: 'codex',
     label: 'Codex',
     description: 'OpenAI Codex sidebar',
-    command: 'chatgpt.addFileToThread',
+    commands: ['chatgpt.addFileToThread'],
     extensionIds: ['openai.chatgpt'],
   },
   {
     id: 'claude',
     label: 'Claude Code',
     description: 'Anthropic Claude sidebar',
-    command: CLAUDE_INSERT_COMMAND,
-    fallbackCommands: ['claude-vscode.focus'],
+    commands: CLAUDE_HANDOFF_COMMANDS,
     extensionIds: ['anthropic.claude-code', 'Anthropic.claude-code'],
   },
   {
     id: 'cursor',
     label: 'Cursor Agent',
     description: 'Cursor Agent chat',
-    command: CURSOR_COMMAND,
+    commands: [CURSOR_COMMAND],
   },
   {
     id: 'codebuddy',
     label: 'CodeBuddy',
     description: 'Tencent CodeBuddy chat',
-    command: 'tencentcloud.codingcopilot.addToChat',
+    commands: ['tencentcloud.codingcopilot.addToChat'],
     extensionIds: [
       'tencent-cloud.coding-copilot',
       'Tencent-Cloud.coding-copilot',
     ],
   },
 ];
+
+const EXTERNAL_AGENTS = AGENTS.filter(
+  (agent): agent is AgentChoice & { id: ExternalAgentId } => agent.id !== 'cursor',
+);
 
 const EDITOR_CHAT_VIEW_TYPES: Readonly<Record<string, AgentId>> = {
   'chatgpt.conversationEditor': 'codex',
@@ -70,6 +91,64 @@ export async function handoffSelectionToCursor(
     attachmentUris,
     commands,
   );
+}
+
+export function getAgentSurfaceCapabilities(): AgentSurfaceCapabilities {
+  const appName = String(vscode.env?.appName ?? '').toLowerCase();
+  return {
+    cursorAgent: appName.includes('cursor'),
+    providers: EXTERNAL_AGENTS.flatMap(agent => {
+      const extension = extensionForAgent(agent);
+      if (!extension) return [];
+      const contributedCommands = contributedCommandIds(extension);
+      return agent.commands.some(command => contributedCommands.has(command))
+        ? [{ id: agent.id, label: agent.label }]
+        : [];
+    }),
+  };
+}
+
+export async function handoffSelectionToAgentId(
+  agentId: ExternalAgentId,
+  contextUri: vscode.Uri,
+  attachmentUris: readonly vscode.Uri[] = [],
+): Promise<boolean> {
+  const agent = EXTERNAL_AGENTS.find(candidate => candidate.id === agentId);
+  if (!agent) return false;
+
+  const extension = extensionForAgent(agent);
+  if (!extension) {
+    vscode.window.showWarningMessage(`${agent.label} is not available.`);
+    return false;
+  }
+  if (!extension.isActive) {
+    try {
+      await extension.activate();
+    } catch {
+      vscode.window.showWarningMessage(`${agent.label} could not be activated.`);
+      return false;
+    }
+  }
+
+  let command: string | undefined;
+  try {
+    const commands = new Set(await vscode.commands.getCommands(true));
+    command = availableAgentCommand(agent, commands);
+  } catch {
+    vscode.window.showWarningMessage(`${agent.label} handoff is not available.`);
+    return false;
+  }
+  if (!command) {
+    vscode.window.showWarningMessage(`${agent.label} handoff is not available.`);
+    return false;
+  }
+  try {
+    await executeAgentHandoff(agent, command, contextUri, attachmentUris);
+    return true;
+  } catch {
+    vscode.window.showWarningMessage(`${agent.label} could not attach the selection.`);
+    return false;
+  }
 }
 
 async function handoffSelectionToCursorWithCommands(
@@ -130,7 +209,7 @@ export async function handoffSelectionToAgent(
   const commands = new Set(await vscode.commands.getCommands(true));
   const available = AGENTS
     .map(agent => availableAgent(agent, commands))
-    .filter((agent): agent is AgentChoice => agent !== undefined);
+    .filter((agent): agent is AvailableAgentChoice => agent !== undefined);
   if (!available.length) {
     vscode.window.showWarningMessage(
       'Selection exported, but no supported agent sidebar is available.',
@@ -141,47 +220,21 @@ export async function handoffSelectionToAgent(
   if (!target) return undefined;
   const { agent } = target;
 
-  if (agent.id === 'claude') {
-    const document = await vscode.workspace.openTextDocument(contextUri);
-    const editor = await vscode.window.showTextDocument(document, { preview: true });
-    const end = document.lineAt(Math.max(0, document.lineCount - 1)).range.end;
-    editor.selection = new vscode.Selection(new vscode.Position(0, 0), end);
-    // Claude's contributed insert-at-mention command reads the active native
-    // selection and appends an @file#line reference to its current draft.
-    if (
-      target.surface !== 'editor'
-      && agent.command !== CLAUDE_INSERT_COMMAND
-      && commands.has('claude-vscode.sidebar.open')
-    ) {
-      await vscode.commands.executeCommand('claude-vscode.sidebar.open');
-    }
-    await vscode.commands.executeCommand(agent.command);
-  } else if (agent.id === 'cursor') {
+  if (agent.id === 'cursor') {
     if (!await handoffSelectionToCursorWithCommands(
       contextUri,
       attachmentUris,
       commands,
       target.surface === 'cursor-composer' ? true : undefined,
     )) return undefined;
-  } else if (agent.id === 'codex') {
-    for (const uri of uniqueLocalUris([contextUri, ...attachmentUris])) {
-      await vscode.commands.executeCommand(agent.command, uri);
-    }
-  } else if (agent.id === 'codebuddy' && attachmentUris.length) {
-    const attachments = uniqueLocalUris([contextUri, ...attachmentUris]);
-    await vscode.commands.executeCommand(
-      agent.command,
-      contextUri,
-      attachments,
-    );
   } else {
-    await vscode.commands.executeCommand(agent.command, contextUri);
+    await executeAgentHandoff(agent, agent.command, contextUri, attachmentUris);
   }
   return agent.id;
 }
 
 async function selectAgentTarget(
-  available: readonly AgentChoice[],
+  available: readonly AvailableAgentChoice[],
   commands: ReadonlySet<string>,
 ): Promise<AgentTarget | undefined> {
   const availableById = new Map(available.map(agent => [agent.id, agent]));
@@ -223,14 +276,14 @@ async function selectAgentTarget(
 }
 
 function visibleEditorChatTargets(
-  availableById: ReadonlyMap<AgentId, AgentChoice>,
-): { active?: AgentChoice; visible: AgentChoice[] } {
+  availableById: ReadonlyMap<AgentId, AvailableAgentChoice>,
+): { active?: AvailableAgentChoice; visible: AvailableAgentChoice[] } {
   const tabGroups = vscode.window.tabGroups;
   if (!tabGroups) return { visible: [] };
 
   const activeId = agentIdForEditorTab(tabGroups.activeTabGroup?.activeTab);
   const active = activeId ? availableById.get(activeId) : undefined;
-  const visible: AgentChoice[] = [];
+  const visible: AvailableAgentChoice[] = [];
   const seen = new Set<AgentId>();
   for (const group of tabGroups.all ?? []) {
     const id = agentIdForEditorTab(group.activeTab);
@@ -263,7 +316,7 @@ function agentIdForEditorTab(
 function availableAgent(
   agent: AgentChoice,
   commands: ReadonlySet<string>,
-): AgentChoice | undefined {
+): AvailableAgentChoice | undefined {
   const command = availableAgentCommand(agent, commands);
   if (!command) return undefined;
 
@@ -277,15 +330,81 @@ function availableAgent(
   ) {
     return undefined;
   }
-  return command === agent.command ? agent : { ...agent, command };
+  return { ...agent, command };
 }
 
 function availableAgentCommand(
   agent: AgentChoice,
   commands: ReadonlySet<string>,
 ): string | undefined {
-  return [agent.command, ...(agent.fallbackCommands ?? [])]
-    .find(command => commands.has(command));
+  return agent.commands.find(command => commands.has(command));
+}
+
+function extensionForAgent(
+  agent: AgentChoice,
+): vscode.Extension<unknown> | undefined {
+  const extensions = vscode.extensions as typeof vscode.extensions | undefined;
+  if (!agent.extensionIds?.length || typeof extensions?.getExtension !== 'function') {
+    return undefined;
+  }
+  return agent.extensionIds
+    .map(id => extensions.getExtension<unknown>(id))
+    .find((extension): extension is vscode.Extension<unknown> => extension !== undefined);
+}
+
+function contributedCommandIds(extension: vscode.Extension<unknown>): Set<string> {
+  const manifest: unknown = extension.packageJSON;
+  const commands = manifestCommandContributions(manifest);
+  if (!Array.isArray(commands)) return new Set();
+  return new Set(commands.flatMap(item =>
+    isCommandContribution(item) ? [item.command] : []
+  ));
+}
+
+function manifestCommandContributions(manifest: unknown): unknown {
+  if (typeof manifest !== 'object' || manifest === null || !('contributes' in manifest)) {
+    return undefined;
+  }
+  const contributes = manifest.contributes;
+  if (
+    typeof contributes !== 'object'
+    || contributes === null
+    || !('commands' in contributes)
+  ) {
+    return undefined;
+  }
+  return contributes.commands;
+}
+
+function isCommandContribution(item: unknown): item is { command: string } {
+  return typeof item === 'object'
+    && item !== null
+    && 'command' in item
+    && typeof item.command === 'string';
+}
+
+async function executeAgentHandoff(
+  agent: AgentChoice,
+  command: string,
+  contextUri: vscode.Uri,
+  attachmentUris: readonly vscode.Uri[],
+): Promise<void> {
+  if (agent.id === 'claude') {
+    const document = await vscode.workspace.openTextDocument(contextUri);
+    const editor = await vscode.window.showTextDocument(document, { preview: true });
+    const end = document.lineAt(Math.max(0, document.lineCount - 1)).range.end;
+    editor.selection = new vscode.Selection(new vscode.Position(0, 0), end);
+    await vscode.commands.executeCommand(command);
+  } else if (agent.id === 'codex') {
+    for (const uri of uniqueLocalUris([contextUri, ...attachmentUris])) {
+      await vscode.commands.executeCommand(command, uri);
+    }
+  } else if (agent.id === 'codebuddy' && attachmentUris.length) {
+    const attachments = uniqueLocalUris([contextUri, ...attachmentUris]);
+    await vscode.commands.executeCommand(command, contextUri, attachments);
+  } else {
+    await vscode.commands.executeCommand(command, contextUri);
+  }
 }
 
 function uniqueLocalUris(uris: readonly vscode.Uri[]): vscode.Uri[] {

@@ -33,6 +33,135 @@ function loadAgentHandoff(vscode) {
   }
 }
 
+function installedExtension(id, commands, options = {}) {
+  return {
+    id,
+    packageJSON: {
+      contributes: {
+        commands: commands.map(command => ({ command })),
+      },
+    },
+    isActive: options.isActive ?? false,
+    activate: options.activate ?? (async () => undefined),
+  };
+}
+
+function extensionRegistry(...extensions) {
+  const installed = new Map(extensions.map(extension => [
+    extension.id.toLowerCase(),
+    extension,
+  ]));
+  return {
+    getExtension: id => installed.get(id.toLowerCase()),
+  };
+}
+
+test('cold installed providers are visible before activation', () => {
+  const vscode = {
+    env: { appName: 'Visual Studio Code' },
+    extensions: extensionRegistry(
+      installedExtension('OPENAI.CHATGPT', ['chatgpt.addFileToThread']),
+      installedExtension('Anthropic.Claude-Code', ['claude-code.insertAtMentioned']),
+      installedExtension('TENCENT-CLOUD.CODING-COPILOT', ['tencentcloud.codingcopilot.addToChat']),
+    ),
+  };
+  const { getAgentSurfaceCapabilities } = loadAgentHandoff(vscode);
+
+  assert.deepEqual(getAgentSurfaceCapabilities(), {
+    cursorAgent: false,
+    providers: [
+      { id: 'codex', label: 'Codex' },
+      { id: 'claude', label: 'Claude Code' },
+      { id: 'codebuddy', label: 'CodeBuddy' },
+    ],
+  });
+});
+
+test('focus-only Claude does not produce a handoff capability', () => {
+  const vscode = {
+    env: { appName: 'Visual Studio Code' },
+    extensions: extensionRegistry(
+      installedExtension('anthropic.claude-code', ['claude-vscode.focus']),
+    ),
+  };
+  const { getAgentSurfaceCapabilities } = loadAgentHandoff(vscode);
+
+  assert.deepEqual(getAgentSurfaceCapabilities().providers, []);
+});
+
+test('cursor agent capability follows the host product name only', () => {
+  const { getAgentSurfaceCapabilities } = loadAgentHandoff({
+    env: { appName: 'Cursor' },
+    extensions: extensionRegistry(),
+  });
+
+  assert.equal(getAgentSurfaceCapabilities().cursorAgent, true);
+});
+
+test('explicit cold Codex handoff activates, refreshes commands, then attaches', async () => {
+  const order = [];
+  const selection = {
+    scheme: 'file',
+    fsPath: '/vault/.hl/agent/selection.md',
+  };
+  const crop = {
+    scheme: 'file',
+    fsPath: '/vault/.hl/agent/selection.png',
+  };
+  const vscode = {
+    commands: {
+      getCommands: async () => {
+        order.push('getCommands');
+        return ['chatgpt.addFileToThread'];
+      },
+      executeCommand: async (command, ...args) => {
+        order.push(`${command}:${args[0]?.fsPath.split('/').at(-1)}`);
+      },
+    },
+    extensions: extensionRegistry(installedExtension(
+      'openai.chatgpt',
+      ['chatgpt.addFileToThread'],
+      { activate: async () => order.push('activate:openai.chatgpt') },
+    )),
+    window: { showWarningMessage: () => undefined },
+  };
+  const { handoffSelectionToAgentId } = loadAgentHandoff(vscode);
+
+  assert.equal(await handoffSelectionToAgentId('codex', selection, [crop]), true);
+  assert.deepEqual(order, [
+    'activate:openai.chatgpt',
+    'getCommands',
+    'chatgpt.addFileToThread:selection.md',
+    'chatgpt.addFileToThread:selection.png',
+  ]);
+});
+
+test('explicit activation failure does not fall back to another provider', async () => {
+  const executedCommands = [];
+  const warnings = [];
+  const selection = {
+    scheme: 'file',
+    fsPath: '/vault/.hl/agent/selection.md',
+  };
+  const vscode = {
+    commands: {
+      getCommands: () => assert.fail('commands must not be queried after activation fails'),
+      executeCommand: async (...args) => executedCommands.push(args),
+    },
+    extensions: extensionRegistry(installedExtension(
+      'openai.chatgpt',
+      ['chatgpt.addFileToThread'],
+      { activate: async () => { throw new Error('activation failed'); } },
+    )),
+    window: { showWarningMessage: message => warnings.push(message) },
+  };
+  const { handoffSelectionToAgentId } = loadAgentHandoff(vscode);
+
+  assert.equal(await handoffSelectionToAgentId('codex', selection), false);
+  assert.deepEqual(executedCommands, []);
+  assert.match(warnings[0], /Codex could not be activated/);
+});
+
 test('hands the exported context file directly to Codex', async () => {
   const calls = [];
   const uri = {
@@ -743,27 +872,11 @@ test('CodeBuddy receives one draft attachment batch including an optional crop',
   );
 });
 
-test('gives Claude an exact native-editor reference to the context file', async () => {
+test('does not treat focus-only Claude as a handoff target', async () => {
   const calls = [];
+  const warnings = [];
   const uri = { fsPath: '/vault/.hl/agent/selection.md' };
-  const end = { line: 2, character: 7 };
-  const document = { lineCount: 3, lineAt: () => ({ range: { end } }) };
-  const editor = {};
-  class Position {
-    constructor(line, character) {
-      this.line = line;
-      this.character = character;
-    }
-  }
-  class Selection {
-    constructor(start, finish) {
-      this.start = start;
-      this.end = finish;
-    }
-  }
   const vscode = {
-    Position,
-    Selection,
     commands: {
       getCommands: async () => [
         'claude-vscode.sidebar.open',
@@ -771,32 +884,17 @@ test('gives Claude an exact native-editor reference to the context file', async 
       ],
       executeCommand: async (...args) => calls.push(args),
     },
-    workspace: {
-      openTextDocument: async candidate => {
-        assert.equal(candidate, uri);
-        return document;
-      },
-    },
     window: {
-      showTextDocument: async candidate => {
-        assert.equal(candidate, document);
-        return editor;
-      },
-      showQuickPick: () => assert.fail('one provider should not prompt'),
-      showWarningMessage: () => undefined,
+      showQuickPick: () => assert.fail('focus is not a data command'),
+      showWarningMessage: message => warnings.push(message),
     },
   };
   const { handoffSelectionToAgent } = loadAgentHandoff(vscode);
 
-  assert.equal(await handoffSelectionToAgent(uri), 'claude');
-  assert.deepEqual(
-    [editor.selection.start.line, editor.selection.start.character],
-    [0, 0],
-  );
-  assert.equal(editor.selection.end, end);
-  assert.deepEqual(calls, [
-    ['claude-vscode.sidebar.open'],
-    ['claude-vscode.focus'],
+  assert.equal(await handoffSelectionToAgent(uri), undefined);
+  assert.deepEqual(calls, []);
+  assert.deepEqual(warnings, [
+    'Selection exported, but no supported agent sidebar is available.',
   ]);
 });
 
