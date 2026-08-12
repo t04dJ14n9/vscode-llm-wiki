@@ -46,7 +46,7 @@ export type {
 } from './pdf-discussions/store';
 
 export {
-  HUMAN_LEARNING_CONTEXT,
+  LLM_WIKI_CONTEXT,
   PDF_FRAGMENT_CONFORMS_TO,
   scanPortablePdfAnnotations,
   toPortablePdfAnnotation,

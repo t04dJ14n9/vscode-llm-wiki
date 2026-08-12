@@ -117,7 +117,7 @@ function forwardLinkTreeItem(link: WikiLink): vscode.TreeItem {
   item.description = `line ${link.line}`;
   item.tooltip = link.href;
   item.command = {
-    command: 'human-learning.openAnchor',
+    command: 'llm-wiki.openAnchor',
     title: 'Open',
     arguments: [link.href],
   };
@@ -130,7 +130,7 @@ function backlinkTreeItem(link: WikiLink): vscode.TreeItem {
   item.description = link.label || 'reference';
   item.tooltip = link.href;
   item.command = {
-    command: 'human-learning.openAnchor',
+    command: 'llm-wiki.openAnchor',
     title: 'Open',
     arguments: [link.sourcePath],
   };

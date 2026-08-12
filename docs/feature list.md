@@ -1,10 +1,10 @@
-# Human Learning: Current Feature List
+# LLM Wiki: Current Feature List
 
 > This document describes the simplified combined desktop extension. For the
 > system boundaries and data flows, see
 > [Architecture and VS Code Integration](architecture-and-vscode-integration.md).
 
-Human Learning turns an ordinary Git repository into a source-linked learning
+LLM Wiki turns an ordinary Git repository into a source-linked learning
 workspace in VS Code or Cursor. Repository files, rather than a database, are
 the durable source of truth.
 
@@ -13,13 +13,13 @@ the durable source of truth.
 | Capability | Current release |
 | --- | --- |
 | Desktop host | VS Code and compatible desktop hosts such as Cursor |
-| Distribution unit | Combined `human-learning-vscode` extension |
+| Distribution unit | Combined `llm-wiki-vscode` extension |
 | Markdown and PDF reading | Included |
 | Markdown/PDF selection handoff | Active supported agent draft, never submitted automatically |
 | Web selection handoff | Cursor Browser capture plus an Experimental Web Reader for stock VS Code |
 | Selection-based, multi-turn questions | Included in the separate Ask PDF panel |
 | Durable learning records | Markdown under `wiki/learning/` |
-| PDF runtime state | v1 JSON sidecar under `.hl/annotations/pdf/` |
+| PDF runtime state | v1 JSON sidecar under `.llm_wiki/annotations/pdf/` |
 | Portable PDF annotation mirror | Per-annotation W3C-shaped JSON-LD |
 | Graph, daily review, and safe Git update | Included |
 | Built-in agent provider | Local Codex app-server |
@@ -67,10 +67,10 @@ All three surfaces use the same shared handoff. The extension exports:
 - repository-relative source path;
 - line range and character offsets.
 
-Human Learning prefers a visible Codex or Claude editor chat through stable VS
+LLM Wiki prefers a visible Codex or Claude editor chat through stable VS
 Code APIs, then a selected Cursor composer when that private capability is
 available. Ambiguous sidebar-only cases show a picker. The chosen provider
-receives the immutable export as draft context; Human Learning never
+receives the immutable export as draft context; LLM Wiki never
 auto-submits or scrapes the answer. Empty selections do not trigger the
 handoff.
 
@@ -133,8 +133,8 @@ For a PDF inside the repository, three file-backed records cooperate:
 | Record | Path | Role |
 | --- | --- | --- |
 | Learning note | `wiki/learning/*.md` | Human-readable Q&A truth, quote, summary, source link, and review dates |
-| v1 runtime sidecar | `.hl/annotations/pdf/<pdf-sha256>.json` | Current viewer geometry, messages, and turn/UI state |
-| Portable mirror | `.hl/annotations/pdf/<pdf-sha256>/<annotation-id>.jsonld` | W3C-shaped quote, page, geometry, and available learning-note/snapshot metadata for migration/interchange |
+| v1 runtime sidecar | `.llm_wiki/annotations/pdf/<pdf-sha256>.json` | Current viewer geometry, messages, and turn/UI state |
+| Portable mirror | `.llm_wiki/annotations/pdf/<pdf-sha256>/<annotation-id>.jsonld` | W3C-shaped quote, page, geometry, and available learning-note/snapshot metadata for migration/interchange |
 
 The JSON-LD mirror is not yet the viewer's canonical store. The current viewer
 reloads the v1 sidecar. A separate core scanner API can read the mirror's
@@ -148,7 +148,7 @@ snapshot metadata records `[left, top, right, bottom]`, `padding: 24`, and
 capture is non-fatal: the canonical quote, page, and multi-rectangle anchor remain
 valid and the question continues with text-only context.
 
-The PNG lives below `.hl/annotations/pdf/assets/`. The readable source quote,
+The PNG lives below `.llm_wiki/annotations/pdf/assets/`. The readable source quote,
 summary, and full Q&A are written to the matching `wiki/learning/*.md` after an
 assistant answer exists. Markdown alone cannot reconstruct PDF geometry, while
 the runtime sidecar alone is not the portable interchange representation.
@@ -200,7 +200,7 @@ filesystem wiki, link trees, graph, or PDF viewer.
 
 ## 8. Concept and entity graph
 
-**Human Learning: Show Knowledge Graph** opens a CSP-safe SVG graph derived from:
+**LLM Wiki: Show Knowledge Graph** opens a CSP-safe SVG graph derived from:
 
 - explicit links between Markdown notes;
 - `concepts` and `entities` YAML frontmatter.
@@ -223,7 +223,7 @@ that are absent from Markdown or frontmatter.
 
 ## 9. Daily note and review plan
 
-**Human Learning: Open Today's Learning Note** creates or refreshes:
+**LLM Wiki: Open Today's Learning Note** creates or refreshes:
 
 ```text
 wiki/daily/YYYY-MM-DD.md
@@ -246,7 +246,7 @@ current checkbox state.
 
 ## 10. Safe remote update
 
-**Human Learning: Pull Latest Wiki Content** follows a conservative Git policy:
+**LLM Wiki: Pull Latest Wiki Content** follows a conservative Git policy:
 
 1. require a Git repository;
 2. fetch and prune remote refs without touching working files;
@@ -275,8 +275,8 @@ than injected HTML. External links use VS Code's external URL API.
 
 **Send Selection to Agent…** writes the exact Markdown selection or canonical
 PDF extracted quote and anchor to
-an immutable `.hl/agent/exports/<id>/` snapshot and refreshes
-`.hl/agent/selection.md` and `.json` as latest-export aliases. It detects
+an immutable `.llm_wiki/agent/exports/<id>/` snapshot and refreshes
+`.llm_wiki/agent/selection.md` and `.json` as latest-export aliases. It detects
 supported commands at runtime, then lets the learner attach the snapshot's
 Markdown context file to Codex, Claude Code, Cursor Agent, or CodeBuddy. This
 is a local context handoff, not a second question-service implementation: only
@@ -286,9 +286,9 @@ Ask PDF streams answers back and persists the resulting Q&A automatically.
 exact Markdown selection or canonical PDF extracted quote. Markdown exposes an automatic selection
 prompt and context-menu action; PDF exposes context-menu and selection-toolbar
 actions. Both accept `Cmd+L` / `Ctrl+L` and attach
-`.hl/agent/exports/<id>/selection.md` first. A PDF may also attach the immutable
+`.llm_wiki/agent/exports/<id>/selection.md` first. A PDF may also attach the immutable
 sibling `selection.png` when the best-effort crop passes validation and can be
-saved. The stable `.hl/agent/selection.{md,json,png}` paths remain latest-export
+saved. The stable `.llm_wiki/agent/selection.{md,json,png}` paths remain latest-export
 aliases. Crop save or attachment failure warns and continues text-only. It
 prefers active editor-area agent chats using stable VS Code APIs, uses Cursor's
 selected-composer probe only when available, and asks when the target is
@@ -304,9 +304,9 @@ the entire supported product surface.
 ## 13. Verification commands
 
 ```bash
-pnpm --filter human-learning-vscode exec tsc --noEmit
-pnpm --filter @human-learning/core test
-pnpm --filter human-learning-vscode test
+pnpm --filter llm-wiki-vscode exec tsc --noEmit
+pnpm --filter @llm-wiki/core test
+pnpm --filter llm-wiki-vscode test
 pnpm exec playwright test --config playwright.config.ts
 ```
 

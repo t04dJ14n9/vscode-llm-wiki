@@ -1,15 +1,15 @@
-# Human Learning: Product Proposal
+# LLM Wiki: Product Proposal
 
 ## **Abstract**
 
-**Human Learning** is an open-source, local-first VS Code vault for **Karpathy Wiki–style agentic learning**: users add raw materials, and agents help digest them into a source-grounded markdown knowledge base. The project extends the LLM Wiki pattern from a prompt/skill workflow into an interactive research environment where PDFs, webpages, source code, markdown notes, handwritten annotations, and agent context become one bidirectionally linked graph. Karpathy’s gist frames the core idea as a raw-source → wiki → index workflow for LLM agents, and `karpathy-llm-wiki` shows this pattern can be packaged for Claude Code, Cursor, and Codex.
+**LLM Wiki** is an open-source, local-first VS Code vault for **Karpathy Wiki–style agentic learning**: users add raw materials, and agents help digest them into a source-grounded markdown knowledge base. The project extends the LLM Wiki pattern from a prompt/skill workflow into an interactive research environment where PDFs, webpages, source code, markdown notes, handwritten annotations, and agent context become one bidirectionally linked graph. Karpathy’s gist frames the core idea as a raw-source → wiki → index workflow for LLM agents, and `karpathy-llm-wiki` shows this pattern can be packaged for Claude Code, Cursor, and Codex.
 
-Obsidian and Zotero are excellent at parts of this workflow, but modern technical study increasingly crosses papers, code, web docs, and agent-generated context. **Human Learning** uses VS Code as the host because it already contains code navigation, Git, terminals, extensions, and Claude Code / Codex-style agents. Its goal is not just to help LLMs get work done, but to help humans learn with machines: trace claims to sources, connect concepts across media, preserve study history, and turn raw material into durable understanding.
+Obsidian and Zotero are excellent at parts of this workflow, but modern technical study increasingly crosses papers, code, web docs, and agent-generated context. **LLM Wiki** uses VS Code as the host because it already contains code navigation, Git, terminals, extensions, and Claude Code / Codex-style agents. Its goal is not just to help LLMs get work done, but to help humans learn with machines: trace claims to sources, connect concepts across media, preserve study history, and turn raw material into durable understanding.
 
 ## Current Implementation Update
 
 The MVP reference model now uses native Markdown and Obsidian-compatible links
-as the user-facing persisted format. Human Learning does not generate `hl://`
+as the user-facing persisted format. LLM Wiki does not generate `llm-wiki://`
 links for notes, code, PDFs, or web targets. Current examples are:
 
 ```md
@@ -18,7 +18,7 @@ links for notes, code, PDFs, or web targets. Current examples are:
 [paper p7](raw/pdf/flash-attention.pdf#page=7)
 [selected text](raw/pdf/flash-attention.pdf#page=7:~:text=selected%20text)
 [quote](https://example.com/article#:~:text=selected%20text)
-[DOM block](https://example.com/article#hl-web=web_abc123)
+[DOM block](https://example.com/article#llm-wiki-web=web_abc123)
 ```
 
 PDF search results and selection links use portable page/text-fragment targets.
@@ -38,7 +38,7 @@ This fragmentation matters because the objects being studied are no longer just 
 
 Karpathy’s LLM Wiki pattern points toward a better architecture: raw materials are collected, and the LLM maintains a directory of generated markdown pages—summaries, concept pages, comparisons, overviews, and cross-references. The wiki becomes the durable knowledge substrate: readable by humans, editable by agents, and grounded in source material. Karpathy explicitly frames the idea as a pattern for personal knowledge bases using LLM agents such as Codex, Claude Code, OpenCode, or similar tools.  [oai_citation:1‡Gist](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f?utm_source=chatgpt.com)
 
-Existing projects such as `Astro-Han/karpathy-llm-wiki` show that this idea can be packaged for agents: the repository describes itself as an Agent Skills-compatible LLM wiki for Claude Code, Cursor, and Codex, focused on raw sources, citations, and linting.  [oai_citation:2‡GitHub](https://github.com/Astro-Han/karpathy-llm-wiki?utm_source=chatgpt.com) Human Learning extends that idea from an agent skill into an interactive VS Code workspace.
+Existing projects such as `Astro-Han/karpathy-llm-wiki` show that this idea can be packaged for agents: the repository describes itself as an Agent Skills-compatible LLM wiki for Claude Code, Cursor, and Codex, focused on raw sources, citations, and linting.  [oai_citation:2‡GitHub](https://github.com/Astro-Han/karpathy-llm-wiki?utm_source=chatgpt.com) LLM Wiki extends that idea from an agent skill into an interactive VS Code workspace.
 
 The central abstraction is the **source anchor**: a stable reference to a precise fragment of a source. An anchor may point to a PDF page rectangle, a markdown heading, a code line range, a code symbol, an HTML DOM element, or an image region. Once every selected fragment can become an addressable anchor, the system can support source-grounded notes, bidirectional links, backlink repair, reference highlights, embeddings, activity history, daily study summaries, and reliable context handoff to agents.
 
@@ -48,7 +48,7 @@ VS Code is the right substrate because its extension platform supports custom ed
 
 ## 2. Product Vision
 
-**Human Learning** is an open-source, local-first VS Code vault for agentic study.
+**LLM Wiki** is an open-source, local-first VS Code vault for agentic study.
 
 It turns:
 
@@ -98,7 +98,7 @@ Underused activity history:
   The system usually does not know what the user viewed, selected, linked, or asked an agent about today.
 ```
 
-Human Learning addresses these problems by making sources, anchors, links, notes, context bundles, and agent workflows part of one local workspace.
+LLM Wiki addresses these problems by making sources, anchors, links, notes, context bundles, and agent workflows part of one local workspace.
 
 ---
 
@@ -117,7 +117,7 @@ Human Learning addresses these problems by making sources, anchors, links, notes
    The markdown editor should support source mode, reading mode, and hybrid live preview where the active line remains raw markdown and inactive lines render visually.
 
 5. **Portable markdown**
-   Notes should remain useful outside Human Learning. Canonical persisted links should prefer Obsidian wikilinks, relative markdown links to vault files, normal web URLs, and native URL fragments. `hl://` is not generated for MVP note content.
+   Notes should remain useful outside LLM Wiki. Canonical persisted links should prefer Obsidian wikilinks, relative markdown links to vault files, normal web URLs, and native URL fragments. `llm-wiki://` is not generated for MVP note content.
 
 6. **Local-first and open-source**
    Raw sources and notes remain local files by default. Indexes, embeddings, activity logs, and metadata are inspectable and rebuildable.
@@ -132,7 +132,7 @@ Human Learning addresses these problems by making sources, anchors, links, notes
 
 ## 5. Non-goals
 
-Human Learning is not primarily:
+LLM Wiki is not primarily:
 
 ```text
 a commercial SaaS note app
@@ -144,13 +144,13 @@ a closed cloud RAG product
 a proprietary agent platform
 ```
 
-Zotero integration should be supported, but Human Learning should not try to replace Zotero’s bibliographic database and citation ecosystem. Obsidian import/export should be supported, but Human Learning should not become a clone of Obsidian. The core deliverable is a source-addressable, agent-compatible research workspace inside VS Code.
+Zotero integration should be supported, but LLM Wiki should not try to replace Zotero’s bibliographic database and citation ecosystem. Obsidian import/export should be supported, but LLM Wiki should not become a clone of Obsidian. The core deliverable is a source-addressable, agent-compatible research workspace inside VS Code.
 
 ---
 
 ## 6. Proposed System
 
-A Human Learning vault uses a transparent workspace layout:
+A LLM Wiki vault uses a transparent workspace layout:
 
 ```text
 vault/
@@ -168,7 +168,7 @@ vault/
     assets/
       ink/
 
-  .hl/                    # local state, indexes, activity, context
+  .llm_wiki/                    # local state, indexes, activity, context
     index.sqlite
     embeddings/
     annotations/
@@ -190,20 +190,20 @@ The architectural rule is simple:
 ```text
 raw/    = canonical evidence
 notes/  = durable understanding
-.hl/    = rebuildable index, metadata, context, activity
+.llm_wiki/    = rebuildable index, metadata, context, activity
 agents  = readers/writers of the knowledge layer, not owners of raw evidence
 ```
 
-The CLI name is `hl`:
+The CLI name is `llm_wiki`:
 
 ```bash
-hl init
-hl ingest raw/pdf/flash-attention.pdf
-hl links check --fix
-hl embeddings refresh --changed
-hl context current
-hl today
-hl mcp stdio
+llm_wiki init
+llm_wiki ingest raw/pdf/flash-attention.pdf
+llm_wiki links check --fix
+llm_wiki embeddings refresh --changed
+llm_wiki context current
+llm_wiki today
+llm_wiki mcp stdio
 ```
 
 ---
@@ -284,7 +284,7 @@ Canonical persisted links should be valid markdown links:
 [[Online Softmax#Why This Matters]]
 ```
 
-Human Learning can still support Obsidian-style authoring syntax:
+LLM Wiki can still support Obsidian-style authoring syntax:
 
 ```md
 [[Online Softmax]]
@@ -368,7 +368,7 @@ Export selected HTML fragment to agent context
 
 ### 7.8 Code Source Anchors
 
-VS Code remains the native code editor. Human Learning adds a knowledge graph layer on top.
+VS Code remains the native code editor. LLM Wiki adds a knowledge graph layer on top.
 
 Features:
 
@@ -515,25 +515,25 @@ CLI commands
 Context files:
 
 ```text
-.hl/agent/selection.md
-.hl/agent/selection.json
-.hl/agent/related.md
-.hl/agent/today.md
+.llm_wiki/agent/selection.md
+.llm_wiki/agent/selection.json
+.llm_wiki/agent/related.md
+.llm_wiki/agent/today.md
 ```
 
 MCP tools:
 
 ```text
-hl.get_current_selection
-hl.search
-hl.get_anchor
-hl.get_related
-hl.get_backlinks
-hl.get_forward_links
-hl.check_links
-hl.refresh_embeddings
-hl.ingest
-hl.summarize_today
+llm_wiki.get_current_selection
+llm_wiki.search
+llm_wiki.get_anchor
+llm_wiki.get_related
+llm_wiki.get_backlinks
+llm_wiki.get_forward_links
+llm_wiki.check_links
+llm_wiki.refresh_embeddings
+llm_wiki.ingest
+llm_wiki.summarize_today
 ```
 
 ### 7.13 Optional iPad Companion
@@ -567,17 +567,17 @@ For PDFs, the ideal experience is full handwritten annotation with sidecar metad
 
 ### 8.1 Karpathy’s LLM Wiki
 
-Karpathy’s LLM Wiki is the conceptual foundation. It proposes raw sources plus an LLM-maintained directory of markdown wiki files: summaries, entity pages, concept pages, comparisons, overviews, and syntheses.  [oai_citation:8‡Gist](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f?utm_source=chatgpt.com) Human Learning adopts this pattern but adds interactive source anchors, VS Code custom editors, PDF/code/web selection, link repair, activity history, and agent context handoff.
+Karpathy’s LLM Wiki is the conceptual foundation. It proposes raw sources plus an LLM-maintained directory of markdown wiki files: summaries, entity pages, concept pages, comparisons, overviews, and syntheses.  [oai_citation:8‡Gist](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f?utm_source=chatgpt.com) LLM Wiki adopts this pattern but adds interactive source anchors, VS Code custom editors, PDF/code/web selection, link repair, activity history, and agent context handoff.
 
 ### 8.2 `karpathy-llm-wiki`
 
-`Astro-Han/karpathy-llm-wiki` is the closest implementation-level precedent. It already targets Claude Code, Cursor, Codex, Agent Skills, raw sources, citations, and linting.  [oai_citation:9‡GitHub](https://github.com/Astro-Han/karpathy-llm-wiki?utm_source=chatgpt.com) Human Learning should interoperate with that direction, but its scope is broader: it is an interactive VS Code research workspace rather than only an agent skill.
+`Astro-Han/karpathy-llm-wiki` is the closest implementation-level precedent. It already targets Claude Code, Cursor, Codex, Agent Skills, raw sources, citations, and linting.  [oai_citation:9‡GitHub](https://github.com/Astro-Han/karpathy-llm-wiki?utm_source=chatgpt.com) LLM Wiki should interoperate with that direction, but its scope is broader: it is an interactive VS Code research workspace rather than only an agent skill.
 
 ### 8.3 Obsidian
 
 Obsidian is the key UX precedent for local markdown knowledge work. It popularized local vaults, bidirectional note links, graph-oriented thinking, daily notes, and hybrid live preview. Obsidian’s own positioning emphasizes linking notes to create a personal Wikipedia-like knowledge base.  [oai_citation:10‡Obsidian](https://obsidian.md/?utm_source=chatgpt.com)
 
-Human Learning differs in three ways:
+LLM Wiki differs in three ways:
 
 ```text
 It is built inside VS Code.
@@ -587,9 +587,9 @@ It is designed from the start for Claude Code, Codex, CLI, and MCP workflows.
 
 ### 8.4 Zotero
 
-Zotero remains the best reference-management tool in this ecosystem. It should not be replaced. It collects, organizes, annotates, cites, and shares research.  [oai_citation:11‡Zotero](https://www.zotero.org/?utm_source=chatgpt.com) Human Learning should integrate with Zotero metadata and citation keys, but its core responsibility is different: source-addressed study, markdown synthesis, and agent context.
+Zotero remains the best reference-management tool in this ecosystem. It should not be replaced. It collects, organizes, annotates, cites, and shares research.  [oai_citation:11‡Zotero](https://www.zotero.org/?utm_source=chatgpt.com) LLM Wiki should integrate with Zotero metadata and citation keys, but its core responsibility is different: source-addressed study, markdown synthesis, and agent context.
 
-The Zotero–Obsidian ecosystem shows why native source anchoring matters. Current workflows often depend on Better BibTeX, citation-key conventions, note templates, and community plugins; discussions around plugin breakage, Zotero 8 changes, and citation-key/export mismatches show that this bridge can be fragile.  [oai_citation:12‡marianamontes.me](https://www.marianamontes.me/post/obsidian-and-zotero/?utm_source=chatgpt.com) Human Learning should reduce this fragility by treating source anchors and notes as one graph, while still importing Zotero metadata where useful.
+The Zotero–Obsidian ecosystem shows why native source anchoring matters. Current workflows often depend on Better BibTeX, citation-key conventions, note templates, and community plugins; discussions around plugin breakage, Zotero 8 changes, and citation-key/export mismatches show that this bridge can be fragile.  [oai_citation:12‡marianamontes.me](https://www.marianamontes.me/post/obsidian-and-zotero/?utm_source=chatgpt.com) LLM Wiki should reduce this fragility by treating source anchors and notes as one graph, while still importing Zotero metadata where useful.
 
 ### 8.5 CodeMirror
 
@@ -597,7 +597,7 @@ CodeMirror is the right basis for the custom markdown editor because it is an ex
 
 ### 8.6 MuPDF WebViewer
 
-MuPDF WebViewer is relevant for browser-compatible PDF viewing, text extraction, annotations, highlights, and markup.  [oai_citation:14‡GitHub](https://github.com/lewislulu/llm-wiki-skill?utm_source=chatgpt.com) Human Learning’s PDF use case is not general PDF editing; it is precise source anchoring, reference highlighting, handwritten annotation support, and agent context export.
+MuPDF WebViewer is relevant for browser-compatible PDF viewing, text extraction, annotations, highlights, and markup.  [oai_citation:14‡GitHub](https://github.com/lewislulu/llm-wiki-skill?utm_source=chatgpt.com) LLM Wiki’s PDF use case is not general PDF editing; it is precise source anchoring, reference highlighting, handwritten annotation support, and agent context export.
 
 ### 8.7 VS Code Extension Platform
 
@@ -607,7 +607,7 @@ VS Code provides the host environment. Its webview API supports fully customizab
 
 ## 9. Proposed Contribution
 
-Human Learning’s contribution is not “Obsidian in VS Code” or “RAG over markdown.” It is the combination of:
+LLM Wiki’s contribution is not “Obsidian in VS Code” or “RAG over markdown.” It is the combination of:
 
 ```text
 1. Agent-maintained markdown wiki
@@ -643,7 +643,7 @@ That invariant is the technical heart of the product.
 
 ## 10. Open-source Positioning
 
-Human Learning should optimize for trust, portability, and hackability:
+LLM Wiki should optimize for trust, portability, and hackability:
 
 ```text
 MIT or Apache-2.0 license
@@ -656,7 +656,7 @@ Transparent SQLite index
 Rebuildable embeddings
 Provider-agnostic model APIs
 Documented native reference model
-Composable hl CLI
+Composable llm_wiki CLI
 Optional MCP server
 Minimal lock-in
 ```
@@ -681,4 +681,4 @@ iPad annotation companion
 
 ## 11. One-sentence Proposal
 
-**Human Learning is an open-source, local-first VS Code vault that helps humans learn with machines by turning PDFs, webpages, source code, markdown notes, handwritten annotations, and agent context into one source-grounded, bidirectionally linked knowledge graph.**
+**LLM Wiki is an open-source, local-first VS Code vault that helps humans learn with machines by turning PDFs, webpages, source code, markdown notes, handwritten annotations, and agent context into one source-grounded, bidirectionally linked knowledge graph.**

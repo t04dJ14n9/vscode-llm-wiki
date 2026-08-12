@@ -403,11 +403,11 @@ test('explicit cold Codex handoff activates, refreshes commands, then attaches',
   const order = [];
   const selection = {
     scheme: 'file',
-    fsPath: '/vault/.hl/agent/selection.md',
+    fsPath: '/vault/.llm_wiki/agent/selection.md',
   };
   const crop = {
     scheme: 'file',
-    fsPath: '/vault/.hl/agent/selection.png',
+    fsPath: '/vault/.llm_wiki/agent/selection.png',
   };
   const vscode = {
     commands: {
@@ -442,11 +442,11 @@ test('Codex reports total failure and skips the crop when selection.md attachmen
   const warnings = [];
   const selection = {
     scheme: 'file',
-    fsPath: '/vault/.hl/agent/selection.md',
+    fsPath: '/vault/.llm_wiki/agent/selection.md',
   };
   const crop = {
     scheme: 'file',
-    fsPath: '/vault/.hl/agent/selection.png',
+    fsPath: '/vault/.llm_wiki/agent/selection.png',
   };
   const command = 'chatgpt.addFileToThread';
   const vscode = {
@@ -483,11 +483,11 @@ test('Codex reports partial success when only the optional crop attachment fails
   const warnings = [];
   const selection = {
     scheme: 'file',
-    fsPath: '/vault/.hl/agent/selection.md',
+    fsPath: '/vault/.llm_wiki/agent/selection.md',
   };
   const crop = {
     scheme: 'file',
-    fsPath: '/vault/.hl/agent/selection.png',
+    fsPath: '/vault/.llm_wiki/agent/selection.png',
   };
   const command = 'chatgpt.addFileToThread';
   const vscode = {
@@ -527,7 +527,7 @@ test('explicit activation failure does not fall back to another provider', async
   const warnings = [];
   const selection = {
     scheme: 'file',
-    fsPath: '/vault/.hl/agent/selection.md',
+    fsPath: '/vault/.llm_wiki/agent/selection.md',
   };
   const vscode = {
     commands: {
@@ -552,7 +552,7 @@ test('hands the exported context file directly to Codex', async () => {
   const calls = [];
   const uri = {
     scheme: 'file',
-    fsPath: '/vault/.hl/agent/selection.md',
+    fsPath: '/vault/.llm_wiki/agent/selection.md',
   };
   const vscode = {
     commands: {
@@ -574,7 +574,7 @@ test('auto-routes to the selected Cursor composer before falling back to a provi
   const calls = [];
   const uri = {
     scheme: 'file',
-    fsPath: '/vault/.hl/agent/selection.md',
+    fsPath: '/vault/.llm_wiki/agent/selection.md',
   };
   const vscode = {
     commands: {
@@ -609,7 +609,7 @@ test('stable active editor tab routes to Codex without private visibility probes
   const calls = [];
   const uri = {
     scheme: 'file',
-    fsPath: '/vault/.hl/agent/selection.md',
+    fsPath: '/vault/.llm_wiki/agent/selection.md',
   };
   const codexGroup = {
     activeTab: {
@@ -666,7 +666,7 @@ test('stable visible Claude editor routes there without reopening its sidebar', 
   const calls = [];
   const uri = {
     scheme: 'file',
-    fsPath: '/vault/.hl/agent/selection.md',
+    fsPath: '/vault/.llm_wiki/agent/selection.md',
   };
   const mainGroup = {
     activeTab: {
@@ -740,7 +740,7 @@ test('multiple visible chat editors show a picker narrowed to those stable targe
   const pickedIds = [];
   const uri = {
     scheme: 'file',
-    fsPath: '/vault/.hl/agent/selection.md',
+    fsPath: '/vault/.llm_wiki/agent/selection.md',
   };
   const mainGroup = {
     activeTab: {
@@ -822,7 +822,7 @@ test('installed-extension capability check ignores a stale foreign command', asy
   const calls = [];
   const uri = {
     scheme: 'file',
-    fsPath: '/vault/.hl/agent/selection.md',
+    fsPath: '/vault/.llm_wiki/agent/selection.md',
   };
   const vscode = {
     commands: {
@@ -850,11 +850,11 @@ test('Codex receives unique optional crop attachments without submitting', async
   const calls = [];
   const selection = {
     scheme: 'file',
-    fsPath: '/vault/.hl/agent/selection.md',
+    fsPath: '/vault/.llm_wiki/agent/selection.md',
   };
   const crop = {
     scheme: 'file',
-    fsPath: '/vault/.hl/agent/selection.png',
+    fsPath: '/vault/.llm_wiki/agent/selection.png',
   };
   const vscode = {
     commands: {
@@ -886,7 +886,7 @@ test('attaches to the current Cursor composer when chat-open is unavailable', as
   const calls = [];
   const uri = {
     scheme: 'file',
-    fsPath: '/vault/.hl/agent/selection.md',
+    fsPath: '/vault/.llm_wiki/agent/selection.md',
   };
   const vscode = {
     commands: {
@@ -923,7 +923,7 @@ test('warns and does nothing when Cursor Chat is unavailable', async () => {
   assert.equal(
     await handoffSelectionToCursor({
       scheme: 'file',
-      fsPath: '/vault/.hl/agent/selection.md',
+      fsPath: '/vault/.llm_wiki/agent/selection.md',
     }),
     false,
   );
@@ -936,7 +936,7 @@ test('does not silently attach when Cursor reports no composer and cannot open o
   const warnings = [];
   const selection = {
     scheme: 'file',
-    fsPath: '/vault/.hl/agent/selection.md',
+    fsPath: '/vault/.llm_wiki/agent/selection.md',
   };
   const vscode = {
     commands: {
@@ -966,7 +966,7 @@ test('attaches after Cursor creates a composer even when its open command reject
   const calls = [];
   const selection = {
     scheme: 'file',
-    fsPath: '/vault/.hl/agent/selection.md',
+    fsPath: '/vault/.llm_wiki/agent/selection.md',
   };
   const vscode = {
     commands: {
@@ -1010,11 +1010,11 @@ test('returns false when Cursor cannot attach selection.md', async () => {
   const warnings = [];
   const selection = {
     scheme: 'file',
-    fsPath: '/vault/.hl/agent/selection.md',
+    fsPath: '/vault/.llm_wiki/agent/selection.md',
   };
   const crop = {
     scheme: 'file',
-    fsPath: '/vault/.hl/agent/selection.png',
+    fsPath: '/vault/.llm_wiki/agent/selection.png',
   };
   const vscode = {
     commands: {
@@ -1044,11 +1044,11 @@ test('continues text-only when Cursor cannot attach the optional crop', async ()
   const warnings = [];
   const selection = {
     scheme: 'file',
-    fsPath: '/vault/.hl/agent/selection.md',
+    fsPath: '/vault/.llm_wiki/agent/selection.md',
   };
   const crop = {
     scheme: 'file',
-    fsPath: '/vault/.hl/agent/selection.png',
+    fsPath: '/vault/.llm_wiki/agent/selection.png',
   };
   const vscode = {
     commands: {
@@ -1082,11 +1082,11 @@ test('reuses the active Cursor composer for selection.md and crop without openin
   const calls = [];
   const selection = {
     scheme: 'file',
-    fsPath: '/vault/.hl/agent/selection.md',
+    fsPath: '/vault/.llm_wiki/agent/selection.md',
   };
   const crop = {
     scheme: 'file',
-    fsPath: '/vault/.hl/annotations/pdf/page-3.png',
+    fsPath: '/vault/.llm_wiki/annotations/pdf/page-3.png',
   };
   const vscode = {
     commands: {
@@ -1128,11 +1128,11 @@ test('opens Cursor once and attaches when no current composer exists', async () 
   const calls = [];
   const selection = {
     scheme: 'file',
-    fsPath: '/vault/.hl/agent/selection.md',
+    fsPath: '/vault/.llm_wiki/agent/selection.md',
   };
   const crop = {
     scheme: 'file',
-    fsPath: '/vault/.hl/annotations/pdf/page-3.png',
+    fsPath: '/vault/.llm_wiki/annotations/pdf/page-3.png',
   };
   const vscode = {
     commands: {
@@ -1204,7 +1204,7 @@ test('rejects non-local Cursor attachments before opening the composer', async (
 
 test('hands the exported context file directly to CodeBuddy', async () => {
   const calls = [];
-  const uri = { fsPath: '/vault/.hl/agent/selection.md' };
+  const uri = { fsPath: '/vault/.llm_wiki/agent/selection.md' };
   const vscode = {
     commands: {
       getCommands: async () => ['tencentcloud.codingcopilot.addToChat'],
@@ -1225,11 +1225,11 @@ test('CodeBuddy receives one draft attachment batch including an optional crop',
   const calls = [];
   const selection = {
     scheme: 'file',
-    fsPath: '/vault/.hl/agent/selection.md',
+    fsPath: '/vault/.llm_wiki/agent/selection.md',
   };
   const crop = {
     scheme: 'file',
-    fsPath: '/vault/.hl/agent/selection.png',
+    fsPath: '/vault/.llm_wiki/agent/selection.png',
   };
   const vscode = {
     commands: {
@@ -1261,7 +1261,7 @@ test('CodeBuddy receives one draft attachment batch including an optional crop',
 test('does not treat focus-only Claude as a handoff target', async () => {
   const calls = [];
   const warnings = [];
-  const uri = { fsPath: '/vault/.hl/agent/selection.md' };
+  const uri = { fsPath: '/vault/.llm_wiki/agent/selection.md' };
   const vscode = {
     commands: {
       getCommands: async () => [
@@ -1288,7 +1288,7 @@ test('Claude prefers insert-at-mention so its current draft receives the exact r
   const calls = [];
   const uri = {
     scheme: 'file',
-    fsPath: '/vault/.hl/agent/selection.md',
+    fsPath: '/vault/.llm_wiki/agent/selection.md',
   };
   const end = { line: 2, character: 7 };
   const document = { lineCount: 3, lineAt: () => ({ range: { end } }) };
@@ -1352,7 +1352,7 @@ test('keeps the exported files when no supported agent is installed', async () =
   const { handoffSelectionToAgent } = loadAgentHandoff(vscode);
 
   assert.equal(
-    await handoffSelectionToAgent({ fsPath: '/vault/.hl/agent/selection.md' }),
+    await handoffSelectionToAgent({ fsPath: '/vault/.llm_wiki/agent/selection.md' }),
     undefined,
   );
   assert.deepEqual(warnings, [

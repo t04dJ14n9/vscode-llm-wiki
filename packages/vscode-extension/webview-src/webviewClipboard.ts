@@ -13,7 +13,7 @@ export async function writeTextToClipboard(text: string, fallback: CopyTextFallb
 }
 
 export function dispatchCopyTextEvent(target: EventTarget, text: string): void {
-  target.dispatchEvent(new CustomEvent('human-learning-copy-text', {
+  target.dispatchEvent(new CustomEvent('llm-wiki-copy-text', {
     bubbles: true,
     detail: { text },
   }));

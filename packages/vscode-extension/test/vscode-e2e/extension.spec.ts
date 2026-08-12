@@ -112,14 +112,14 @@ async function runCommandFromPalette(page: Page, query: string, waitMs = 500): P
 }
 
 async function ensureHostVimMode(page: Page, docNeedle: string, enabled: boolean): Promise<void> {
-  const current = await evaluateHumanLearningWebview<boolean>(docNeedle, `
-    return typeof win.__hlVimModeEnabled === 'function' ? win.__hlVimModeEnabled() : false;
+  const current = await evaluateLlmWikiWebview<boolean>(docNeedle, `
+    return typeof win.__llmWikiVimModeEnabled === 'function' ? win.__llmWikiVimModeEnabled() : false;
   `);
   if (current !== enabled) {
-    await runCommandFromPalette(page, 'Human Learning: Toggle Vim Mode', 750);
+    await runCommandFromPalette(page, 'LLM Wiki: Toggle Vim Mode', 750);
   }
-  await expect.poll(() => evaluateHumanLearningWebview<boolean>(docNeedle, `
-    return typeof win.__hlVimModeEnabled === 'function' ? win.__hlVimModeEnabled() : false;
+  await expect.poll(() => evaluateLlmWikiWebview<boolean>(docNeedle, `
+    return typeof win.__llmWikiVimModeEnabled === 'function' ? win.__llmWikiVimModeEnabled() : false;
   `)).toBe(enabled);
 }
 
@@ -185,7 +185,7 @@ interface DevtoolsTarget {
   webSocketDebuggerUrl?: string;
 }
 
-async function evaluateHumanLearningWebview<T>(
+async function evaluateLlmWikiWebview<T>(
   docNeedle: string,
   body: string,
 ): Promise<T> {
@@ -199,7 +199,7 @@ async function evaluateHumanLearningWebview<T>(
     const webviews = targets.filter(target => (
       target.type === 'iframe'
       && typeof target.webSocketDebuggerUrl === 'string'
-      && (target.url ?? '').includes('extensionId=human-learning.human-learning-vscode')
+      && (target.url ?? '').includes('extensionId=llm-wiki.llm-wiki-vscode')
     ));
 
     mismatches = [];
@@ -219,7 +219,7 @@ async function evaluateHumanLearningWebview<T>(
             ? [...doc.querySelectorAll('script')].map(script => script.getAttribute('src') ?? '[inline]').join(', ')
             : 'no document';
           const body = doc?.body?.textContent?.trim().slice(0, 160) ?? '';
-          const scriptReady = typeof win?.__hlCommands === 'object';
+          const scriptReady = typeof win?.__llmWikiCommands === 'object';
           return {
             ok: false,
             reason: 'missing editor',
@@ -244,10 +244,10 @@ async function evaluateHumanLearningWebview<T>(
     await new Promise(resolve => setTimeout(resolve, 250));
   }
 
-  throw new Error(`Human Learning markdown webview not found for ${JSON.stringify(docNeedle)}. Candidates: ${mismatches.join(' | ')}`);
+  throw new Error(`LLM Wiki markdown webview not found for ${JSON.stringify(docNeedle)}. Candidates: ${mismatches.join(' | ')}`);
 }
 
-async function evaluateHumanLearningPdfWebview<T>(body: string): Promise<T> {
+async function evaluateLlmWikiPdfWebview<T>(body: string): Promise<T> {
   const debugPort = Number(fs.readFileSync(DEBUG_PORT_FILE, 'utf-8').trim());
   const deadline = Date.now() + 20_000;
   let mismatches: string[] = [];
@@ -258,7 +258,7 @@ async function evaluateHumanLearningPdfWebview<T>(body: string): Promise<T> {
     const webviews = targets.filter(target => (
       target.type === 'iframe'
       && typeof target.webSocketDebuggerUrl === 'string'
-      && (target.url ?? '').includes('extensionId=human-learning.human-learning-vscode')
+      && (target.url ?? '').includes('extensionId=llm-wiki.llm-wiki-vscode')
     ));
 
     mismatches = [];
@@ -292,7 +292,7 @@ async function evaluateHumanLearningPdfWebview<T>(body: string): Promise<T> {
     await new Promise(resolve => setTimeout(resolve, 250));
   }
 
-  throw new Error(`Human Learning PDF webview not found. Candidates: ${mismatches.join(' | ')}`);
+  throw new Error(`LLM Wiki PDF webview not found. Candidates: ${mismatches.join(' | ')}`);
 }
 
 async function cdpEvaluate<T>(wsUrl: string, expression: string): Promise<T> {
@@ -343,7 +343,7 @@ function expectCloseTo(actual: number, expected: number, tolerance = 1): void {
   expect(Math.abs(actual - expected)).toBeLessThanOrEqual(tolerance);
 }
 
-test.describe('Human Learning — VS Code Extension E2E', () => {
+test.describe('LLM Wiki — VS Code Extension E2E', () => {
 
   test('extension activates and VS Code loads', async ({ vsCodePage: page }) => {
     // Verify VS Code workbench is loaded
@@ -358,7 +358,7 @@ test.describe('Human Learning — VS Code Extension E2E', () => {
     await screenshot(page, '02-editor-area-visible');
   });
 
-  test('Human Learning sidebar icon is present', async ({ vsCodePage: page }) => {
+  test('LLM Wiki sidebar icon is present', async ({ vsCodePage: page }) => {
     // Look for activity bar items
     const activityBar = page.locator('.activitybar, .activity-bar');
     await expect(activityBar).toBeVisible({ timeout: 10_000 });
@@ -368,22 +368,22 @@ test.describe('Human Learning — VS Code Extension E2E', () => {
     const count = await actionItems.count();
     console.log(`[info] Activity bar items: ${count}`);
 
-    // Try to find the Human Learning icon by iterating
-    let hlFound = false;
+    // Try to find the LLM Wiki icon by iterating
+    let llmWikiFound = false;
     for (let i = 0; i < count; i++) {
       const item = actionItems.nth(i);
       const title = await item.getAttribute('title') ?? '';
       const label = await item.getAttribute('aria-label') ?? '';
       if (title.toLowerCase().includes('human') || title.toLowerCase().includes('learning') ||
           label.toLowerCase().includes('human') || label.toLowerCase().includes('learning')) {
-        hlFound = true;
-        console.log(`[info] Found HL icon at index ${i}: title="${title}" label="${label}"`);
+        llmWikiFound = true;
+        console.log(`[info] Found LLM Wiki icon at index ${i}: title="${title}" label="${label}"`);
         break;
       }
     }
 
-    if (!hlFound) {
-      console.log('[info] HL icon not found by title/label, checking all items...');
+    if (!llmWikiFound) {
+      console.log('[info] LLM Wiki icon not found by title/label, checking all items...');
       for (let i = 0; i < count; i++) {
         const item = actionItems.nth(i);
         const title = await item.getAttribute('title') ?? '';
@@ -429,13 +429,13 @@ test.describe('Human Learning — VS Code Extension E2E', () => {
     await screenshot(page, '07-markdown-editor-content');
   });
 
-  test('can open command palette and find Human Learning commands', async ({ vsCodePage: page }) => {
+  test('can open command palette and find LLM Wiki commands', async ({ vsCodePage: page }) => {
     const modifier = process.platform === 'darwin' ? 'Meta' : 'Control';
 
     // Open Command Palette (Cmd+Shift+P)
     await openQuickInput(page, `${modifier}+Shift+p`);
 
-    await page.keyboard.type('Human Learning', { delay: 50 });
+    await page.keyboard.type('LLM Wiki', { delay: 50 });
     await page.waitForTimeout(1500);
 
     await screenshot(page, '08-command-palette');
@@ -443,7 +443,7 @@ test.describe('Human Learning — VS Code Extension E2E', () => {
     // Check for command entries
     const commands = page.locator('.quick-input-list .monaco-list-row');
     const commandCount = await commands.count();
-    console.log(`[info] Human Learning commands found: ${commandCount}`);
+    console.log(`[info] LLM Wiki commands found: ${commandCount}`);
 
     // List the commands
     for (let i = 0; i < Math.min(commandCount, 5); i++) {
@@ -463,14 +463,14 @@ test.describe('Human Learning — VS Code Extension E2E', () => {
 
     await screenshot(page, '10-pdf-file-opened');
 
-    await evaluateHumanLearningPdfWebview(`
+    await evaluateLlmWikiPdfWebview(`
       if (!doc.querySelector('#page-container')?.classList.contains('paginated')) {
         doc.querySelector('[data-display-action="presentation-single"]')?.click();
       }
       return true;
     `);
 
-    await expect.poll(() => evaluateHumanLearningPdfWebview<{
+    await expect.poll(() => evaluateLlmWikiPdfWebview<{
       pageInfo: string;
       pageCount: number;
       firstCanvasReady: boolean;
@@ -515,7 +515,7 @@ test.describe('Human Learning — VS Code Extension E2E', () => {
       focusedOutlineStyle: 'none',
     });
 
-    const pageTurn = await evaluateHumanLearningPdfWebview<{
+    const pageTurn = await evaluateLlmWikiPdfWebview<{
       durationMs: number;
       firstVisibleFrameHadBitmap: boolean;
       targetCanvasReady: boolean;
@@ -574,7 +574,7 @@ test.describe('Human Learning — VS Code Extension E2E', () => {
     const outlineTarget = page.getByText('Slide 3: Outline and goals', { exact: true }).last();
     await expect(outlineTarget).toBeVisible({ timeout: 15_000 });
     await outlineTarget.click();
-    await expect.poll(() => evaluateHumanLearningPdfWebview<{
+    await expect.poll(() => evaluateLlmWikiPdfWebview<{
       pageInfo: string;
       destinationFocusCount: number;
       historyBackHidden: boolean;
@@ -593,8 +593,8 @@ test.describe('Human Learning — VS Code Extension E2E', () => {
     await screenshot(page, '11-pdf-viewer-visible');
   });
 
-  test('sidebar shows tree views when Human Learning icon is clicked', async ({ vsCodePage: page }) => {
-    // Find and click the Human Learning activity bar icon
+  test('sidebar shows tree views when LLM Wiki icon is clicked', async ({ vsCodePage: page }) => {
+    // Find and click the LLM Wiki activity bar icon
     const actionItems = page.locator('.activitybar .action-item, .activity-bar .action-item');
     const count = await actionItems.count();
 
@@ -606,7 +606,7 @@ test.describe('Human Learning — VS Code Extension E2E', () => {
           label.toLowerCase().includes('human') || label.toLowerCase().includes('learning')) {
         await item.click();
         await page.waitForTimeout(1500);
-        console.log(`[info] Clicked HL sidebar icon at index ${i}`);
+        console.log(`[info] Clicked LLM Wiki sidebar icon at index ${i}`);
         break;
       }
     }
@@ -630,7 +630,7 @@ test.describe('Human Learning — VS Code Extension E2E', () => {
 
     await screenshot(page, '14-workflow-note-opened');
 
-    // Step 2: Open Human Learning sidebar
+    // Step 2: Open LLM Wiki sidebar
     const actionItems = page.locator('.activitybar .action-item, .activity-bar .action-item');
     const count = await actionItems.count();
     for (let i = 0; i < count; i++) {
@@ -703,7 +703,7 @@ test.describe('Human Learning — VS Code Extension E2E', () => {
     await openQuickFile(page, 'notes/Concepts/Native Typography.md', 4000);
     await expect(page.locator('iframe.webview:visible').first()).toBeVisible({ timeout: 15_000 });
 
-    const transition = await evaluateHumanLearningWebview<{
+    const transition = await evaluateLlmWikiWebview<{
       inactive: EditorPixelMetrics;
       active: EditorPixelMetrics;
       restored: EditorPixelMetrics;
@@ -806,7 +806,7 @@ test.describe('Human Learning — VS Code Extension E2E', () => {
     await page.bringToFront();
     await webview.click({ position: { x: 320, y: 260 } });
 
-    const colors = await evaluateHumanLearningWebview<{
+    const colors = await evaluateLlmWikiWebview<{
       active: string[];
       inactive: string[];
       expectedActive: string;
@@ -925,7 +925,7 @@ test.describe('Human Learning — VS Code Extension E2E', () => {
   test('inactive display math source is hidden in the VS Code webview', async ({ vsCodePage: page }) => {
     await openQuickFile(page, 'Online Softmax');
 
-    await evaluateHumanLearningWebview('m_k = \\max', `
+    await evaluateLlmWikiWebview('m_k = \\max', `
       const heading = view.state.doc.line(6);
       view.dispatch({ selection: { anchor: heading.from }, scrollIntoView: true });
       view.focus();
@@ -933,7 +933,7 @@ test.describe('Human Learning — VS Code Extension E2E', () => {
     `);
     await page.waitForTimeout(500);
 
-    const mathState = await evaluateHumanLearningWebview<{
+    const mathState = await evaluateLlmWikiWebview<{
       selectedLine: number;
       rawMathSourceRows: string[];
       renderedMathBlocks: number;
@@ -975,7 +975,7 @@ test.describe('Human Learning — VS Code Extension E2E', () => {
   test('active fenced code keeps padding and Prism highlighting in the VS Code webview', async ({ vsCodePage: page }) => {
     await openMathAndCode(page);
 
-    const inactiveCodeState = await evaluateHumanLearningWebview<{
+    const inactiveCodeState = await evaluateLlmWikiWebview<{
       selectedLine: number;
       lineLeft: number;
       linePaddingLeft: string;
@@ -1009,7 +1009,7 @@ test.describe('Human Learning — VS Code Extension E2E', () => {
       };
     `);
 
-    await evaluateHumanLearningWebview('def softmax(x):', `
+    await evaluateLlmWikiWebview('def softmax(x):', `
       const source = view.state.doc.toString();
       const target = source.indexOf('def softmax(x):');
       const line = view.state.doc.lineAt(target);
@@ -1019,7 +1019,7 @@ test.describe('Human Learning — VS Code Extension E2E', () => {
     `);
     await page.waitForTimeout(750);
 
-    const codeState = await evaluateHumanLearningWebview<{
+    const codeState = await evaluateLlmWikiWebview<{
       selectedLineText: string;
       selectedLineClass: string;
       selectedLineLeft: number;
@@ -1099,7 +1099,7 @@ test.describe('Human Learning — VS Code Extension E2E', () => {
     await page.mouse.wheel(0, 2600);
     await page.waitForTimeout(1500);
 
-    const listMathState = await evaluateHumanLearningWebview<{
+    const listMathState = await evaluateLlmWikiWebview<{
       selectedLine: number;
       renderedInlineMath: number;
       listRows: Array<{
@@ -1200,8 +1200,8 @@ test.describe('Human Learning — VS Code Extension E2E', () => {
 
     // Look for VS Code error notification
     const errorNotifications = await page.locator('.notification-list-item .notification-list-item-message').allTextContents();
-    const humanLearningErrors = errorNotifications.filter(text =>
-      text.includes('Human Learning Markdown') || text.includes("Cannot read properties of undefined")
+    const llmWikiErrors = errorNotifications.filter(text =>
+      text.includes('LLM Wiki Markdown') || text.includes("Cannot read properties of undefined")
     );
 
     console.log(`[info] Console/Page errors: ${errorMessages.length}`);
@@ -1209,11 +1209,11 @@ test.describe('Human Learning — VS Code Extension E2E', () => {
       console.log('[error] Errors:', errorMessages);
     }
     console.log(`[info] VS Code error notifications: ${errorNotifications.length}`);
-    if (humanLearningErrors.length > 0) {
-      console.log('[error] Human Learning errors:', humanLearningErrors);
+    if (llmWikiErrors.length > 0) {
+      console.log('[error] LLM Wiki errors:', llmWikiErrors);
     }
 
-    expect(humanLearningErrors).toHaveLength(0);
+    expect(llmWikiErrors).toHaveLength(0);
     expect(errorMessages.filter(m => m.includes("Cannot read properties of undefined"))).toHaveLength(0);
   });
 
@@ -1234,7 +1234,7 @@ test.describe('Human Learning — VS Code Extension E2E', () => {
 
     for (const shortcut of shortcuts) {
       await test.step(shortcut.label, async () => {
-        const before = await evaluateHumanLearningWebview<{
+        const before = await evaluateLlmWikiWebview<{
           text: string;
           head: number;
           focused: boolean;
@@ -1260,7 +1260,7 @@ test.describe('Human Learning — VS Code Extension E2E', () => {
         await page.keyboard.press('Escape');
         await page.waitForTimeout(100);
 
-        const normalModeState = await evaluateHumanLearningWebview<typeof before>('alpha beta', `
+        const normalModeState = await evaluateLlmWikiWebview<typeof before>('alpha beta', `
           const editor = doc.querySelector('.cm-editor');
           return {
             text: view.state.doc.toString(),
@@ -1272,7 +1272,7 @@ test.describe('Human Learning — VS Code Extension E2E', () => {
         await page.keyboard.press(shortcut.key);
         await page.waitForTimeout(200);
 
-        const after = await evaluateHumanLearningWebview<typeof before>('alpha beta', `
+        const after = await evaluateLlmWikiWebview<typeof before>('alpha beta', `
           const editor = doc.querySelector('.cm-editor');
           return {
             text: view.state.doc.toString(),
@@ -1297,7 +1297,7 @@ test.describe('Human Learning — VS Code Extension E2E', () => {
 
     await page.locator('iframe.webview:visible').first().click({ position: { x: 300, y: 300 } });
     await page.waitForTimeout(200);
-    const before = await evaluateHumanLearningWebview<{
+    const before = await evaluateLlmWikiWebview<{
       text: string;
       lineNumber: number;
       offset: number;
@@ -1334,7 +1334,7 @@ test.describe('Human Learning — VS Code Extension E2E', () => {
     await page.keyboard.type('Z');
     await page.waitForTimeout(200);
 
-    const after = await evaluateHumanLearningWebview<{
+    const after = await evaluateLlmWikiWebview<{
       text: string;
       lineNumber: number;
       offset: number;
@@ -1360,7 +1360,7 @@ test.describe('Human Learning — VS Code Extension E2E', () => {
 
     await page.locator('iframe.webview:visible').first().click({ position: { x: 300, y: 300 } });
     await page.waitForTimeout(200);
-    const before = await evaluateHumanLearningWebview<{
+    const before = await evaluateLlmWikiWebview<{
       text: string;
       head: number;
       lineNumber: number;
@@ -1394,12 +1394,12 @@ test.describe('Human Learning — VS Code Extension E2E', () => {
 
     await page.keyboard.press('Escape');
     await page.waitForTimeout(100);
-    await runCommandFromPalette(page, 'Human Learning: Consume Vim Host Shortcut', 900);
+    await runCommandFromPalette(page, 'LLM Wiki: Consume Vim Host Shortcut', 900);
     await page.keyboard.press('i');
     await page.keyboard.type('X');
     await page.waitForTimeout(200);
 
-    const after = await evaluateHumanLearningWebview<{
+    const after = await evaluateLlmWikiWebview<{
       text: string;
       lineNumber: number;
       offset: number;
@@ -1425,7 +1425,7 @@ test.describe('Human Learning — VS Code Extension E2E', () => {
 
     await page.locator('iframe.webview:visible').first().click({ position: { x: 300, y: 300 } });
     await page.waitForTimeout(200);
-    await evaluateHumanLearningWebview(initialNeedle, `
+    await evaluateLlmWikiWebview(initialNeedle, `
       win.postMessage({
         type: 'setText',
         text: ['Intro line', '# Delete Me', 'Tail line', 'Final line'].join('\\n'),
@@ -1450,7 +1450,7 @@ test.describe('Human Learning — VS Code Extension E2E', () => {
     await page.keyboard.type('X');
     await page.waitForTimeout(200);
 
-    const after = await evaluateHumanLearningWebview<{
+    const after = await evaluateLlmWikiWebview<{
       text: string;
       lineNumber: number;
       offset: number;
@@ -1476,7 +1476,7 @@ test.describe('Human Learning — VS Code Extension E2E', () => {
 
     await page.locator('iframe.webview:visible').first().click({ position: { x: 300, y: 300 } });
     await page.waitForTimeout(200);
-    await evaluateHumanLearningWebview(initialNeedle, `
+    await evaluateLlmWikiWebview(initialNeedle, `
       win.postMessage({
         type: 'setText',
         text: [
@@ -1508,7 +1508,7 @@ test.describe('Human Learning — VS Code Extension E2E', () => {
     await page.keyboard.type('Z');
     await page.waitForTimeout(200);
 
-    const after = await evaluateHumanLearningWebview<{
+    const after = await evaluateLlmWikiWebview<{
       text: string;
       lineNumber: number;
       offset: number;
@@ -1572,7 +1572,7 @@ test.describe('Human Learning — VS Code Extension E2E', () => {
       await test.step(testCase.label, async () => {
         await page.locator('iframe.webview:visible').first().click({ position: { x: 300, y: 300 } });
         await page.waitForTimeout(200);
-        await evaluateHumanLearningWebview(docNeedle, `
+        await evaluateLlmWikiWebview(docNeedle, `
           win.postMessage({
             type: 'setText',
             text: ['Intro', '# Rendered Heading', 'Tail', ${JSON.stringify(initialNeedle)}].join('\\n'),
@@ -1590,7 +1590,7 @@ test.describe('Human Learning — VS Code Extension E2E', () => {
         await page.keyboard.press('j');
         await page.waitForTimeout(100);
 
-        const beforeCommand = await evaluateHumanLearningWebview<{
+        const beforeCommand = await evaluateLlmWikiWebview<{
           lineNumber: number;
           offset: number;
           text: string;
@@ -1612,7 +1612,7 @@ test.describe('Human Learning — VS Code Extension E2E', () => {
         await page.keyboard.type(testCase.typed);
         await page.waitForTimeout(200);
 
-        const after = await evaluateHumanLearningWebview<{
+        const after = await evaluateLlmWikiWebview<{
           text: string;
           lineNumber: number;
           offset: number;
@@ -1641,7 +1641,7 @@ test.describe('Human Learning — VS Code Extension E2E', () => {
     await editorArea.click();
     await page.waitForTimeout(500);
 
-    await evaluateHumanLearningWebview('Math and Code Rendering Test', `
+    await evaluateLlmWikiWebview('Math and Code Rendering Test', `
       win.postMessage({ type: 'setVimMode', enabled: true }, '*');
       const targetLineNumber = 8;
       const line = view.state.doc.line(targetLineNumber);
@@ -1659,7 +1659,7 @@ test.describe('Human Learning — VS Code Extension E2E', () => {
     await page.keyboard.type('whoami');
     await page.waitForTimeout(1500);
 
-    const state = await evaluateHumanLearningWebview<{
+    const state = await evaluateLlmWikiWebview<{
       lineNumber: number;
       lineText: string;
       column: number;
@@ -1713,7 +1713,7 @@ test.describe('Human Learning — VS Code Extension E2E', () => {
       'Tail line',
     ].join('\n');
 
-    await evaluateHumanLearningWebview('Math and Code Rendering Test', `
+    await evaluateLlmWikiWebview('Math and Code Rendering Test', `
       const scratchDoc = ${JSON.stringify(scratchDoc)};
       win.postMessage({ type: 'setVimMode', enabled: false }, '*');
       win.postMessage({
@@ -1735,7 +1735,7 @@ test.describe('Human Learning — VS Code Extension E2E', () => {
     await page.waitForTimeout(250);
     const ctrlODoc = scratchDoc.replace('Alpha beta', 'Alpha betaio');
 
-    const ctrlOState = await evaluateHumanLearningWebview<{
+    const ctrlOState = await evaluateLlmWikiWebview<{
       text: string;
       lineNumber: number;
       lineText: string;
@@ -1756,7 +1756,7 @@ test.describe('Human Learning — VS Code Extension E2E', () => {
     expect(ctrlOState.lineText).toBe('Alpha betaio');
     expect(ctrlOState.column).toBe('Alpha betaio'.length);
 
-    const tableClickState = await evaluateHumanLearningWebview<{
+    const tableClickState = await evaluateLlmWikiWebview<{
       lineNumber: number;
       lineText: string;
       column: number;

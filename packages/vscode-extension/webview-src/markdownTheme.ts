@@ -6,7 +6,7 @@ const descriptionForeground = 'var(--vscode-descriptionForeground, var(--vscode-
 const linkForeground = 'var(--vscode-textLink-foreground, var(--vscode-editor-foreground))';
 const preformattedForeground = 'var(--vscode-textPreformat-foreground, var(--vscode-editor-foreground))';
 
-export const humanLearningHighlightStyle = HighlightStyle.define([
+export const llmWikiHighlightStyle = HighlightStyle.define([
   { tag: [tags.meta, tags.punctuation, tags.comment], color: descriptionForeground },
   { tag: tags.link, color: linkForeground, textDecoration: 'underline' },
   { tag: tags.url, color: descriptionForeground },

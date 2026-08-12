@@ -81,8 +81,8 @@ import { normalizePdfTextBands, type PdfRect } from './pdfTextBands';
 
 const vscode = acquireVsCodeApi();
 const askPdfEnabled =
-  (window as typeof window & { __humanLearningAskPdfEnabled?: unknown })
-    .__humanLearningAskPdfEnabled === true;
+  (window as typeof window & { __llmWikiAskPdfEnabled?: unknown })
+    .__llmWikiAskPdfEnabled === true;
 
 type PdfReduceAnimationSetting = 'on' | 'off' | 'system';
 type PdfTextSelectionAction =

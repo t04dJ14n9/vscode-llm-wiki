@@ -178,7 +178,7 @@ class DocumentTitleWidget extends WidgetType {
       }
       lastCommittedTitle = nextTitle;
       skipBlurCommit = true;
-      view.dom.dispatchEvent(new CustomEvent('human-learning-title-rename', {
+      view.dom.dispatchEvent(new CustomEvent('llm-wiki-title-rename', {
         bubbles: true,
         detail: { title: nextTitle },
       }));
@@ -925,7 +925,7 @@ function calloutInlineLinkElement(match: InlineLinkMatch, classPrefix = 'cm-hybr
   button.addEventListener('click', event => {
     event.preventDefault();
     event.stopPropagation();
-    button.dispatchEvent(new CustomEvent('human-learning-open-uri', {
+    button.dispatchEvent(new CustomEvent('llm-wiki-open-uri', {
       bubbles: true,
       detail: { uri: match.uri },
     }));
@@ -2346,7 +2346,7 @@ function renderMarkdownLinks(
   for (const link of markdownLinkSourceSpans(lineFrom, text)) {
     if (link.image) continue;
     const href = link.destination;
-    if (href.startsWith('hl://')) continue;
+    if (href.startsWith('llm-wiki://')) continue;
     addMark(decorations, reserved, link.labelFrom, link.labelTo, linkTextMark);
     addReplace(decorations, reserved, link.from, link.labelFrom);
     addReplace(decorations, reserved, link.labelTo, link.to);

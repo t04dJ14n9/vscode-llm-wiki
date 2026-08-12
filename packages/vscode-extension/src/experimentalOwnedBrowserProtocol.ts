@@ -1,4 +1,4 @@
-export const EXPERIMENTAL_BROWSER_VIEW_TYPE = 'human-learning.experimentalOwnedBrowser';
+export const EXPERIMENTAL_BROWSER_VIEW_TYPE = 'llm-wiki.experimentalOwnedBrowser';
 export const EXPERIMENTAL_BROWSER_BUNDLE = 'experimental-owned-browser.js';
 export const EXPERIMENTAL_BROWSER_MAX_HTML_BYTES = 2 * 1024 * 1024;
 export const EXPERIMENTAL_BROWSER_MAX_SELECTION_CHARS = 32_000;

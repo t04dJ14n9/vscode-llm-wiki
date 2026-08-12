@@ -1,18 +1,18 @@
-# Human Learning PRD
+# LLM Wiki PRD
 
 > Current status: this PRD is an older planning document. The MVP reference
-> model has moved from generated `hl://` links to native Markdown and
+> model has moved from generated `llm-wiki://` links to native Markdown and
 > Obsidian-compatible links. See [reference model.md](reference%20model.md),
 > [feature list.md](feature%20list.md), and
 > [implementation detail.md](implementation%20detail.md) for current behavior.
 
 ## 1. Introduction
 
-**Human Learning (`hl`)** is an open-source, local-first VS Code workspace for **Karpathy Wiki–style agentic learning**. Users collect raw learning materials—PDF papers, web snapshots, source code, images, text, and handwritten captures—and use AI agents to help transform them into a durable, source-grounded markdown knowledge base.
+**LLM Wiki (`llm_wiki`)** is an open-source, local-first VS Code workspace for **Karpathy Wiki–style agentic learning**. Users collect raw learning materials—PDF papers, web snapshots, source code, images, text, and handwritten captures—and use AI agents to help transform them into a durable, source-grounded markdown knowledge base.
 
 The project is not a generic note app, PDF reader, Zotero clone, or Obsidian clone. Its core product is a **source-addressable learning graph** where every meaningful selection can become a stable anchor, every anchor can be cited from markdown, and every citation becomes part of a bidirectional graph that humans and agents can navigate.
 
-The existing project direction already defines Human Learning as a local-first VS Code / VS Code-fork workspace with `raw/`, `notes/`, `.hl/`, source anchors, CodeMirror hybrid markdown editing, PDF/web/code anchors, backlinks, embeddings, agent context files, Claude/Codex compatibility, optional MCP, and optional iPad annotation workflow.  [oai_citation:0‡VSCode Research Workspace.txt](sediment://file_000000003e0471fd98a5f5f903073357)
+The existing project direction already defines LLM Wiki as a local-first VS Code / VS Code-fork workspace with `raw/`, `notes/`, `.llm_wiki/`, source anchors, CodeMirror hybrid markdown editing, PDF/web/code anchors, backlinks, embeddings, agent context files, Claude/Codex compatibility, optional MCP, and optional iPad annotation workflow.  [oai_citation:0‡VSCode Research Workspace.txt](sediment://file_000000003e0471fd98a5f5f903073357)
 
 The core invariant is:
 
@@ -31,7 +31,7 @@ The previous plan said “any user selection should become a stable anchor, a ma
 
 # 2. Product vision
 
-Human Learning helps humans learn with machines, rather than merely instructing machines to learn.
+LLM Wiki helps humans learn with machines, rather than merely instructing machines to learn.
 
 The system should let a user:
 
@@ -59,7 +59,7 @@ one bidirectionally navigable knowledge graph.
 
 # 3. Non-goals
 
-Human Learning should not try to be everything.
+LLM Wiki should not try to be everything.
 
 ## Not a generic note app
 
@@ -98,7 +98,7 @@ The word **source** must be reserved for evidence material only. This eliminates
 | **Reference Overlay** | Generated UI highlight showing “this region is cited by notes.” |
 | **Annotation** | Human-created highlight, comment, handwritten ink, margin note. |
 | **Chunk** | Search/embedding unit extracted from a document. |
-| **Context Bundle** | Agent handoff package written under `.hl/agent/`. |
+| **Context Bundle** | Agent handoff package written under `.llm_wiki/agent/`. |
 
 Strict rule:
 
@@ -119,26 +119,26 @@ The PDF/markdown design already states the correct architecture: source selectio
 Use the new names everywhere.
 
 ```text
-Product name: Human Learning
-CLI: hl
-Metadata directory: .hl/
-URI scheme: hl://
-Agent skill: human-learning
+Product name: LLM Wiki
+CLI: llm_wiki
+Metadata directory: .llm_wiki/
+URI scheme: llm-wiki://
+Agent skill: llm-wiki
 ```
 
 Deprecated names:
 
 ```text
-kwiki       → hl
-.kwiki/     → .hl/
-kwiki CLI   → hl CLI
-raw://      → hl://
-note://     → hl://note/...
-code://     → hl://code/...
-web://      → hl://web/...
+kwiki       → llm_wiki
+.kwiki/     → .llm_wiki/
+kwiki CLI   → llm_wiki CLI
+raw://      → llm-wiki://
+note://     → llm-wiki://note/...
+code://     → llm-wiki://code/...
+web://      → llm-wiki://web/...
 ```
 
-The existing implementation plan already requires renaming `kwiki`, `.kwiki`, `kwiki CLI`, and `raw://` to `Human Learning`, `.hl`, `hl CLI`, and `hl://` links.  [oai_citation:4‡VSCode Research Workspace.txt](sediment://file_000000003e0471fd98a5f5f903073357)
+The existing implementation plan already requires renaming `kwiki`, `.kwiki`, `kwiki CLI`, and `raw://` to `LLM Wiki`, `.llm_wiki`, `llm_wiki CLI`, and `llm-wiki://` links.  [oai_citation:4‡VSCode Research Workspace.txt](sediment://file_000000003e0471fd98a5f5f903073357)
 
 ---
 
@@ -173,7 +173,7 @@ Acceptance criteria:
 ```text
 - User selects PDF text.
 - System creates a durable anchor.
-- System inserts [label](hl://anchor/<id>) into the active note.
+- System inserts [label](llm-wiki://anchor/<id>) into the active note.
 - Clicking the citation opens the PDF at the selected region.
 - Opening the PDF shows a generated reference overlay for cited regions.
 - Clicking the overlay shows notes that cite it.
@@ -181,14 +181,14 @@ Acceptance criteria:
 
 ## 7.2 Use AI without losing provenance
 
-As a user, I can export my current selection and related links to `.hl/agent/selection.md` and `.hl/agent/selection.json`, so Claude Code or Codex can act on grounded context.
+As a user, I can export my current selection and related links to `.llm_wiki/agent/selection.md` and `.llm_wiki/agent/selection.json`, so Claude Code or Codex can act on grounded context.
 
 Acceptance criteria:
 
 ```text
 - Exported context includes selected text, anchor URI, document metadata, backlinks, outgoing links, and suggested task.
 - Agent instructions tell agents not to invent PDF geometry.
-- Agents use hl tools to create anchors instead of fabricating links.
+- Agents use llm_wiki tools to create anchors instead of fabricating links.
 ```
 
 ## 7.3 Keep markdown portable
@@ -228,7 +228,7 @@ The current plan already defines safe repair logic for moved notes, renamed head
 
 ## 8.1 Workspace layout
 
-`hl init` creates:
+`llm_wiki init` creates:
 
 ```text
 vault/
@@ -248,7 +248,7 @@ vault/
     assets/
       ink/
 
-  .hl/
+  .llm_wiki/
     config.yaml
     anchors/
       anchors.jsonl
@@ -276,7 +276,7 @@ vault/
   CLAUDE.md
   .agents/
     skills/
-      human-learning/
+      llm-wiki/
         SKILL.md
   .claude/
     commands/
@@ -291,9 +291,9 @@ Canonical data:
 ```text
 notes/**/*.md
 raw/**
-.hl/anchors/anchors.jsonl
-.hl/annotations/**
-.hl/config.yaml
+.llm_wiki/anchors/anchors.jsonl
+.llm_wiki/annotations/**
+.llm_wiki/config.yaml
 AGENTS.md
 CLAUDE.md
 .agents/skills/**
@@ -303,17 +303,17 @@ CLAUDE.md
 Derived/rebuildable data:
 
 ```text
-.hl/index.sqlite
-.hl/references/**
-.hl/cache/**
-.hl/embeddings/**
-.hl/reports/**
-.hl/logs/**
+.llm_wiki/index.sqlite
+.llm_wiki/references/**
+.llm_wiki/cache/**
+.llm_wiki/embeddings/**
+.llm_wiki/reports/**
+.llm_wiki/logs/**
 ```
 
 The existing design already says source files are truth and SQLite is an index, with markdown/raw/annotations/anchors as canonical and SQLite/references/cache/embeddings as derived.  [oai_citation:7‡PDF vs Markdown Editors.txt](sediment://file_00000000420c71fdb7138e9f677605e5)
 
-Important correction: `.hl/anchors/anchors.jsonl` should be canonical, not optional, if persisted markdown links use `hl://anchor/<id>`.
+Important correction: `.llm_wiki/anchors/anchors.jsonl` should be canonical, not optional, if persisted markdown links use `llm-wiki://anchor/<id>`.
 
 ---
 
@@ -324,7 +324,7 @@ Important correction: `.hl/anchors/anchors.jsonl` should be canonical, not optio
 Use this for exact PDF regions, markdown blocks, DOM nodes, image rects, and stable code selections:
 
 ```md
-[label](hl://anchor/anc_xxx)
+[label](llm-wiki://anchor/anc_xxx)
 ```
 
 ## 9.2 Whole document link
@@ -332,14 +332,14 @@ Use this for exact PDF regions, markdown blocks, DOM nodes, image rects, and sta
 Use this for whole notes or raw sources:
 
 ```md
-[label](hl://doc/doc_xxx)
+[label](llm-wiki://doc/doc_xxx)
 ```
 
 Readable aliases may be supported:
 
 ```md
-[label](hl://note/notes/Concepts/FlashAttention.md)
-[label](hl://source/raw/pdf/flash-attention.pdf)
+[label](llm-wiki://note/notes/Concepts/FlashAttention.md)
+[label](llm-wiki://source/raw/pdf/flash-attention.pdf)
 ```
 
 ## 9.3 Wikilink sugar
@@ -359,19 +359,19 @@ Internally resolve these into link edges.
 This should not be normal authored output:
 
 ```md
-[source](hl://pdf/raw/pdf/fa.pdf?page=3&rect=120,240,530,310)
+[source](llm-wiki://pdf/raw/pdf/fa.pdf?page=3&rect=120,240,530,310)
 ```
 
 Agents must not fabricate geometry. Instead:
 
 ```text
 agent quotes/searches text
-→ hl tool validates against document
-→ hl creates anchor
+→ llm_wiki tool validates against document
+→ llm_wiki creates anchor
 → agent inserts returned URI
 ```
 
-The current PDF/markdown plan explicitly says agents should not hallucinate geometry and should call the `hl` tool to validate and create anchors.  [oai_citation:8‡PDF vs Markdown Editors.txt](sediment://file_0000000071c471fdb683c727036140ae)
+The current PDF/markdown plan explicitly says agents should not hallucinate geometry and should call the `llm_wiki` tool to validate and create anchors.  [oai_citation:8‡PDF vs Markdown Editors.txt](sediment://file_0000000071c471fdb683c727036140ae)
 
 ---
 
@@ -384,7 +384,7 @@ The current PDF/markdown plan explicitly says agents should not hallucinate geom
   "id": "anc_pdf_8f21",
   "document_id": "doc_fa",
   "kind": "pdf_rect",
-  "uri": "hl://anchor/anc_pdf_8f21",
+  "uri": "llm-wiki://anchor/anc_pdf_8f21",
   "locator": {
     "page": 3,
     "rects": [[120, 240, 530, 310]]
@@ -535,10 +535,10 @@ page coordinate conversion
 optional annotation drawing primitives
 ```
 
-Human Learning owns:
+LLM Wiki owns:
 
 ```text
-hl:// URI scheme
+llm-wiki:// URI scheme
 anchor IDs
 SQLite graph
 anchor sidecars
@@ -550,7 +550,7 @@ agent context export
 anchor repair
 ```
 
-The existing PDF plan explicitly says the PDF engine should not own the product model and that Human Learning owns the URI scheme, anchor IDs, graph, sidecars, backlinks, jumps, context export, and repair.  [oai_citation:10‡PDF vs Markdown Editors.txt](sediment://file_0000000071c471fdb683c727036140ae)
+The existing PDF plan explicitly says the PDF engine should not own the product model and that LLM Wiki owns the URI scheme, anchor IDs, graph, sidecars, backlinks, jumps, context export, and repair.  [oai_citation:10‡PDF vs Markdown Editors.txt](sediment://file_0000000071c471fdb683c727036140ae)
 
 ## 12.2 PDF engine strategy
 
@@ -582,7 +582,7 @@ The previous final recommendation was EmbedPDF/PDFium as primary, PDF.js as fall
 - Select text.
 - Extract selected text_quote.
 - Extract page-space rects.
-- Create hl://anchor/<id>.
+- Create llm-wiki://anchor/<id>.
 - Insert markdown citation.
 - Click citation to open PDF at region.
 - Draw reference overlay.
@@ -601,7 +601,7 @@ Reference overlays and user annotations must remain separate because “this reg
 Start with normal VS Code markdown editor plus:
 
 ```text
-DocumentLinkProvider for hl:// links
+DocumentLinkProvider for llm-wiki:// links
 HoverProvider for previews
 Selection export command
 Backlinks panel
@@ -650,7 +650,7 @@ Requirements:
 - Sanitize or sandbox rendering.
 - Allow DOM element selection.
 - Create DOM-range anchors.
-- Insert hl://anchor/<id> citation.
+- Insert llm-wiki://anchor/<id> citation.
 - Click citation to open snapshot and scroll to target.
 - Show reference overlays for cited DOM nodes.
 ```
@@ -690,12 +690,12 @@ The earlier plan already says code anchors should support line ranges, later sym
 Write:
 
 ```text
-.hl/agent/selection.md
-.hl/agent/selection.json
-.hl/agent/related.md
-.hl/agent/today.md
-.hl/agent/context.md
-.hl/agent/context.json
+.llm_wiki/agent/selection.md
+.llm_wiki/agent/selection.json
+.llm_wiki/agent/related.md
+.llm_wiki/agent/today.md
+.llm_wiki/agent/context.md
+.llm_wiki/agent/context.json
 ```
 
 Context bundle includes:
@@ -705,7 +705,7 @@ Context bundle includes:
   "kind": "selection_context",
   "vault": "/path/to/vault",
   "selection": {
-    "anchor_uri": "hl://anchor/anc_xxx",
+    "anchor_uri": "llm-wiki://anchor/anc_xxx",
     "document_path": "notes/Concepts/FlashAttention.md",
     "start_line": 20,
     "end_line": 29,
@@ -723,22 +723,22 @@ Context bundle includes:
 }
 ```
 
-The current implementation plan already defines `.hl/agent/selection.md`, `.hl/agent/selection.json`, `.hl/agent/related.md`, `.hl/agent/today.md`, and a context export command.  [oai_citation:17‡VSCode Research Workspace.txt](sediment://file_000000003e0471fd98a5f5f903073357)
+The current implementation plan already defines `.llm_wiki/agent/selection.md`, `.llm_wiki/agent/selection.json`, `.llm_wiki/agent/related.md`, `.llm_wiki/agent/today.md`, and a context export command.  [oai_citation:17‡VSCode Research Workspace.txt](sediment://file_000000003e0471fd98a5f5f903073357)
 
 ## 16.2 AGENTS.md / CLAUDE.md source rules
 
 ```md
-## Human Learning source rules
+## LLM Wiki source rules
 
 - “Raw Source” means immutable evidence under raw/.
 - “Note” means markdown knowledge under notes/.
 - Do not call notes “sources” unless discussing the internal document graph.
 - Do not edit raw/ unless explicitly asked.
-- Do not invent hl:// PDF rectangle coordinates.
-- For precise PDF, image, web, markdown-block, or code citations, call the hl anchor tool and insert only the returned URI.
-- Use hl://anchor/<id> for precise citations.
-- Use [[Note]] or hl://note/... only for whole-note or heading links.
-- After editing notes, run hl links check --fix.
+- Do not invent llm-wiki:// PDF rectangle coordinates.
+- For precise PDF, image, web, markdown-block, or code citations, call the llm_wiki anchor tool and insert only the returned URI.
+- Use llm-wiki://anchor/<id> for precise citations.
+- Use [[Note]] or llm-wiki://note/... only for whole-note or heading links.
+- After editing notes, run llm_wiki links check --fix.
 ```
 
 Codex uses `AGENTS.md` files for repository-level instructions, including coding conventions and verification commands; nested files can define scoped guidance, with deeper files taking precedence.  [oai_citation:18‡OpenAI](https://openai.com/index/introducing-codex/?utm_source=chatgpt.com)
@@ -752,33 +752,33 @@ MCP is optional but first-class.
 Read-only tools by default:
 
 ```text
-hl.get_current_selection
-hl.search
-hl.get_anchor
-hl.get_related
-hl.get_backlinks
-hl.get_forward_links
-hl.check_links
+llm_wiki.get_current_selection
+llm_wiki.search
+llm_wiki.get_anchor
+llm_wiki.get_related
+llm_wiki.get_backlinks
+llm_wiki.get_forward_links
+llm_wiki.check_links
 ```
 
 Mutating tools require explicit configuration:
 
 ```text
-hl.create_anchor
-hl.ingest
-hl.refresh_embeddings
-hl.repair_links
-hl.summarize_today
+llm_wiki.create_anchor
+llm_wiki.ingest
+llm_wiki.refresh_embeddings
+llm_wiki.repair_links
+llm_wiki.summarize_today
 ```
 
 Resources:
 
 ```text
-hl://selection/current
-hl://anchor/{anchorId}
-hl://doc/{documentId}
-hl://note/{path}
-hl://activity/today
+llm-wiki://selection/current
+llm-wiki://anchor/{anchorId}
+llm-wiki://doc/{documentId}
+llm-wiki://note/{path}
+llm-wiki://activity/today
 ```
 
 Prompts:
@@ -801,7 +801,7 @@ Security rules:
 - No generic shell execution.
 - Validate every URI.
 - Prevent path traversal outside vault root.
-- Log every mutation to .hl/logs/audit.jsonl.
+- Log every mutation to .llm_wiki/logs/audit.jsonl.
 ```
 
 The MCP resource spec also emphasizes URI validation and access controls for sensitive resources.  [oai_citation:20‡Model Context Protocol](https://modelcontextprotocol.io/docs/concepts/resources?utm_source=chatgpt.com)
@@ -865,7 +865,7 @@ Use stable public VS Code APIs.
 ```text
 workspace detection
 command registration
-DocumentLinkProvider for hl://
+DocumentLinkProvider for llm-wiki://
 custom URI dispatcher
 native editor selection export
 custom markdown editor later
@@ -883,19 +883,19 @@ VS Code custom editors are webview-based and can be used for text or binary/non-
 ## 19.2 Commands
 
 ```text
-Human Learning: Initialize Vault
-Human Learning: Add Selection to Agent Context
-Human Learning: Copy Selection as Agent Prompt
-Human Learning: Insert Source Citation
-Human Learning: Create Anchor from Selection
-Human Learning: Open Anchor
-Human Learning: Check Links
-Human Learning: Repair Links
-Human Learning: Refresh Embeddings
-Human Learning: Summarize Today
+LLM Wiki: Initialize Vault
+LLM Wiki: Add Selection to Agent Context
+LLM Wiki: Copy Selection as Agent Prompt
+LLM Wiki: Insert Source Citation
+LLM Wiki: Create Anchor from Selection
+LLM Wiki: Open Anchor
+LLM Wiki: Check Links
+LLM Wiki: Repair Links
+LLM Wiki: Refresh Embeddings
+LLM Wiki: Summarize Today
 ```
 
-The existing VS Code MVP already includes extension activation, workspace detection, commands, DocumentLinkProvider, URI dispatcher, side panels, diagnostics, file watchers, and `hl://` link routing.  [oai_citation:23‡VSCode Research Workspace.txt](sediment://file_000000003e0471fd98a5f5f903073357)
+The existing VS Code MVP already includes extension activation, workspace detection, commands, DocumentLinkProvider, URI dispatcher, side panels, diagnostics, file watchers, and `llm-wiki://` link routing.  [oai_citation:23‡VSCode Research Workspace.txt](sediment://file_000000003e0471fd98a5f5f903073357)
 
 ---
 
@@ -904,7 +904,7 @@ The existing VS Code MVP already includes extension activation, workspace detect
 VS Code view container:
 
 ```text
-Human Learning
+LLM Wiki
 ├── Navigation
 ├── Links
 ├── Agent Context
@@ -945,27 +945,27 @@ The existing feature list already includes Hybrid Markdown Editor, PDF Viewer, H
 Commands:
 
 ```bash
-hl init
-hl status
-hl add <path-or-url>
-hl ingest <path> [--recursive]
-hl index rebuild
-hl links check [--fix] [--dry-run]
-hl links rebuild
-hl anchor create --document <path> --quote "..." [--page-hint N]
-hl anchor resolve <uri>
-hl anchor validate <uri>
-hl references rebuild
-hl embeddings refresh [--changed|--all]
-hl search "<query>"
-hl context current
-hl context export --anchor <anchor-uri>
-hl today [--date YYYY-MM-DD]
-hl doctor
-hl mcp stdio
-hl skills install --target codex|claude|all
-hl hooks install --target claude
-hl mobile import
+llm_wiki init
+llm_wiki status
+llm_wiki add <path-or-url>
+llm_wiki ingest <path> [--recursive]
+llm_wiki index rebuild
+llm_wiki links check [--fix] [--dry-run]
+llm_wiki links rebuild
+llm_wiki anchor create --document <path> --quote "..." [--page-hint N]
+llm_wiki anchor resolve <uri>
+llm_wiki anchor validate <uri>
+llm_wiki references rebuild
+llm_wiki embeddings refresh [--changed|--all]
+llm_wiki search "<query>"
+llm_wiki context current
+llm_wiki context export --anchor <anchor-uri>
+llm_wiki today [--date YYYY-MM-DD]
+llm_wiki doctor
+llm_wiki mcp stdio
+llm_wiki skills install --target codex|claude|all
+llm_wiki hooks install --target claude
+llm_wiki mobile import
 ```
 
 CLI rules:
@@ -977,7 +977,7 @@ CLI rules:
 - Errors must be structured enough for agents to act on.
 ```
 
-The old CLI feature list includes init, add, ingest, index, refresh embeddings, link check/fix, search, context export, today, mobile import, doctor, MCP stdio, skills install, and hooks install; this version normalizes names to `hl`.  [oai_citation:25‡VSCode Research Workspace.txt](sediment://file_0000000079cc71f8b579551c33498c2f)
+The old CLI feature list includes init, add, ingest, index, refresh embeddings, link check/fix, search, context export, today, mobile import, doctor, MCP stdio, skills install, and hooks install; this version normalizes names to `llm_wiki`.  [oai_citation:25‡VSCode Research Workspace.txt](sediment://file_0000000079cc71f8b579551c33498c2f)
 
 ---
 
@@ -990,19 +990,19 @@ Sync:
   raw/
   notes/
   notes/assets/ink/
-  .hl/anchors/
-  .hl/annotations/
+  .llm_wiki/anchors/
+  .llm_wiki/annotations/
   AGENTS.md
   CLAUDE.md
   .agents/skills/
   .claude/commands/
 
 Do not sync by default:
-  .hl/index.sqlite
-  .hl/embeddings/
-  .hl/cache/
-  .hl/logs/
-  .hl/activity.jsonl unless user opts in
+  .llm_wiki/index.sqlite
+  .llm_wiki/embeddings/
+  .llm_wiki/cache/
+  .llm_wiki/logs/
+  .llm_wiki/activity.jsonl unless user opts in
 ```
 
 Security:
@@ -1040,24 +1040,24 @@ Deliverables:
 ```text
 1. pnpm TypeScript monorepo
 2. packages/core workspace/config module
-3. .hl workspace layout
-4. .hl/anchors/anchors.jsonl
+3. .llm_wiki workspace layout
+4. .llm_wiki/anchors/anchors.jsonl
 5. SQLite migration system
 6. documents / anchors / links / chunks / diagnostics schema
-7. hl init
-8. hl doctor
-9. hl:// URI parser
+7. llm_wiki init
+8. llm_wiki doctor
+9. llm-wiki:// URI parser
 10. markdown link parser
 11. raw source registry and hashing
 12. markdown/code ingestion
 13. basic PDF text ingestion
 14. link graph build
-15. hl links check
-16. hl links check --fix --dry-run
+15. llm_wiki links check
+16. llm_wiki links check --fix --dry-run
 17. context bundle generator
-18. .hl/agent/selection.md/json
+18. .llm_wiki/agent/selection.md/json
 19. VS Code extension skeleton
-20. DocumentLinkProvider for hl://
+20. DocumentLinkProvider for llm-wiki://
 21. Add Selection to Agent Context command
 22. AGENTS.md / CLAUDE.md generation
 23. Codex skill skeleton
@@ -1065,7 +1065,7 @@ Deliverables:
 25. lexical search
 ```
 
-The earlier MVP scope already includes `hl init`, SQLite schema, raw/notes layout, source registry, markdown/code ingestion, PDF text ingestion, URI parser, markdown link parser, backlinks/outgoing links, link check, context export, DocumentLinkProvider, agent instruction generation, lexical search, and doctor.  [oai_citation:27‡VSCode Research Workspace.txt](sediment://file_000000003e0471fd98a5f5f903073357)
+The earlier MVP scope already includes `llm_wiki init`, SQLite schema, raw/notes layout, source registry, markdown/code ingestion, PDF text ingestion, URI parser, markdown link parser, backlinks/outgoing links, link check, context export, DocumentLinkProvider, agent instruction generation, lexical search, and doctor.  [oai_citation:27‡VSCode Research Workspace.txt](sediment://file_000000003e0471fd98a5f5f903073357)
 
 ## 23.2 First serious release
 
@@ -1083,7 +1083,7 @@ Deliverables:
 9. anchor repair by quote/hash
 10. Navigation side panel
 11. Activity tracking
-12. hl today
+12. llm_wiki today
 13. optional embeddings
 14. read-only MCP tools
 15. search over notes + PDF anchors
@@ -1116,9 +1116,9 @@ Deliverables:
 ## Phase 0 — Normalize terminology
 
 ```text
-[ ] Replace kwiki with hl.
-[ ] Replace .kwiki with .hl.
-[ ] Replace raw://, note://, code://, web:// as persisted schemes with hl:// forms.
+[ ] Replace kwiki with llm_wiki.
+[ ] Replace .kwiki with .llm_wiki.
+[ ] Replace raw://, note://, code://, web:// as persisted schemes with llm-wiki:// forms.
 [ ] Define Raw Source, Note, Document, Anchor, Citation, Link Edge, Reference Overlay, Annotation, Chunk, Context Bundle.
 [ ] Update AGENTS.md and CLAUDE.md with source rules.
 [ ] Add migration notes for legacy links.
@@ -1141,8 +1141,8 @@ Deliverables:
 ## Phase 2 — Storage
 
 ```text
-[ ] Create .hl/config.yaml.
-[ ] Create .hl/anchors/anchors.jsonl.
+[ ] Create .llm_wiki/config.yaml.
+[ ] Create .llm_wiki/anchors/anchors.jsonl.
 [ ] Implement SQLite migrations.
 [ ] Create documents table.
 [ ] Create anchors table.
@@ -1156,12 +1156,12 @@ Deliverables:
 ## Phase 3 — URI and anchors
 
 ```text
-[ ] Implement hl:// URI parser.
-[ ] Implement hl://anchor/<id>.
-[ ] Implement hl://doc/<id>.
-[ ] Implement hl://note/<path>.
-[ ] Implement hl://source/<path>.
-[ ] Implement hl://code/<path>.
+[ ] Implement llm-wiki:// URI parser.
+[ ] Implement llm-wiki://anchor/<id>.
+[ ] Implement llm-wiki://doc/<id>.
+[ ] Implement llm-wiki://note/<path>.
+[ ] Implement llm-wiki://source/<path>.
+[ ] Implement llm-wiki://code/<path>.
 [ ] Implement legacy URI parser for migration.
 [ ] Implement anchor create/resolve/validate.
 [ ] Implement deterministic IDs.
@@ -1186,7 +1186,7 @@ Deliverables:
 ## Phase 5 — Link graph
 
 ```text
-[ ] Parse [label](hl://...).
+[ ] Parse [label](llm-wiki://...).
 [ ] Parse [[Note]].
 [ ] Parse [[Note#Heading]].
 [ ] Parse [[Note|Alias]].
@@ -1202,15 +1202,15 @@ Deliverables:
 ## Phase 6 — Agent context
 
 ```text
-[ ] Implement hl context export --anchor.
-[ ] Implement hl context current.
-[ ] Write .hl/agent/selection.md.
-[ ] Write .hl/agent/selection.json.
+[ ] Implement llm_wiki context export --anchor.
+[ ] Implement llm_wiki context current.
+[ ] Write .llm_wiki/agent/selection.md.
+[ ] Write .llm_wiki/agent/selection.json.
 [ ] Include backlinks and outgoing links.
 [ ] Include related chunks when search is available.
 [ ] Generate AGENTS.md.
 [ ] Generate CLAUDE.md.
-[ ] Generate .agents/skills/human-learning/SKILL.md.
+[ ] Generate .agents/skills/llm-wiki/SKILL.md.
 [ ] Generate .claude/commands.
 ```
 
@@ -1220,7 +1220,7 @@ Deliverables:
 [ ] Extension activation.
 [ ] Workspace detection.
 [ ] Commands.
-[ ] DocumentLinkProvider for hl://.
+[ ] DocumentLinkProvider for llm-wiki://.
 [ ] URI dispatcher.
 [ ] Open note target.
 [ ] Open code range target.
@@ -1270,7 +1270,7 @@ Deliverables:
 ## Phase 10 — MCP
 
 ```text
-[ ] Implement hl mcp stdio.
+[ ] Implement llm_wiki mcp stdio.
 [ ] Expose read-only tools.
 [ ] Expose resources.
 [ ] Expose prompts.
@@ -1319,7 +1319,7 @@ The PDF/markdown plan already defines the key test categories: PDF open/render/s
 Use this as the project’s governing principle:
 
 ```text
-Human Learning does not treat “source” as a vague synonym for file, note, link,
+LLM Wiki does not treat “source” as a vague synonym for file, note, link,
 citation, annotation, or context.
 
 A Raw Source is immutable evidence.

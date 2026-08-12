@@ -39,7 +39,7 @@ const markdownEditorAliases = {
   '@lezer/markdown$': resolveFromPackage('@codemirror/lang-markdown', '@lezer/markdown'),
 };
 
-const pdfEditorWebviewEntry = require.resolve('@human-learning/pdf-editor/webview', {
+const pdfEditorWebviewEntry = require.resolve('@llm-wiki/pdf-editor/webview', {
   paths: [__dirname],
 });
 const pdfEditorPackageRoot = path.resolve(path.dirname(pdfEditorWebviewEntry), '../..');

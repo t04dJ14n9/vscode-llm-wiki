@@ -1,13 +1,13 @@
-# Human Learning Reference Model
+# LLM Wiki Reference Model
 
 This is the short authoritative reference for current link and locator
 behavior.
 
 ## Current decision
 
-Human Learning uses native Markdown and Obsidian-compatible links as the
+LLM Wiki uses native Markdown and Obsidian-compatible links as the
 persisted format. Repository files are the source of truth; there is no SQLite
-index, `hl://` link layer, CLI-generated anchor row, or required ingestion
+index, `llm-wiki://` link layer, CLI-generated anchor row, or required ingestion
 step.
 
 ## Link formats
@@ -61,14 +61,14 @@ entities. No generated graph database is required or persisted.
 ## PDF locator model
 
 A portable PDF selection uses a page plus a Chrome-compatible text fragment.
-The readable Markdown link remains useful outside Human Learning:
+The readable Markdown link remains useful outside LLM Wiki:
 
 ```text
 raw/pdf/paper.pdf#page=7:~:text=prefix-,selected%20text,-suffix
 ```
 
 Ask PDF stores reopenable runtime state in a content-addressed JSON sidecar
-under `.hl/annotations/pdf/`. Each discussion may also have a portable
+under `.llm_wiki/annotations/pdf/`. Each discussion may also have a portable
 W3C-shaped JSON-LD mirror and a bounded PNG crop. These files preserve exact
 quotes, page geometry, PDF hashes, transcripts, and learning-note links without
 placing internal IDs in user-facing Markdown.
@@ -78,7 +78,7 @@ placing internal IDs in user-facing Markdown.
 Cursor Browser capture and the Experimental Web Reader export the exact
 selection, bounded surrounding text, source URL, and optional visual evidence.
 Persisted citations prefer the original URL or its native section/text
-fragment. Human Learning does not maintain a second web-target database.
+fragment. LLM Wiki does not maintain a second web-target database.
 
 ## Agent rules
 

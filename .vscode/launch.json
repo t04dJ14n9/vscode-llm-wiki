@@ -2,7 +2,7 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Launch Human Learning Extension",
+      "name": "Launch LLM Wiki Extension",
       "type": "extensionHost",
       "request": "launch",
       "args": [
@@ -12,7 +12,7 @@
       "outFiles": [
         "${workspaceFolder}/packages/vscode-extension/dist/**/*.js"
       ],
-      "preLaunchTask": "Build HL Extension"
+      "preLaunchTask": "Build LLM Wiki Extension"
     }
   ]
 }

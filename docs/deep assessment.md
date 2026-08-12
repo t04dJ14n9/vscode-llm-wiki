@@ -1,8 +1,8 @@
-Below is the updated implementation plan and design philosophy for the **PDF viewer** and **markdown system** in Human Learning.
+Below is the updated implementation plan and design philosophy for the **PDF viewer** and **markdown system** in LLM Wiki.
 
 > Historical/obsolete design note: this assessment predates the native
 > reference-model update. The current generated link format is native
-> Markdown/Obsidian, not `hl://`. See
+> Markdown/Obsidian, not `llm-wiki://`. See
 > [reference model.md](reference%20model.md) and
 > [implementation detail.md](implementation%20detail.md) for current behavior.
 
@@ -18,7 +18,7 @@ Markdown editor:
   links are parsed, indexed, repaired, and navigable
 ```
 
-This follows the current Human Learning plan: local-first VS Code workspace, `.hl/` metadata, SQLite index, source anchors, hybrid CodeMirror markdown, PDF/web/code anchors, backlinks, agent context files, and Claude/Codex compatibility.  [oai_citation:0‡VSCode Research Workspace.txt](sediment://file_000000003e0471fd98a5f5f903073357)
+This follows the current LLM Wiki plan: local-first VS Code workspace, `.llm_wiki/` metadata, SQLite index, source anchors, hybrid CodeMirror markdown, PDF/web/code anchors, backlinks, agent context files, and Claude/Codex compatibility.  [oai_citation:0‡VSCode Research Workspace.txt](sediment://file_000000003e0471fd98a5f5f903073357)
 
 ---
 
@@ -35,17 +35,17 @@ notes/*.md
 raw/pdf/*.pdf
 raw/web/*
 raw/code/*
-.hl/annotations/*
-.hl/anchors/*     optional durable sidecars
+.llm_wiki/annotations/*
+.llm_wiki/anchors/*     optional durable sidecars
 ```
 
 Derived/rebuildable data:
 
 ```text
-.hl/index.sqlite
-.hl/references/*
-.hl/cache/*
-.hl/embeddings/*
+.llm_wiki/index.sqlite
+.llm_wiki/references/*
+.llm_wiki/cache/*
+.llm_wiki/embeddings/*
 ```
 
 This is important because both humans and agents can edit markdown. The safest model is:
@@ -57,9 +57,9 @@ human or agent edits markdown
 → SQLite updates automatically
 ```
 
-So agents should not write SQLite directly. They should write markdown or call `hl` tools that write markdown/sidecars and then trigger indexing.
+So agents should not write SQLite directly. They should write markdown or call `llm_wiki` tools that write markdown/sidecars and then trigger indexing.
 
-The existing plan already treats the index as rebuildable, and the MVP requires source registry, source-link parser, backlinks/forward-links, `hl links check`, and agent context export.  [oai_citation:1‡VSCode Research Workspace.txt](sediment://file_000000003e0471fd98a5f5f903073357)
+The existing plan already treats the index as rebuildable, and the MVP requires source registry, source-link parser, backlinks/forward-links, `llm_wiki links check`, and agent context export.  [oai_citation:1‡VSCode Research Workspace.txt](sediment://file_000000003e0471fd98a5f5f903073357)
 
 ---
 
@@ -77,10 +77,10 @@ page coordinate conversion
 maybe annotation drawing primitives
 ```
 
-Human Learning owns:
+LLM Wiki owns:
 
 ```text
-hl:// URI scheme
+llm-wiki:// URI scheme
 anchor IDs
 SQLite graph
 reference sidecars
@@ -101,7 +101,7 @@ For whole files and headings, links can be simple:
 
 ```md
 [[FlashAttention]]
-[Online Softmax](hl://note/notes/Concepts/FlashAttention.md#online-softmax)
+[Online Softmax](llm-wiki://note/notes/Concepts/FlashAttention.md#online-softmax)
 ```
 
 For precise PDF regions, links carry the exact quoted text with an explicit
@@ -114,15 +114,15 @@ page:
 The agent should **not** hallucinate geometry like:
 
 ```md
-[source](hl://pdf/raw/pdf/fa.pdf?page=3&rect=120,240,530,310)
+[source](llm-wiki://pdf/raw/pdf/fa.pdf?page=3&rect=120,240,530,310)
 ```
 
 Instead:
 
 ```text
 agent searches or quotes text
-→ hl tool validates against source
-→ hl tool creates anchor
+→ llm_wiki tool validates against source
+→ llm_wiki tool creates anchor
 → agent inserts returned URI
 ```
 
@@ -147,7 +147,7 @@ That keeps notes portable and agent-readable.  [oai_citation:4‡VSCode Research
 
 ## 1.5 The UI should expose the graph
 
-Human Learning is not just a PDF reader or markdown editor. It is a source-addressable graph workspace.
+LLM Wiki is not just a PDF reader or markdown editor. It is a source-addressable graph workspace.
 
 The VS Code side panel should expose:
 
@@ -361,7 +361,7 @@ Internal annotation IDs are storage identity only and are not link targets.
 Only treat raw geometry links as transitional/debug syntax:
 
 ```md
-[source](hl://pdf/raw/pdf/fa.pdf?page=3&rect=120,240,530,310)
+[source](llm-wiki://pdf/raw/pdf/fa.pdf?page=3&rect=120,240,530,310)
 ```
 
 The existing feature list already defines PDF anchors as page number, bounding rectangles, source hash, and text quote.  [oai_citation:9‡VSCode Research Workspace.txt](sediment://file_0000000079cc71f8b579551c33498c2f)
@@ -373,7 +373,7 @@ The existing feature list already defines PDF anchors as page number, bounding r
 Generate this from SQLite links. Do not hand-edit it normally.
 
 ```text
-.hl/references/pdf/fa.references.json
+.llm_wiki/references/pdf/fa.references.json
 ```
 
 ```json
@@ -420,7 +420,7 @@ The existing plan’s PDF acceptance test is exactly this: select text, insert s
 Keep user annotations separate from generated reference highlights.
 
 ```text
-.hl/annotations/pdf/fa.annotations.json
+.llm_wiki/annotations/pdf/fa.annotations.json
 ```
 
 ```json
@@ -460,41 +460,41 @@ This distinction is already in the plan: user highlights and reference highlight
 VS Code commands:
 
 ```text
-Human Learning: Open PDF Source
-Human Learning: Insert PDF Source Reference
-Human Learning: Create Anchor from Current PDF Selection
-Human Learning: Add PDF Selection to Agent Context
-Human Learning: Copy PDF Anchor URI
-Human Learning: Show References to This Region
-Human Learning: Show User Annotations
-Human Learning: Validate PDF Anchors
-Human Learning: Repair PDF Anchors
+LLM Wiki: Open PDF Source
+LLM Wiki: Insert PDF Source Reference
+LLM Wiki: Create Anchor from Current PDF Selection
+LLM Wiki: Add PDF Selection to Agent Context
+LLM Wiki: Copy PDF Anchor URI
+LLM Wiki: Show References to This Region
+LLM Wiki: Show User Annotations
+LLM Wiki: Validate PDF Anchors
+LLM Wiki: Repair PDF Anchors
 ```
 
 CLI commands:
 
 ```bash
-hl anchor create-pdf --source raw/pdf/fa.pdf --quote "..." --page-hint 3 --json
-hl anchor resolve 'raw/pdf/fa.pdf#page=3:~:text=FlashAttention%20uses%20tiling' --json
-hl anchor validate 'raw/pdf/fa.pdf#page=3:~:text=FlashAttention%20uses%20tiling' --json
-hl references rebuild --source raw/pdf/fa.pdf
-hl links check --fix
+llm_wiki anchor create-pdf --source raw/pdf/fa.pdf --quote "..." --page-hint 3 --json
+llm_wiki anchor resolve 'raw/pdf/fa.pdf#page=3:~:text=FlashAttention%20uses%20tiling' --json
+llm_wiki anchor validate 'raw/pdf/fa.pdf#page=3:~:text=FlashAttention%20uses%20tiling' --json
+llm_wiki references rebuild --source raw/pdf/fa.pdf
+llm_wiki links check --fix
 ```
 
 Agent/MCP tools:
 
 ```ts
-hl.anchor.createFromQuote({
+llm_wiki.anchor.createFromQuote({
   source: "raw/pdf/fa.pdf",
   quote: "...",
   pageHint: 3
 })
 
-hl.anchor.resolve({
+llm_wiki.anchor.resolve({
   uri: "raw/pdf/fa.pdf#page=3:~:text=FlashAttention%20uses%20tiling"
 })
 
-hl.get_backlinks({
+llm_wiki.get_backlinks({
   uri: "raw/pdf/fa.pdf#page=3:~:text=FlashAttention%20uses%20tiling"
 })
 ```
@@ -535,7 +535,7 @@ Select paragraph → create anchor → insert note link → reopen PDF → overl
 ```text
 [ ] Define PdfAnchor schema.
 [ ] Create anchors table.
-[ ] Create optional .hl/anchors/*.json sidecar.
+[ ] Create optional .llm_wiki/anchors/*.json sidecar.
 [ ] Implement createFromSelection.
 [ ] Implement createFromQuote.
 [ ] Implement resolveAnchor.
@@ -560,7 +560,7 @@ Select paragraph → create anchor → insert note link → reopen PDF → overl
 
 ```text
 [ ] Query SQLite links where to_uri targets PDF anchors.
-[ ] Generate .hl/references/pdf/*.json.
+[ ] Generate .llm_wiki/references/pdf/*.json.
 [ ] Load sidecar in PDF viewer.
 [ ] Refresh sidecar on markdown changes.
 [ ] Implement overlay hit-testing.
@@ -572,7 +572,7 @@ Select paragraph → create anchor → insert note link → reopen PDF → overl
 ```text
 [ ] Add user highlight tool.
 [ ] Add comment/margin-note tool.
-[ ] Store annotations in .hl/annotations/pdf/*.json.
+[ ] Store annotations in .llm_wiki/annotations/pdf/*.json.
 [ ] Keep annotation sidecar separate from reference sidecar.
 [ ] Add optional EmbedPDF annotation plugin integration.
 [ ] Add future ink/freehand support.
@@ -604,7 +604,7 @@ Use normal VS Code markdown editor first.
 Add:
 
 ```text
-DocumentLinkProvider for hl:// links
+DocumentLinkProvider for llm-wiki:// links
 HoverProvider for note/PDF/code previews
 CodeLens or inline badges later
 Selection export command
@@ -637,7 +637,7 @@ Support these link classes.
 Canonical internal target:
 
 ```text
-hl://note/notes/Concepts/FlashAttention.md
+llm-wiki://note/notes/Concepts/FlashAttention.md
 ```
 
 No anchor ID required.
@@ -651,7 +651,7 @@ No anchor ID required.
 Better canonical target:
 
 ```md
-[Online Softmax](hl://note/notes/Concepts/FlashAttention.md#online-softmax)
+[Online Softmax](llm-wiki://note/notes/Concepts/FlashAttention.md#online-softmax)
 ```
 
 Prefer stable heading IDs:
@@ -667,7 +667,7 @@ Anchor ID optional.
 Use stable anchor.
 
 ```md
-[source](hl://anchor/anc_note_8f21)
+[source](llm-wiki://anchor/anc_note_8f21)
 ```
 
 Anchor record:
@@ -705,13 +705,13 @@ Precise page/text selector required.
 ### Code range
 
 ```md
-[kernel](hl://code/src/kernel.cu?lines=80-145)
+[kernel](llm-wiki://code/src/kernel.cu?lines=80-145)
 ```
 
 Later add symbol anchors:
 
 ```md
-[kernel](hl://code/src/kernel.cu?symbol=flash_attention_forward)
+[kernel](llm-wiki://code/src/kernel.cu?symbol=flash_attention_forward)
 ```
 
 ---
@@ -731,7 +731,7 @@ stable heading IDs
 block IDs
 wikilinks
 markdown links
-hl:// links
+llm-wiki:// links
 outgoing links
 inline source anchors
 ```
@@ -759,7 +759,7 @@ on external file watcher burst:
   1–3 seconds
 
 CLI:
-  explicit hl links rebuild --changed
+  explicit llm_wiki links rebuild --changed
 ```
 
 ---
@@ -830,8 +830,8 @@ agent-context
 Selecting a markdown block and running command writes:
 
 ```text
-.hl/agent/selection.md
-.hl/agent/selection.json
+.llm_wiki/agent/selection.md
+.llm_wiki/agent/selection.json
 ```
 
 This is already required in the current plan.  [oai_citation:14‡VSCode Research Workspace.txt](sediment://file_000000003e0471fd98a5f5f903073357)
@@ -891,10 +891,10 @@ External file changes update webview.
 
 VS Code’s built-in Outline is good for text documents and symbols, but not enough for PDF anchors, backlinks, reference overlays, and graph edges.
 
-Use a Human Learning view container:
+Use a LLM Wiki view container:
 
 ```text
-Human Learning
+LLM Wiki
 ├── Navigation
 ├── Links
 ├── Agent Context
@@ -1044,24 +1044,24 @@ Put this in `AGENTS.md` / `CLAUDE.md`.
 Do not invent PDF rectangle coordinates.
 
 When citing PDFs:
-1. Prefer existing anchors returned by `hl search`.
-2. If no anchor exists, call `hl anchor create-pdf --quote ... --source ...`.
+1. Prefer existing anchors returned by `llm_wiki search`.
+2. If no anchor exists, call `llm_wiki anchor create-pdf --quote ... --source ...`.
 3. Insert only the canonical URI returned by the tool.
 4. If the tool reports ambiguous or not_found, do not fabricate geometry.
-5. After note edits, run `hl links check --fix`.
+5. After note edits, run `llm_wiki links check --fix`.
 
 When citing markdown:
 1. Whole-note links may use `[[Note]]`.
-2. Heading links may use `[[Note#Heading]]` or `hl://note/...#heading-id`.
-3. Specific paragraph links require `hl anchor create-note-block`.
+2. Heading links may use `[[Note#Heading]]` or `llm-wiki://note/...#heading-id`.
+3. Specific paragraph links require `llm_wiki anchor create-note-block`.
 ```
 
 Rationale:
 
 ```text
 agent supplies semantic intent
-HL tool validates against source
-HL tool returns canonical anchor
+LLM Wiki tool validates against source
+LLM Wiki tool returns canonical anchor
 agent inserts canonical link
 indexer updates SQLite
 ```
@@ -1085,9 +1085,9 @@ Every meaningful selection can become:
 Tasks:
 
 ```text
-[ ] .hl workspace layout
+[ ] .llm_wiki workspace layout
 [ ] SQLite schema
-[ ] hl:// URI parser
+[ ] llm-wiki:// URI parser
 [ ] markdown link parser
 [ ] native VS Code DocumentLinkProvider
 [ ] Backlinks / Forward Links view
@@ -1098,7 +1098,7 @@ Tasks:
 [ ] insert PDF source link into markdown
 [ ] note → PDF jump
 [ ] basic PDF reference sidecar generation
-[ ] hl links check
+[ ] llm_wiki links check
 [ ] AGENTS.md / CLAUDE.md rules
 ```
 
@@ -1170,8 +1170,8 @@ Tasks:
 ```text
 [ ] Parse [[Note]].
 [ ] Parse [[Note#Heading]].
-[ ] Parse [label](hl://note/...).
-[ ] Parse [source](hl://anchor/...).
+[ ] Parse [label](llm-wiki://note/...).
+[ ] Parse [source](llm-wiki://anchor/...).
 [ ] Rename note and repair link.
 [ ] Rename heading and repair if heading ID exists.
 [ ] Move paragraph and resolve by block ID.
@@ -1181,7 +1181,7 @@ Tasks:
 [ ] Forward links panel updates.
 [ ] CodeMirror active line shows raw syntax.
 [ ] Inactive line renders source link chip.
-[ ] Selection export writes .hl/agent/selection.md/json.
+[ ] Selection export writes .llm_wiki/agent/selection.md/json.
 ```
 
 ## Engine swap test
@@ -1239,7 +1239,7 @@ Use:
 native VS Code markdown first
 CodeMirror hybrid editor second
 plain markdown as canonical source
-hl:// links as semantic source links
+llm-wiki:// links as semantic source links
 wikilinks as authoring sugar
 ```
 

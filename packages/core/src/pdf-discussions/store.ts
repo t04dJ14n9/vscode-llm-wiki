@@ -519,7 +519,7 @@ export class PdfDiscussionStore {
     this.pdfSha256 = computePdfSha256(this.pdfPath);
 
     if (this.layout === 'vault') {
-      const discussionRoot = join(this.rootPath, '.hl', 'annotations', 'pdf');
+      const discussionRoot = join(this.rootPath, '.llm_wiki', 'annotations', 'pdf');
       this.sidecarPath = join(discussionRoot, `${this.pdfSha256}.json`);
       this.assetsPath = join(discussionRoot, 'assets');
       this.portableAnnotationsPath = pathIsWithin(this.rootPath, this.pdfPath)

@@ -1326,12 +1326,12 @@ test('pdf goToAnchor scopes text-fragment matching to the requested page', async
 
   await page.evaluate(() => {
     const originalScrollIntoView = Element.prototype.scrollIntoView;
-    (window as unknown as { __hlAnchorScrollBehavior?: ScrollBehavior })
-      .__hlAnchorScrollBehavior = undefined;
+    (window as unknown as { __llmWikiAnchorScrollBehavior?: ScrollBehavior })
+      .__llmWikiAnchorScrollBehavior = undefined;
     Element.prototype.scrollIntoView = function scrollIntoView(options?: boolean | ScrollIntoViewOptions) {
       if (this.classList.contains('anchor-highlight') && typeof options === 'object') {
-        (window as unknown as { __hlAnchorScrollBehavior?: ScrollBehavior })
-          .__hlAnchorScrollBehavior = options.behavior;
+        (window as unknown as { __llmWikiAnchorScrollBehavior?: ScrollBehavior })
+          .__llmWikiAnchorScrollBehavior = options.behavior;
       }
       return originalScrollIntoView.call(this, options);
     };
@@ -1346,8 +1346,8 @@ test('pdf goToAnchor scopes text-fragment matching to the requested page', async
   await expect(page.locator('#page-1 .anchor-highlight')).toHaveCount(0);
   await expect(page.locator('#page-2 .anchor-highlight')).toHaveCount(1);
   await expect.poll(() => page.evaluate(() =>
-    (window as unknown as { __hlAnchorScrollBehavior?: ScrollBehavior })
-      .__hlAnchorScrollBehavior
+    (window as unknown as { __llmWikiAnchorScrollBehavior?: ScrollBehavior })
+      .__llmWikiAnchorScrollBehavior
   )).toBe('auto');
 });
 

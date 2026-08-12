@@ -47,7 +47,7 @@ function clientModule() {
 }
 
 function coreModule() {
-  return Module.createRequire(join(packageRoot, 'package.json'))('@human-learning/core');
+  return Module.createRequire(join(packageRoot, 'package.json'))('@llm-wiki/core');
 }
 
 class RecordingClient {
@@ -219,7 +219,7 @@ function createFixtureClient(hooks) {
 }
 
 async function tempDocument() {
-  const root = await mkdtemp(join(tmpdir(), 'hl-pdf-controller-'));
+  const root = await mkdtemp(join(tmpdir(), 'llm-wiki-pdf-controller-'));
   const pdfPath = join(root, 'paper.pdf');
   writeFileSync(pdfPath, '%PDF-1.7\ncontroller fixture\n');
   const { PdfDiscussionStore } = coreModule();
@@ -1002,7 +1002,7 @@ test('never exposes an optional internal anchor ID in reconstructed or promoted 
   for (const call of client.turnCalls) {
     const serialized = JSON.stringify(call.input);
     assert.match(serialized, /paper\.pdf#page=2:~:text=A%20selected%20passage\./);
-    assert.doesNotMatch(serialized, /internal-anchor-do-not-share|anchorId|\.hl(?:\/|\\\\)/);
+    assert.doesNotMatch(serialized, /internal-anchor-do-not-share|anchorId|\.llm_wiki(?:\/|\\\\)/);
   }
 });
 
@@ -1025,7 +1025,7 @@ test('ignores stale prior-turn notifications received before turn/start returns 
 test('routes external PDFs globally and imports matching global data only for a contained vault PDF', async t => {
   const { createPdfDiscussionStoreForDocument, isPathInside } = controllerModule();
   const { PdfDiscussionStore, createPdfDiscussionSelectionKey } = coreModule();
-  const root = await mkdtemp(join(tmpdir(), 'hl-pdf-routing-'));
+  const root = await mkdtemp(join(tmpdir(), 'llm-wiki-pdf-routing-'));
   t.after(async () => rm(root, { recursive: true, force: true }));
   const vaultRoot = join(root, 'vault');
   const globalStoragePath = join(root, 'global');

@@ -1,4 +1,4 @@
-# Human Learning: PDF Viewer and Portable Annotations
+# LLM Wiki: PDF Viewer and Portable Annotations
 
 > Current behavior of the combined desktop extension in VS Code and Cursor.
 > For the full system, see
@@ -46,8 +46,8 @@ The portable JSON-LD mirror represents these as:
 
 - a W3C `TextQuoteSelector`;
 - an RFC 8118 `FragmentSelector` with `page=N`;
-- a Human Learning `hl:PdfRectSelector`;
-- an optional `hl:PdfTextItemSelector`.
+- a LLM Wiki `llm_wiki:PdfRectSelector`;
+- an optional `llm_wiki:PdfTextItemSelector`.
 
 The canonical extracted quote, page, and rectangles are deliberately
 redundant. Consumers that do not understand the optional text offsets can
@@ -93,8 +93,8 @@ set. A newly asked annotation produces three records with distinct roles:
 | Record | Path | Authority and runtime role |
 | --- | --- | --- |
 | Learning Markdown | `wiki/learning/*.md` | Human-readable authority for the canonical extracted quote, source link, summary, full Q&A, and review dates |
-| v1 runtime sidecar | `.hl/annotations/pdf/<pdf-sha256>.json` | Current viewer state: anchor geometry, transcript, turn status, and inspector state |
-| Portable JSON-LD mirror | `.hl/annotations/pdf/<pdf-sha256>/<annotation-id>.jsonld` | One annotation per file for migration, scanning, and interchange |
+| v1 runtime sidecar | `.llm_wiki/annotations/pdf/<pdf-sha256>.json` | Current viewer state: anchor geometry, transcript, turn status, and inspector state |
+| Portable JSON-LD mirror | `.llm_wiki/annotations/pdf/<pdf-sha256>/<annotation-id>.jsonld` | One annotation per file for migration, scanning, and interchange |
 
 The current viewer still reads and updates the v1 sidecar. The JSON-LD mirror
 is not yet its interactive read path; the core
@@ -112,7 +112,7 @@ surrounding context on every side, clamped to the page. A successful capture is
 stored at:
 
 ```text
-.hl/annotations/pdf/assets/<annotation-id>/selection.png
+.llm_wiki/annotations/pdf/assets/<annotation-id>/selection.png
 ```
 
 Its metadata includes the crop rectangle, `padding: 24`, `unit: "pt"`, image
@@ -138,15 +138,15 @@ a new document.
 
 ## 6. Local agent handoff
 
-**Human Learning: Send Selection to Agent…** is a separate, lightweight path.
+**LLM Wiki: Send Selection to Agent…** is a separate, lightweight path.
 For the active Markdown or PDF selection it writes an immutable snapshot and
 refreshes stable latest-export aliases:
 
 ```text
-.hl/agent/exports/<id>/selection.md
-.hl/agent/exports/<id>/selection.json
-.hl/agent/selection.md                  # latest alias
-.hl/agent/selection.json                # latest alias
+.llm_wiki/agent/exports/<id>/selection.md
+.llm_wiki/agent/exports/<id>/selection.json
+.llm_wiki/agent/selection.md                  # latest alias
+.llm_wiki/agent/selection.json                # latest alias
 ```
 
 The extension then attaches the immutable snapshot's `selection.md` to an
@@ -162,14 +162,14 @@ right-click selection menu, floating selection toolbar, and editor title
 toolbar. It routes through the same export instead of maintaining a separate
 context format. The chosen supported agent receives:
 
-- `.hl/agent/exports/<id>/selection.md`, containing the canonical extracted quote and
+- `.llm_wiki/agent/exports/<id>/selection.md`, containing the canonical extracted quote and
   portable page/text-fragment anchor;
-- `.hl/agent/exports/<id>/selection.png`, when the best-effort crop is a valid,
+- `.llm_wiki/agent/exports/<id>/selection.png`, when the best-effort crop is a valid,
   bounded PNG that can be saved and attached.
 
-The structured `.hl/agent/selection.json` remains available as the latest
+The structured `.llm_wiki/agent/selection.json` remains available as the latest
 repository alias but is not attached. The optional latest crop alias is
-`.hl/agent/selection.png`. If saving or attaching the crop fails, the extension
+`.llm_wiki/agent/selection.png`. If saving or attaching the crop fails, the extension
 warns and continues with the Markdown attachment only. The extension updates
 the chosen draft with the available attachments and never submits it. If no
 supported provider is available, the export
@@ -186,7 +186,7 @@ for streamed multi-turn answers that automatically become learning notes.
 - Portable paths must be repository-relative. Absolute paths, URI schemes,
   `..` traversal, and malformed percent encoding are rejected.
 - The portable scanner accepts only the content-addressed
-  `.hl/annotations/pdf/<64-hex-sha256>/*.jsonld` layout and strictly validates
+  `.llm_wiki/annotations/pdf/<64-hex-sha256>/*.jsonld` layout and strictly validates
   selectors, source hashes, learning-note links, and canonical snapshot paths.
 - Scanner and snapshot reads reject symbolic links, confine real paths to their
   storage root, use no-follow file opens where supported, and check that a file
@@ -207,9 +207,9 @@ for streamed multi-turn answers that automatically become learning notes.
 Run the current combined extension checks from the repository root:
 
 ```bash
-pnpm --filter human-learning-vscode exec tsc --noEmit
-pnpm --filter @human-learning/core test
-pnpm --filter human-learning-vscode test
+pnpm --filter llm-wiki-vscode exec tsc --noEmit
+pnpm --filter @llm-wiki/core test
+pnpm --filter llm-wiki-vscode test
 pnpm exec playwright test --config playwright.config.ts
 ```
 

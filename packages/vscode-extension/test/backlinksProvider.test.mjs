@@ -108,11 +108,11 @@ test('filesystem wiki resolves basename wikilinks to the closest note', () => {
 });
 
 test('filesystem scan recursively excludes generated and private directories', async () => {
-  const root = mkdtempSync(join(tmpdir(), 'human-learning-wiki-'));
+  const root = mkdtempSync(join(tmpdir(), 'llm-wiki-wiki-'));
   try {
     writeMarkdown(root, 'README.md', '# Root');
     writeMarkdown(root, 'notes/Included.md', '# Included');
-    for (const excluded of ['.git', '.hl', 'dist', 'node_modules', 'out']) {
+    for (const excluded of ['.git', '.llm_wiki', 'dist', 'node_modules', 'out']) {
       writeMarkdown(root, `${excluded}/Ignored.md`, '# Ignore me');
     }
 

@@ -88,4 +88,4 @@ jobs:
 
       - name: Run remaining Markdown and PDF browser regressions
         if: matrix.spec == ''
-        run: pnpm exec playwright test --config playwright.config.ts --grep-invert 'Human Learning Markdown (deterministic keystroke fuzzing|expanded Vim command fuzzing)'
+        run: pnpm exec playwright test --config playwright.config.ts --grep-invert 'LLM Wiki Markdown (deterministic keystroke fuzzing|expanded Vim command fuzzing)'

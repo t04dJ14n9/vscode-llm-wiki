@@ -1,6 +1,6 @@
-# Human Learning
+# LLM Wiki
 
-Human Learning is a desktop learning workspace for VS Code and Cursor. Open a
+LLM Wiki is a desktop learning workspace for VS Code and Cursor. Open a
 normal Git repository, read Markdown, PDFs, and selected web passages, attach
 source context to a supported agent draft, and keep durable PDF discussions
 connected to their source.
@@ -26,7 +26,7 @@ Codex powers the built-in Ask PDF flow and its durable note creation.
 **Send Selection to Agent…** exports exact Markdown text or the canonical PDF
 extracted quote and attaches it to an installed Codex, Claude Code, Cursor
 Agent, or CodeBuddy sidebar. Those
-external sidebars own their own conversation; Human Learning does not scrape
+external sidebars own their own conversation; LLM Wiki does not scrape
 their answers into a learning note.
 
 **Add to Chat** is the compact action in the Markdown and PDF selection UI;
@@ -34,9 +34,9 @@ their answers into a learning note.
 prefers an active Codex or Claude editor chat through stable VS Code APIs, then
 uses a selected Cursor composer when Cursor exposes that capability. Ambiguous
 sidebar-only cases show a provider picker instead of guessing. The command
-refreshes `.hl/agent/selection.{md,json,png}` and attaches immutable files from
-`.hl/agent/exports/<id>/`; optional visual evidence falls back to text context
-if it cannot be saved or attached. Human Learning only updates the draft and
+refreshes `.llm_wiki/agent/selection.{md,json,png}` and attaches immutable files from
+`.llm_wiki/agent/exports/<id>/`; optional visual evidence falls back to text context
+if it cannot be saved or attached. LLM Wiki only updates the draft and
 never submits it.
 
 Cursor Browser selections can also be captured with bounded surrounding text
@@ -65,7 +65,7 @@ scripts, authentication, cookies, forms, or remote media.
   marker, or moving the caret into its exact range shows the previous question
   and concise answer; the marker opens the full durable note. PDF discussions
   can be reopened and continued in Ask PDF.
-- Backlinks and forward links in the Human Learning activity view, contextual
+- Backlinks and forward links in the LLM Wiki activity view, contextual
   **Markdown Outline** and **PDF Outline** panels in the main Explorer sidebar,
   broken-link detection, and a concept graph parsed directly from repository
   Markdown.
@@ -87,7 +87,7 @@ my-learning-repo/
 ├── wiki/
 │   ├── learning/                  # human-readable discussion records
 │   └── daily/                     # daily plans and review checklists
-├── .hl/
+├── .llm_wiki/
 │   └── annotations/
 │       └── pdf/
 │           ├── <pdf-sha256>.json  # runtime discussion state
@@ -99,7 +99,7 @@ my-learning-repo/
 Markdown learning notes are the readable study record: source quote, summary,
 and complete Q&A. PDF highlight rectangles and the state needed to reopen the
 PDF discussion are stored in a content-addressed JSON sidecar under
-`.hl/annotations/pdf/` when the PDF is inside the repository. Each asked
+`.llm_wiki/annotations/pdf/` when the PDF is inside the repository. Each asked
 annotation also gets a W3C-shaped JSON-LD mirror containing the exact text,
 page, rectangles, PDF hash, learning-note link, and available screenshot metadata.
 Markdown alone does not reconstruct page geometry. All forms are ordinary
@@ -145,7 +145,7 @@ finishes.
 ## Focused product surface
 
 The repository contains only the combined desktop extension and the shared
-libraries it executes. The retired `hl` CLI, MCP server, SQLite index,
+libraries it executes. The retired `llm_wiki` CLI, MCP server, SQLite index,
 database-backed services, and standalone editor packages have been removed.
 If a future headless or MCP integration has a concrete consumer, it should be
 built on the same filesystem-first APIs instead of reviving a parallel
@@ -162,7 +162,7 @@ packages/
 
 The combined extension ships `extension.js`, the Markdown, PDF, and
 experimental web-reader bundles, plus `pdfium.wasm`. It does not ship
-`sql.js`, `sql-wasm.wasm`, or require `.hl/index.sqlite`.
+`sql.js`, `sql-wasm.wasm`, or require `.llm_wiki/index.sqlite`.
 
 ## Development
 
@@ -178,7 +178,7 @@ pnpm check
 pnpm exec playwright test --config playwright.config.ts
 ```
 
-In VS Code, open this repository and run the **Launch Human Learning
+In VS Code, open this repository and run the **Launch LLM Wiki
 Extension** debug configuration (`F5`). It builds the combined package and
 opens `demo-vault` in an Extension Development Host. The same extension entry
 point can be launched in Cursor.

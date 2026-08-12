@@ -10,7 +10,7 @@
 
 ## Global Constraints
 
-- Keep `packages/vscode-extension/src/codexAppServerClient.ts`, PDF discussion controller/protocol/store modules, and existing `.hl/annotations/pdf` data.
+- Keep `packages/vscode-extension/src/codexAppServerClient.ts`, PDF discussion controller/protocol/store modules, and existing `.llm_wiki/annotations/pdf` data.
 - Do not start Codex, show Ask PDF UI, or handle legacy Ask messages in a production activation.
 - The visible PDF text-selection toolbar contains only **Copy Link** and **Add to Chat** when handoff is available.
 - Keep rectangle embed copying and ordinary selected-text copying.
@@ -31,7 +31,7 @@
 
 **Interfaces:**
 - Consumes: existing `PdfEditorProviderOptions.discussionController?: PdfDiscussionController`.
-- Produces: production `PdfEditorProvider` construction with `discussionController === undefined`; no `human-learning.pdfAskSelection` command/configuration.
+- Produces: production `PdfEditorProvider` construction with `discussionController === undefined`; no `llm-wiki.pdfAskSelection` command/configuration.
 
 - [ ] **Step 1: Replace positive Ask PDF activation assertions with failing absence assertions**
 
@@ -42,8 +42,8 @@ test('production activation leaves Ask PDF and Codex uncomposed', () => {
   assert.equal(codexClientCount, 0);
   assert.equal(discussionControllerCount, 0);
   assert.equal(outputChannels.length, 0);
-  assert.equal(configurationSections.includes('humanLearning.agent'), false);
-  assert.equal(vscode.__registeredCommands['human-learning.pdfAskSelection'], undefined);
+  assert.equal(configurationSections.includes('llmWiki.agent'), false);
+  assert.equal(vscode.__registeredCommands['llm-wiki.pdfAskSelection'], undefined);
   assert.equal(providerOptions[0].discussionController, undefined);
 });
 ```
@@ -52,11 +52,11 @@ In `pdfDiscussionHostIntegration.test.mjs`, invert the manifest test:
 
 ```js
 assert.equal(
-  manifest.contributes.commands.some(item => item.command === 'human-learning.pdfAskSelection'),
+  manifest.contributes.commands.some(item => item.command === 'llm-wiki.pdfAskSelection'),
   false,
 );
 assert.equal(
-  manifest.contributes.configuration?.properties?.['humanLearning.agent.codexCommand'],
+  manifest.contributes.configuration?.properties?.['llmWiki.agent.codexCommand'],
   undefined,
 );
 assert.doesNotMatch(JSON.stringify(manifest.capabilities), /Ask PDF/);
@@ -67,7 +67,7 @@ assert.doesNotMatch(JSON.stringify(manifest.capabilities), /Ask PDF/);
 Run:
 
 ```bash
-pnpm --filter human-learning-vscode build
+pnpm --filter llm-wiki-vscode build
 node --test --test-name-pattern="production activation leaves Ask PDF|manifest" packages/vscode-extension/test/extensionActivation.test.mjs packages/vscode-extension/test/pdfDiscussionHostIntegration.test.mjs
 ```
 
@@ -80,7 +80,7 @@ In `extension.ts`:
 - Remove active imports and globals for `CodexAppServerClient`, `PdfDiscussionController`, `PDF_DISCUSSION_WORKSPACE_TRUST_MESSAGE`, the Codex output channel, and controller/client instances.
 - Remove `initializeCodex(context)` and its activation call.
 - Remove `discussionController: pdfDiscussionController` and `markdownInsertTarget: markdownEditorProvider` from `PdfEditorProvider` construction.
-- Remove `human-learning.pdfAskSelection` registration and `requireWorkspaceTrust()`.
+- Remove `llm-wiki.pdfAskSelection` registration and `requireWorkspaceTrust()`.
 - Remove Ask-owned deactivation disposal.
 - Add exactly one intentional marker at the provider-composition boundary:
 
@@ -90,10 +90,10 @@ In `extension.ts`:
 
 In `package.json`:
 
-- Remove `human-learning.pdfAskSelection`.
+- Remove `llm-wiki.pdfAskSelection`.
 - Change limited-workspace copy so it describes only the capabilities that remain.
-- Remove `restrictedConfigurations: ["humanLearning.agent.codexCommand"]`.
-- Remove the `humanLearning.agent.codexCommand` configuration property.
+- Remove `restrictedConfigurations: ["llmWiki.agent.codexCommand"]`.
+- Remove the `llmWiki.agent.codexCommand` configuration property.
 
 - [ ] **Step 4: Run focused Node tests and verify GREEN**
 
@@ -126,7 +126,7 @@ git commit -m "fix: leave Ask PDF uncomposed"
 **Interfaces:**
 - Consumes: optional `PdfEditorProviderOptions.discussionController`.
 - Produces: `PdfTextSelectionAction = 'addToCursorChat' | 'copyLink'` in the webview and `PdfSelectionAction = 'addToCursorChat' | 'copyLink' | 'copyRectEmbed'` in the host.
-- Produces: test-only `window.__humanLearningAskPdfEnabled === true` support; production emits `false`.
+- Produces: test-only `window.__llmWikiAskPdfEnabled === true` support; production emits `false`.
 
 - [ ] **Step 1: Write failing product-surface and protocol tests**
 
@@ -187,7 +187,7 @@ In `pdfDiscussionHostIntegration.test.mjs`, construct a provider without a contr
 Run:
 
 ```bash
-pnpm --filter human-learning-vscode build
+pnpm --filter llm-wiki-vscode build
 node --test --test-name-pattern="removed selection|without a controller|PDF copy" packages/vscode-extension/test/pdfSelectionContext.test.mjs packages/vscode-extension/test/pdfDiscussionHostIntegration.test.mjs
 pnpm exec playwright test packages/vscode-extension/test/e2e/pdf-viewer.spec.ts -g "selection actions|Ask PDF"
 ```
@@ -200,8 +200,8 @@ In `pdf-viewer.ts`, define:
 
 ```ts
 const askPdfEnabled =
-  (window as typeof window & { __humanLearningAskPdfEnabled?: unknown })
-    .__humanLearningAskPdfEnabled === true;
+  (window as typeof window & { __llmWikiAskPdfEnabled?: unknown })
+    .__llmWikiAskPdfEnabled === true;
 ```
 
 Make `askPanel` optional, construct it only when `askPdfEnabled`, guard Ask host messages/markers, and include “Ask about selection…” only in the test-enabled context menu. A disabled viewer must ignore discussion snapshots without creating styles, panel nodes, markers, or outbound discussion messages.
@@ -209,12 +209,12 @@ Make `askPanel` optional, construct it only when `askPdfEnabled`, guard Ask host
 In `pdfEditorProvider.ts`:
 
 - Ignore `isPdfDiscussionMessage(message)` when `discussionController` is absent.
-- Emit `window.__humanLearningAskPdfEnabled = ${this.discussionController !== undefined};` in generated HTML.
+- Emit `window.__llmWikiAskPdfEnabled = ${this.discussionController !== undefined};` in generated HTML.
 
 In `pdf-viewer.html`, set the test capability from the query string:
 
 ```js
-window.__humanLearningAskPdfEnabled =
+window.__llmWikiAskPdfEnabled =
   new URLSearchParams(window.location.search).get('askPdf') === '1';
 ```
 
@@ -261,7 +261,7 @@ The dormant Ask panel remains imported behind its explicit test capability, so i
 Run:
 
 ```bash
-pnpm --filter human-learning-vscode build
+pnpm --filter llm-wiki-vscode build
 node --test packages/vscode-extension/test/pdfSelectionContext.test.mjs packages/vscode-extension/test/pdfDiscussionHostIntegration.test.mjs packages/vscode-extension/test/markdownEditorInsertion.test.mjs packages/vscode-extension/test/buildArtifacts.test.mjs
 pnpm exec playwright test packages/vscode-extension/test/e2e/pdf-viewer.spec.ts packages/vscode-extension/test/e2e/ask-pdf.spec.ts
 ```
@@ -322,7 +322,7 @@ Then set `--vscode-editorCursor-foreground: initial`, `--vscode-editor-foregroun
 Run:
 
 ```bash
-pnpm --filter human-learning-vscode build
+pnpm --filter llm-wiki-vscode build
 pnpm exec playwright test packages/vscode-extension/test/e2e/markdown-editor.spec.ts -g "caret surfaces"
 ```
 
@@ -365,35 +365,35 @@ git commit -m "fix: follow editor theme for markdown carets"
 **Files:**
 - Modify locally (ignored): `demo-vault/AGENTS.md`
 - Modify locally (ignored): `demo-vault/CLAUDE.md`
-- Modify locally (ignored): `demo-vault/.agents/skills/human-learning/SKILL.md`
-- Modify locally (ignored): `demo-vault/.claude/commands/hl-explain-selection.md`
+- Modify locally (ignored): `demo-vault/.agents/skills/llm-wiki/SKILL.md`
+- Modify locally (ignored): `demo-vault/.claude/commands/llm-wiki-explain-selection.md`
 
 **Interfaces:**
-- Consumes: `.hl/agent/selection.md`, optional `.hl/agent/selection.png`, and immutable `.hl/agent/exports/<id>/...hlanchor` Source links.
+- Consumes: `.llm_wiki/agent/selection.md`, optional `.llm_wiki/agent/selection.png`, and immutable `.llm_wiki/agent/exports/<id>/...llm_wiki_anchor` Source links.
 - Produces: synchronized provider-neutral agent instructions.
 
 - [ ] **Step 1: Replace AGENTS and CLAUDE with the synchronized current contract**
 
 Both files must state:
 
-- Human Learning custom Markdown/PDF editors and outline panels.
+- LLM Wiki custom Markdown/PDF editors and outline panels.
 - Vim starts in normal mode when enabled.
 - Editor text, links, and caret follow the active VS Code theme.
 - Add to Chat targets a compatible supported agent, prepares a draft, and never submits.
-- Read `.hl/agent/selection.md` for the current handoff.
-- Treat `.hl/agent/selection.png` as optional visual evidence.
+- Read `.llm_wiki/agent/selection.md` for the current handoff.
+- Treat `.llm_wiki/agent/selection.png` as optional visual evidence.
 - Reuse the exact Markdown link on the `**Source**:` line verbatim.
-- Never invent/rewrite a PDF URL or `.hlanchor` identifier.
-- `.hlanchor` is a generated bridge artifact.
+- Never invent/rewrite a PDF URL or `.llm_wiki_anchor` identifier.
+- `.llm_wiki_anchor` is a generated bridge artifact.
 - Do not edit `raw/` unless explicitly asked.
 
 Remove “Add to Cursor Chat” and direct `raw/pdf/...#page=...:~:text=...` construction guidance.
 
 - [ ] **Step 2: Update the agent skill and Claude command**
 
-Make `.agents/skills/human-learning/SKILL.md` provider-neutral and apply the same exact-Source-link contract.
+Make `.agents/skills/llm-wiki/SKILL.md` provider-neutral and apply the same exact-Source-link contract.
 
-Set `.claude/commands/hl-explain-selection.md` to instruct Claude to read the current handoff and optional image, explain the selection, reuse the exact Source link verbatim, and never construct/rewrite a PDF URL or `.hlanchor` identifier.
+Set `.claude/commands/llm-wiki-explain-selection.md` to instruct Claude to read the current handoff and optional image, explain the selection, reuse the exact Source link verbatim, and never construct/rewrite a PDF URL or `.llm_wiki_anchor` identifier.
 
 - [ ] **Step 3: Verify the ignored local rules directly**
 
@@ -401,8 +401,8 @@ Run:
 
 ```bash
 cmp demo-vault/AGENTS.md demo-vault/CLAUDE.md
-rg -n "Add to Cursor Chat|raw/pdf/.+#page=.*text=" demo-vault/AGENTS.md demo-vault/CLAUDE.md demo-vault/.agents/skills/human-learning/SKILL.md
-rg -n "Add to Chat|selection\\.md|selection\\.png|exact.*Source|\\.hlanchor|normal mode|theme" demo-vault/AGENTS.md demo-vault/CLAUDE.md demo-vault/.agents/skills/human-learning/SKILL.md demo-vault/.claude/commands/hl-explain-selection.md
+rg -n "Add to Cursor Chat|raw/pdf/.+#page=.*text=" demo-vault/AGENTS.md demo-vault/CLAUDE.md demo-vault/.agents/skills/llm-wiki/SKILL.md
+rg -n "Add to Chat|selection\\.md|selection\\.png|exact.*Source|\\.llm_wiki_anchor|normal mode|theme" demo-vault/AGENTS.md demo-vault/CLAUDE.md demo-vault/.agents/skills/llm-wiki/SKILL.md demo-vault/.claude/commands/llm-wiki-explain-selection.md
 ```
 
 Expected: `cmp` exits 0; the stale-pattern search returns no matches; the current-contract search finds all required concepts.
@@ -415,7 +415,7 @@ Do not stage these ignored local-vault files and do not alter `.gitignore`.
 
 **Files:**
 - Verify: all files changed in Tasks 1–4.
-- Verify unchanged: `demo-vault/.hl/annotations/pdf/**`.
+- Verify unchanged: `demo-vault/.llm_wiki/annotations/pdf/**`.
 
 **Interfaces:**
 - Consumes: production extension bundle and Extension Development Host.
@@ -441,8 +441,8 @@ Expected: all non-skipped tests pass. If an unrelated known flaky test fails, re
 - [ ] **Step 3: Audit source and data invariants**
 
 ```bash
-rg -n "human-learning\\.pdfAskSelection|Insert Quote and Link|Copy Quote and Link|Insert Link|>More<|copy-link-format" packages/pdf-editor/src packages/vscode-extension/src packages/vscode-extension/package.json
-git diff -- demo-vault/.hl/annotations/pdf
+rg -n "llm-wiki\\.pdfAskSelection|Insert Quote and Link|Copy Quote and Link|Insert Link|>More<|copy-link-format" packages/pdf-editor/src packages/vscode-extension/src packages/vscode-extension/package.json
+git diff -- demo-vault/.llm_wiki/annotations/pdf
 ```
 
 Expected: no active production UI/command matches; no annotation data diff.
@@ -491,7 +491,7 @@ If an extension is not installed, record `SKIPPED: not installed` for that host/
 - [ ] **Step 2: Run the complete handoff test suite**
 
 ```bash
-pnpm --filter human-learning-vscode build
+pnpm --filter llm-wiki-vscode build
 node --test packages/vscode-extension/test/agentHandoff.test.mjs
 ```
 
@@ -504,10 +504,10 @@ Launch each application with:
 - A unique temporary user-data directory.
 - Its normal external-extension directory.
 - A unique explicit remote-debugging port.
-- `--extensionDevelopmentPath=/Users/t04dj14n9/Code/human-learning/packages/vscode-extension`.
-- `/Users/t04dj14n9/Code/human-learning/demo-vault`.
+- `--extensionDevelopmentPath=/Users/t04dj14n9/Code/llm-wiki/packages/vscode-extension`.
+- `/Users/t04dj14n9/Code/llm-wiki/demo-vault`.
 
-Record exact argv, PID/start time, CDP target list, active extension versions, and current Human Learning bundle hashes.
+Record exact argv, PID/start time, CDP target list, active extension versions, and current LLM Wiki bundle hashes.
 
 - [ ] **Step 4: Exercise Add to Chat without the Cursor built-in Agent**
 
@@ -518,7 +518,7 @@ For each available pair in this matrix:
 | Cursor | verify | verify | verify |
 | VS Code | verify | verify | verify |
 
-Select a PDF passage, invoke Human Learning Add to Chat, choose or focus the named external agent, and verify:
+Select a PDF passage, invoke LLM Wiki Add to Chat, choose or focus the named external agent, and verify:
 
 - The external extension's command is selected instead of Cursor Agent.
 - `selection.md` reaches the draft/context.

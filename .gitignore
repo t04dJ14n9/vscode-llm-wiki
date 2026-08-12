@@ -42,7 +42,7 @@ reference/
 *.sqlite-wal
 
 # VS Code E2E runtime state and generated fixtures
-packages/vscode-extension/test/vscode-e2e/fixtures/test-vault/.hl/*
-!packages/vscode-extension/test/vscode-e2e/fixtures/test-vault/.hl/config.yaml
-packages/vscode-extension/test/vscode-e2e/fixtures/test-vault/__hl_vscode_e2e_sandboxes__/
+packages/vscode-extension/test/vscode-e2e/fixtures/test-vault/.llm_wiki/*
+!packages/vscode-extension/test/vscode-e2e/fixtures/test-vault/.llm_wiki/config.yaml
+packages/vscode-extension/test/vscode-e2e/fixtures/test-vault/__llm_wiki_vscode_e2e_sandboxes__/
 packages/vscode-extension/test/vscode-e2e/fixtures/test-vault/raw/pdf/multipage-fixture.pdf

@@ -1,8 +1,8 @@
 {
-  "name": "@human-learning/core",
+  "name": "@llm-wiki/core",
   "version": "0.1.0",
   "private": true,
-  "description": "Human Learning — portable references and PDF discussion persistence",
+  "description": "LLM Wiki — portable references and PDF discussion persistence",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {

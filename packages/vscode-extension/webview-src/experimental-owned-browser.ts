@@ -516,7 +516,7 @@ function rectToCapture(rect: DOMRect): ExperimentalBrowserRect {
 
 function installStyles(): void {
   const style = document.createElement('style');
-  const nonce = document.querySelector<HTMLMetaElement>('meta[name="hl-csp-nonce"]')?.content;
+  const nonce = document.querySelector<HTMLMetaElement>('meta[name="llm-wiki-csp-nonce"]')?.content;
   if (nonce) style.nonce = nonce;
   style.textContent = `
     *{box-sizing:border-box}

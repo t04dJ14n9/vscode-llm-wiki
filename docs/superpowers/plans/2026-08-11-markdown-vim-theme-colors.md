@@ -96,7 +96,7 @@ Normal mode.
 Run:
 
 ```bash
-pnpm --filter human-learning-vscode exec playwright test test/e2e/markdown-editor.spec.ts --grep "Vim mode starts|Vim mode remains|host focus|host reveal"
+pnpm --filter llm-wiki-vscode exec playwright test test/e2e/markdown-editor.spec.ts --grep "Vim mode starts|Vim mode remains|host focus|host reveal"
 ```
 
 Expected: the new assertions fail because `ensureVimInsertMode` forces
@@ -126,7 +126,7 @@ not mutate Vim state.
 Run:
 
 ```bash
-pnpm --filter human-learning-vscode exec playwright test test/e2e/markdown-editor.spec.ts --grep "Vim|vim"
+pnpm --filter llm-wiki-vscode exec playwright test test/e2e/markdown-editor.spec.ts --grep "Vim|vim"
 ```
 
 Expected: all Vim tests pass after expectations that depended on forced Insert
@@ -153,7 +153,7 @@ git commit -m "fix: start markdown Vim in normal mode"
 - Test: `packages/vscode-extension/test/e2e/markdown-editor.spec.ts`
 
 **Interfaces:**
-- Produces: `humanLearningHighlightStyle: HighlightStyle` from `markdownTheme.ts`.
+- Produces: `llmWikiHighlightStyle: HighlightStyle` from `markdownTheme.ts`.
 - Consumes: `HighlightStyle` from `@codemirror/language`, `tags` from `@lezer/highlight`, and semantic `--vscode-*` variables injected into the webview.
 
 - [ ] **Step 1: Add a failing computed-style test**
@@ -206,7 +206,7 @@ test('Markdown syntax colors follow semantic VS Code theme variables', async ({ 
 Run:
 
 ```bash
-pnpm --filter human-learning-vscode exec playwright test test/e2e/markdown-editor.spec.ts --grep "syntax colors follow"
+pnpm --filter llm-wiki-vscode exec playwright test test/e2e/markdown-editor.spec.ts --grep "syntax colors follow"
 ```
 
 Expected: FAIL because CodeMirror's fixed `defaultHighlightStyle` does not
@@ -225,7 +225,7 @@ const editorForeground =
 const descriptionForeground =
   'var(--vscode-descriptionForeground, var(--vscode-editor-foreground))';
 
-export const humanLearningHighlightStyle = HighlightStyle.define([
+export const llmWikiHighlightStyle = HighlightStyle.define([
   { tag: tags.meta, color: descriptionForeground },
   { tag: tags.link, color: 'var(--vscode-textLink-foreground)', textDecoration: 'underline' },
   { tag: tags.url, color: descriptionForeground },
@@ -263,8 +263,8 @@ with:
 
 ```ts
 import { bracketMatching, ... } from '@codemirror/language';
-import { humanLearningHighlightStyle } from './markdownTheme';
-syntaxHighlighting(humanLearningHighlightStyle, { fallback: true }),
+import { llmWikiHighlightStyle } from './markdownTheme';
+syntaxHighlighting(llmWikiHighlightStyle, { fallback: true }),
 ```
 
 Replace fixed text fallbacks such as `#d4d4d4`, `#c586c0`, and `#4ec9b0`
@@ -290,9 +290,9 @@ backgrounds.
 Run:
 
 ```bash
-pnpm --filter human-learning-vscode exec playwright test test/e2e/markdown-editor.spec.ts --grep "syntax colors follow"
+pnpm --filter llm-wiki-vscode exec playwright test test/e2e/markdown-editor.spec.ts --grep "syntax colors follow"
 pnpm exec tsc -p packages/vscode-extension/tsconfig.json --pretty false --noEmit
-pnpm --filter human-learning-vscode build
+pnpm --filter llm-wiki-vscode build
 ```
 
 Expected: all commands exit zero.
@@ -361,7 +361,7 @@ test('active Markdown links separate theme label, destination, and punctuation c
 Run:
 
 ```bash
-pnpm --filter human-learning-vscode exec playwright test test/e2e/markdown-editor.spec.ts --grep "active Markdown links separate"
+pnpm --filter llm-wiki-vscode exec playwright test test/e2e/markdown-editor.spec.ts --grep "active Markdown links separate"
 ```
 
 Expected: FAIL because destination and punctuation classes do not exist.
@@ -410,7 +410,7 @@ Add:
   color: 'var(--vscode-descriptionForeground, var(--vscode-editor-foreground))',
   fontWeight: '400',
 },
-'.cm-active-link-label:focus-visible, .cm-hl-link:focus-visible': {
+'.cm-active-link-label:focus-visible, .cm-llm-wiki-link:focus-visible': {
   outline: '1px solid var(--vscode-contrastBorder, var(--vscode-focusBorder))',
   outlineOffset: '1px',
 },
@@ -433,7 +433,7 @@ palette. This proves there is no dark/light name branch.
 Run:
 
 ```bash
-pnpm --filter human-learning-vscode exec playwright test test/e2e/markdown-editor.spec.ts
+pnpm --filter llm-wiki-vscode exec playwright test test/e2e/markdown-editor.spec.ts
 ```
 
 Expected: all Markdown editor E2E tests pass.
@@ -495,6 +495,6 @@ user's original theme at the end.
 
 - [ ] **Step 5: Inspect fresh console output**
 
-Confirm there are no new Human Learning webview errors. Record unrelated Cursor
+Confirm there are no new LLM Wiki webview errors. Record unrelated Cursor
 or third-party-extension errors separately rather than attributing them to the
 Markdown editor.

@@ -50,43 +50,43 @@ function loadAnchorUris(uriScheme = 'cursor') {
   }
 }
 
-test('Human Learning anchor URIs use the current product scheme and round-trip the portable target', () => {
+test('LLM Wiki anchor URIs use the current product scheme and round-trip the portable target', () => {
   const {
-    humanLearningAnchorTarget,
-    humanLearningAnchorTargetFromString,
-    humanLearningOpenAnchorUri,
+    llmWikiAnchorTarget,
+    llmWikiAnchorTargetFromString,
+    llmWikiOpenAnchorUri,
   } = loadAnchorUris();
   const target =
     'raw/pdf/ddia.pdf#page=25:~:text=The%20Internet%20was%20done%20so%20well';
-  const actionUri = humanLearningOpenAnchorUri(target);
+  const actionUri = llmWikiOpenAnchorUri(target);
 
   assert.equal(
     actionUri,
-    'cursor://human-learning.human-learning-vscode/open-anchor?target='
+    'cursor://llm-wiki.llm-wiki-vscode/open-anchor?target='
       + `v1.${Buffer.from(target, 'utf8').toString('base64url')}`,
   );
   assert.equal(
-    humanLearningAnchorTarget({
+    llmWikiAnchorTarget({
       scheme: 'cursor',
-      authority: 'human-learning.human-learning-vscode',
+      authority: 'llm-wiki.llm-wiki-vscode',
       path: '/open-anchor',
       query: decodeURIComponent(actionUri.slice(actionUri.indexOf('?') + 1)),
     }),
     target,
   );
-  assert.equal(humanLearningAnchorTargetFromString(actionUri), target);
+  assert.equal(llmWikiAnchorTargetFromString(actionUri), target);
 
   const webTarget = 'https://example.com/paper?one=1&target=two#section';
   assert.equal(
-    humanLearningAnchorTargetFromString(humanLearningOpenAnchorUri(webTarget)),
+    llmWikiAnchorTargetFromString(llmWikiOpenAnchorUri(webTarget)),
     webTarget,
   );
 });
 
-test('Human Learning anchor URIs preserve the exact DDIA text fragment after VS Code URI parsing', () => {
+test('LLM Wiki anchor URIs preserve the exact DDIA text fragment after VS Code URI parsing', () => {
   const {
-    humanLearningAnchorTargetFromString,
-    humanLearningOpenAnchorUri,
+    llmWikiAnchorTargetFromString,
+    llmWikiOpenAnchorUri,
   } = loadAnchorUris();
   const target =
     'raw/pdf/ddia.pdf#page=25:~:text=and%20Maintainable%20Applications-,'
@@ -96,72 +96,72 @@ test('Human Learning anchor URIs preserve the exact DDIA text fragment after VS 
     + '%20tech%E2%80%90nology%20with%20a%20scale%20like%20that%20was%20so%20error'
     + '%2Dfree%3F,-%E2%80%94Alan%20Kay%2C%20in%20interview%20with%20Dr';
 
-  const actionUri = humanLearningOpenAnchorUri(target);
+  const actionUri = llmWikiOpenAnchorUri(target);
 
   assert.ok(actionUri);
-  assert.equal(humanLearningAnchorTargetFromString(actionUri), target);
+  assert.equal(llmWikiAnchorTargetFromString(actionUri), target);
 });
 
-test('Human Learning anchor URI parsing rejects malformed or foreign targets', () => {
+test('LLM Wiki anchor URI parsing rejects malformed or foreign targets', () => {
   const {
-    humanLearningAnchorTarget,
-    humanLearningAnchorTargetFromString,
-    humanLearningOpenAnchorUri,
+    llmWikiAnchorTarget,
+    llmWikiAnchorTargetFromString,
+    llmWikiOpenAnchorUri,
   } = loadAnchorUris('vscode');
 
-  assert.equal(humanLearningOpenAnchorUri(' \n '), undefined);
-  assert.equal(humanLearningOpenAnchorUri(`raw/pdf/paper.pdf\u0000#page=2`), undefined);
-  assert.equal(humanLearningOpenAnchorUri('x'.repeat((32 * 1024) + 1)), undefined);
-  assert.equal(humanLearningAnchorTargetFromString('not a URI'), undefined);
+  assert.equal(llmWikiOpenAnchorUri(' \n '), undefined);
+  assert.equal(llmWikiOpenAnchorUri(`raw/pdf/paper.pdf\u0000#page=2`), undefined);
+  assert.equal(llmWikiOpenAnchorUri('x'.repeat((32 * 1024) + 1)), undefined);
+  assert.equal(llmWikiAnchorTargetFromString('not a URI'), undefined);
   assert.equal(
-    humanLearningAnchorTarget({
+    llmWikiAnchorTarget({
       scheme: 'vscode',
-      authority: 'human-learning.human-learning-vscode',
+      authority: 'llm-wiki.llm-wiki-vscode',
       path: '/open-anchor',
       query: `target=v1.${'A'.repeat((32 * 1024 * 4) + 1)}`,
     }),
     undefined,
   );
   assert.equal(
-    humanLearningAnchorTarget({
+    llmWikiAnchorTarget({
       scheme: 'cursor',
-      authority: 'human-learning.human-learning-vscode',
+      authority: 'llm-wiki.llm-wiki-vscode',
       path: '/other',
       query: 'target=raw%2Fpdf%2Fpaper.pdf',
     }),
     undefined,
   );
   assert.equal(
-    humanLearningAnchorTarget({
+    llmWikiAnchorTarget({
       scheme: 'cursor',
-      authority: 'human-learning.human-learning-vscode',
+      authority: 'llm-wiki.llm-wiki-vscode',
       path: '/open-anchor',
       query: 'target=raw%2Fpdf%2Fpaper.pdf',
     }),
     undefined,
   );
   assert.equal(
-    humanLearningAnchorTarget({
+    llmWikiAnchorTarget({
       scheme: 'cursor',
-      authority: 'human-learning.human-learning-vscode',
+      authority: 'llm-wiki.llm-wiki-vscode',
       path: '/open-anchor',
       query: 'target=v1.cmF3L3BkZi9vbmUucGRm&target=v1.cmF3L3BkZi90d28ucGRm',
     }),
     undefined,
   );
   assert.equal(
-    humanLearningAnchorTarget({
+    llmWikiAnchorTarget({
       scheme: 'cursor',
-      authority: 'human-learning.human-learning-vscode',
+      authority: 'llm-wiki.llm-wiki-vscode',
       path: '/open-anchor',
       query: 'target=v1.cmF3L3BkZi9wYXBlci5wZGY&other=value',
     }),
     undefined,
   );
   assert.equal(
-    humanLearningAnchorTarget({
+    llmWikiAnchorTarget({
       scheme: 'https',
-      authority: 'human-learning.human-learning-vscode',
+      authority: 'llm-wiki.llm-wiki-vscode',
       path: '/open-anchor',
       query: 'target=v1.cmF3L3BkZi9wYXBlci5wZGY',
     }),

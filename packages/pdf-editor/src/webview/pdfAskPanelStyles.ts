@@ -1,5 +1,5 @@
 // Styles for the annotation-owned Ask PDF window.
-const ASK_PDF_STYLE_ID = 'human-learning-ask-pdf-styles';
+const ASK_PDF_STYLE_ID = 'llm-wiki-ask-pdf-styles';
 
 export function installAskPdfPanelStyles(): void {
   if (document.getElementById(ASK_PDF_STYLE_ID)) return;

@@ -569,8 +569,8 @@ export class CodexAppServerClient {
         'initialize',
         {
           clientInfo: {
-            name: 'human-learning-vscode',
-            title: 'Human Learning',
+            name: 'llm-wiki-vscode',
+            title: 'LLM Wiki',
             version: this.extensionVersion,
           },
         },

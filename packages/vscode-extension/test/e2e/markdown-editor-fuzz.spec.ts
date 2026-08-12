@@ -87,7 +87,7 @@ const TYPE_TEXT_FRAGMENTS = [
   '_',
 ];
 
-test.describe('Human Learning Markdown deterministic keystroke fuzzing', () => {
+test.describe('LLM Wiki Markdown deterministic keystroke fuzzing', () => {
   test.setTimeout(180_000);
 
   test('Vim inserts after a rendered wikilink without entering its closing brackets', async ({ page }) => {

@@ -1,7 +1,7 @@
 import { open, readdir, stat } from 'node:fs/promises';
 import { join, relative, resolve } from 'node:path';
 
-const EXCLUDED_DIRECTORIES = new Set(['.git', '.hl', 'dist', 'node_modules', 'out']);
+const EXCLUDED_DIRECTORIES = new Set(['.git', '.llm_wiki', 'dist', 'node_modules', 'out']);
 const DEFAULT_MAX_FILES = 10_000;
 const DEFAULT_MAX_FILE_BYTES = 4 * 1024 * 1024;
 const DEFAULT_MAX_TOTAL_BYTES = 128 * 1024 * 1024;
@@ -436,7 +436,7 @@ function resolveMarkdownLink(input: {
   line: number;
   documents: readonly WikiDocument[];
 }): WikiLink {
-  const customNoteTarget = parseHumanLearningNoteUri(input.destination);
+  const customNoteTarget = parseLlmWikiNoteUri(input.destination);
   if (customNoteTarget) {
     return resolvedInternalLink({
       kind: 'markdown',
@@ -785,10 +785,10 @@ function normalizeMarkdownDestination(raw: string): string | undefined {
   return destination.match(/^(\S+)(?:\s+(?:"[^"]*"|'[^']*'|\([^)]*\)))?$/)?.[1];
 }
 
-function parseHumanLearningNoteUri(
+function parseLlmWikiNoteUri(
   destination: string,
 ): { path: string; heading?: string } | undefined {
-  const match = destination.match(/^hl:\/\/note\/([^#?]*)(?:#(.*))?$/i);
+  const match = destination.match(/^llm_wiki:\/\/note\/([^#?]*)(?:#(.*))?$/i);
   if (!match) return undefined;
   return {
     path: normalizeNotePath(safeDecodeURIComponent(match[1] ?? '')),

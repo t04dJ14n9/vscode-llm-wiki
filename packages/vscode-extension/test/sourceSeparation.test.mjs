@@ -45,17 +45,17 @@ test('combined extension owns both editors and uses the shared PDF implementatio
   }
 
   const manifest = readJson(join(extensionRoot, 'package.json'));
-  assert.equal(manifest.name, 'human-learning-vscode');
+  assert.equal(manifest.name, 'llm-wiki-vscode');
   assert.deepEqual(
     customEditorViewTypes(manifest).sort(),
     [
-      'human-learning.anchorFile',
-      'human-learning.markdownEditor',
-      'human-learning.pdfViewer',
+      'llm-wiki.anchorFile',
+      'llm-wiki.markdownEditor',
+      'llm-wiki.pdfViewer',
     ],
   );
   assert.equal(
-    manifest.dependencies?.['@human-learning/pdf-editor'],
+    manifest.dependencies?.['@llm-wiki/pdf-editor'],
     'workspace:*',
   );
 });
@@ -63,7 +63,7 @@ test('combined extension owns both editors and uses the shared PDF implementatio
 test('combined build resolves the canonical shared PDF webview entry', () => {
   const webpackPath = join(extensionRoot, 'webpack.config.js');
   const webpackSource = readFileSync(webpackPath, 'utf8');
-  assert.match(webpackSource, /@human-learning\/pdf-editor\/webview/);
+  assert.match(webpackSource, /@llm-wiki\/pdf-editor\/webview/);
 
   delete require.cache[require.resolve(webpackPath)];
   const webpackConfigs = require(webpackPath);

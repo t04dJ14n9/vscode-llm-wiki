@@ -18,16 +18,16 @@ import ts from 'typescript';
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 function productAnchorUri(target) {
-  return 'cursor://human-learning.human-learning-vscode/open-anchor?target='
+  return 'cursor://llm-wiki.llm-wiki-vscode/open-anchor?target='
     + `v1.${Buffer.from(target, 'utf8').toString('base64url')}`;
 }
 
 function loadTsModule(relativePath, mocks = {}) {
   const moduleMocks = {
     './anchorUris': {
-      humanLearningAnchorTargetFromString: value => {
+      llmWikiAnchorTargetFromString: value => {
         const prefix =
-          'cursor://human-learning.human-learning-vscode/open-anchor?target=';
+          'cursor://llm-wiki.llm-wiki-vscode/open-anchor?target=';
         if (!value.startsWith(prefix)) return undefined;
         const encoded = value.slice(prefix.length);
         if (!encoded.startsWith('v1.')) return undefined;
@@ -70,7 +70,7 @@ function loadTsModule(relativePath, mocks = {}) {
   }
 }
 
-test('dispatchUri opens markdown note links with the Human Learning markdown editor', async () => {
+test('dispatchUri opens markdown note links with the LLM Wiki markdown editor', async () => {
   const executeCommandCalls = [];
   const openTextDocumentCalls = [];
   const showTextDocumentCalls = [];
@@ -87,7 +87,7 @@ test('dispatchUri opens markdown note links with the Human Learning markdown edi
   });
   const { dispatchUri } = loadTsModule('src/uriDispatcher.ts', {
     vscode,
-    '@human-learning/core': {
+    '@llm-wiki/core': {
       classifyReferenceTarget: () => ({
         kind: 'note',
         path: 'notes/Concepts/Online Softmax.md',
@@ -106,7 +106,7 @@ test('dispatchUri opens markdown note links with the Human Learning markdown edi
     [
       'vscode.openWith',
       { fsPath: '/vault/notes/Concepts/Online Softmax.md' },
-      'human-learning.markdownEditor',
+      'llm-wiki.markdownEditor',
     ],
   ]);
   assert.deepEqual(openTextDocumentCalls, []);
@@ -114,8 +114,8 @@ test('dispatchUri opens markdown note links with the Human Learning markdown edi
 });
 
 test('dispatchUri refuses to create a note through a workspace symlink', async () => {
-  const root = mkdtempSync(join(tmpdir(), 'hl-uri-root-'));
-  const outside = mkdtempSync(join(tmpdir(), 'hl-uri-outside-'));
+  const root = mkdtempSync(join(tmpdir(), 'llm-wiki-uri-root-'));
+  const outside = mkdtempSync(join(tmpdir(), 'llm-wiki-uri-outside-'));
   const executeCommandCalls = [];
   const errorMessages = [];
   try {
@@ -133,7 +133,7 @@ test('dispatchUri refuses to create a note through a workspace symlink', async (
     });
     const { dispatchUri } = loadTsModule('src/uriDispatcher.ts', {
       vscode,
-      '@human-learning/core': {
+      '@llm-wiki/core': {
         classifyReferenceTarget: () => ({
           kind: 'note',
           path: 'notes/out/Escape.md',
@@ -171,7 +171,7 @@ test('dispatchUri creates missing markdown note links before opening them', asyn
   });
   const { dispatchUri } = loadTsModule('src/uriDispatcher.ts', {
     vscode,
-    '@human-learning/core': {
+    '@llm-wiki/core': {
       classifyReferenceTarget: () => ({
         kind: 'note',
         path: 'notes/Concepts/Linked Concept.md',
@@ -200,7 +200,7 @@ test('dispatchUri creates missing markdown note links before opening them', asyn
     [
       'vscode.openWith',
       { fsPath: '/vault/notes/Concepts/Linked Concept.md' },
-      'human-learning.markdownEditor',
+      'llm-wiki.markdownEditor',
     ],
   ]);
 });
@@ -220,7 +220,7 @@ test('dispatchUri rejects note targets that would create files outside the works
   });
   const { dispatchUri } = loadTsModule('src/uriDispatcher.ts', {
     vscode,
-    '@human-learning/core': {
+    '@llm-wiki/core': {
       classifyReferenceTarget: () => ({
         kind: 'note',
         path: '../outside.md',
@@ -260,7 +260,7 @@ test('dispatchUri rejects relative code, asset, and PDF targets outside the work
     });
     const { dispatchUri } = loadTsModule('src/uriDispatcher.ts', {
       vscode,
-      '@human-learning/core': {
+      '@llm-wiki/core': {
         classifyReferenceTarget: () => ({ kind, path }),
       },
       fs: { existsSync: () => true },
@@ -291,7 +291,7 @@ test('dispatchUri without a workspace allows only web and absolute PDF viewing',
   });
   const { dispatchUri } = loadTsModule('src/uriDispatcher.ts', {
     vscode,
-    '@human-learning/core': {
+    '@llm-wiki/core': {
       classifyReferenceTarget: uri => {
         if (uri.startsWith('https://')) return { kind: 'web', url: uri };
         if (uri.startsWith('/')) {
@@ -308,7 +308,7 @@ test('dispatchUri without a workspace allows only web and absolute PDF viewing',
   await dispatchUri(undefined, 'notes/relative.md');
 
   assert.deepEqual(executeCommandCalls, [[
-    'human-learning.openPdfTarget',
+    'llm-wiki.openPdfTarget',
     { pdfPath: '/outside/read-only.pdf', page: 4 },
   ]]);
   assert.equal(openExternalCalls.length, 1);
@@ -321,7 +321,7 @@ test('dispatchUri without a workspace allows only web and absolute PDF viewing',
   ]);
 });
 
-test('dispatchUri reveals note headings inside the Human Learning markdown editor after opening', async () => {
+test('dispatchUri reveals note headings inside the LLM Wiki markdown editor after opening', async () => {
   const executeCommandCalls = [];
   const document = {
     uri: { fsPath: '/vault/notes/Concepts/Online Softmax.md' },
@@ -336,7 +336,7 @@ test('dispatchUri reveals note headings inside the Human Learning markdown edito
   });
   const { dispatchUri } = loadTsModule('src/uriDispatcher.ts', {
     vscode,
-    '@human-learning/core': {
+    '@llm-wiki/core': {
       classifyReferenceTarget: () => ({
         kind: 'note',
         path: 'notes/Concepts/Online Softmax.md',
@@ -356,10 +356,10 @@ test('dispatchUri reveals note headings inside the Human Learning markdown edito
     [
       'vscode.openWith',
       { fsPath: '/vault/notes/Concepts/Online Softmax.md' },
-      'human-learning.markdownEditor',
+      'llm-wiki.markdownEditor',
     ],
     [
-      'human-learning.revealInMarkdownEditor',
+      'llm-wiki.revealInMarkdownEditor',
       {
         uri: { fsPath: '/vault/notes/Concepts/Online Softmax.md' },
         selection: { from: 9, to: 9 },
@@ -386,7 +386,7 @@ test('dispatchUri reveals Markdown line fragments as complete line ranges', asyn
   });
   const { dispatchUri } = loadTsModule('src/uriDispatcher.ts', {
     vscode,
-    '@human-learning/core': {
+    '@llm-wiki/core': {
       classifyReferenceTarget: () => ({
         kind: 'note',
         path: 'notes/Concepts/Memory.md',
@@ -399,7 +399,7 @@ test('dispatchUri reveals Markdown line fragments as complete line ranges', asyn
   await dispatchUri('/vault', 'notes/Concepts/Memory.md#L4-L5');
 
   assert.deepEqual(executeCommandCalls.at(-1), [
-    'human-learning.revealInMarkdownEditor',
+    'llm-wiki.revealInMarkdownEditor',
     {
       uri: { fsPath: '/vault/notes/Concepts/Memory.md' },
       selection: { from: 17, to: 30 },
@@ -422,7 +422,7 @@ test('dispatchUri reveals Obsidian block references inside markdown notes', asyn
   });
   const { dispatchUri } = loadTsModule('src/uriDispatcher.ts', {
     vscode,
-    '@human-learning/core': {
+    '@llm-wiki/core': {
       classifyReferenceTarget: () => ({
         kind: 'note',
         path: 'notes/Concepts/Online Softmax.md',
@@ -442,10 +442,10 @@ test('dispatchUri reveals Obsidian block references inside markdown notes', asyn
     [
       'vscode.openWith',
       { fsPath: '/vault/notes/Concepts/Online Softmax.md' },
-      'human-learning.markdownEditor',
+      'llm-wiki.markdownEditor',
     ],
     [
-      'human-learning.revealInMarkdownEditor',
+      'llm-wiki.revealInMarkdownEditor',
       {
         uri: { fsPath: '/vault/notes/Concepts/Online Softmax.md' },
         selection: { from: 9, to: 9 },
@@ -477,7 +477,7 @@ test('dispatchUri transports portable PDF text fragments without database lookup
     });
     const { dispatchUri } = loadTsModule(relativePath, {
       vscode,
-      '@human-learning/core': {
+      '@llm-wiki/core': {
         classifyReferenceTarget: () => ({
           kind: 'pdf',
           uri,
@@ -496,7 +496,7 @@ test('dispatchUri transports portable PDF text fragments without database lookup
     await dispatchUri('/vault', uri);
 
     assert.deepEqual(executeCommandCalls, [[
-      'human-learning.openPdfTarget',
+      'llm-wiki.openPdfTarget',
       {
         pdfPath: 'raw/pdf/paper.pdf',
         page: 7,
@@ -506,7 +506,7 @@ test('dispatchUri transports portable PDF text fragments without database lookup
   }
 });
 
-test('dispatchUri unwraps Human Learning product links before opening an anchored PDF', async () => {
+test('dispatchUri unwraps LLM Wiki product links before opening an anchored PDF', async () => {
   const executeCommandCalls = [];
   const classifiedUris = [];
   const portableUri =
@@ -520,7 +520,7 @@ test('dispatchUri unwraps Human Learning product links before opening an anchore
   });
   const { dispatchUri } = loadTsModule('src/uriDispatcher.ts', {
     vscode,
-    '@human-learning/core': {
+    '@llm-wiki/core': {
       classifyReferenceTarget: uri => {
         classifiedUris.push(uri);
         return {
@@ -538,7 +538,7 @@ test('dispatchUri unwraps Human Learning product links before opening an anchore
 
   assert.deepEqual(classifiedUris, [portableUri]);
   assert.deepEqual(executeCommandCalls, [[
-    'human-learning.openPdfTarget',
+    'llm-wiki.openPdfTarget',
     {
       pdfPath: 'raw/pdf/ddia.pdf',
       page: 25,
@@ -551,8 +551,8 @@ test('dispatchUri opens local anchor bridge file links with their dedicated edit
   const executeCommandCalls = [];
   const errorMessages = [];
   const anchorUri =
-    'file:///vault/.hl/agent/exports/export-1/'
-    + `source-${'a'.repeat(64)}.hlanchor`;
+    'file:///vault/.llm_wiki/agent/exports/export-1/'
+    + `source-${'a'.repeat(64)}.llm_wiki_anchor`;
   const vscode = createVscodeMock({
     executeCommandCalls,
     openTextDocumentCalls: [],
@@ -562,7 +562,7 @@ test('dispatchUri opens local anchor bridge file links with their dedicated edit
   });
   const { dispatchUri } = loadTsModule('src/uriDispatcher.ts', {
     vscode,
-    '@human-learning/core': {
+    '@llm-wiki/core': {
       classifyReferenceTarget: uri => ({
         kind: 'unknown',
         uri,
@@ -576,13 +576,13 @@ test('dispatchUri opens local anchor bridge file links with their dedicated edit
   assert.equal(executeCommandCalls.length, 1);
   assert.equal(executeCommandCalls[0][0], 'vscode.openWith');
   assert.equal(executeCommandCalls[0][1].toString(), anchorUri);
-  assert.equal(executeCommandCalls[0][2], 'human-learning.anchorFile');
+  assert.equal(executeCommandCalls[0][2], 'llm-wiki.anchorFile');
   assert.deepEqual(errorMessages, []);
 });
 
 test('trusted workspaces can open a final PDF file symlink without allowing symlinked directories', async () => {
-  const root = mkdtempSync(join(tmpdir(), 'hl-uri-pdf-root-'));
-  const outside = mkdtempSync(join(tmpdir(), 'hl-uri-pdf-outside-'));
+  const root = mkdtempSync(join(tmpdir(), 'llm-wiki-uri-pdf-root-'));
+  const outside = mkdtempSync(join(tmpdir(), 'llm-wiki-uri-pdf-outside-'));
   try {
     mkdirSync(join(root, 'raw', 'pdf'), { recursive: true });
     const outsidePdf = join(outside, 'paper.pdf');
@@ -602,7 +602,7 @@ test('trusted workspaces can open a final PDF file symlink without allowing syml
     });
     const { dispatchUri } = loadTsModule('src/uriDispatcher.ts', {
       vscode,
-      '@human-learning/core': {
+      '@llm-wiki/core': {
         classifyReferenceTarget: uri => ({
           kind: 'pdf',
           uri,
@@ -616,7 +616,7 @@ test('trusted workspaces can open a final PDF file symlink without allowing syml
     await dispatchUri(root, 'linked-pdfs/paper.pdf#page=2');
 
     assert.deepEqual(executeCommandCalls, [[
-      'human-learning.openPdfTarget',
+      'llm-wiki.openPdfTarget',
       { pdfPath: 'raw/pdf/paper.pdf', page: 2 },
     ]]);
     assert.deepEqual(errorMessages, [
@@ -629,8 +629,8 @@ test('trusted workspaces can open a final PDF file symlink without allowing syml
 });
 
 test('untrusted workspaces reject final PDF file symlinks', async () => {
-  const root = mkdtempSync(join(tmpdir(), 'hl-uri-pdf-untrusted-root-'));
-  const outside = mkdtempSync(join(tmpdir(), 'hl-uri-pdf-untrusted-outside-'));
+  const root = mkdtempSync(join(tmpdir(), 'llm-wiki-uri-pdf-untrusted-root-'));
+  const outside = mkdtempSync(join(tmpdir(), 'llm-wiki-uri-pdf-untrusted-outside-'));
   try {
     mkdirSync(join(root, 'raw', 'pdf'), { recursive: true });
     const outsidePdf = join(outside, 'paper.pdf');
@@ -649,7 +649,7 @@ test('untrusted workspaces reject final PDF file symlinks', async () => {
     });
     const { dispatchUri } = loadTsModule('src/uriDispatcher.ts', {
       vscode,
-      '@human-learning/core': {
+      '@llm-wiki/core': {
         classifyReferenceTarget: uri => ({
           kind: 'pdf',
           uri,
@@ -688,7 +688,7 @@ test('dispatchUri no longer resolves direct internal PDF anchor IDs', async () =
     });
     const { dispatchUri } = loadTsModule(relativePath, {
       vscode,
-      '@human-learning/core': {
+      '@llm-wiki/core': {
         classifyReferenceTarget: uri => ({ kind: 'unknown', uri }),
         openDatabase: () => { throw new Error('direct anchor IDs must not open the database'); },
         closeDatabase: () => undefined,
@@ -705,7 +705,7 @@ test('dispatchUri no longer resolves direct internal PDF anchor IDs', async () =
   }
 });
 
-test('dispatchUri can route web targets into the Human Learning web browser instead of Chrome', async () => {
+test('dispatchUri can route web targets into the LLM Wiki web browser instead of Chrome', async () => {
   const executeCommandCalls = [];
   const openExternalCalls = [];
   const openedWebTargets = [];
@@ -722,7 +722,7 @@ test('dispatchUri can route web targets into the Human Learning web browser inst
   });
   const { dispatchUri } = loadTsModule('src/uriDispatcher.ts', {
     vscode,
-    '@human-learning/core': {
+    '@llm-wiki/core': {
       classifyReferenceTarget: () => ({
         kind: 'web',
         url: 'https://vuejs.org/guide/components/props.html',
@@ -763,14 +763,14 @@ test('dispatchUri preserves absolute PDF paths in default-editor fallback', asyn
       },
       executeCommand: async (...args) => {
         executeCommandCalls.push(args);
-        if (args[0] === 'human-learning.openPdfTarget') {
-          throw new Error("command 'human-learning.openPdfTarget' not found");
+        if (args[0] === 'llm-wiki.openPdfTarget') {
+          throw new Error("command 'llm-wiki.openPdfTarget' not found");
         }
       },
     });
     const { dispatchUri } = loadTsModule(relativePath, {
       vscode,
-      '@human-learning/core': {
+      '@llm-wiki/core': {
         classifyReferenceTarget: () => ({
           kind: 'pdf',
           path: pdfPath,
@@ -789,7 +789,7 @@ test('dispatchUri preserves absolute PDF paths in default-editor fallback', asyn
 
     assert.deepEqual(executeCommandCalls, [
       [
-        'human-learning.openPdfTarget',
+        'llm-wiki.openPdfTarget',
         { pdfPath, page: 7, textFragment },
       ],
       [

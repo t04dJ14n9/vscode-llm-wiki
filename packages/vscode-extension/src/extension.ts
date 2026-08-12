@@ -1,13 +1,13 @@
 import * as vscode from 'vscode';
 import { isAbsolute } from 'node:path';
-import type { PdfTextFragment } from '@human-learning/core';
+import type { PdfTextFragment } from '@llm-wiki/core';
 import {
   addSelectionToContext,
   syncSelectionExportAttachment,
   type SelectionContextExportResult,
 } from './agentContext';
 import { registerAnchorFileEditorProvider } from './anchorFileEditorProvider';
-import { humanLearningAnchorTarget } from './anchorUris';
+import { llmWikiAnchorTarget } from './anchorUris';
 import {
   createAgentSurfaceCapabilitySource,
   handoffSelectionToAgent,
@@ -51,7 +51,7 @@ let refreshTimer: NodeJS.Timeout | undefined;
 const STARTUP_CUSTOM_EDITOR_RETRY_DELAYS_MS = [0, 250, 1_000] as const;
 const STARTUP_CUSTOM_EDITOR_MONITOR_MS = 1_500;
 const WORKSPACE_REQUIRED_MESSAGE =
-  'Open a folder to use Human Learning notes and repository features.';
+  'Open a folder to use LLM Wiki notes and repository features.';
 
 interface AddSelectionToChatInput {
   selection?: SelectionContext;
@@ -63,7 +63,7 @@ interface AddSelectionToAgentInput extends AddSelectionToChatInput {
 }
 
 export const ADD_SELECTION_TO_AGENT_COMMAND =
-  'human-learning.addSelectionToAgent';
+  'llm-wiki.addSelectionToAgent';
 
 type SelectionHandoffTarget =
   | { kind: 'picker' }
@@ -94,7 +94,7 @@ export function activate(context: vscode.ExtensionContext): void {
   });
   void vscode.commands.executeCommand(
     'setContext',
-    'humanLearningHostIsCursor',
+    'llmWikiHostIsCursor',
     agentCapabilitySource.read().cursorAgent,
   );
   markdownOutlineProvider = registerMarkdownOutlineTreeProvider(context, pdfEditorProvider);
@@ -115,9 +115,9 @@ export function activate(context: vscode.ExtensionContext): void {
     ),
     vscode.window.registerUriHandler({
       async handleUri(uri): Promise<void> {
-        const target = humanLearningAnchorTarget(uri);
+        const target = llmWikiAnchorTarget(uri);
         if (!target) {
-          vscode.window.showWarningMessage('This Human Learning link is invalid.');
+          vscode.window.showWarningMessage('This LLM Wiki link is invalid.');
           return;
         }
         await dispatchUri(workspaceRoot, target);
@@ -132,8 +132,8 @@ export function activate(context: vscode.ExtensionContext): void {
     backlinksProvider = new BacklinksProvider(workspaceRoot, 'backlinks');
     forwardLinksProvider = new BacklinksProvider(workspaceRoot, 'forward');
     context.subscriptions.push(
-      vscode.window.registerTreeDataProvider('hl-backlinks', backlinksProvider),
-      vscode.window.registerTreeDataProvider('hl-forward-links', forwardLinksProvider),
+      vscode.window.registerTreeDataProvider('llm-wiki-backlinks', backlinksProvider),
+      vscode.window.registerTreeDataProvider('llm-wiki-forward-links', forwardLinksProvider),
     );
   }
   context.subscriptions.push(
@@ -162,8 +162,8 @@ export function activate(context: vscode.ExtensionContext): void {
   refreshAllViews();
   vscode.window.showInformationMessage(
     workspaceRoot
-      ? `Human Learning ready — Markdown, PDF, and Git-backed notes at ${workspaceRoot}`
-      : 'Human Learning viewers ready — open a folder to enable learning notes and repository features.',
+      ? `LLM Wiki ready — Markdown, PDF, and Git-backed notes at ${workspaceRoot}`
+      : 'LLM Wiki viewers ready — open a folder to enable learning notes and repository features.',
   );
 }
 
@@ -200,16 +200,16 @@ function registerCommands(
   };
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('human-learning.openAnchor', async (uri?: string) => {
+    vscode.commands.registerCommand('llm-wiki.openAnchor', async (uri?: string) => {
       const target = uri ?? await vscode.window.showInputBox({
         prompt: 'Enter a note, PDF, code, web, or source link',
       });
       if (target) await dispatchUri(workspaceRoot, target);
     }),
-    vscode.commands.registerCommand('human-learning.openLinkTarget', async (uri?: string) => {
+    vscode.commands.registerCommand('llm-wiki.openLinkTarget', async (uri?: string) => {
       if (uri) await dispatchUri(workspaceRoot, uri);
     }),
-    vscode.commands.registerCommand('human-learning.openPdfTarget', async (args?: {
+    vscode.commands.registerCommand('llm-wiki.openPdfTarget', async (args?: {
       pdfPath?: string;
       page?: number;
       textFragment?: PdfTextFragment;
@@ -224,7 +224,7 @@ function registerCommands(
       }
       await pdfEditorProvider?.openPdfAtTarget(args.pdfPath, args.page, args.textFragment);
     }),
-    vscode.commands.registerCommand('human-learning.openInMarkdownEditor', async () => {
+    vscode.commands.registerCommand('llm-wiki.openInMarkdownEditor', async () => {
       const uri = getActiveMarkdownUri();
       if (uri) {
         await vscode.commands.executeCommand(
@@ -234,7 +234,7 @@ function registerCommands(
         );
       }
     }),
-    vscode.commands.registerCommand('human-learning.openLearningDiscussion', async (args?: {
+    vscode.commands.registerCommand('llm-wiki.openLearningDiscussion', async (args?: {
       discussionId?: string;
       notePath?: string;
     }) => {
@@ -262,7 +262,7 @@ function registerCommands(
         MarkdownEditorProvider.viewType,
       );
     }),
-    vscode.commands.registerCommand('human-learning.addSelectionToContext', async () => {
+    vscode.commands.registerCommand('llm-wiki.addSelectionToContext', async () => {
       const root = requireWorkspaceRoot(workspaceRoot);
       if (!root) return;
       const exported = await exportCurrentSelection(root);
@@ -271,11 +271,11 @@ function registerCommands(
       }
     }),
     vscode.commands.registerCommand(
-      'human-learning.addSelectionToChat',
+      'llm-wiki.addSelectionToChat',
       (input?: AddSelectionToChatInput) => addSelectionToChat(input, { kind: 'cursor' }),
     ),
     vscode.commands.registerCommand(
-      'human-learning.addSelectionToCursorChat',
+      'llm-wiki.addSelectionToCursorChat',
       (input?: AddSelectionToChatInput) => addSelectionToChat(input, { kind: 'cursor' }),
     ),
     vscode.commands.registerCommand(
@@ -286,14 +286,14 @@ function registerCommands(
       },
     ),
     vscode.commands.registerCommand(
-      'human-learning.addCursorBrowserSelectionToChat',
+      'llm-wiki.addCursorBrowserSelectionToChat',
       async () => {
         const root = requireWorkspaceRoot(workspaceRoot);
         if (!root) return;
         const capture = await captureActiveCursorBrowserSelection();
         if (!capture) {
           vscode.window.showWarningMessage(
-            'No active Cursor Browser text selection was available. In stock VS Code, use Human Learning: Open Experimental Web Reader.',
+            'No active Cursor Browser text selection was available. In stock VS Code, use LLM Wiki: Open Experimental Web Reader.',
           );
           return;
         }
@@ -306,7 +306,7 @@ function registerCommands(
         );
       },
     ),
-    vscode.commands.registerCommand('human-learning.generateDailyNote', async () => {
+    vscode.commands.registerCommand('llm-wiki.generateDailyNote', async () => {
       const root = requireWorkspaceRoot(workspaceRoot);
       if (!root) return;
       const daily = await generateDailyNote({ workspaceRoot: root });
@@ -319,33 +319,33 @@ function registerCommands(
         `Daily note ready: ${daily.dueReviews.length} reviews, ${daily.carriedTodos.length} carried tasks`,
       );
     }),
-    vscode.commands.registerCommand('human-learning.showKnowledgeGraph', async () => {
+    vscode.commands.registerCommand('llm-wiki.showKnowledgeGraph', async () => {
       const root = requireWorkspaceRoot(workspaceRoot);
       if (!root) return;
       const graph = getConceptGraph(await loadFilesystemWiki(root));
       graphPanel?.show(graph);
     }),
-    vscode.commands.registerCommand('human-learning.syncRepository', async () => {
+    vscode.commands.registerCommand('llm-wiki.syncRepository', async () => {
       const root = requireWorkspaceRoot(workspaceRoot);
       if (root) await runRepositorySync(root);
     }),
-    vscode.commands.registerCommand('human-learning.refreshLinks', async () => {
+    vscode.commands.registerCommand('llm-wiki.refreshLinks', async () => {
       if (!requireWorkspaceRoot(workspaceRoot)) return;
       await refreshFilesystemViews();
       vscode.window.showInformationMessage('Filesystem links and annotations refreshed.');
     }),
-    vscode.commands.registerCommand('human-learning.toggleVimMode', async () => {
+    vscode.commands.registerCommand('llm-wiki.toggleVimMode', async () => {
       const enabled = await markdownEditorProvider?.toggleVimMode();
       if (enabled !== undefined) {
         vscode.window.showInformationMessage(
-          `Human Learning Vim mode ${enabled ? 'enabled' : 'disabled'}`,
+          `LLM Wiki Vim mode ${enabled ? 'enabled' : 'disabled'}`,
         );
       }
     }),
-    vscode.commands.registerCommand('human-learning.consumeVimHostShortcut', async () => {
+    vscode.commands.registerCommand('llm-wiki.consumeVimHostShortcut', async () => {
       await markdownEditorProvider?.consumeVimHostShortcut();
     }),
-    vscode.commands.registerCommand('human-learning.revealInMarkdownEditor', async (args?: {
+    vscode.commands.registerCommand('llm-wiki.revealInMarkdownEditor', async (args?: {
       uri?: vscode.Uri;
       selection?: { from?: number; to?: number };
     }) => {
@@ -359,7 +359,7 @@ function registerCommands(
         to: args.selection.to,
       });
     }),
-    vscode.commands.registerCommand('human-learning.revealInPdfOutline', async (args?: {
+    vscode.commands.registerCommand('llm-wiki.revealInPdfOutline', async (args?: {
       uri?: vscode.Uri;
       destination?: unknown;
       title?: string;
@@ -372,28 +372,28 @@ function registerCommands(
         );
       }
     }),
-    vscode.commands.registerCommand('human-learning.pdfPrevPage', () => {
+    vscode.commands.registerCommand('llm-wiki.pdfPrevPage', () => {
       pdfEditorProvider?.getActiveWebview()?.postMessage({ type: 'navigate', direction: 'prev' });
     }),
-    vscode.commands.registerCommand('human-learning.pdfNextPage', () => {
+    vscode.commands.registerCommand('llm-wiki.pdfNextPage', () => {
       pdfEditorProvider?.getActiveWebview()?.postMessage({ type: 'navigate', direction: 'next' });
     }),
-    vscode.commands.registerCommand('human-learning.pdfZoomIn', () => {
+    vscode.commands.registerCommand('llm-wiki.pdfZoomIn', () => {
       pdfEditorProvider?.getActiveWebview()?.postMessage({ type: 'zoom', delta: 0.15 });
     }),
-    vscode.commands.registerCommand('human-learning.pdfZoomOut', () => {
+    vscode.commands.registerCommand('llm-wiki.pdfZoomOut', () => {
       pdfEditorProvider?.getActiveWebview()?.postMessage({ type: 'zoom', delta: -0.15 });
     }),
-    vscode.commands.registerCommand('human-learning.pdfFitWidth', () => {
+    vscode.commands.registerCommand('llm-wiki.pdfFitWidth', () => {
       pdfEditorProvider?.getActiveWebview()?.postMessage({ type: 'fitWidth' });
     }),
-    vscode.commands.registerCommand('human-learning.pdfToggleContinuousScroll', () => {
+    vscode.commands.registerCommand('llm-wiki.pdfToggleContinuousScroll', () => {
       pdfEditorProvider?.getActiveWebview()?.postMessage({ type: 'toggleContinuousScroll' });
     }),
-    vscode.commands.registerCommand('human-learning.pdfToggleTwoPageView', () => {
+    vscode.commands.registerCommand('llm-wiki.pdfToggleTwoPageView', () => {
       pdfEditorProvider?.getActiveWebview()?.postMessage({ type: 'toggleTwoPageView' });
     }),
-    vscode.commands.registerCommand('human-learning.openPdfMarkdownColumns', async () => {
+    vscode.commands.registerCommand('llm-wiki.openPdfMarkdownColumns', async () => {
       const pdfUri = getActivePdfUri();
       const markdownUri = getActiveMarkdownUri();
       if (!pdfUri || !markdownUri) {

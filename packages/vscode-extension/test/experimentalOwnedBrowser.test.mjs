@@ -80,8 +80,8 @@ test('experimental browser registration stays opt-in and exposes stable command 
   assert.deepEqual(
     registeredCommands.slice(-2).map(value => value.id),
     [
-      'human-learning.experimentalBrowser.open',
-      'human-learning.experimentalBrowser.sendSelection',
+      'llm-wiki.experimentalBrowser.open',
+      'llm-wiki.experimentalBrowser.sendSelection',
     ],
   );
   assert.equal(context.subscriptions.length, 3);
@@ -353,7 +353,7 @@ test('owned webview is strict-CSP and source capture cannot include a remote pag
   }, {
     toString: () => 'extension:',
   }, 'fixed-nonce');
-  assert.match(html, /Human Learning Browser \(Experimental\)/);
+  assert.match(html, /LLM Wiki Browser \(Experimental\)/);
   assert.match(html, /default-src 'none'/);
   assert.match(html, /connect-src 'none'/);
   assert.match(html, /img-src blob: data:/);

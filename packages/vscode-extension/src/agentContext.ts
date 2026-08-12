@@ -20,7 +20,7 @@ import {
   loadFilesystemWiki,
 } from './filesystemWiki';
 import { encodeAnchorFile } from './anchorFileCodec';
-import { humanLearningOpenAnchorUri } from './anchorUris';
+import { llmWikiOpenAnchorUri } from './anchorUris';
 import { notePathToUri } from './wikiLinks';
 
 export interface AddSelectionToContextOptions {
@@ -67,7 +67,7 @@ export async function addSelectionToContext(
 
   const anchorUri = activeSelection.anchorUri
     ?? defaultSelectionAnchor(relPath, startLine, endLine);
-  const openUri = humanLearningOpenAnchorUri(anchorUri);
+  const openUri = llmWikiOpenAnchorUri(anchorUri);
   const anchorFile = /^https?:\/\//i.test(anchorUri)
     ? undefined
     : safeEncodeAnchorFile(anchorUri, vaultRoot);
@@ -127,7 +127,7 @@ ${fence}
   });
 
   vscode.window.showInformationMessage(
-    `Selection exported to .hl/agent/selection.md + .hl/agent/selection.json`
+    `Selection exported to .llm_wiki/agent/selection.md + .llm_wiki/agent/selection.json`
   );
   return exported;
 }
@@ -245,7 +245,7 @@ function secureExportLayout(vaultRoot: string): ExportLayout {
   assertDirectory(rootPath);
   const rootRealPath = realpathSync(rootPath);
   let current = rootPath;
-  for (const segment of ['.hl', 'agent', 'exports']) {
+  for (const segment of ['.llm_wiki', 'agent', 'exports']) {
     current = join(current, segment);
     const stat = lstat(current);
     if (stat) {
@@ -268,7 +268,7 @@ function createSelectionExportPaths(
 ): SelectionExportPaths {
   if (
     anchorFileName !== undefined
-    && !/^source-[a-f0-9]{64}\.hlanchor$/.test(anchorFileName)
+    && !/^source-[a-f0-9]{64}\.llm_wiki_anchor$/.test(anchorFileName)
   ) {
     throw new Error('Selection anchor filename is invalid.');
   }
@@ -299,7 +299,7 @@ function publishSelection(
     || Boolean(anchorFileName) !== Boolean(anchor)
     || (
       anchorFileName !== undefined
-      && !/^source-[a-f0-9]{64}\.hlanchor$/.test(anchorFileName)
+      && !/^source-[a-f0-9]{64}\.llm_wiki_anchor$/.test(anchorFileName)
     )
     || resolve(paths.markdownPath) !== join(directoryPath, 'selection.md')
     || resolve(paths.jsonPath) !== join(directoryPath, 'selection.json')
@@ -330,21 +330,21 @@ function validateExportResult(exported: SelectionContextExportResult): ExportLay
   const directoryPath = resolve(exported.directoryPath);
   const exportsDir = dirname(directoryPath);
   const agentDir = dirname(exportsDir);
-  const hlDir = dirname(agentDir);
-  const rootPath = dirname(hlDir);
+  const llmWikiDir = dirname(agentDir);
+  const rootPath = dirname(llmWikiDir);
   const anchorFileName = exported.anchorPath
     ? basename(exported.anchorPath)
     : undefined;
   if (
     basename(exportsDir) !== 'exports'
     || basename(agentDir) !== 'agent'
-    || basename(hlDir) !== '.hl'
+    || basename(llmWikiDir) !== '.llm_wiki'
     || basename(directoryPath).startsWith('.')
     || resolve(exported.markdownPath) !== join(directoryPath, 'selection.md')
     || resolve(exported.jsonPath) !== join(directoryPath, 'selection.json')
     || (
       anchorFileName !== undefined
-      && !/^source-[a-f0-9]{64}\.hlanchor$/.test(anchorFileName)
+      && !/^source-[a-f0-9]{64}\.llm_wiki_anchor$/.test(anchorFileName)
     )
     || (
       exported.anchorPath !== undefined
@@ -354,7 +354,7 @@ function validateExportResult(exported: SelectionContextExportResult): ExportLay
 
   assertDirectory(rootPath);
   const rootRealPath = realpathSync(rootPath);
-  for (const path of [hlDir, agentDir, exportsDir, directoryPath]) {
+  for (const path of [llmWikiDir, agentDir, exportsDir, directoryPath]) {
     assertDirectory(path);
     assertConfined(rootRealPath, realpathSync(path));
   }

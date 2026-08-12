@@ -58,9 +58,9 @@ function loadCapture(overrides = {}) {
       addSelectionToContext: async (_vaultRoot, options) => {
         exportedSelections.push(await options.getActiveSelectionContext());
         return {
-          directoryPath: '/vault/.hl/agent/exports/web',
-          markdownPath: '/vault/.hl/agent/exports/web/selection.md',
-          jsonPath: '/vault/.hl/agent/exports/web/selection.json',
+          directoryPath: '/vault/.llm_wiki/agent/exports/web',
+          markdownPath: '/vault/.llm_wiki/agent/exports/web/selection.md',
+          jsonPath: '/vault/.llm_wiki/agent/exports/web/selection.json',
         };
       },
       syncSelectionExportAttachment: async (exported, fileName, bytes) => {
@@ -231,7 +231,7 @@ test('captures only the active Cursor Browser tab and validates it around the cr
       type: 'png',
       fullPage: false,
       viewId: 'tab-1',
-      ref: '#human-learning-web-crop-stable-marker',
+      ref: '#llm-wiki-web-crop-stable-marker',
     },
   ]);
   const cleanupCall = host.calls.at(-1);
@@ -419,7 +419,7 @@ test('exports an immutable untrusted web context and its validated selection cro
   });
 
   assert.ok(result);
-  assert.equal(result.snapshotPath, '/vault/.hl/agent/exports/web/selection.png');
+  assert.equal(result.snapshotPath, '/vault/.llm_wiki/agent/exports/web/selection.png');
   assert.equal(exportedSelections.length, 1);
   const selection = exportedSelections[0];
   assert.equal(selection.uri.scheme, 'https');

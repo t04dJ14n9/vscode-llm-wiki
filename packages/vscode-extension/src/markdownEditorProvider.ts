@@ -35,10 +35,10 @@ interface PendingSelectionRequest {
 }
 
 export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
-  static readonly viewType = 'human-learning.markdownEditor';
+  static readonly viewType = 'llm-wiki.markdownEditor';
   private static readonly vimModeStorageKey = 'markdownVimMode';
-  private static readonly vimModeContextKey = 'humanLearningMarkdownVimMode';
-  private static readonly selectionContextKey = 'humanLearningMarkdownHasSelection';
+  private static readonly vimModeContextKey = 'llmWikiMarkdownVimMode';
+  private static readonly selectionContextKey = 'llmWikiMarkdownHasSelection';
 
   private readonly webviews = new Map<vscode.WebviewPanel, ActiveMarkdownWebview>();
   private readonly pendingReveals = new Map<string, RevealSelection>();
@@ -404,7 +404,7 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
         case 'openUri':
           if (typeof message.uri === 'string') {
             await vscode.commands.executeCommand(
-              'human-learning.openLinkTarget',
+              'llm-wiki.openLinkTarget',
               resolveMarkdownEditorLink(message.uri, documentRelativePath(document.uri)),
             );
           }
@@ -415,7 +415,7 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
             || typeof message.discussionId !== 'string'
             || path.isAbsolute(message.notePath)
           ) return;
-          await vscode.commands.executeCommand('human-learning.openLearningDiscussion', {
+          await vscode.commands.executeCommand('llm-wiki.openLearningDiscussion', {
             notePath: message.notePath,
             discussionId: message.discussionId,
           });
@@ -431,7 +431,7 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
         case 'addSelectionToCursorChat':
           this.activePanel = webviewPanel;
           this.updateSelectionContext();
-          await vscode.commands.executeCommand('human-learning.addSelectionToCursorChat');
+          await vscode.commands.executeCommand('llm-wiki.addSelectionToCursorChat');
           break;
         case 'renameTitle': {
           if (typeof message.title !== 'string') return;
@@ -442,7 +442,7 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
         }
         case 'error': {
           const detail = typeof message.message === 'string' ? message.message : 'Unknown webview error';
-          vscode.window.showErrorMessage(`Human Learning Markdown: ${detail}`);
+          vscode.window.showErrorMessage(`LLM Wiki Markdown: ${detail}`);
           break;
         }
       }
@@ -559,7 +559,7 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
   <meta charset="UTF-8">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'nonce-${nonce}' ${webview.cspSource}; style-src ${webview.cspSource} 'unsafe-inline'; font-src ${webview.cspSource}; img-src ${webview.cspSource} data: https: http:;">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Human Learning Markdown</title>
+  <title>LLM Wiki Markdown</title>
   <style>
     html, body, #editor { height: 100%; margin: 0; padding: 0; overflow: hidden; background: var(--vscode-editor-background); color: var(--vscode-editor-foreground); }
   </style>

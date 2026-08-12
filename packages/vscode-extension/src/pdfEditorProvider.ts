@@ -7,7 +7,7 @@ import {
   type PdfDiscussionAnnotationV1,
   type PdfDiscussionStore,
   type PdfTextFragment,
-} from '@human-learning/core';
+} from '@llm-wiki/core';
 import {
   createPdfDiscussionStoreForDocument,
   PDF_DISCUSSION_MAX_PNG_BYTES,
@@ -112,11 +112,11 @@ export interface PdfEditorProviderOptions {
 }
 
 export const ADD_SELECTION_TO_CURSOR_CHAT_COMMAND =
-  'human-learning.addSelectionToCursorChat';
+  'llm-wiki.addSelectionToCursorChat';
 export const ADD_SELECTION_TO_AGENT_COMMAND =
-  'human-learning.addSelectionToAgent';
+  'llm-wiki.addSelectionToAgent';
 
-const PDF_DISCUSSION_CONSENT_KEY = 'humanLearning.pdf.askPdfConsent';
+const PDF_DISCUSSION_CONSENT_KEY = 'llmWiki.pdf.askPdfConsent';
 const MAX_PENDING_SELECTION_AGENT_REQUESTS = 32;
 
 export interface OpenCodexThreadResult {
@@ -147,7 +147,7 @@ export async function openCodexThread(threadId: string): Promise<OpenCodexThread
 }
 
 export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
-  static readonly viewType = 'human-learning.pdfViewer';
+  static readonly viewType = 'llm-wiki.pdfViewer';
 
   private readonly webviews = new Map<string, ActivePdfWebview>();
   private readonly discussionStores = new Map<string, CachedPdfDiscussionStore>();
@@ -368,8 +368,8 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
     this.webviews.set(key, active);
     if (webviewPanel.active) {
       this.activeKey = key;
-      await vscode.commands.executeCommand('setContext', 'humanLearningPdfOpen', true);
-      await vscode.commands.executeCommand('setContext', 'humanLearningPdfHasSelection', false);
+      await vscode.commands.executeCommand('setContext', 'llmWikiPdfOpen', true);
+      await vscode.commands.executeCommand('setContext', 'llmWikiPdfHasSelection', false);
     }
 
     webview.onDidReceiveMessage(async (message: any) => {
@@ -434,7 +434,7 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
           if (!page) break;
           const relPath = vscode.workspace.asRelativePath(pdfUri);
           await vscode.env.clipboard.writeText(formatPdfPageLink(relPath, page));
-          vscode.window.showInformationMessage('Human Learning PDF page link copied');
+          vscode.window.showInformationMessage('LLM Wiki PDF page link copied');
           break;
         }
         case 'selectionChanged':
@@ -447,7 +447,7 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
         case 'pageChanged':
           break;
         case 'error':
-          vscode.window.showErrorMessage(`Human Learning PDF: ${message.message}`);
+          vscode.window.showErrorMessage(`LLM Wiki PDF: ${message.message}`);
           break;
       }
     });
@@ -456,14 +456,14 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
       if (!webviewPanel.active) {
         if (this.activeKey === key) {
           this.activeKey = undefined;
-          await vscode.commands.executeCommand('setContext', 'humanLearningPdfOpen', false);
-          await vscode.commands.executeCommand('setContext', 'humanLearningPdfHasSelection', false);
+          await vscode.commands.executeCommand('setContext', 'llmWikiPdfOpen', false);
+          await vscode.commands.executeCommand('setContext', 'llmWikiPdfHasSelection', false);
         }
         return;
       }
       this.activeKey = key;
-      await vscode.commands.executeCommand('setContext', 'humanLearningPdfOpen', true);
-      await vscode.commands.executeCommand('setContext', 'humanLearningPdfHasSelection', Boolean(active.selection));
+      await vscode.commands.executeCommand('setContext', 'llmWikiPdfOpen', true);
+      await vscode.commands.executeCommand('setContext', 'llmWikiPdfHasSelection', Boolean(active.selection));
       await this.sendPdfDiscussionState(webview, pdfUri);
       this.firePdfOutlineChanged(pdfUri);
     });
@@ -474,8 +474,8 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
       this.firePdfOutlineChanged(pdfUri);
       if (this.activeKey === key) {
         this.activeKey = undefined;
-        await vscode.commands.executeCommand('setContext', 'humanLearningPdfOpen', false);
-        await vscode.commands.executeCommand('setContext', 'humanLearningPdfHasSelection', false);
+        await vscode.commands.executeCommand('setContext', 'llmWikiPdfOpen', false);
+        await vscode.commands.executeCommand('setContext', 'llmWikiPdfHasSelection', false);
       }
     });
 
@@ -487,7 +487,7 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
       try {
         listener(uri);
       } catch (error) {
-        console.error('Human Learning PDF outline listener failed', error);
+        console.error('LLM Wiki PDF outline listener failed', error);
       }
     }
   }
@@ -739,7 +739,7 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
           await vscode.commands.executeCommand(
             'vscode.openWith',
             vscode.Uri.file(note.absolutePath),
-            'human-learning.markdownEditor',
+            'llm-wiki.markdownEditor',
           );
           return;
         }
@@ -980,7 +980,7 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
       const rect = normalizePdfRects(anchor.rects)?.[0];
       if (!rect) throw new Error('Cannot copy a PDF rectangle embed without rectangle geometry');
       await vscode.env.clipboard.writeText(formatPdfRectangleEmbed(relPath, anchor.page, rect));
-      vscode.window.showInformationMessage('Human Learning PDF rectangular embed link copied');
+      vscode.window.showInformationMessage('LLM Wiki PDF rectangular embed link copied');
       return;
     }
 
@@ -994,7 +994,7 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
 
     if (action === 'copyLink') {
       await vscode.env.clipboard.writeText(markdown);
-      vscode.window.showInformationMessage('Human Learning PDF link copied');
+      vscode.window.showInformationMessage('LLM Wiki PDF link copied');
     }
   }
 
@@ -1004,7 +1004,7 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
     active.pendingSelectionAgentRequests?.clear();
     active.selection = normalizePdfSelectionAnchor(anchor);
     if (this.activeKey === key) {
-      await vscode.commands.executeCommand('setContext', 'humanLearningPdfHasSelection', Boolean(active.selection));
+      await vscode.commands.executeCommand('setContext', 'llmWikiPdfHasSelection', Boolean(active.selection));
     }
   }
 
@@ -1047,7 +1047,7 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
   <meta charset="UTF-8">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; base-uri 'none'; form-action 'none'; img-src ${webview.cspSource} blob: data:; script-src 'nonce-${nonce}' ${webview.cspSource} 'wasm-unsafe-eval'; style-src ${webview.cspSource} 'unsafe-inline'; worker-src blob: ${webview.cspSource}; connect-src ${webview.cspSource} blob: data:;">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Human Learning PDF</title>
+  <title>LLM Wiki PDF</title>
   <style>
     html, body { height: 100%; margin: 0; padding: 0; background: var(--vscode-editor-background); color: var(--vscode-editor-foreground); overflow: hidden; }
     #toolbar { box-sizing: border-box; height: 38px; display: flex; gap: 4px; align-items: center; padding: 0 6px; border-bottom: 1px solid var(--vscode-panel-border); background: var(--vscode-sideBar-background); font: 12px var(--vscode-font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif); }
@@ -1365,7 +1365,7 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
   </div>
   <script nonce="${nonce}">
     window.__pdfiumWasmUrl = "${wasmUri.toString()}";
-    window.__humanLearningAskPdfEnabled = ${this.discussionController !== undefined};
+    window.__llmWikiAskPdfEnabled = ${this.discussionController !== undefined};
   </script>
   <script nonce="${nonce}" src="${scriptUri.toString()}?v=${nonce}"></script>
 </body>

@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 
-test.describe('Human Learning — E2E Bidirectional Links', () => {
+test.describe('LLM Wiki — E2E Bidirectional Links', () => {
 
   async function waitForEditorBootstrap(page: import('@playwright/test').Page): Promise<void> {
     await page.waitForFunction(() =>
@@ -98,12 +98,12 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
     // Wait for the editor to appear
     await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
 
-    // The native PDF link should be replaced by an .cm-hl-link widget button
-    const linkWidget = page.locator('.cm-hl-link');
+    // The native PDF link should be replaced by an .cm-llm-wiki-link widget button
+    const linkWidget = page.locator('.cm-llm-wiki-link');
     await expect(linkWidget.first()).toBeVisible({ timeout: 3000 });
 
-    // The wiki link is also rendered as an .cm-hl-link widget
-    const widgets = page.locator('.cm-hl-link');
+    // The wiki link is also rendered as an .cm-llm-wiki-link widget
+    const widgets = page.locator('.cm-llm-wiki-link');
     const count = await widgets.count();
     expect(count).toBeGreaterThanOrEqual(1);
   });
@@ -441,7 +441,7 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
       view.dispatch({ selection: { anchor: from, head: from + 'beta'.length } });
     });
 
-    const prompt = page.locator('.hl-cursor-selection-prompt');
+    const prompt = page.locator('.llm-wiki-cursor-selection-prompt');
     await expect(prompt).toBeVisible();
     await expect(prompt.locator('.add-to-chat-label')).toHaveText('Add to Chat');
     await expect(prompt.locator('.add-to-chat-shortcut')).toHaveText(/^(?:⌘L|Ctrl\+L)$/);
@@ -527,7 +527,7 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
       { timeout: 5000 },
     );
 
-    await expect(page.locator('.hl-cursor-selection-prompt')).toBeVisible();
+    await expect(page.locator('.llm-wiki-cursor-selection-prompt')).toBeVisible();
     await page.keyboard.press(process.platform === 'darwin' ? 'Meta+L' : 'Control+L');
     await page.waitForFunction(() =>
       window.__mockMessages?.some((message) =>
@@ -536,13 +536,13 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
       ),
       { timeout: 5000 },
     );
-    await expect(page.locator('.hl-cursor-selection-prompt')).toBeVisible();
+    await expect(page.locator('.llm-wiki-cursor-selection-prompt')).toBeVisible();
 
     await page.evaluate(() => {
       const view = window.__cmView;
       view.dispatch({ selection: { anchor: view.state.selection.main.head } });
     });
-    await expect(page.locator('.hl-cursor-selection-prompt')).toHaveCount(0);
+    await expect(page.locator('.llm-wiki-cursor-selection-prompt')).toHaveCount(0);
   });
 
   test('markdown editor defaults to Obsidian\'s 16px prose rhythm and heading scale', async ({ page }) => {
@@ -552,8 +552,8 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
       window.postMessage(message, '*');
     }, {
       type: 'setText',
-      title: 'Human Learning Parity',
-      text: '# Human Learning Parity\n\nBody copy\n\n## Second level\n\nTail',
+      title: 'LLM Wiki Parity',
+      text: '# LLM Wiki Parity\n\nBody copy\n\n## Second level\n\nTail',
     });
     await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
     await page.evaluate(() => {
@@ -1183,7 +1183,7 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
       root.setProperty('--vscode-editor-font-family', '"Courier New", monospace');
       root.setProperty('--vscode-editor-font-size', '13px');
       root.setProperty('--vscode-editor-font-weight', '500');
-      root.setProperty('--hl-editor-letter-spacing', '1.25px');
+      root.setProperty('--llm-wiki-editor-letter-spacing', '1.25px');
     });
     await page.evaluate((text) => {
       window.postMessage({ type: 'setText', text }, '*');
@@ -1531,10 +1531,10 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
       const view = window.__cmView;
       view.dispatch({ selection: { anchor: view.state.doc.length } });
     });
-    await expect(page.locator('.cm-hl-link')).toHaveCount(2);
+    await expect(page.locator('.cm-llm-wiki-link')).toHaveCount(2);
 
     const copiedWikiLink = await page.evaluate(() => new Promise<string>((resolve) => {
-      const linkText = document.querySelector('.cm-hl-link')?.firstChild;
+      const linkText = document.querySelector('.cm-llm-wiki-link')?.firstChild;
       if (!linkText) throw new Error('Missing rendered wiki link text');
       const range = document.createRange();
       range.setStart(linkText, 0);
@@ -1551,7 +1551,7 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
     expect(copiedWikiLink).toBe('[[FlashAttention]]');
 
     const copiedPdfLink = await page.evaluate(() => new Promise<string>((resolve) => {
-      const linkText = document.querySelectorAll('.cm-hl-link')[1]?.firstChild;
+      const linkText = document.querySelectorAll('.cm-llm-wiki-link')[1]?.firstChild;
       if (!linkText) throw new Error('Missing rendered PDF link text');
       const range = document.createRange();
       range.setStart(linkText, 0);
@@ -4265,7 +4265,7 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
     }, doc);
 
     await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
-    await expect(page.locator('.cm-hl-link')).toBeVisible();
+    await expect(page.locator('.cm-llm-wiki-link')).toBeVisible();
     await page.click('.cm-content');
     await page.evaluate(() => {
       const view = window.__cmView;
@@ -4304,7 +4304,7 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
     }, doc);
 
     await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
-    await expect(page.locator('.cm-hl-link')).toBeVisible();
+    await expect(page.locator('.cm-llm-wiki-link')).toBeVisible();
     await page.click('.cm-content');
     await page.evaluate(() => {
       const view = window.__cmView;
@@ -4520,14 +4520,14 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
     await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
 
     // Verify the widget was rendered (the markdown link text should be replaced)
-    const widgetCount = await page.locator('.cm-hl-link').count();
+    const widgetCount = await page.locator('.cm-llm-wiki-link').count();
     expect(widgetCount).toBeGreaterThanOrEqual(1);
 
     // Click the widget button with a real pointer event to match VS Code webview use.
     await page.evaluate(() => {
       window.__mockMessages = [];
     });
-    await page.locator('.cm-hl-link').first().click();
+    await page.locator('.cm-llm-wiki-link').first().click();
 
     // Verify openUri message was sent
     const openUriMessages = await page.evaluate(() =>
@@ -4716,9 +4716,9 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
     }, testDoc);
 
     await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
-    await expect(page.locator('.cm-hl-link')).toContainText(['external docs']);
+    await expect(page.locator('.cm-llm-wiki-link')).toContainText(['external docs']);
 
-    await page.locator('.cm-hl-link').first().click();
+    await page.locator('.cm-llm-wiki-link').first().click();
 
     const openUriMessages = await page.evaluate(() =>
       window.__mockMessages?.filter((m) => m.type === 'openUri')
@@ -4808,7 +4808,7 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
     const copied = await page.evaluate(() => (
       new Promise<string>((resolve) => {
         const selection = window.getSelection();
-        const target = document.querySelector('.cm-hl-link');
+        const target = document.querySelector('.cm-llm-wiki-link');
         if (!target) throw new Error('Missing rendered reference link');
         const range = document.createRange();
         range.selectNodeContents(target);
@@ -5017,14 +5017,14 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
       view.dispatch({ selection: { anchor: view.state.doc.line(3).from } });
     });
 
-    await expect(page.locator('.cm-hl-link')).toContainText([
+    await expect(page.locator('.cm-llm-wiki-link')).toContainText([
       'https://example.com/bare',
       'https://example.com/angle',
     ]);
     await expect(page.locator('.cm-line').first()).not.toContainText('<https://example.com/angle>');
 
-    await page.locator('.cm-hl-link').nth(0).click();
-    await page.locator('.cm-hl-link').nth(1).click();
+    await page.locator('.cm-llm-wiki-link').nth(0).click();
+    await page.locator('.cm-llm-wiki-link').nth(1).click();
 
     let openUriMessages = await page.evaluate(() =>
       window.__mockMessages?.filter((m) => m.type === 'openUri')
@@ -5067,7 +5067,7 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
 
     await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
 
-    const renderedAffordance = await page.locator('.cm-hl-link').first().evaluate((element) =>
+    const renderedAffordance = await page.locator('.cm-llm-wiki-link').first().evaluate((element) =>
       getComputedStyle(element, '::after').content
     );
     expect(renderedAffordance).toBe('"↗"');
@@ -5093,7 +5093,7 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
 
     await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
 
-    const styles = await page.locator('.cm-hl-link').first().evaluate((element) => {
+    const styles = await page.locator('.cm-llm-wiki-link').first().evaluate((element) => {
       const style = getComputedStyle(element);
       return {
         textDecorationLine: style.textDecorationLine,
@@ -5133,7 +5133,7 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
       view.dispatch({ selection: { anchor: target.from + 8 } });
     });
 
-    await expect(page.locator('.cm-hl-link')).toHaveCount(0);
+    await expect(page.locator('.cm-llm-wiki-link')).toHaveCount(0);
     await expect(page.locator('.cm-active-link-label')).toContainText(['docs', 'FlashAttention']);
 
     const linkStyles = await page.locator('.cm-active-link-label').first().evaluate((element) => {
@@ -5180,7 +5180,7 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
     await expect(page.locator('.cm-active-link-label')).toHaveText('docs');
     await expect(page.locator('.cm-active-link-destination')).toHaveText('https://example.com/docs');
     await expect(page.locator('.cm-active-link-punctuation')).toHaveText(['[', '](', ')']);
-    await expect(page.locator('.cm-hl-link')).toHaveText('guide');
+    await expect(page.locator('.cm-llm-wiki-link')).toHaveText('guide');
 
     const palettes = [
       {
@@ -5221,7 +5221,7 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
       await expect(page.locator('.cm-active-link-destination'), palette.name).toHaveCSS('color', palette.secondary);
       await expect(page.locator('.cm-active-link-punctuation').first(), palette.name).toHaveCSS('color', palette.secondary);
 
-      const renderedLink = page.locator('.cm-hl-link');
+      const renderedLink = page.locator('.cm-llm-wiki-link');
       await renderedLink.focus();
       const focusStyle = await renderedLink.evaluate((element) => {
         const style = getComputedStyle(element);
@@ -6264,7 +6264,7 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
     await expect.poll(() => page.evaluate(() => window.__cmView?.state.doc.toString())).toBe(expectedDoc);
 
     await page.keyboard.press(`${modifier}+E`);
-    await expect(page.locator('.cm-hl-link').filter({ hasText: 'FlashAttention' })).toHaveCount(0);
+    await expect(page.locator('.cm-llm-wiki-link').filter({ hasText: 'FlashAttention' })).toHaveCount(0);
     await page.keyboard.press(`${modifier}+E`);
 
     await page.evaluate(() => {
@@ -6274,7 +6274,7 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
       view.focus();
     });
 
-    await expect(page.locator('.cm-hl-link').filter({ hasText: 'FlashAttention' })).toBeVisible();
+    await expect(page.locator('.cm-llm-wiki-link').filter({ hasText: 'FlashAttention' })).toBeVisible();
     await expect(page.locator('.cm-hybrid-table')).toBeVisible();
     await expect(page.locator('.cm-hybrid-codeblock')).toBeVisible();
     await expect(page.locator('.cm-hybrid-callout')).toBeVisible();
@@ -6944,7 +6944,7 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
         text: line.textContent,
         fontStyle: style.fontStyle,
         italicCount: line.querySelectorAll('.cm-hybrid-italic').length,
-        linkCount: line.querySelectorAll('.cm-hl-link').length,
+        linkCount: line.querySelectorAll('.cm-llm-wiki-link').length,
         tagCount: line.querySelectorAll('.cm-hybrid-tag').length,
       };
     });
@@ -7049,7 +7049,7 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
 
     const inlineCodeLine = await page.locator('.cm-line').first().evaluate(line => ({
       text: line.textContent,
-      linkCount: line.querySelectorAll('.cm-hl-link').length,
+      linkCount: line.querySelectorAll('.cm-llm-wiki-link').length,
       tagCount: line.querySelectorAll('.cm-hybrid-tag').length,
       footnoteCount: line.querySelectorAll('.cm-hybrid-footnote-ref').length,
     }));
@@ -7062,7 +7062,7 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
     expect(inlineCodeLine.footnoteCount).toBe(0);
 
     const outsideLine = await page.locator('.cm-line').nth(2).evaluate(line => ({
-      linkCount: line.querySelectorAll('.cm-hl-link').length,
+      linkCount: line.querySelectorAll('.cm-llm-wiki-link').length,
       tagCount: line.querySelectorAll('.cm-hybrid-tag').length,
       footnoteCount: line.querySelectorAll('.cm-hybrid-footnote-ref').length,
     }));
@@ -7107,7 +7107,7 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
 
     const inactiveLine = await page.locator('.cm-line').first().evaluate(line => ({
       text: line.textContent,
-      linkCount: line.querySelectorAll('.cm-hl-link').length,
+      linkCount: line.querySelectorAll('.cm-llm-wiki-link').length,
       tagCount: line.querySelectorAll('.cm-hybrid-tag').length,
       footnoteCount: line.querySelectorAll('.cm-hybrid-footnote-ref').length,
     }));
@@ -7120,7 +7120,7 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
     expect(inactiveLine.footnoteCount).toBe(0);
 
     const outsideLine = await page.locator('.cm-line').nth(2).evaluate(line => ({
-      linkCount: line.querySelectorAll('.cm-hl-link').length,
+      linkCount: line.querySelectorAll('.cm-llm-wiki-link').length,
       tagCount: line.querySelectorAll('.cm-hybrid-tag').length,
       footnoteCount: line.querySelectorAll('.cm-hybrid-footnote-ref').length,
     }));
@@ -9807,7 +9807,7 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
     await expect(page.locator('.cm-hybrid-bullet')).toHaveText('•');
     await expect(page.locator('.cm-hybrid-table-widget')).toBeVisible();
     await expect(page.locator('.cm-hybrid-table')).toContainText('vkid.official_account');
-    await expect(page.locator('.cm-hl-link')).toHaveCount(2);
+    await expect(page.locator('.cm-llm-wiki-link')).toHaveCount(2);
     await expect(page.getByRole('button', { name: 'external docs' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'PDF link' })).toBeVisible();
 
@@ -10802,7 +10802,7 @@ test.describe('Human Learning — E2E Bidirectional Links', () => {
       window.postMessage({ type: 'executeCommand', command: 'markdown:toggle-preview' }, '*');
     });
     await expect(page.locator('.cm-hybrid-table-widget')).toHaveCount(0);
-    await expect(page.locator('.cm-hl-link')).toHaveCount(0);
+    await expect(page.locator('.cm-llm-wiki-link')).toHaveCount(0);
 
     await page.evaluate(() => {
       window.__cmView.dispatch({ selection: { anchor: 0 } });

@@ -192,7 +192,7 @@ test('filesystem wiki ignores scalar, body, and unterminated metadata lookalikes
 });
 
 test('filesystem wiki bounds Markdown file count and bytes before building the index', async () => {
-  const root = mkdtempSync(join(tmpdir(), 'hl-filesystem-wiki-limits-'));
+  const root = mkdtempSync(join(tmpdir(), 'llm-wiki-filesystem-wiki-limits-'));
   try {
     mkdirSync(join(root, 'notes'), { recursive: true });
     writeFileSync(join(root, 'notes', 'One.md'), '# One');

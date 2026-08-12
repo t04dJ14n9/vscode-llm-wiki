@@ -2,7 +2,7 @@
 
 ## Goal
 
-PDF links must work from a standalone Markdown file and a standalone PDF editor without a Human Learning database. A link identifies a PDF selection with the Chrome/WICG text-fragment syntax plus an explicit PDF page:
+PDF links must work from a standalone Markdown file and a standalone PDF editor without a LLM Wiki database. A link identifies a PDF selection with the Chrome/WICG text-fragment syntax plus an explicit PDF page:
 
 ```text
 raw/pdf/paper.pdf#page=7:~:text=prefix-,selected%20text,-suffix
@@ -25,22 +25,22 @@ New selection links use the complete normalized selected text as `textStart`, wi
 ## Editor Data Flow
 
 1. The PDF webview converts a native single-page selection into renderer coordinates, normalized text, and short prefix/suffix context derived from the page text index.
-2. Copy-link, quote-link, insert-link, and agent-context actions call `pdfHref` directly. They do not open the database, create an anchor row, or create `.hl`.
-3. The URI dispatcher passes `{ pdfPath, page, textFragment }` to the `human-learning.openPdfTarget` command.
+2. Copy-link, quote-link, insert-link, and agent-context actions call `pdfHref` directly. They do not open the database, create an anchor row, or create `.llm_wiki`.
+3. The URI dispatcher passes `{ pdfPath, page, textFragment }` to the `llm-wiki.openPdfTarget` command.
 4. The provider opens the PDF and posts `{ page, textFragment }` to the webview.
 5. The webview searches only the requested page, applies prefix/suffix disambiguation, scrolls to the match, and flashes the matched text. If matching fails, it still opens the requested page.
 
 The combined extension, standalone PDF extension, and standalone Markdown extension share the same command argument shape.
 
-The standalone PDF extension activates even when no `.hl` directory exists, using the open workspace as its file root. In that mode it skips annotation/highlight database reads during load and view changes. The standalone Markdown dispatcher can still route a relative PDF text-fragment link to the PDF extension (or the default PDF editor when the PDF command is unavailable).
+The standalone PDF extension activates even when no `.llm_wiki` directory exists, using the open workspace as its file root. In that mode it skips annotation/highlight database reads during load and view changes. The standalone Markdown dispatcher can still route a relative PDF text-fragment link to the PDF extension (or the default PDF editor when the PDF command is unavailable).
 
 ## Persisted Highlights
 
-Direct highlight remains an annotation feature and may persist an internal anchor record in `.hl`. Its row ID is internal database identity only. The row's `uri` uses the same portable page-plus-text-fragment URL; it never exposes the row ID in a Markdown link. Prefix and suffix are stored with the locator when supplied so annotation metadata and portable links describe the same selection.
+Direct highlight remains an annotation feature and may persist an internal anchor record in `.llm_wiki`. Its row ID is internal database identity only. The row's `uri` uses the same portable page-plus-text-fragment URL; it never exposes the row ID in a Markdown link. Prefix and suffix are stored with the locator when supplied so annotation metadata and portable links describe the same selection.
 
-When the standalone PDF extension has no initialized vault, explicit highlight creation reports that annotations require a vault; it does not create `.hl` implicitly.
+When the standalone PDF extension has no initialized vault, explicit highlight creation reports that annotations require a vault; it does not create `.llm_wiki` implicitly.
 
-Rectangle embeds and page-only links keep their existing PDF++-compatible formats because they do not depend on `.hl`.
+Rectangle embeds and page-only links keep their existing PDF++-compatible formats because they do not depend on `.llm_wiki`.
 
 ## Matching Rules
 
@@ -59,9 +59,9 @@ Rectangle embeds and page-only links keep their existing PDF++-compatible format
 
 - No legacy `anchor=` or `chunk=` PDF navigation.
 - No `openPdfAtAnchor` command or method alias; internal navigation is renamed to `openPdfTarget`/`openPdfAtTarget`.
-- No `.hl` requirement for link generation or navigation.
+- No `.llm_wiki` requirement for link generation or navigation.
 - No automatic repair of a selector after PDF text changes.
-- No implementation of Chrome's link-generation heuristics; the link grammar and navigation semantics are compatible, while Human Learning emits the full selected text.
+- No implementation of Chrome's link-generation heuristics; the link grammar and navigation semantics are compatible, while LLM Wiki emits the full selected text.
 - No change to rectangular PDF++ embeds or page-only links.
 
 ## Verification

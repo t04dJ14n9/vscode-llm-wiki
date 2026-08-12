@@ -1,12 +1,12 @@
 {
-  "name": "human-learning",
+  "name": "llm-wiki",
   "version": "0.1.0",
   "private": true,
-  "description": "Human Learning — a local-first VS Code vault for agentic study",
+  "description": "LLM Wiki — a local-first VS Code vault for agentic study",
   "scripts": {
     "build": "pnpm -r build",
-    "build:core": "pnpm --filter @human-learning/core build",
-    "build:extension": "pnpm --filter human-learning-vscode build",
+    "build:core": "pnpm --filter @llm-wiki/core build",
+    "build:extension": "pnpm --filter llm-wiki-vscode build",
     "watch": "pnpm -r watch",
     "test": "pnpm -r test",
     "lint": "eslint . --cache --cache-location .cache/eslint/.eslintcache --max-warnings=0",

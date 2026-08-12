@@ -441,7 +441,7 @@ two implementation commits.
 - [ ] **Step 3: Verify the exact interaction in Cursor**
 
 Build output is produced by `pnpm check`. Reload the Extension Development
-Host, reopen `demo-vault/.hl/agent/selection.md`, and:
+Host, reopen `demo-vault/.llm_wiki/agent/selection.md`, and:
 
 1. Hover the fenced-code copy button.
 2. Click it once and confirm `Copied` appears above the button without layout

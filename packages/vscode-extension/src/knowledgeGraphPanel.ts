@@ -12,8 +12,8 @@ export class KnowledgeGraphPanel implements vscode.Disposable {
   show(graph: ConceptGraph): void {
     if (!this.panel) {
       this.panel = vscode.window.createWebviewPanel(
-        'human-learning.knowledgeGraph',
-        'Human Learning Graph',
+        'llm-wiki.knowledgeGraph',
+        'LLM Wiki Graph',
         vscode.ViewColumn.Beside,
         { enableScripts: false, retainContextWhenHidden: true },
       );
@@ -66,7 +66,7 @@ export function renderKnowledgeGraphHtml(
   <meta charset="utf-8">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'nonce-${escapeHtml(nonce)}';">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Human Learning Graph</title>
+  <title>LLM Wiki Graph</title>
   <style nonce="${escapeHtml(nonce)}">
     :root { color-scheme: light dark; }
     body { margin: 0; padding: 20px; color: var(--vscode-editor-foreground); background: var(--vscode-editor-background); font: 13px var(--vscode-font-family, sans-serif); }

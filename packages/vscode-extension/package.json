@@ -1,14 +1,14 @@
 {
-  "name": "human-learning-vscode",
-  "displayName": "Human Learning",
+  "name": "llm-wiki-vscode",
+  "displayName": "LLM Wiki",
   "version": "0.1.0",
   "private": true,
-  "description": "Human Learning — a local-first VS Code vault for agentic study",
-  "publisher": "human-learning",
+  "description": "LLM Wiki — a local-first VS Code vault for agentic study",
+  "publisher": "llm-wiki",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/t04dJ14n9/human-learning.git"
+    "url": "https://github.com/t04dJ14n9/llm_wiki.git"
   },
   "engines": {
     "vscode": "^1.85.0"
@@ -19,9 +19,9 @@
   "activationEvents": [
     "onStartupFinished",
     "onUri",
-    "onCustomEditor:human-learning.pdfViewer",
-    "onCustomEditor:human-learning.markdownEditor",
-    "onCustomEditor:human-learning.anchorFile",
+    "onCustomEditor:llm-wiki.pdfViewer",
+    "onCustomEditor:llm-wiki.markdownEditor",
+    "onCustomEditor:llm-wiki.anchorFile",
     "workspaceContains:**/*.md",
     "workspaceContains:**/*.pdf"
   ],
@@ -35,8 +35,8 @@
   "contributes": {
     "customEditors": [
       {
-        "viewType": "human-learning.pdfViewer",
-        "displayName": "Human Learning PDF Viewer",
+        "viewType": "llm-wiki.pdfViewer",
+        "displayName": "LLM Wiki PDF Viewer",
         "selector": [
           {
             "filenamePattern": "*.pdf"
@@ -45,8 +45,8 @@
         "priority": "default"
       },
       {
-        "viewType": "human-learning.markdownEditor",
-        "displayName": "Human Learning Markdown Editor",
+        "viewType": "llm-wiki.markdownEditor",
+        "displayName": "LLM Wiki Markdown Editor",
         "selector": [
           {
             "filenamePattern": "*.md"
@@ -55,11 +55,11 @@
         "priority": "default"
       },
       {
-        "viewType": "human-learning.anchorFile",
-        "displayName": "Human Learning Passage Link",
+        "viewType": "llm-wiki.anchorFile",
+        "displayName": "LLM Wiki Passage Link",
         "selector": [
           {
-            "filenamePattern": "*.hlanchor"
+            "filenamePattern": "*.llm_wiki_anchor"
           }
         ],
         "priority": "default"
@@ -67,322 +67,322 @@
     ],
     "commands": [
       {
-        "command": "human-learning.openAnchor",
-        "title": "Human Learning: Open Anchor"
+        "command": "llm-wiki.openAnchor",
+        "title": "LLM Wiki: Open Anchor"
       },
       {
-        "command": "human-learning.refreshLinks",
-        "title": "Human Learning: Refresh Links"
+        "command": "llm-wiki.refreshLinks",
+        "title": "LLM Wiki: Refresh Links"
       },
       {
-        "command": "human-learning.openInMarkdownEditor",
-        "title": "Human Learning: Open In Markdown Editor"
+        "command": "llm-wiki.openInMarkdownEditor",
+        "title": "LLM Wiki: Open In Markdown Editor"
       },
       {
-        "command": "human-learning.addSelectionToContext",
-        "title": "Human Learning: Send Selection to Agent…",
+        "command": "llm-wiki.addSelectionToContext",
+        "title": "LLM Wiki: Send Selection to Agent…",
         "icon": "$(selection)"
       },
       {
-        "command": "human-learning.addSelectionToChat",
-        "title": "Human Learning: Add to Chat",
+        "command": "llm-wiki.addSelectionToChat",
+        "title": "LLM Wiki: Add to Chat",
         "icon": "$(comment-discussion)",
-        "enablement": "humanLearningHostIsCursor"
+        "enablement": "llmWikiHostIsCursor"
       },
       {
-        "command": "human-learning.addCursorBrowserSelectionToChat",
-        "title": "Human Learning: Add Cursor Browser Selection to Chat",
+        "command": "llm-wiki.addCursorBrowserSelectionToChat",
+        "title": "LLM Wiki: Add Cursor Browser Selection to Chat",
         "icon": "$(globe)"
       },
       {
-        "command": "human-learning.experimentalBrowser.open",
-        "title": "Human Learning: Open Experimental Web Reader",
+        "command": "llm-wiki.experimentalBrowser.open",
+        "title": "LLM Wiki: Open Experimental Web Reader",
         "icon": "$(preview)"
       },
       {
-        "command": "human-learning.experimentalBrowser.sendSelection",
-        "title": "Human Learning: Add Experimental Web Selection to Chat",
+        "command": "llm-wiki.experimentalBrowser.sendSelection",
+        "title": "LLM Wiki: Add Experimental Web Selection to Chat",
         "icon": "$(comment-discussion)"
       },
       {
-        "command": "human-learning.generateDailyNote",
-        "title": "Human Learning: Open Today's Learning Note",
+        "command": "llm-wiki.generateDailyNote",
+        "title": "LLM Wiki: Open Today's Learning Note",
         "icon": "$(calendar)"
       },
       {
-        "command": "human-learning.showKnowledgeGraph",
-        "title": "Human Learning: Show Knowledge Graph",
+        "command": "llm-wiki.showKnowledgeGraph",
+        "title": "LLM Wiki: Show Knowledge Graph",
         "icon": "$(type-hierarchy-sub)"
       },
       {
-        "command": "human-learning.syncRepository",
-        "title": "Human Learning: Pull Latest Wiki Content",
+        "command": "llm-wiki.syncRepository",
+        "title": "LLM Wiki: Pull Latest Wiki Content",
         "icon": "$(sync)"
       },
       {
-        "command": "human-learning.toggleVimMode",
-        "title": "Human Learning: Toggle Vim Mode"
+        "command": "llm-wiki.toggleVimMode",
+        "title": "LLM Wiki: Toggle Vim Mode"
       },
       {
-        "command": "human-learning.consumeVimHostShortcut",
-        "title": "Human Learning: Consume Vim Host Shortcut"
+        "command": "llm-wiki.consumeVimHostShortcut",
+        "title": "LLM Wiki: Consume Vim Host Shortcut"
       },
       {
-        "command": "human-learning.pdfPrevPage",
-        "title": "Human Learning: Previous PDF Page",
+        "command": "llm-wiki.pdfPrevPage",
+        "title": "LLM Wiki: Previous PDF Page",
         "icon": "$(arrow-left)"
       },
       {
-        "command": "human-learning.pdfNextPage",
-        "title": "Human Learning: Next PDF Page",
+        "command": "llm-wiki.pdfNextPage",
+        "title": "LLM Wiki: Next PDF Page",
         "icon": "$(arrow-right)"
       },
       {
-        "command": "human-learning.pdfZoomIn",
-        "title": "Human Learning: Zoom In",
+        "command": "llm-wiki.pdfZoomIn",
+        "title": "LLM Wiki: Zoom In",
         "icon": "$(zoom-in)"
       },
       {
-        "command": "human-learning.pdfZoomOut",
-        "title": "Human Learning: Zoom Out",
+        "command": "llm-wiki.pdfZoomOut",
+        "title": "LLM Wiki: Zoom Out",
         "icon": "$(zoom-out)"
       },
       {
-        "command": "human-learning.pdfFitWidth",
-        "title": "Human Learning: Fit Width",
+        "command": "llm-wiki.pdfFitWidth",
+        "title": "LLM Wiki: Fit Width",
         "icon": "$(screen-normal)"
       },
       {
-        "command": "human-learning.pdfToggleContinuousScroll",
-        "title": "Human Learning: Toggle PDF Continuous Scroll",
+        "command": "llm-wiki.pdfToggleContinuousScroll",
+        "title": "LLM Wiki: Toggle PDF Continuous Scroll",
         "icon": "$(list-tree)"
       },
       {
-        "command": "human-learning.pdfToggleTwoPageView",
-        "title": "Human Learning: Toggle PDF Two-Page View",
+        "command": "llm-wiki.pdfToggleTwoPageView",
+        "title": "LLM Wiki: Toggle PDF Two-Page View",
         "icon": "$(split-horizontal)"
       },
       {
-        "command": "human-learning.openPdfMarkdownColumns",
-        "title": "Human Learning: Open PDF and Markdown Columns",
+        "command": "llm-wiki.openPdfMarkdownColumns",
+        "title": "LLM Wiki: Open PDF and Markdown Columns",
         "icon": "$(layout-sidebar-right)"
       }
     ],
     "keybindings": [
       {
-        "command": "human-learning.consumeVimHostShortcut",
+        "command": "llm-wiki.consumeVimHostShortcut",
         "key": "ctrl+o",
         "mac": "cmd+o",
-        "when": "activeCustomEditorId == 'human-learning.markdownEditor' && humanLearningMarkdownVimMode"
+        "when": "activeCustomEditorId == 'llm-wiki.markdownEditor' && llmWikiMarkdownVimMode"
       },
       {
-        "command": "human-learning.consumeVimHostShortcut",
+        "command": "llm-wiki.consumeVimHostShortcut",
         "key": "ctrl+b",
         "mac": "cmd+b",
-        "when": "activeCustomEditorId == 'human-learning.markdownEditor' && humanLearningMarkdownVimMode"
+        "when": "activeCustomEditorId == 'llm-wiki.markdownEditor' && llmWikiMarkdownVimMode"
       },
       {
-        "command": "human-learning.consumeVimHostShortcut",
+        "command": "llm-wiki.consumeVimHostShortcut",
         "key": "ctrl+i",
         "mac": "cmd+i",
-        "when": "activeCustomEditorId == 'human-learning.markdownEditor' && humanLearningMarkdownVimMode"
+        "when": "activeCustomEditorId == 'llm-wiki.markdownEditor' && llmWikiMarkdownVimMode"
       },
       {
-        "command": "human-learning.consumeVimHostShortcut",
+        "command": "llm-wiki.consumeVimHostShortcut",
         "key": "ctrl+shift+x",
         "mac": "cmd+shift+x",
-        "when": "activeCustomEditorId == 'human-learning.markdownEditor' && humanLearningMarkdownVimMode"
+        "when": "activeCustomEditorId == 'llm-wiki.markdownEditor' && llmWikiMarkdownVimMode"
       },
       {
-        "command": "human-learning.consumeVimHostShortcut",
+        "command": "llm-wiki.consumeVimHostShortcut",
         "key": "ctrl+`",
         "mac": "cmd+`",
-        "when": "activeCustomEditorId == 'human-learning.markdownEditor' && humanLearningMarkdownVimMode"
+        "when": "activeCustomEditorId == 'llm-wiki.markdownEditor' && llmWikiMarkdownVimMode"
       },
       {
-        "command": "human-learning.consumeVimHostShortcut",
+        "command": "llm-wiki.consumeVimHostShortcut",
         "key": "ctrl+k",
         "mac": "cmd+k",
-        "when": "activeCustomEditorId == 'human-learning.markdownEditor' && humanLearningMarkdownVimMode"
+        "when": "activeCustomEditorId == 'llm-wiki.markdownEditor' && llmWikiMarkdownVimMode"
       },
       {
-        "command": "human-learning.addSelectionToChat",
+        "command": "llm-wiki.addSelectionToChat",
         "key": "ctrl+l",
         "mac": "cmd+l",
-        "when": "humanLearningHostIsCursor && ((activeCustomEditorId == 'human-learning.markdownEditor' && humanLearningMarkdownHasSelection) || (humanLearningPdfOpen && humanLearningPdfHasSelection))"
+        "when": "llmWikiHostIsCursor && ((activeCustomEditorId == 'llm-wiki.markdownEditor' && llmWikiMarkdownHasSelection) || (llmWikiPdfOpen && llmWikiPdfHasSelection))"
       },
       {
-        "command": "human-learning.consumeVimHostShortcut",
+        "command": "llm-wiki.consumeVimHostShortcut",
         "key": "ctrl+alt+0",
         "mac": "cmd+alt+0",
-        "when": "activeCustomEditorId == 'human-learning.markdownEditor' && humanLearningMarkdownVimMode"
+        "when": "activeCustomEditorId == 'llm-wiki.markdownEditor' && llmWikiMarkdownVimMode"
       },
       {
-        "command": "human-learning.consumeVimHostShortcut",
+        "command": "llm-wiki.consumeVimHostShortcut",
         "key": "ctrl+alt+1",
         "mac": "cmd+alt+1",
-        "when": "activeCustomEditorId == 'human-learning.markdownEditor' && humanLearningMarkdownVimMode"
+        "when": "activeCustomEditorId == 'llm-wiki.markdownEditor' && llmWikiMarkdownVimMode"
       },
       {
-        "command": "human-learning.consumeVimHostShortcut",
+        "command": "llm-wiki.consumeVimHostShortcut",
         "key": "ctrl+alt+2",
         "mac": "cmd+alt+2",
-        "when": "activeCustomEditorId == 'human-learning.markdownEditor' && humanLearningMarkdownVimMode"
+        "when": "activeCustomEditorId == 'llm-wiki.markdownEditor' && llmWikiMarkdownVimMode"
       },
       {
-        "command": "human-learning.consumeVimHostShortcut",
+        "command": "llm-wiki.consumeVimHostShortcut",
         "key": "ctrl+alt+3",
         "mac": "cmd+alt+3",
-        "when": "activeCustomEditorId == 'human-learning.markdownEditor' && humanLearningMarkdownVimMode"
+        "when": "activeCustomEditorId == 'llm-wiki.markdownEditor' && llmWikiMarkdownVimMode"
       },
       {
-        "command": "human-learning.consumeVimHostShortcut",
+        "command": "llm-wiki.consumeVimHostShortcut",
         "key": "ctrl+alt+4",
         "mac": "cmd+alt+4",
-        "when": "activeCustomEditorId == 'human-learning.markdownEditor' && humanLearningMarkdownVimMode"
+        "when": "activeCustomEditorId == 'llm-wiki.markdownEditor' && llmWikiMarkdownVimMode"
       },
       {
-        "command": "human-learning.consumeVimHostShortcut",
+        "command": "llm-wiki.consumeVimHostShortcut",
         "key": "ctrl+alt+5",
         "mac": "cmd+alt+5",
-        "when": "activeCustomEditorId == 'human-learning.markdownEditor' && humanLearningMarkdownVimMode"
+        "when": "activeCustomEditorId == 'llm-wiki.markdownEditor' && llmWikiMarkdownVimMode"
       },
       {
-        "command": "human-learning.consumeVimHostShortcut",
+        "command": "llm-wiki.consumeVimHostShortcut",
         "key": "ctrl+alt+6",
         "mac": "cmd+alt+6",
-        "when": "activeCustomEditorId == 'human-learning.markdownEditor' && humanLearningMarkdownVimMode"
+        "when": "activeCustomEditorId == 'llm-wiki.markdownEditor' && llmWikiMarkdownVimMode"
       },
       {
-        "command": "human-learning.consumeVimHostShortcut",
+        "command": "llm-wiki.consumeVimHostShortcut",
         "key": "ctrl+shift+t",
         "mac": "cmd+shift+t",
-        "when": "activeCustomEditorId == 'human-learning.markdownEditor' && humanLearningMarkdownVimMode"
+        "when": "activeCustomEditorId == 'llm-wiki.markdownEditor' && llmWikiMarkdownVimMode"
       },
       {
-        "command": "human-learning.consumeVimHostShortcut",
+        "command": "llm-wiki.consumeVimHostShortcut",
         "key": "ctrl+shift+h",
         "mac": "cmd+shift+h",
-        "when": "activeCustomEditorId == 'human-learning.markdownEditor' && humanLearningMarkdownVimMode"
+        "when": "activeCustomEditorId == 'llm-wiki.markdownEditor' && llmWikiMarkdownVimMode"
       }
     ],
     "menus": {
       "editor/title": [
         {
-          "command": "human-learning.addSelectionToContext",
-          "when": "activeCustomEditorId == 'human-learning.markdownEditor'",
+          "command": "llm-wiki.addSelectionToContext",
+          "when": "activeCustomEditorId == 'llm-wiki.markdownEditor'",
           "group": "navigation@1"
         },
         {
-          "command": "human-learning.addSelectionToChat",
-          "when": "humanLearningHostIsCursor && activeCustomEditorId == 'human-learning.markdownEditor'",
+          "command": "llm-wiki.addSelectionToChat",
+          "when": "llmWikiHostIsCursor && activeCustomEditorId == 'llm-wiki.markdownEditor'",
           "group": "navigation@2"
         },
         {
-          "command": "human-learning.pdfPrevPage",
-          "when": "humanLearningPdfOpen",
+          "command": "llm-wiki.pdfPrevPage",
+          "when": "llmWikiPdfOpen",
           "group": "navigation@1"
         },
         {
-          "command": "human-learning.pdfNextPage",
-          "when": "humanLearningPdfOpen",
+          "command": "llm-wiki.pdfNextPage",
+          "when": "llmWikiPdfOpen",
           "group": "navigation@2"
         },
         {
-          "command": "human-learning.pdfZoomOut",
-          "when": "humanLearningPdfOpen",
+          "command": "llm-wiki.pdfZoomOut",
+          "when": "llmWikiPdfOpen",
           "group": "navigation@3"
         },
         {
-          "command": "human-learning.pdfZoomIn",
-          "when": "humanLearningPdfOpen",
+          "command": "llm-wiki.pdfZoomIn",
+          "when": "llmWikiPdfOpen",
           "group": "navigation@4"
         },
         {
-          "command": "human-learning.pdfFitWidth",
-          "when": "humanLearningPdfOpen",
+          "command": "llm-wiki.pdfFitWidth",
+          "when": "llmWikiPdfOpen",
           "group": "navigation@5"
         },
         {
-          "command": "human-learning.pdfToggleContinuousScroll",
-          "when": "humanLearningPdfOpen",
+          "command": "llm-wiki.pdfToggleContinuousScroll",
+          "when": "llmWikiPdfOpen",
           "group": "navigation@6"
         },
         {
-          "command": "human-learning.pdfToggleTwoPageView",
-          "when": "humanLearningPdfOpen",
+          "command": "llm-wiki.pdfToggleTwoPageView",
+          "when": "llmWikiPdfOpen",
           "group": "navigation@7"
         },
         {
-          "command": "human-learning.openPdfMarkdownColumns",
-          "when": "humanLearningPdfOpen",
+          "command": "llm-wiki.openPdfMarkdownColumns",
+          "when": "llmWikiPdfOpen",
           "group": "navigation@8"
         },
         {
-          "command": "human-learning.addSelectionToContext",
-          "when": "humanLearningPdfOpen && humanLearningPdfHasSelection",
+          "command": "llm-wiki.addSelectionToContext",
+          "when": "llmWikiPdfOpen && llmWikiPdfHasSelection",
           "group": "navigation@9"
         },
         {
-          "command": "human-learning.addSelectionToChat",
-          "when": "humanLearningHostIsCursor && humanLearningPdfOpen && humanLearningPdfHasSelection",
+          "command": "llm-wiki.addSelectionToChat",
+          "when": "llmWikiHostIsCursor && llmWikiPdfOpen && llmWikiPdfHasSelection",
           "group": "navigation@10"
         }
       ],
       "editor/context": [
         {
-          "command": "human-learning.addSelectionToChat",
-          "when": "humanLearningHostIsCursor && editorLangId == markdown && editorHasSelection",
+          "command": "llm-wiki.addSelectionToChat",
+          "when": "llmWikiHostIsCursor && editorLangId == markdown && editorHasSelection",
           "group": "navigation@10"
         }
       ]
     },
     "views": {
-      "human-learning": [
+      "llm-wiki": [
         {
-          "id": "hl-backlinks",
+          "id": "llm-wiki-backlinks",
           "name": "Backlinks",
           "type": "tree"
         },
         {
-          "id": "hl-forward-links",
+          "id": "llm-wiki-forward-links",
           "name": "Forward Links",
           "type": "tree"
         }
       ],
       "explorer": [
         {
-          "id": "hl-markdown-outline",
+          "id": "llm-wiki-markdown-outline",
           "name": "Markdown Outline",
           "type": "tree",
-          "when": "activeCustomEditorId == 'human-learning.markdownEditor'"
+          "when": "activeCustomEditorId == 'llm-wiki.markdownEditor'"
         },
         {
-          "id": "hl-pdf-outline",
+          "id": "llm-wiki-pdf-outline",
           "name": "PDF Outline",
           "type": "tree",
-          "when": "activeCustomEditorId == 'human-learning.pdfViewer'"
+          "when": "activeCustomEditorId == 'llm-wiki.pdfViewer'"
         }
       ]
     },
     "viewsContainers": {
       "activitybar": [
         {
-          "id": "human-learning",
-          "title": "Human Learning",
+          "id": "llm-wiki",
+          "title": "LLM Wiki",
           "icon": "$(book)"
         }
       ]
     },
     "configurationDefaults": {
       "workbench.editorAssociations": {
-        "*.pdf": "human-learning.pdfViewer",
-        "*.md": "human-learning.markdownEditor"
+        "*.pdf": "llm-wiki.pdfViewer",
+        "*.md": "llm-wiki.markdownEditor"
       }
     }
   },
   "scripts": {
-    "build": "pnpm --filter @human-learning/core build && rm -rf dist && webpack --mode production",
+    "build": "pnpm --filter @llm-wiki/core build && rm -rf dist && webpack --mode production",
     "watch": "webpack --mode development --watch",
     "clean": "rm -rf dist",
     "test": "pnpm build && node --test test/*.test.mjs",
@@ -399,8 +399,8 @@
     "@codemirror/search": "^6.7.0",
     "@codemirror/state": "^6.6.0",
     "@codemirror/view": "^6.43.0",
-    "@human-learning/core": "workspace:*",
-    "@human-learning/pdf-editor": "workspace:*",
+    "@llm-wiki/core": "workspace:*",
+    "@llm-wiki/pdf-editor": "workspace:*",
     "@lezer/highlight": "^1.2.3",
     "@mathjax/src": "^4.1.2",
     "@replit/codemirror-vim": "^6.3.0",

@@ -142,7 +142,7 @@ function discussionAnnotation(overrides = {}) {
     kind: 'agent_discussion',
     selectionKey: 'selection-key',
     anchorId: 'internal-anchor-1',
-    hostOnlyPath: '/vault/.hl/pdf-discussions/annotations.json',
+    hostOnlyPath: '/vault/.llm_wiki/pdf-discussions/annotations.json',
     anchor: {
       uri: 'file:///vault/docs/real.pdf',
       page: 2,
@@ -179,7 +179,7 @@ test('PDF discussion messages are ignored without a controller', async () => {
   };
   const { PdfEditorProvider } = loadTsModule(packageRoot, 'src/pdfEditorProvider.ts', {
     vscode,
-    '@human-learning/core': {
+    '@llm-wiki/core': {
       pdfHref: (path, options) => `${path}#page=${options.page}`,
     },
     './pdfDiscussionController': {
@@ -270,7 +270,7 @@ async function exerciseProvider(root) {
   };
   const { PdfEditorProvider } = loadTsModule(root, 'src/pdfEditorProvider.ts', {
     vscode,
-    '@human-learning/core': core,
+    '@llm-wiki/core': core,
     './pdfDiscussionController': discussionModule,
   });
   const provider = new PdfEditorProvider(context, {
@@ -445,7 +445,7 @@ async function createPersistedSnapshotTransportHarness(
   };
   const { PdfEditorProvider } = loadTsModule(root, 'src/pdfEditorProvider.ts', {
     vscode,
-    '@human-learning/core': {
+    '@llm-wiki/core': {
       closeDatabase: () => undefined,
       createPdfAnchorFromSelection: () => ({ id: 'anchor', uri: 'pdf:anchor' }),
       openDatabase: async () => ({ prepare: () => ({ all: () => [] }) }),
@@ -517,7 +517,7 @@ async function createSnapshotSubmitHarness(root, { modelError } = {}) {
   };
   const { PdfEditorProvider } = loadTsModule(root, 'src/pdfEditorProvider.ts', {
     vscode,
-    '@human-learning/core': {
+    '@llm-wiki/core': {
       closeDatabase: () => undefined,
       createPdfAnchorFromSelection: () => ({ id: 'anchor', uri: 'pdf:anchor' }),
       openDatabase: async () => ({ prepare: () => ({ all: () => [] }) }),
@@ -589,7 +589,7 @@ async function createCodexActionBoundaryHarness(
   };
   const { PdfEditorProvider } = loadTsModule(root, 'src/pdfEditorProvider.ts', {
     vscode,
-    '@human-learning/core': {
+    '@llm-wiki/core': {
       closeDatabase: () => undefined,
       createPdfAnchorFromSelection: () => ({ id: 'anchor', uri: 'pdf:anchor' }),
       openDatabase: async () => ({ prepare: () => ({ all: () => [] }) }),
@@ -649,7 +649,7 @@ test('combined provider enforces host path authority and typed discussion messag
 });
 
 test('combined provider persists an answered PDF discussion and opens its durable learning note', async () => {
-  const workspaceRoot = mkdtempSync(join(tmpdir(), 'hl-pdf-learning-note-'));
+  const workspaceRoot = mkdtempSync(join(tmpdir(), 'llm-wiki-pdf-learning-note-'));
   const pdfPath = join(workspaceRoot, 'paper.pdf');
   writeFileSync(pdfPath, Buffer.from('%PDF-learning-note', 'utf8'));
 
@@ -717,7 +717,7 @@ test('combined provider persists an answered PDF discussion and opens its durabl
   };
   const { PdfEditorProvider } = loadTsModule(packageRoot, 'src/pdfEditorProvider.ts', {
     vscode,
-    '@human-learning/core': {
+    '@llm-wiki/core': {
       pdfHref: (path, options) => `${path}#page=${options.page}`,
     },
     './pdfDiscussionController': {
@@ -795,7 +795,7 @@ test('combined provider persists an answered PDF discussion and opens its durabl
   const openCommand = commands.findLast(([command]) => command === 'vscode.openWith');
   assert.ok(openCommand, 'the durable learning note was not opened');
   assert.equal(openCommand[1].fsPath, note.absolutePath);
-  assert.equal(openCommand[2], 'human-learning.markdownEditor');
+  assert.equal(openCommand[2], 'llm-wiki.markdownEditor');
   assert.equal(
     harness.posted.some(message => (
       message.type === 'pdfDiscussionError'
@@ -807,7 +807,7 @@ test('combined provider persists an answered PDF discussion and opens its durabl
 
 test('combined provider invalidates cached discussion stores for same-size, same-mtime PDF replacements', () => {
   for (const root of [packageRoot]) {
-    const tempRoot = mkdtempSync(join(tmpdir(), 'hl-pdf-provider-store-cache-'));
+    const tempRoot = mkdtempSync(join(tmpdir(), 'llm-wiki-pdf-provider-store-cache-'));
     const pdfPath = join(tempRoot, 'paper.pdf');
     const initialTime = new Date('2026-01-02T03:04:05.000Z');
     const changedTime = new Date('2026-01-02T03:04:06.000Z');
@@ -819,7 +819,7 @@ test('combined provider invalidates cached discussion stores for same-size, same
     const stores = [];
     const { PdfEditorProvider } = loadTsModule(root, 'src/pdfEditorProvider.ts', {
       vscode,
-      '@human-learning/core': {
+      '@llm-wiki/core': {
         closeDatabase: () => undefined,
         createPdfAnchorFromSelection: () => ({ id: 'anchor', uri: 'pdf:anchor' }),
         openDatabase: async () => ({ prepare: () => ({ all: () => [] }) }),
@@ -1296,11 +1296,11 @@ test('combined provider falls back to text-only for missing or invalid persisted
 test('combined manifest leaves Ask PDF unexposed', () => {
   const manifest = JSON.parse(readFileSync(join(packageRoot, 'package.json'), 'utf8'));
   assert.equal(
-    manifest.contributes.commands.some(item => item.command === 'human-learning.pdfAskSelection'),
+    manifest.contributes.commands.some(item => item.command === 'llm-wiki.pdfAskSelection'),
     false,
   );
   assert.equal(
-    manifest.contributes.configuration?.properties?.['humanLearning.agent.codexCommand'],
+    manifest.contributes.configuration?.properties?.['llmWiki.agent.codexCommand'],
     undefined,
   );
   assert.doesNotMatch(JSON.stringify(manifest.capabilities), /Ask PDF/);

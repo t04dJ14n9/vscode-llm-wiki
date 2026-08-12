@@ -59,7 +59,7 @@ class MarkdownOutlineItem extends vscode.TreeItem {
     };
     const offset = document.offsetAt(new vscode.Position(node.line, node.textStart));
     this.command = {
-      command: 'human-learning.revealInMarkdownEditor',
+      command: 'llm-wiki.revealInMarkdownEditor',
       title: 'Reveal Heading',
       arguments: [{
         uri: document.uri,
@@ -93,7 +93,7 @@ class PdfOutlineItem extends vscode.TreeItem {
     if (node.destination) {
       this.description = `p. ${node.destination.pageIndex + 1}`;
       this.command = {
-        command: 'human-learning.revealInPdfOutline',
+        command: 'llm-wiki.revealInPdfOutline',
         title: 'Reveal PDF Section',
         arguments: [{
           uri,
@@ -172,7 +172,7 @@ export function registerMarkdownOutlineTreeProvider(
 ): MarkdownOutlineTreeProvider {
   const provider = new MarkdownOutlineTreeProvider(pdfOutlineSource);
   const subscriptions: vscode.Disposable[] = [
-    ...['hl-markdown-outline', 'hl-pdf-outline'].map(viewId =>
+    ...['llm-wiki-markdown-outline', 'llm-wiki-pdf-outline'].map(viewId =>
       vscode.window.createTreeView(viewId, {
         treeDataProvider: provider,
         showCollapseAll: true,

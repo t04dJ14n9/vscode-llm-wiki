@@ -18,7 +18,7 @@ export function registerLinkProvider(context: vscode.ExtensionContext): void {
 
         const link = new vscode.DocumentLink(
           new vscode.Range(startPos, endPos),
-          vscode.Uri.parse(`command:human-learning.openAnchor?${encodeURIComponent(JSON.stringify([uri]))}`)
+          vscode.Uri.parse(`command:llm-wiki.openAnchor?${encodeURIComponent(JSON.stringify([uri]))}`)
         );
         link.tooltip = `Open: ${uri}`;
         links.push(link);
@@ -36,7 +36,7 @@ export function registerLinkProvider(context: vscode.ExtensionContext): void {
 
         const link = new vscode.DocumentLink(
           new vscode.Range(startPos, endPos),
-          vscode.Uri.parse(`command:human-learning.openAnchor?${encodeURIComponent(JSON.stringify([uri]))}`)
+          vscode.Uri.parse(`command:llm-wiki.openAnchor?${encodeURIComponent(JSON.stringify([uri]))}`)
         );
         link.tooltip = `Open: ${target}`;
         links.push(link);

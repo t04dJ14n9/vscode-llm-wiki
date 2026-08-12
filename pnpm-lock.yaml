@@ -97,15 +97,15 @@ importers:
       '@codemirror/view':
         specifier: ^6.43.0
         version: 6.43.0
-      '@human-learning/core':
-        specifier: workspace:*
-        version: link:../core
-      '@human-learning/pdf-editor':
-        specifier: workspace:*
-        version: link:../pdf-editor
       '@lezer/highlight':
         specifier: ^1.2.3
         version: 1.2.3
+      '@llm-wiki/core':
+        specifier: workspace:*
+        version: link:../core
+      '@llm-wiki/pdf-editor':
+        specifier: workspace:*
+        version: link:../pdf-editor
       '@mathjax/src':
         specifier: ^4.1.2
         version: 4.1.2

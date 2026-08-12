@@ -1,11 +1,11 @@
-# Human Learning: Architecture and VS Code Integration
+# LLM Wiki: Architecture and VS Code Integration
 
 > Desktop-only product architecture, updated for the filesystem-first
 > implementation on 2026-08-10.
 
 ## 1. Product in one sentence
 
-Human Learning currently turns a normal Git repository into a personal
+LLM Wiki currently turns a normal Git repository into a personal
 learning wiki: read Markdown and PDFs, capture selected web passages, attach
 source context to a supported agent draft, keep PDF questions and answers as
 source-linked Markdown, revisit them on a fixed schedule, and explore the
@@ -23,8 +23,8 @@ that continues across reading sessions, while “mark” describes the durable
 annotation that connects a passage to that discussion.
 
 This is a naming proposal, not a code rename. The extension package, command
-IDs, view IDs, file markers, and current UI still use `human-learning` or
-“Human Learning.” Renaming those identifiers should be a separate compatibility
+IDs, view IDs, file markers, and current UI still use `llm-wiki` or
+“LLM Wiki.” Renaming those identifiers should be a separate compatibility
 change if the proposal is accepted.
 
 ## 2. The main architectural decision
@@ -46,7 +46,7 @@ This is a better fit for the learning workflow because:
 The legacy database packages and adapters have been removed. The combined
 extension consumes the small portable-reference and PDF-discussion surface
 from [`packages/core/src/index.ts`](../packages/core/src/index.ts) and does not
-ship `sql.js`, a SQLite WASM asset, or a required `.hl/index.sqlite`.
+ship `sql.js`, a SQLite WASM asset, or a required `.llm_wiki/index.sqlite`.
 
 ## 3. System overview
 
@@ -61,7 +61,7 @@ flowchart LR
         AskPDF["Embedded Ask PDF panel"]
         Graph["Concept graph<br/>webview panel"]
         WebReader["Experimental Web Reader<br/>sanitized public pages"]
-        Trees["Human Learning activity<br/>Backlinks and forward links"]
+        Trees["LLM Wiki activity<br/>Backlinks and forward links"]
         Outline["Explorer sidebar<br/>Markdown Outline / PDF Outline"]
     end
 
@@ -69,14 +69,14 @@ flowchart LR
         Sources["Markdown and PDFs"]
         Notes["wiki/learning/*.md"]
         Daily["wiki/daily/*.md"]
-        PdfMirror[".hl/annotations/pdf/&lt;pdf&gt;/&lt;annotation&gt;.jsonld<br/>portable Web Annotation mirror"]
-        PdfRuntime[".hl/annotations/pdf/&lt;pdf&gt;.json<br/>v1 runtime compatibility state"]
+        PdfMirror[".llm_wiki/annotations/pdf/&lt;pdf&gt;/&lt;annotation&gt;.jsonld<br/>portable Web Annotation mirror"]
+        PdfRuntime[".llm_wiki/annotations/pdf/&lt;pdf&gt;.json<br/>v1 runtime compatibility state"]
         Git["Git history and remote"]
     end
 
     Codex["Codex app-server<br/>read-only agent"]
     Sidebars["Installed agent composers<br/>Codex, Claude, Cursor, CodeBuddy"]
-    Handoff["Latest aliases under .hl/agent/<br/>immutable exports/&lt;id&gt; attachments"]
+    Handoff["Latest aliases under .llm_wiki/agent/<br/>immutable exports/&lt;id&gt; attachments"]
     PortableApi["Core portable-annotation<br/>migration/scanner API"]
 
     User --> MD
@@ -128,7 +128,7 @@ There are three clean boundaries:
 | Remote update and merge | Yes | Safe Git fetch/fast-forward/confirmed merge |
 | SQLite in the combined extension | No | Removed from its runtime and build |
 | MCP server | No | Removed; future integration only if a concrete consumer exists |
-| `hl` CLI | No | Removed; future automation should use filesystem-first APIs |
+| `llm_wiki` CLI | No | Removed; future automation should use filesystem-first APIs |
 | Mobile app | No | Explicitly out of scope |
 
 ## 5. Repository layout
@@ -145,7 +145,7 @@ my-learning-repo/
 │   │   └── 2026-08-10-question-<id>.md
 │   └── daily/
 │       └── 2026-08-10.md
-├── .hl/
+├── .llm_wiki/
 │   ├── annotations/
 │   │   └── pdf/
 │   │       ├── <pdf-sha256>.json  # current v1 runtime compatibility state
@@ -166,9 +166,9 @@ my-learning-repo/
 ```
 
 The active Markdown wiki scan ignores generated/build directories such as
-`.git`, `.hl`, `node_modules`, `dist`, and `out`. The core package separately
+`.git`, `.llm_wiki`, `node_modules`, `dist`, and `out`. The core package separately
 exposes a deliberately narrow portable-annotation scanner API for
-`.hl/annotations/pdf/<pdf-sha256>/<annotation-id>.jsonld`. That API supports
+`.llm_wiki/annotations/pdf/<pdf-sha256>/<annotation-id>.jsonld`. That API supports
 migration and interchange; `filesystemWiki`, the graph, and the current PDF
 viewer do not call it yet.
 
@@ -257,8 +257,8 @@ cooperate:
 | Record | Path | Current role |
 | --- | --- | --- |
 | Learning note | `wiki/learning/*.md` | Canonical, human-readable Q&A truth: source quote, portable link, summary, full transcript, and review schedule |
-| Portable annotation mirror | `.hl/annotations/pdf/<pdf-sha256>/<annotation-id>.jsonld` | One [W3C Web Annotation](https://www.w3.org/TR/annotation-model/)-shaped JSON-LD document per asked annotation for interchange and the core migration/scanner API |
-| v1 runtime sidecar | `.hl/annotations/pdf/<pdf-sha256>.json` | Current PDF viewer/controller compatibility state, including geometry, turn state, and transcript UI state |
+| Portable annotation mirror | `.llm_wiki/annotations/pdf/<pdf-sha256>/<annotation-id>.jsonld` | One [W3C Web Annotation](https://www.w3.org/TR/annotation-model/)-shaped JSON-LD document per asked annotation for interchange and the core migration/scanner API |
+| v1 runtime sidecar | `.llm_wiki/annotations/pdf/<pdf-sha256>.json` | Current PDF viewer/controller compatibility state, including geometry, turn state, and transcript UI state |
 
 The JSON-LD document is a **portable mirror during migration**, not yet the
 sole canonical store. The PDF runtime continues to read and update the v1
@@ -272,11 +272,11 @@ Each portable mirror targets the source PDF with complementary selectors:
 | --- | --- |
 | `TextQuoteSelector` | `exact` stores the selected passage. The core portable-annotation scanner API reads this field rather than parsing v1 transcript state. |
 | RFC 8118 page selector | Identifies the one-based PDF page with the `page=N` fragment defined by [RFC 8118](https://www.rfc-editor.org/rfc/rfc8118). |
-| Human Learning multi-rectangle selector | Stores every selection rectangle as `[left, top, right, bottom]` in PDF points (`pt`, 1/72 inch), measured right and down from a top-left origin. This project-specific selector extends the portable model without pretending that W3C defines PDF rectangles. |
+| LLM Wiki multi-rectangle selector | Stores every selection rectangle as `[left, top, right, bottom]` in PDF points (`pt`, 1/72 inch), measured right and down from a top-left origin. This project-specific selector extends the portable model without pretending that W3C defines PDF rectangles. |
 
 The quote, page, and geometry are intentionally redundant. A consumer that
 does not understand the custom rectangle selector can still identify the page
-and exact text. The current Human Learning viewer has not migrated to these
+and exact text. The current LLM Wiki viewer has not migrated to these
 selectors; it continues to restore highlights from the v1 sidecar.
 
 Every newly asked PDF annotation attempts to capture and store a PNG screenshot
@@ -306,7 +306,7 @@ Activation in
 registers:
 
 - Markdown and PDF custom editors;
-- Backlinks and Forward Links in the Human Learning activity view;
+- Backlinks and Forward Links in the LLM Wiki activity view;
 - context-aware Markdown Outline and PDF Outline panels in the main Explorer
   sidebar;
 - daily-note, graph, Git-sync, navigation, and selection commands;
@@ -331,7 +331,7 @@ When text is selected, the learner can:
 - press `Cmd+L` on macOS or `Ctrl+L` elsewhere.
 
 These surfaces all send the same exact Markdown selection through the shared
-handoff described below. Human Learning uses stable editor-tab evidence first,
+handoff described below. LLM Wiki uses stable editor-tab evidence first,
 falls back to feature-detected provider commands, asks when ambiguous, and
 does not submit the resulting draft.
 
@@ -369,9 +369,9 @@ repository-relative and carries the PDF page fragment.
 
 During migration, reopening the PDF restores precise geometry and
 discussion/transcript UI state from the tracked v1
-`.hl/annotations/pdf/<pdf-sha256>.json` compatibility sidecar. The core
+`.llm_wiki/annotations/pdf/<pdf-sha256>.json` compatibility sidecar. The core
 portable-annotation API can scan the per-annotation
-`.hl/annotations/pdf/<pdf-sha256>/<annotation-id>.jsonld` mirror, including
+`.llm_wiki/annotations/pdf/<pdf-sha256>/<annotation-id>.jsonld` mirror, including
 `TextQuoteSelector.exact`, for migration or interchange. The active
 `filesystemWiki`, graph, and PDF viewer do not consume that mirror yet. The
 readable summary and full Q&A remain in `wiki/learning/*.md`.
@@ -392,7 +392,7 @@ not become the sole canonical runtime store merely because it exists.
 ### Web path
 
 Cursor-specific capture is enabled only when the host exposes the required
-Browser commands. Human Learning then reads the active selection and bounded
+Browser commands. LLM Wiki then reads the active selection and bounded
 neighbor text, checks tab and URL identity before and after capture, and
 accepts a crop only after PNG and expected-dimension validation. These
 undocumented commands are isolated behind capability detection and are not
@@ -410,18 +410,18 @@ synthetic context image rather than a screenshot of the remote page.
 ### Shared agent handoff
 
 **Send Selection to Agent…** writes an immutable snapshot of exact Markdown
-text or the canonical PDF extracted quote under `.hl/agent/exports/<id>/`,
+text or the canonical PDF extracted quote under `.llm_wiki/agent/exports/<id>/`,
 refreshes the convenient latest aliases
-`.hl/agent/selection.md` and `.json`, discovers installed agent commands at
+`.llm_wiki/agent/selection.md` and `.json`, discovers installed agent commands at
 runtime, and attaches the snapshot's Markdown file to Codex, Claude Code,
 Cursor Agent, or CodeBuddy.
 
 **Add to Chat** calls the same export and shared agent handoff directly.
-It attaches `.hl/agent/exports/<id>/selection.md` first and, for a PDF, may
+It attaches `.llm_wiki/agent/exports/<id>/selection.md` first and, for a PDF, may
 attach the validated sibling `selection.png`. Crop capture, persistence, or
 optional crop attachment failure is non-fatal: the Markdown attachment remains
-usable and Human Learning warns before continuing text-only. The stable
-`.hl/agent/selection.{md,json,png}` paths remain latest-export aliases rather
+usable and LLM Wiki warns before continuing text-only. The stable
+`.llm_wiki/agent/selection.{md,json,png}` paths remain latest-export aliases rather
 than the files attached to an agent draft. The command prefers stable active
 editor-chat evidence, uses provider-specific draft commands only when
 available, asks when ambiguous, and never submits. If no supported provider is
@@ -592,7 +592,7 @@ alternate persistence layer.
 ### MCP
 
 The Model Context Protocol lets an external agent discover and call structured
-tools. A future Human Learning MCP server could be useful when a separate agent needs
+tools. A future LLM Wiki MCP server could be useful when a separate agent needs
 operations such as:
 
 - search this wiki;
@@ -654,14 +654,14 @@ The combined build emits:
 | `dist/pdfium.wasm` | Local PDF renderer |
 
 It intentionally does not emit `sql-wasm.wasm` or require
-`.hl/index.sqlite`.
+`.llm_wiki/index.sqlite`.
 
 Useful commands:
 
 ```bash
-pnpm --filter human-learning-vscode exec tsc --noEmit
-pnpm --filter @human-learning/core test
-pnpm --filter human-learning-vscode test
+pnpm --filter llm-wiki-vscode exec tsc --noEmit
+pnpm --filter @llm-wiki/core test
+pnpm --filter llm-wiki-vscode test
 pnpm exec playwright test --config playwright.config.ts
 ```
 

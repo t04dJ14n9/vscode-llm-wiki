@@ -56,7 +56,7 @@ const VIM_REPLACE_TEXTS = ['a', 'z', 'Q', '7'];
 const NON_VIM_INSERT_TEXTS = ['a', ' beta', ' ', '\t', '`', '```', '**', '[]', '()', '$x$'];
 const NON_VIM_TYPE_TEXTS = ['a', ' beta', ' ', '`', '```', '**', '[]', '()', '$x$'];
 
-test.describe('Human Learning Markdown expanded Vim command fuzzing', () => {
+test.describe('LLM Wiki Markdown expanded Vim command fuzzing', () => {
   test.setTimeout(240_000);
 
   // This generated final-text model intentionally covers deterministic Vim command

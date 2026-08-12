@@ -52,7 +52,7 @@ Feed separate `IntersectionObserver` callback batches where page 2 remains most 
 
 - [ ] **Step 6: Run the focused tests and record the expected failures**
 
-Run `pnpm --filter human-learning-vscode exec playwright test --config ../../playwright.config.ts test/e2e/ask-pdf.spec.ts test/e2e/pdf-viewer.spec.ts`. Expected: the new floating-window and visibility assertions fail against the docked implementation.
+Run `pnpm --filter llm-wiki-vscode exec playwright test --config ../../playwright.config.ts test/e2e/ask-pdf.spec.ts test/e2e/pdf-viewer.spec.ts`. Expected: the new floating-window and visibility assertions fail against the docked implementation.
 
 ### Task 2: Implement annotation-owned floating geometry
 
@@ -115,7 +115,7 @@ Clear ratios when the document/page wrappers are rebuilt so state cannot cross d
 
 - [ ] **Step 3: Run the page-state regression**
 
-Run `pnpm --filter human-learning-vscode exec playwright test --config ../../playwright.config.ts test/e2e/pdf-viewer.spec.ts -g 'continuous-scroll page state'`. Expected: pass with Page 2 retained.
+Run `pnpm --filter llm-wiki-vscode exec playwright test --config ../../playwright.config.ts test/e2e/pdf-viewer.spec.ts -g 'continuous-scroll page state'`. Expected: pass with Page 2 retained.
 
 ### Task 4: Documentation, parity, and verification
 

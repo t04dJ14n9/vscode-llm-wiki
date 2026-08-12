@@ -2,7 +2,7 @@
 
 ## Goal
 
-The Human Learning Markdown editor should feel native to the selected Cursor or
+The LLM Wiki Markdown editor should feel native to the selected Cursor or
 VS Code color theme and predictable to Vim users.
 
 When Markdown Vim mode is enabled, a newly initialized Markdown editor starts in
@@ -57,7 +57,7 @@ The rendered and active-line states use the following semantic roles:
   `var(--vscode-contrastBorder)` as the high-contrast border source when
   available.
 
-The theme remains the authority for the actual hue. Human Learning does not
+The theme remains the authority for the actual hue. LLM Wiki does not
 replace a theme's link palette. Readability improves because only the
 human-readable label receives the link color; the long destination and
 punctuation no longer inherit a saturated URL color. The underline and external
@@ -72,7 +72,7 @@ through the existing title or editing interaction.
 The CodeMirror `defaultHighlightStyle` is not suitable for this webview. It
 contains fixed colors documented as working well with light themes, including
 fixed colors for URLs, metadata, keywords, strings, variables, comments, and
-invalid syntax. It is replaced by a Human Learning `HighlightStyle` whose text
+invalid syntax. It is replaced by a LLM Wiki `HighlightStyle` whose text
 colors use VS Code semantic variables.
 
 The mapping is:
@@ -118,7 +118,7 @@ the editor follows automatically.
 - Links retain a visible underline instead of relying on color alone.
 - Keyboard focus uses the host focus or contrast border.
 - Raw destinations remain readable but visually secondary.
-- High-contrast themes remain authoritative; Human Learning does not blend or
+- High-contrast themes remain authoritative; LLM Wiki does not blend or
   reduce their supplied foreground colors.
 - The implementation must be visually checked in at least one dark theme, one
   light theme, and a high-contrast theme or a test fixture with equivalent
@@ -151,7 +151,7 @@ failures, but it is not a complete accessibility-conformance test.
 
 - No change to the PDF viewer's colors.
 - No change to Cursor Chat link rendering.
-- No custom theme picker or Human Learning palette.
+- No custom theme picker or LLM Wiki palette.
 - No pill, chip, or metadata-card link design.
 - No change to Markdown document content or exported source links.
 - No reset of Vim mode on every tab focus.

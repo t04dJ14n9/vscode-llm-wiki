@@ -615,7 +615,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function makeMarkerId(value: string): string {
   const safe = value.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 96);
-  return `human-learning-web-crop-${safe || randomUUID()}`;
+  return `llm-wiki-web-crop-${safe || randomUUID()}`;
 }
 
 function createMarkerCleanupScript(markerId: string): string {

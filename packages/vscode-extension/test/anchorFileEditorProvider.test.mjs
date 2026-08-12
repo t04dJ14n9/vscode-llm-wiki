@@ -115,7 +115,7 @@ function createHarness() {
     },
   };
   const codec = loadTsModule('src/anchorFileCodec.ts', {
-    '@human-learning/core': core,
+    '@llm-wiki/core': core,
   });
   const module = loadTsModule('src/anchorFileEditorProvider.ts', {
     vscode,
@@ -138,7 +138,7 @@ test('shared anchor codec supports local code and safely bounds oversized target
   const { codec } = createHarness();
   const code = codec.encodeAnchorFile('raw/code/example.ts#L3-L8', '/vault');
   assert.ok(code);
-  assert.match(code.fileName, /^source-[a-f0-9]{64}\.hlanchor$/);
+  assert.match(code.fileName, /^source-[a-f0-9]{64}\.llm_wiki_anchor$/);
   assert.deepEqual(JSON.parse(code.text), {
     version: 1,
     target: 'raw/code/example.ts#L3-L8',
@@ -163,7 +163,7 @@ test('shared anchor codec supports local code and safely bounds oversized target
 });
 
 async function withTempDirectory(run) {
-  const root = mkdtempSync(join(tmpdir(), 'hl-anchor-provider-'));
+  const root = mkdtempSync(join(tmpdir(), 'llm-wiki-anchor-provider-'));
   try {
     return await run(root);
   } finally {
@@ -177,13 +177,13 @@ function writeAnchorFile(root, payload, options = {}) {
     ?? createHash('sha256').update(bytes).digest('hex');
   const directory = join(
     root,
-    '.hl',
+    '.llm_wiki',
     'agent',
     'exports',
     options.exportId ?? '019fe660-3c41-7d43-9a0c-cd2b224cd5ed',
   );
   mkdirSync(directory, { recursive: true });
-  const filePath = join(directory, `source-${hash}.hlanchor`);
+  const filePath = join(directory, `source-${hash}.llm_wiki_anchor`);
   writeFileSync(filePath, bytes);
   return { filePath, bytes, hash };
 }
@@ -270,7 +270,7 @@ test('anchor file reader verifies trusted export placement, type, size, and hash
       /local file URI/,
     );
 
-    const outsidePath = join(root, 'source.hlanchor');
+    const outsidePath = join(root, 'source.llm_wiki_anchor');
     writeFileSync(outsidePath, valid.bytes);
     assert.throws(
       () => module.readAnchorFilePayload(createUri(outsidePath), root),
@@ -279,12 +279,12 @@ test('anchor file reader verifies trusted export placement, type, size, and hash
 
     const nestedPath = join(
       root,
-      '.hl',
+      '.llm_wiki',
       'agent',
       'exports',
       'outer-export',
       'nested-export',
-      `source-${valid.hash}.hlanchor`,
+      `source-${valid.hash}.llm_wiki_anchor`,
     );
     mkdirSync(dirname(nestedPath), { recursive: true });
     writeFileSync(nestedPath, valid.bytes);
@@ -295,11 +295,11 @@ test('anchor file reader verifies trusted export placement, type, size, and hash
 
     const uppercaseHashPath = join(
       root,
-      '.hl',
+      '.llm_wiki',
       'agent',
       'exports',
       'uppercase-export',
-      `source-${valid.hash.toUpperCase()}.hlanchor`,
+      `source-${valid.hash.toUpperCase()}.llm_wiki_anchor`,
     );
     mkdirSync(dirname(uppercaseHashPath), { recursive: true });
     writeFileSync(uppercaseHashPath, valid.bytes);
@@ -310,11 +310,11 @@ test('anchor file reader verifies trusted export placement, type, size, and hash
 
     const directoryPath = join(
       root,
-      '.hl',
+      '.llm_wiki',
       'agent',
       'exports',
       'directory-export',
-      `source-${'0'.repeat(64)}.hlanchor`,
+      `source-${'0'.repeat(64)}.llm_wiki_anchor`,
     );
     mkdirSync(dirname(directoryPath), { recursive: true });
     mkdirSync(directoryPath);
@@ -325,7 +325,7 @@ test('anchor file reader verifies trusted export placement, type, size, and hash
 
     const symlinkDirectory = join(
       root,
-      '.hl',
+      '.llm_wiki',
       'agent',
       'exports',
       'symlink-export',
@@ -333,7 +333,7 @@ test('anchor file reader verifies trusted export placement, type, size, and hash
     mkdirSync(symlinkDirectory, { recursive: true });
     const symlinkPath = join(
       symlinkDirectory,
-      `source-${valid.hash}.hlanchor`,
+      `source-${valid.hash}.llm_wiki_anchor`,
     );
     symlinkSync(valid.filePath, symlinkPath, 'file');
     assert.throws(
@@ -344,12 +344,12 @@ test('anchor file reader verifies trusted export placement, type, size, and hash
     const actualExportDirectory = join(root, 'actual-export-directory');
     mkdirSync(actualExportDirectory);
     writeFileSync(
-      join(actualExportDirectory, `source-${valid.hash}.hlanchor`),
+      join(actualExportDirectory, `source-${valid.hash}.llm_wiki_anchor`),
       valid.bytes,
     );
     const ancestorSymlink = join(
       root,
-      '.hl',
+      '.llm_wiki',
       'agent',
       'exports',
       'ancestor-symlink',
@@ -359,7 +359,7 @@ test('anchor file reader verifies trusted export placement, type, size, and hash
       () => module.readAnchorFilePayload(
         createUri(join(
           ancestorSymlink,
-          `source-${valid.hash}.hlanchor`,
+          `source-${valid.hash}.llm_wiki_anchor`,
         )),
         root,
       ),
@@ -426,7 +426,7 @@ test('readonly provider dispatches, renders scriptless status, and closes its pr
     };
     const unrelatedTab = {
       input: new TabInputCustom(
-        createUri(join(root, 'other.hlanchor')),
+        createUri(join(root, 'other.llm_wiki_anchor')),
         harness.module.ANCHOR_FILE_VIEW_TYPE,
       ),
     };
@@ -489,7 +489,7 @@ test('readonly provider resolves the workspace folder that owns each anchor file
 
 test('readonly provider keeps a safe error surface and does not close after dispatch failure', async () => {
   const harness = createHarness();
-  const uri = createUri('/vault/failure.hlanchor');
+  const uri = createUri('/vault/failure.llm_wiki_anchor');
   const provider = new harness.module.AnchorFileEditorProvider({
     resolveVaultRoot: () => '/vault',
     dispatchTarget: async () => {
@@ -509,7 +509,7 @@ test('readonly provider keeps a safe error surface and does not close after disp
   assert.doesNotMatch(panel.webview.html, /<unsafe failure>/);
   assert.deepEqual(harness.closes, []);
   assert.deepEqual(harness.errors, [
-    'Human Learning could not open this anchor: <unsafe failure>',
+    'LLM Wiki could not open this anchor: <unsafe failure>',
   ]);
 });
 
@@ -534,7 +534,7 @@ test('registration exposes a stable readonly custom-editor hook and dispatchUri 
 
   await provider.resolveCustomEditor(
     new harness.module.AnchorFileDocument(
-      createUri('/vault/passage.hlanchor'),
+      createUri('/vault/passage.llm_wiki_anchor'),
       '/vault',
       1,
       'raw/pdf/ddia.pdf#page=25',

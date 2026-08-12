@@ -2,10 +2,10 @@ import * as vscode from 'vscode';
 import {
   classifyReferenceTarget,
   type PdfTextFragment,
-} from '@human-learning/core';
+} from '@llm-wiki/core';
 import { existsSync, lstatSync, mkdirSync, statSync, writeFileSync } from 'fs';
 import { isAbsolute, join, relative, resolve, sep } from 'path';
-import { humanLearningAnchorTargetFromString } from './anchorUris';
+import { llmWikiAnchorTargetFromString } from './anchorUris';
 
 export interface DispatchUriOptions {
   openWebTarget?(url: string): Promise<void> | void;
@@ -16,13 +16,13 @@ export async function dispatchUri(
   uri: string,
   options: DispatchUriOptions = {},
 ): Promise<void> {
-  const resolvedUri = humanLearningAnchorTargetFromString(uri) ?? uri;
+  const resolvedUri = llmWikiAnchorTargetFromString(uri) ?? uri;
   const anchorFileUri = localAnchorFileUri(resolvedUri);
   if (anchorFileUri) {
     await vscode.commands.executeCommand(
       'vscode.openWith',
       anchorFileUri,
-      'human-learning.anchorFile',
+      'llm-wiki.anchorFile',
     );
     return;
   }
@@ -52,11 +52,11 @@ export async function dispatchUri(
       await vscode.commands.executeCommand(
         'vscode.openWith',
         fileUri,
-        'human-learning.markdownEditor',
+        'llm-wiki.markdownEditor',
       );
       const selection = await resolveNoteSelection(fileUri, target.heading, target.lines);
       if (selection) {
-        await vscode.commands.executeCommand('human-learning.revealInMarkdownEditor', {
+        await vscode.commands.executeCommand('llm-wiki.revealInMarkdownEditor', {
           uri: fileUri,
           selection,
         });
@@ -109,7 +109,7 @@ export async function dispatchUri(
       if (target.page) args.page = target.page;
       if (target.textFragment) args.textFragment = target.textFragment;
       try {
-        await vscode.commands.executeCommand('human-learning.openPdfTarget', args);
+        await vscode.commands.executeCommand('llm-wiki.openPdfTarget', args);
       } catch (error) {
         if (!isMissingPdfEditorCommand(error)) throw error;
         await openPdfWithDefaultEditor(workspaceRoot, target.path);
@@ -160,7 +160,7 @@ function localAnchorFileUri(value: string): vscode.Uri | undefined {
     || Boolean(url.host)
     || Boolean(url.search)
     || Boolean(url.hash)
-    || !url.pathname.endsWith('.hlanchor')
+    || !url.pathname.endsWith('.llm_wiki_anchor')
   ) {
     return undefined;
   }
@@ -268,7 +268,7 @@ function showOutsideWorkspaceError(candidatePath: string): void {
 
 function isMissingPdfEditorCommand(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
-  return message.includes('human-learning.openPdfTarget')
+  return message.includes('llm-wiki.openPdfTarget')
     && /not found|not registered|does not exist|unknown command/i.test(message);
 }
 

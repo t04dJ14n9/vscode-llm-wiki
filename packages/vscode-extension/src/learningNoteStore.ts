@@ -17,11 +17,11 @@ import {
 } from 'node:path';
 
 const REVIEW_INTERVALS_DAYS = [1, 3, 7, 14, 30, 60, 90] as const;
-const MESSAGE_MARKER_PREFIX = 'human-learning:discussion-message';
+const MESSAGE_MARKER_PREFIX = 'llm-wiki:discussion-message';
 const ENCODED_MESSAGES_KEY = 'discussion_messages_b64';
 
-export const MANUAL_NOTES_START = '<!-- human-learning:manual-notes:start -->';
-export const MANUAL_NOTES_END = '<!-- human-learning:manual-notes:end -->';
+export const MANUAL_NOTES_START = '<!-- llm-wiki:manual-notes:start -->';
+export const MANUAL_NOTES_END = '<!-- llm-wiki:manual-notes:end -->';
 
 export type LearningNoteDate = string | Date;
 

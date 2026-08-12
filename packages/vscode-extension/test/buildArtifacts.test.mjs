@@ -36,7 +36,7 @@ test('Markdown source retains stable typography and selection contracts', () => 
     source,
     /\.cm-lineNumbers \.cm-gutterElement': \{[\s\S]{0,500}cursor: 'default'/,
   );
-  assert.match(source, /\.cm-active-inline-code': \{[\s\S]{0,500}fontFamily: 'var\(--hl-editor-font-family/);
+  assert.match(source, /\.cm-active-inline-code': \{[\s\S]{0,500}fontFamily: 'var\(--llm-wiki-editor-font-family/);
   assert.match(source, /\.cm-active-footnote-def-label': \{[\s\S]{0,300}fontSize: '0\.85em'/);
 });
 
@@ -93,12 +93,12 @@ test('VSIX metadata includes package-local documentation, license, and repositor
   assert.equal(existsSync(join(extensionRoot, 'LICENSE')), true);
   assert.match(
     readFileSync(join(extensionRoot, 'README.md'), 'utf8'),
-    /Human Learning repository/,
+    /LLM Wiki repository/,
   );
   assert.match(readFileSync(join(extensionRoot, 'LICENSE'), 'utf8'), /MIT License/);
   assert.deepEqual(manifest.repository, {
     type: 'git',
-    url: 'https://github.com/t04dJ14n9/human-learning.git',
+    url: 'https://github.com/t04dJ14n9/llm_wiki.git',
   });
 });
 
@@ -146,7 +146,7 @@ test('production PDF bundle contains provider dispatch contract and no static Cu
     'Claude Code',
     'CodeBuddy',
   ]) assert.equal(bundle.includes(value), true);
-  assert.equal(bundle.includes('__humanLearningAddToCursorChat'), false);
+  assert.equal(bundle.includes('__llmWikiAddToCursorChat'), false);
 });
 
 test('webview webpack entries use VS Code webview size budgets', () => {
@@ -161,9 +161,9 @@ test('webview webpack entries use VS Code webview size budgets', () => {
   }
 });
 
-test('manifest opens markdown notes in the Human Learning custom editor by default', () => {
+test('manifest opens markdown notes in the LLM Wiki custom editor by default', () => {
   const markdownEditor = manifest.contributes.customEditors.find(
-    editor => editor.viewType === 'human-learning.markdownEditor',
+    editor => editor.viewType === 'llm-wiki.markdownEditor',
   );
   assert.ok(markdownEditor, 'missing markdown custom editor contribution');
   assert.equal(
@@ -173,21 +173,21 @@ test('manifest opens markdown notes in the Human Learning custom editor by defau
   );
   assert.equal(
     manifest.contributes.configurationDefaults['workbench.editorAssociations']['*.md'],
-    'human-learning.markdownEditor',
+    'llm-wiki.markdownEditor',
     'workspace defaults should route markdown files into the custom editor',
   );
 });
 
-test('manifest routes immutable Human Learning anchor bridge files to their dedicated editor', () => {
+test('manifest routes immutable LLM Wiki anchor bridge files to their dedicated editor', () => {
   const anchorEditor = manifest.contributes.customEditors.find(
-    editor => editor.viewType === 'human-learning.anchorFile',
+    editor => editor.viewType === 'llm-wiki.anchorFile',
   );
-  assert.ok(anchorEditor, 'missing Human Learning anchor-file custom editor contribution');
+  assert.ok(anchorEditor, 'missing LLM Wiki anchor-file custom editor contribution');
   assert.equal(anchorEditor.priority, 'default');
-  assert.deepEqual(anchorEditor.selector, [{ filenamePattern: '*.hlanchor' }]);
+  assert.deepEqual(anchorEditor.selector, [{ filenamePattern: '*.llm_wiki_anchor' }]);
   assert.equal(
     (manifest.activationEvents ?? []).includes(
-      'onCustomEditor:human-learning.anchorFile',
+      'onCustomEditor:llm-wiki.anchorFile',
     ),
     true,
   );
@@ -195,20 +195,20 @@ test('manifest routes immutable Human Learning anchor bridge files to their dedi
 
 test('manifest contributes a command palette toggle for markdown Vim mode', () => {
   const toggleVimCommand = manifest.contributes.commands.find(
-    command => command.command === 'human-learning.toggleVimMode',
+    command => command.command === 'llm-wiki.toggleVimMode',
   );
   assert.ok(toggleVimCommand, 'missing markdown Vim mode toggle command');
-  assert.equal(toggleVimCommand.title, 'Human Learning: Toggle Vim Mode');
+  assert.equal(toggleVimCommand.title, 'LLM Wiki: Toggle Vim Mode');
 });
 
 test('manifest contributes context-aware Markdown and PDF outlines to the main Explorer sidebar', () => {
-  const humanLearningViews = manifest.contributes.views['human-learning'] ?? [];
+  const llmWikiViews = manifest.contributes.views['llm-wiki'] ?? [];
   const explorerViews = manifest.contributes.views.explorer ?? [];
 
   assert.equal(
-    humanLearningViews.some(view => view.id.includes('outline')),
+    llmWikiViews.some(view => view.id.includes('outline')),
     false,
-    'outlines should not remain in the separate Human Learning activity view',
+    'outlines should not remain in the separate LLM Wiki activity view',
   );
   assert.deepEqual(
     explorerViews.map(view => ({
@@ -219,45 +219,45 @@ test('manifest contributes context-aware Markdown and PDF outlines to the main E
     })),
     [
       {
-        id: 'hl-markdown-outline',
+        id: 'llm-wiki-markdown-outline',
         name: 'Markdown Outline',
         type: 'tree',
-        when: "activeCustomEditorId == 'human-learning.markdownEditor'",
+        when: "activeCustomEditorId == 'llm-wiki.markdownEditor'",
       },
       {
-        id: 'hl-pdf-outline',
+        id: 'llm-wiki-pdf-outline',
         name: 'PDF Outline',
         type: 'tree',
-        when: "activeCustomEditorId == 'human-learning.pdfViewer'",
+        when: "activeCustomEditorId == 'llm-wiki.pdfViewer'",
       },
     ],
   );
 });
 
 test('manifest exposes selection export command while omitting Agent Context and Problems UI', () => {
-  const viewIds = (manifest.contributes.views['human-learning'] ?? []).map(view => view.id);
+  const viewIds = (manifest.contributes.views['llm-wiki'] ?? []).map(view => view.id);
   const commandIds = (manifest.contributes.commands ?? []).map(command => command.command);
 
-  assert.equal(viewIds.includes('hl-agent-context'), false);
-  assert.equal(viewIds.includes('hl-problems'), false);
-  assert.equal(commandIds.includes('human-learning.addSelectionToContext'), true);
-  assert.equal(commandIds.includes('human-learning.addSelectionToChat'), true);
-  assert.equal(commandIds.includes('human-learning.addCursorBrowserSelectionToChat'), true);
-  assert.equal(commandIds.includes('human-learning.experimentalBrowser.open'), true);
+  assert.equal(viewIds.includes('llm-wiki-agent-context'), false);
+  assert.equal(viewIds.includes('llm-wiki-problems'), false);
+  assert.equal(commandIds.includes('llm-wiki.addSelectionToContext'), true);
+  assert.equal(commandIds.includes('llm-wiki.addSelectionToChat'), true);
+  assert.equal(commandIds.includes('llm-wiki.addCursorBrowserSelectionToChat'), true);
+  assert.equal(commandIds.includes('llm-wiki.experimentalBrowser.open'), true);
   assert.equal((manifest.activationEvents ?? []).includes('onUri'), true);
   assert.equal(
-    commandIds.includes('human-learning.experimentalBrowser.sendSelection'),
+    commandIds.includes('llm-wiki.experimentalBrowser.sendSelection'),
     true,
   );
   assert.equal(
     (manifest.contributes.commands ?? []).some(
-      command => command.command === 'human-learning.ingestCurrentFile',
+      command => command.command === 'llm-wiki.ingestCurrentFile',
     ),
     false,
   );
   assert.equal(
     (manifest.contributes.commands ?? []).some(
-      command => command.command === 'human-learning.showBacklinks',
+      command => command.command === 'llm-wiki.showBacklinks',
     ),
     false,
   );
@@ -265,10 +265,10 @@ test('manifest exposes selection export command while omitting Agent Context and
 
 test('manifest exposes generic Add to Chat only on Cursor while selection-to-agent remains product neutral', () => {
   const command = manifest.contributes.commands.find(
-    item => item.command === 'human-learning.addSelectionToChat',
+    item => item.command === 'llm-wiki.addSelectionToChat',
   );
-  assert.equal(command?.title, 'Human Learning: Add to Chat');
-  assert.equal(command?.enablement, 'humanLearningHostIsCursor');
+  assert.equal(command?.title, 'LLM Wiki: Add to Chat');
+  assert.equal(command?.enablement, 'llmWikiHostIsCursor');
 
   const genericContributions = [
     ...Object.values(manifest.contributes.menus ?? {}).flat(),
@@ -276,11 +276,11 @@ test('manifest exposes generic Add to Chat only on Cursor while selection-to-age
   ].filter(item => item.command === command.command);
   assert.ok(genericContributions.length > 0);
   assert.ok(genericContributions.every(
-    item => item.when.includes('humanLearningHostIsCursor'),
+    item => item.when.includes('llmWikiHostIsCursor'),
   ));
 
   const selectionCommand = manifest.contributes.commands.find(
-    item => item.command === 'human-learning.addSelectionToContext',
+    item => item.command === 'llm-wiki.addSelectionToContext',
   );
   assert.equal(selectionCommand?.enablement, undefined);
   const selectionContributions = Object.values(manifest.contributes.menus ?? {})
@@ -288,26 +288,26 @@ test('manifest exposes generic Add to Chat only on Cursor while selection-to-age
     .filter(item => item.command === selectionCommand.command);
   assert.ok(selectionContributions.length > 0);
   assert.ok(selectionContributions.every(
-    item => !item.when.includes('humanLearningHostIsCursor'),
+    item => !item.when.includes('llmWikiHostIsCursor'),
   ));
   assert.equal(
-    (manifest.activationEvents ?? []).includes('onView:human-learning.learningChat'),
+    (manifest.activationEvents ?? []).includes('onView:llm-wiki.learningChat'),
     false,
   );
   assert.equal(
-    (manifest.contributes.views?.['human-learning'] ?? []).some(
-      item => item.id === 'human-learning.learningChat',
+    (manifest.contributes.views?.['llm-wiki'] ?? []).some(
+      item => item.id === 'llm-wiki.learningChat',
     ),
     false,
   );
 });
 
-test('manifest omits the redundant Human Learning jump stack view and commands', () => {
-  const humanLearningViews = manifest.contributes.views['human-learning'] ?? [];
+test('manifest omits the redundant LLM Wiki jump stack view and commands', () => {
+  const llmWikiViews = manifest.contributes.views['llm-wiki'] ?? [];
   const commandIds = (manifest.contributes.commands ?? []).map(command => command.command);
 
-  assert.equal(humanLearningViews.some(view => view.id === 'hl-jump-stack'), false);
-  assert.equal(commandIds.includes('human-learning.jumpBack'), false);
-  assert.equal(commandIds.includes('human-learning.retractToJump'), false);
-  assert.equal(commandIds.includes('human-learning.clearJumpStack'), false);
+  assert.equal(llmWikiViews.some(view => view.id === 'llm-wiki-jump-stack'), false);
+  assert.equal(commandIds.includes('llm-wiki.jumpBack'), false);
+  assert.equal(commandIds.includes('llm-wiki.retractToJump'), false);
+  assert.equal(commandIds.includes('llm-wiki.clearJumpStack'), false);
 });

@@ -152,7 +152,7 @@ test('accepts the live integration-name userAgent at the minimum supported versi
 
   assert.equal(
     initialized.userAgent,
-    'human-learning-vscode/0.144.1 (Mac OS 26.5.2; arm64) dumb (human-learning-vscode; 0.1.0)',
+    'llm-wiki-vscode/0.144.1 (Mac OS 26.5.2; arm64) dumb (llm-wiki-vscode; 0.1.0)',
   );
 });
 

@@ -4,7 +4,7 @@
 
 ## Summary
 
-Human Learning will temporarily remove Ask PDF from the active product while preserving its implementation and stored discussion data for a future provider-neutral “More detail” workflow. At the same time, the PDF selection toolbar will be reduced to the two actions that have a clear current purpose: **Copy Link** and **Add to Chat**.
+LLM Wiki will temporarily remove Ask PDF from the active product while preserving its implementation and stored discussion data for a future provider-neutral “More detail” workflow. At the same time, the PDF selection toolbar will be reduced to the two actions that have a clear current purpose: **Copy Link** and **Add to Chat**.
 
 The demo vault instructions will be refreshed to describe the current agent handoff and editor behavior, and the Markdown editor caret will be explicitly verified against the active VS Code color theme.
 
@@ -12,7 +12,7 @@ The demo vault instructions will be refreshed to describe the current agent hand
 
 - Make Ask PDF completely inactive and invisible.
 - Prevent extension activation from starting the Codex app server solely for Ask PDF.
-- Preserve Ask PDF source modules and existing `.hl/annotations/pdf` data.
+- Preserve Ask PDF source modules and existing `.llm_wiki/annotations/pdf` data.
 - Reduce the PDF text-selection toolbar to **Copy Link** and **Add to Chat**.
 - Remove the obsolete quote/insert selection-action protocol paths.
 - Keep provider-neutral Add to Chat behavior unchanged.
@@ -94,7 +94,7 @@ This applies to:
 - Native caret rendering inside the editor.
 - Vim/search panel input carets.
 
-The fallback is the active editor foreground, not a fixed color. The implementation will not introduce a Human Learning caret preference.
+The fallback is the active editor foreground, not a fixed color. The implementation will not introduce a LLM Wiki caret preference.
 
 ## Architecture
 
@@ -127,7 +127,7 @@ The following remain in the repository:
 
 - Ask PDF panel, controller, protocol, persistence, and Codex client modules.
 - Focused tests for those isolated modules.
-- Existing discussion and snapshot data under `.hl/annotations/pdf`.
+- Existing discussion and snapshot data under `.llm_wiki/annotations/pdf`.
 
 No migration runs and no stored record is rewritten.
 
@@ -137,22 +137,22 @@ The following files will be synchronized where their audiences overlap:
 
 - `demo-vault/AGENTS.md`
 - `demo-vault/CLAUDE.md`
-- `demo-vault/.agents/skills/human-learning/SKILL.md`
-- `demo-vault/.claude/commands/hl-explain-selection.md`
+- `demo-vault/.agents/skills/llm-wiki/SKILL.md`
+- `demo-vault/.claude/commands/llm-wiki-explain-selection.md`
 
 The refreshed rules will document:
 
-- Human Learning’s custom Markdown and PDF editors.
+- LLM Wiki’s custom Markdown and PDF editors.
 - Markdown and PDF outline behavior.
 - Vim starting in normal mode when Vim mode is enabled.
 - Theme-derived editor colors.
 - Provider-neutral, draft-only Add to Chat behavior.
-- `.hl/agent/selection.md` as the current selection handoff.
-- `.hl/agent/selection.png` as optional visual evidence.
-- Immutable exported Source links under `.hl/agent/exports/...`.
+- `.llm_wiki/agent/selection.md` as the current selection handoff.
+- `.llm_wiki/agent/selection.png` as optional visual evidence.
+- Immutable exported Source links under `.llm_wiki/agent/exports/...`.
 - The requirement to reuse the exact generated Source link rather than inventing, rewriting, or approximating a PDF URL.
 - The rule not to edit `raw/` source material unless explicitly requested.
-- Internal `.hlanchor` files as generated bridge artifacts whose identifiers must not be invented.
+- Internal `.llm_wiki_anchor` files as generated bridge artifacts whose identifiers must not be invented.
 
 Stale “Add to Cursor Chat” wording and instructions to construct direct PDF text-fragment URLs will be removed. The pending alternative that deletes the selection-handoff rules is not part of this design.
 
@@ -190,7 +190,7 @@ After rebuilding and reloading the Extension Development Host:
 4. Verify Copy Link opens the exact selection after navigation.
 5. Verify Add to Chat prepares text, generated Source link, and screenshot for a compatible agent without submitting.
 6. Open Markdown under at least one dark and one light theme and compare its caret with the built-in editor caret.
-7. Confirm existing `.hl/annotations/pdf` data is unchanged.
+7. Confirm existing `.llm_wiki/annotations/pdf` data is unchanged.
 
 ## Rollback and Future Reintroduction
 

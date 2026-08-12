@@ -4,7 +4,7 @@
 
 ## Summary
 
-Human Learning will replace ambiguous PDF-to-agent routing with explicit,
+LLM Wiki will replace ambiguous PDF-to-agent routing with explicit,
 capability-driven provider actions. VS Code will show one action for each
 supported installed agent extension. Cursor will show the same provider actions
 and retain its generic **Add to Chat** action as a direct handoff to Cursor
@@ -271,15 +271,15 @@ actual `selection.png` lifecycle.
 
 ### Cold-start live verification
 
-Run isolated Cursor and VS Code hosts with the production Human Learning build
+Run isolated Cursor and VS Code hosts with the production LLM Wiki build
 and the normal installed provider directories.
 
 For every installed provider in each host:
 
-1. Start Human Learning and open the PDF before opening the provider.
+1. Start LLM Wiki and open the PDF before opening the provider.
 2. Record that the provider extension exists and `isActive === false`.
 3. Select a real PDF passage and confirm its provider action is visible.
-4. Click the Human Learning provider action.
+4. Click the LLM Wiki provider action.
 5. Record that the provider becomes active.
 6. Verify the provider draft contains the exported `selection.md` and, where
    supported, `selection.png`. Provider-owned logs may corroborate the draft

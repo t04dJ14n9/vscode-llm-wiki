@@ -223,7 +223,7 @@ test('markdown outline tree mirrors native symbol icons, expanded hierarchy, and
 
   assert.deepEqual(revealCommands, [
     [
-      'human-learning.revealInMarkdownEditor',
+      'llm-wiki.revealInMarkdownEditor',
       {
         uri,
         selection: { from: 603, to: 603 },
@@ -329,7 +329,7 @@ test('outline tree provider reads nested PDF bookmarks from the active custom PD
   );
 
   assert.deepEqual(revealCommands, [[
-    'human-learning.revealInPdfOutline',
+    'llm-wiki.revealInPdfOutline',
     {
       uri,
       destination: {
@@ -420,14 +420,14 @@ test('outline tree provider creates collapsible Explorer views and refreshes wit
     treeViewCreations,
     [
       {
-        id: 'hl-markdown-outline',
+        id: 'llm-wiki-markdown-outline',
         options: {
           treeDataProvider: provider,
           showCollapseAll: true,
         },
       },
       {
-        id: 'hl-pdf-outline',
+        id: 'llm-wiki-pdf-outline',
         options: {
           treeDataProvider: provider,
           showCollapseAll: true,

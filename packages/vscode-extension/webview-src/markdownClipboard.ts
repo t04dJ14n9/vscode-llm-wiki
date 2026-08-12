@@ -14,7 +14,7 @@ const renderedPreviewBlockSelector = [
 ].join(',');
 
 const sourcedPreviewWidgetSelector = [
-  '.cm-hl-link',
+  '.cm-llm-wiki-link',
   '.cm-hybrid-callout',
   '.cm-hybrid-codeblock',
   '.cm-hybrid-image',

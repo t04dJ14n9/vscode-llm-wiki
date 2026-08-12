@@ -25,7 +25,7 @@ import type {
 } from './anchorFileCodec';
 import { dispatchUri } from './uriDispatcher';
 
-export const ANCHOR_FILE_VIEW_TYPE = 'human-learning.anchorFile';
+export const ANCHOR_FILE_VIEW_TYPE = 'llm-wiki.anchorFile';
 export {
   ANCHOR_FILE_MAX_BYTES,
   ANCHOR_FILE_MAX_TARGET_CHARS,
@@ -108,7 +108,7 @@ implements vscode.CustomReadonlyEditorProvider<AnchorFileDocument> {
     };
     webviewPanel.webview.html = renderAnchorFileStatus(
       'Opening linked passage…',
-      'Human Learning is handing this anchor to its destination.',
+      'LLM Wiki is handing this anchor to its destination.',
     );
     throwIfCancelled(token);
 
@@ -128,7 +128,7 @@ implements vscode.CustomReadonlyEditorProvider<AnchorFileDocument> {
         message,
       );
       vscode.window.showErrorMessage(
-        `Human Learning could not open this anchor: ${message}`,
+        `LLM Wiki could not open this anchor: ${message}`,
       );
     }
   }
@@ -240,7 +240,7 @@ function assertAnchorFileLocation(uri: vscode.Uri, vaultRoot: string): string {
   const segments = fromRoot.split(sep);
   if (
     segments.length !== 5
-    || segments[0] !== '.hl'
+    || segments[0] !== '.llm_wiki'
     || segments[1] !== 'agent'
     || segments[2] !== 'exports'
     || !segments[3]
@@ -250,7 +250,7 @@ function assertAnchorFileLocation(uri: vscode.Uri, vaultRoot: string): string {
     );
   }
   const filename = segments[4] ?? '';
-  const match = /^source-([0-9a-f]{64})\.hlanchor$/.exec(filename);
+  const match = /^source-([0-9a-f]{64})\.llm_wiki_anchor$/.exec(filename);
   if (!match?.[1]) {
     throw new Error('Anchor bridge file must use its lowercase SHA-256 filename.');
   }

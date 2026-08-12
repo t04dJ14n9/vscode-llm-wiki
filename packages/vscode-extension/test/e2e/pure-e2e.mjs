@@ -33,7 +33,7 @@ function runCli(args, cwd) {
 }
 
 function makeVault(name) {
-  const root = mkdtempSync(join(tmpdir(), 'hl-e2e-'));
+  const root = mkdtempSync(join(tmpdir(), 'llm-wiki-e2e-'));
   runCli(['init', '.', '--name', name], root);
   mkdirSync(join(root, 'notes', 'Concepts'), { recursive: true });
   mkdirSync(join(root, 'raw', 'pdf'), { recursive: true });
@@ -179,7 +179,7 @@ test('E2E: full bidirectional link pipeline', async () => {
 
   const markdownRefs = parseMarkdownLinks(transformersText);
   assert.ok(markdownRefs.length >= 1, 'Transformers.md has native markdown links');
-  assert.ok(markdownRefs.every(link => !link.uri.startsWith('hl://')));
+  assert.ok(markdownRefs.every(link => !link.uri.startsWith('llm-wiki://')));
 
   const attentionText = readFileSync(
     join(root, 'notes', 'Concepts', 'Attention Mechanism.md'), 'utf8',
@@ -248,13 +248,13 @@ test('E2E: full bidirectional link pipeline', async () => {
   assert.equal(context.status, 'ok');
   assert.ok(context.context.markdown.includes('Transformers'));
   assert.ok(context.context.markdown.includes('notes/Concepts/Transformers.md'));
-  assert.ok(existsSync(join(root, '.hl', 'agent', 'context.md')));
-  assert.ok(existsSync(join(root, '.hl', 'agent', 'context.json')));
+  assert.ok(existsSync(join(root, '.llm_wiki', 'agent', 'context.md')));
+  assert.ok(existsSync(join(root, '.llm_wiki', 'agent', 'context.json')));
 
   // ── 12. Verify context file has link references ──
 
-  const contextMd = readFileSync(join(root, '.hl', 'agent', 'context.md'), 'utf8');
-  assert.ok(!contextMd.includes('hl://'), 'Agent context does not emit hl:// links');
+  const contextMd = readFileSync(join(root, '.llm_wiki', 'agent', 'context.md'), 'utf8');
+  assert.ok(!contextMd.includes('llm-wiki://'), 'Agent context does not emit llm-wiki:// links');
   assert.ok(contextMd.includes('notes/Concepts/Transformers.md'), 'Agent context includes native links');
 });
 

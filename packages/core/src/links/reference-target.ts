@@ -141,8 +141,8 @@ function classifyWebTarget(uri: string): ReferenceTarget {
 
 function webTargetIdFromUrl(uri: string): string | undefined {
   const hash = uri.match(/#(.+)$/)?.[1] ?? '';
-  if (!hash.startsWith('hl-web=')) return undefined;
-  const value = hash.slice('hl-web='.length).split(':~:')[0];
+  if (!hash.startsWith('llm-wiki-web=')) return undefined;
+  const value = hash.slice('llm-wiki-web='.length).split(':~:')[0];
   return value ? decodeURIComponent(value) : undefined;
 }
 

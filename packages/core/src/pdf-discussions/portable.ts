@@ -4,7 +4,7 @@ import { isAbsolute, posix, relative, resolve, sep } from 'node:path';
 import type { PdfDiscussionAnnotationV1, PdfDiscussionRectV1 } from './schema';
 
 const WEB_ANNOTATION_CONTEXT = 'http://www.w3.org/ns/anno.jsonld';
-export const HUMAN_LEARNING_CONTEXT = 'urn:human-learning:';
+export const LLM_WIKI_CONTEXT = 'urn:llm_wiki:';
 export const PDF_FRAGMENT_CONFORMS_TO = 'https://www.rfc-editor.org/rfc/rfc8118';
 
 export interface PortablePdfAnnotationInput {
@@ -18,15 +18,15 @@ export interface PortablePdfAnnotationInput {
 export interface PortablePdfAnnotation {
   '@context': readonly [
     'http://www.w3.org/ns/anno.jsonld',
-    { readonly hl: typeof HUMAN_LEARNING_CONTEXT },
+    { readonly llm_wiki: typeof LLM_WIKI_CONTEXT },
   ];
   id: string;
   type: 'Annotation';
   motivation: 'commenting';
   created: string;
   modified: string;
-  'hl:discussionId': string;
-  'hl:selectionKey': string;
+  'llm_wiki:discussionId': string;
+  'llm_wiki:selectionKey': string;
   body?: {
     id: string;
     type: 'Text';
@@ -39,11 +39,11 @@ export interface PortablePdfAnnotation {
       id: string;
       type: 'Document';
       format: 'application/pdf';
-      'hl:sha256': string;
+      'llm_wiki:sha256': string;
     };
     selector: Array<Record<string, unknown>>;
   };
-  'hl:snapshot'?: Record<string, unknown>;
+  'llm_wiki:snapshot'?: Record<string, unknown>;
 }
 
 export interface ScannedPortablePdfAnnotation {
@@ -82,12 +82,12 @@ export function toPortablePdfAnnotation(
       value: `page=${anchor.page}`,
     },
     {
-      type: 'hl:PdfRectSelector',
-      'hl:page': anchor.page,
-      'hl:unit': 'pt',
-      'hl:origin': 'top-left',
-      'hl:coordinates': 'left,top,right,bottom',
-      'hl:rects': anchor.rects.map(copyRect),
+      type: 'llm_wiki:PdfRectSelector',
+      'llm_wiki:page': anchor.page,
+      'llm_wiki:unit': 'pt',
+      'llm_wiki:origin': 'top-left',
+      'llm_wiki:coordinates': 'left,top,right,bottom',
+      'llm_wiki:rects': anchor.rects.map(copyRect),
     },
   ];
   const textPosition = pdfTextPositionSelector(anchor);
@@ -96,15 +96,15 @@ export function toPortablePdfAnnotation(
   return {
     '@context': [
       WEB_ANNOTATION_CONTEXT,
-      { hl: HUMAN_LEARNING_CONTEXT },
+      { llm_wiki: LLM_WIKI_CONTEXT },
     ],
     id: annotationUrn(annotation.id),
     type: 'Annotation',
     motivation: 'commenting',
     created: annotation.createdAt,
     modified: annotation.updatedAt,
-    'hl:discussionId': annotation.id,
-    'hl:selectionKey': annotation.selectionKey,
+    'llm_wiki:discussionId': annotation.id,
+    'llm_wiki:selectionKey': annotation.selectionKey,
     ...(input.learningNotePath
       ? {
           body: {
@@ -121,28 +121,28 @@ export function toPortablePdfAnnotation(
         id: relativeIri(annotationPath, sourcePath),
         type: 'Document',
         format: 'application/pdf',
-        'hl:sha256': pdfSha256,
+        'llm_wiki:sha256': pdfSha256,
       },
       selector: selectors,
     },
     ...(snapshot
       ? {
-          'hl:snapshot': {
+          'llm_wiki:snapshot': {
             id: relativeIri(
               annotationPath,
-              repositoryPath(posix.join('.hl/annotations/pdf', snapshot.file)),
+              repositoryPath(posix.join('.llm_wiki/annotations/pdf', snapshot.file)),
             ),
             type: 'Image',
             format: 'image/png',
-            'hl:sha256': snapshot.sha256,
-            'hl:width': snapshot.width,
-            'hl:height': snapshot.height,
-            'hl:page': anchor.page,
+            'llm_wiki:sha256': snapshot.sha256,
+            'llm_wiki:width': snapshot.width,
+            'llm_wiki:height': snapshot.height,
+            'llm_wiki:page': anchor.page,
             ...(snapshot.cropRect
               ? {
-                  'hl:cropRect': copyRect(snapshot.cropRect),
-                  'hl:padding': snapshot.padding,
-                  'hl:unit': snapshot.unit,
+                  'llm_wiki:cropRect': copyRect(snapshot.cropRect),
+                  'llm_wiki:padding': snapshot.padding,
+                  'llm_wiki:unit': snapshot.unit,
                 }
               : {}),
           },
@@ -161,7 +161,7 @@ export async function scanPortablePdfAnnotations(
   } catch {
     return [];
   }
-  const root = resolve(canonicalWorkspace, '.hl', 'annotations', 'pdf');
+  const root = resolve(canonicalWorkspace, '.llm_wiki', 'annotations', 'pdf');
   if (!await plainPath(canonicalWorkspace, root, 'directory')) return [];
   const records: ScannedPortablePdfAnnotation[] = [];
   for (const directory of await entries(root)) {
@@ -173,7 +173,7 @@ export async function scanPortablePdfAnnotations(
       const path = resolve(hashRoot, file.name);
       try {
         const annotationPath = posix.join(
-          '.hl',
+          '.llm_wiki',
           'annotations',
           'pdf',
           directory.name,
@@ -207,19 +207,19 @@ function pdfTextPositionSelector(
   ];
   if (values.every(value => value === undefined)) return undefined;
   return {
-    type: 'hl:PdfTextItemSelector',
-    'hl:start': {
+    type: 'llm_wiki:PdfTextItemSelector',
+    'llm_wiki:start': {
       ...(anchor.textItemIndex !== undefined
-        ? { 'hl:textItemIndex': anchor.textItemIndex }
+        ? { 'llm_wiki:textItemIndex': anchor.textItemIndex }
         : {}),
-      ...(anchor.charOffset !== undefined ? { 'hl:charOffset': anchor.charOffset } : {}),
+      ...(anchor.charOffset !== undefined ? { 'llm_wiki:charOffset': anchor.charOffset } : {}),
     },
-    'hl:end': {
+    'llm_wiki:end': {
       ...(anchor.endTextItemIndex !== undefined
-        ? { 'hl:textItemIndex': anchor.endTextItemIndex }
+        ? { 'llm_wiki:textItemIndex': anchor.endTextItemIndex }
         : {}),
       ...(anchor.endCharOffset !== undefined
-        ? { 'hl:charOffset': anchor.endCharOffset }
+        ? { 'llm_wiki:charOffset': anchor.endCharOffset }
         : {}),
     },
   };
@@ -235,11 +235,11 @@ function scanRecord(
     || !portableContext(value['@context'])
     || value.type !== 'Annotation'
     || value.motivation !== 'commenting'
-    || typeof value['hl:discussionId'] !== 'string'
-    || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/u.test(value['hl:discussionId'])
-    || value.id !== annotationUrn(value['hl:discussionId'])
-    || typeof value['hl:selectionKey'] !== 'string'
-    || !value['hl:selectionKey']
+    || typeof value['llm_wiki:discussionId'] !== 'string'
+    || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/u.test(value['llm_wiki:discussionId'])
+    || value.id !== annotationUrn(value['llm_wiki:discussionId'])
+    || typeof value['llm_wiki:selectionKey'] !== 'string'
+    || !value['llm_wiki:selectionKey']
     || typeof value.created !== 'string'
     || typeof value.modified !== 'string'
     || !record(value.target)
@@ -251,14 +251,14 @@ function scanRecord(
     || typeof source.id !== 'string'
     || source.type !== 'Document'
     || source.format !== 'application/pdf'
-    || source['hl:sha256'] !== directoryHash
+    || source['llm_wiki:sha256'] !== directoryHash
   ) return undefined;
 
   const selectors = unknownArray(value.target.selector);
   const quote = uniqueSelector(selectors, 'TextQuoteSelector');
   const pageSelector = uniqueSelector(selectors, 'FragmentSelector');
-  const geometry = uniqueSelector(selectors, 'hl:PdfRectSelector');
-  const textPosition = optionalSelector(selectors, 'hl:PdfTextItemSelector');
+  const geometry = uniqueSelector(selectors, 'llm_wiki:PdfRectSelector');
+  const textPosition = optionalSelector(selectors, 'llm_wiki:PdfTextItemSelector');
   if (
     !quote
     || typeof quote.exact !== 'string'
@@ -274,15 +274,15 @@ function scanRecord(
     ? /^page=(\d+)$/u.exec(pageSelector.value)
     : undefined;
   const page = Number(pageMatch?.[1]);
-  const rects = pdfRects(geometry['hl:rects']);
+  const rects = pdfRects(geometry['llm_wiki:rects']);
   const sourcePath = resolveIri(annotationPath, source.id);
   if (
     !Number.isSafeInteger(page)
     || page < 1
-    || geometry['hl:page'] !== page
-    || geometry['hl:unit'] !== 'pt'
-    || geometry['hl:origin'] !== 'top-left'
-    || geometry['hl:coordinates'] !== 'left,top,right,bottom'
+    || geometry['llm_wiki:page'] !== page
+    || geometry['llm_wiki:unit'] !== 'pt'
+    || geometry['llm_wiki:origin'] !== 'top-left'
+    || geometry['llm_wiki:coordinates'] !== 'left,top,right,bottom'
     || !rects
     || !sourcePath
     || !sourcePath.toLowerCase().endsWith('.pdf')
@@ -290,14 +290,14 @@ function scanRecord(
 
   const body = optionalBody(value.body, annotationPath);
   const snapshot = optionalSnapshot(
-    value['hl:snapshot'],
+    value['llm_wiki:snapshot'],
     annotationPath,
-    value['hl:discussionId'],
+    value['llm_wiki:discussionId'],
     page,
   );
   if (body === null || snapshot === null) return undefined;
   return {
-    annotationId: value['hl:discussionId'],
+    annotationId: value['llm_wiki:discussionId'],
     annotationPath,
     pdfSha256: directoryHash,
     sourcePath,
@@ -312,7 +312,7 @@ function scanRecord(
 }
 
 function annotationUrn(annotationId: string): string {
-  return `urn:human-learning:annotation:${encodeURIComponent(annotationId)}`;
+  return `urn:llm_wiki:annotation:${encodeURIComponent(annotationId)}`;
 }
 
 function portableContext(value: unknown): boolean {
@@ -321,7 +321,7 @@ function portableContext(value: unknown): boolean {
     && value[0] === WEB_ANNOTATION_CONTEXT
     && record(value[1])
     && Object.keys(value[1]).length === 1
-    && value[1].hl === HUMAN_LEARNING_CONTEXT;
+    && value[1].llm_wiki === LLM_WIKI_CONTEXT;
 }
 
 function uniqueSelector(
@@ -347,11 +347,11 @@ function optionalSelector(
 }
 
 function validPdfTextPosition(selector: Record<string, unknown>): boolean {
-  const endpoints = [selector['hl:start'], selector['hl:end']];
+  const endpoints = [selector['llm_wiki:start'], selector['llm_wiki:end']];
   return endpoints.every(endpoint => {
     if (!record(endpoint)) return false;
     const keys = Object.keys(endpoint);
-    return keys.every(key => key === 'hl:textItemIndex' || key === 'hl:charOffset')
+    return keys.every(key => key === 'llm_wiki:textItemIndex' || key === 'llm_wiki:charOffset')
       && keys.every(key => {
         const value = endpoint[key];
         return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
@@ -387,15 +387,15 @@ function optionalSnapshot(
     || typeof value.id !== 'string'
     || value.type !== 'Image'
     || value.format !== 'image/png'
-    || !/^[a-f0-9]{64}$/u.test(String(value['hl:sha256']))
-    || !positiveInteger(value['hl:width'])
-    || !positiveInteger(value['hl:height'])
-    || value['hl:page'] !== page
+    || !/^[a-f0-9]{64}$/u.test(String(value['llm_wiki:sha256']))
+    || !positiveInteger(value['llm_wiki:width'])
+    || !positiveInteger(value['llm_wiki:height'])
+    || value['llm_wiki:page'] !== page
   ) return null;
   const path = resolveIri(annotationPath, value.id);
   if (
     path !== posix.join(
-      '.hl',
+      '.llm_wiki',
       'annotations',
       'pdf',
       'assets',
@@ -403,9 +403,9 @@ function optionalSnapshot(
       'selection.png',
     )
   ) return null;
-  const crop = value['hl:cropRect'];
-  const padding = value['hl:padding'];
-  const unit = value['hl:unit'];
+  const crop = value['llm_wiki:cropRect'];
+  const padding = value['llm_wiki:padding'];
+  const unit = value['llm_wiki:unit'];
   const hasCrop = crop !== undefined || padding !== undefined || unit !== undefined;
   if (
     hasCrop

@@ -10,8 +10,8 @@ test('E2E cleanup ignores manual extension development windows that share the de
       pid: 101,
       command:
         '/Applications/Visual Studio Code.app/Contents/MacOS/Electron ' +
-        '--extensionDevelopmentPath=/Users/t04dj14n9/Code/human-learning/packages/vscode-extension ' +
-        '--remote-debugging-port=9229 /Users/t04dj14n9/Code/human-learning/demo-vault',
+        '--extensionDevelopmentPath=/Users/t04dj14n9/Code/llm-wiki/packages/vscode-extension ' +
+        '--remote-debugging-port=9229 /Users/t04dj14n9/Code/llm-wiki/demo-vault',
     },
     {
       pid: 102,

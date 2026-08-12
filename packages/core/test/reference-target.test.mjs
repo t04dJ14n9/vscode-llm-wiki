@@ -111,10 +111,10 @@ test('classifies native note, code, PDF, and web reference targets', () => {
       suffix: 'after',
     },
   });
-  assert.deepEqual(classifyReferenceTarget('https://example.com/article#hl-web=web_abc123'), {
+  assert.deepEqual(classifyReferenceTarget('https://example.com/article#llm-wiki-web=web_abc123'), {
     kind: 'web',
-    uri: 'https://example.com/article#hl-web=web_abc123',
-    url: 'https://example.com/article#hl-web=web_abc123',
+    uri: 'https://example.com/article#llm-wiki-web=web_abc123',
+    url: 'https://example.com/article#llm-wiki-web=web_abc123',
     webTargetId: 'web_abc123',
   });
 });

@@ -1,6 +1,6 @@
 # PDF editor webview
 
-This package is the browser-side PDF editor used by the combined Human Learning
+This package is the browser-side PDF editor used by the combined LLM Wiki
 extension.
 
 ## Boundaries
@@ -13,7 +13,7 @@ extension.
 - `pdfEditorProvider.ts` remains in the combined extension. It is the host
   adapter between VS Code and this browser-side package.
 
-The combined extension resolves `@human-learning/pdf-editor/webview` directly
+The combined extension resolves `@llm-wiki/pdf-editor/webview` directly
 instead of maintaining a mirrored implementation.
 
 ## Dependency direction

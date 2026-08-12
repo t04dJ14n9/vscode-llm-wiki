@@ -17,7 +17,7 @@ import portable from '../dist/pdf-discussions/portable.js';
 import storeModule from '../dist/pdf-discussions/store.js';
 
 const {
-  HUMAN_LEARNING_CONTEXT,
+  LLM_WIKI_CONTEXT,
   PDF_FRAGMENT_CONFORMS_TO,
   scanPortablePdfAnnotations,
   toPortablePdfAnnotation,
@@ -74,7 +74,7 @@ function mappingInput(overrides = {}) {
     pdfSha256: PDF_SHA256,
     sourcePath: 'papers/Paper.pdf',
     annotationPath:
-      `.hl/annotations/pdf/${PDF_SHA256}/discussion-1.jsonld`,
+      `.llm_wiki/annotations/pdf/${PDF_SHA256}/discussion-1.jsonld`,
     ...overrides,
   };
 }
@@ -86,17 +86,17 @@ test('maps a PDF discussion to portable W3C Web Annotation JSON-LD', () => {
 
   assert.deepEqual(result['@context'], [
     'http://www.w3.org/ns/anno.jsonld',
-    { hl: HUMAN_LEARNING_CONTEXT },
+    { llm_wiki: LLM_WIKI_CONTEXT },
   ]);
   assert.equal(result.type, 'Annotation');
   assert.equal(result.motivation, 'commenting');
-  assert.equal(result['hl:discussionId'], 'discussion-1');
-  assert.equal(result.id, 'urn:human-learning:annotation:discussion-1');
+  assert.equal(result['llm_wiki:discussionId'], 'discussion-1');
+  assert.equal(result.id, 'urn:llm_wiki:annotation:discussion-1');
   assert.deepEqual(result.target.source, {
     id: '../../../../papers/Paper.pdf',
     type: 'Document',
     format: 'application/pdf',
-    'hl:sha256': PDF_SHA256,
+    'llm_wiki:sha256': PDF_SHA256,
   });
   assert.deepEqual(result.target.selector, [
     {
@@ -111,33 +111,33 @@ test('maps a PDF discussion to portable W3C Web Annotation JSON-LD', () => {
       value: 'page=7',
     },
     {
-      type: 'hl:PdfRectSelector',
-      'hl:page': 7,
-      'hl:unit': 'pt',
-      'hl:origin': 'top-left',
-      'hl:coordinates': 'left,top,right,bottom',
-      'hl:rects': [
+      type: 'llm_wiki:PdfRectSelector',
+      'llm_wiki:page': 7,
+      'llm_wiki:unit': 'pt',
+      'llm_wiki:origin': 'top-left',
+      'llm_wiki:coordinates': 'left,top,right,bottom',
+      'llm_wiki:rects': [
         [10, 20, 110, 36],
         [10, 38, 80, 54],
       ],
     },
     {
-      type: 'hl:PdfTextItemSelector',
-      'hl:start': { 'hl:textItemIndex': 4, 'hl:charOffset': 2 },
-      'hl:end': { 'hl:textItemIndex': 5, 'hl:charOffset': 9 },
+      type: 'llm_wiki:PdfTextItemSelector',
+      'llm_wiki:start': { 'llm_wiki:textItemIndex': 4, 'llm_wiki:charOffset': 2 },
+      'llm_wiki:end': { 'llm_wiki:textItemIndex': 5, 'llm_wiki:charOffset': 9 },
     },
   ]);
-  assert.deepEqual(result['hl:snapshot'], {
+  assert.deepEqual(result['llm_wiki:snapshot'], {
     id: '../assets/discussion-1/selection.png',
     type: 'Image',
     format: 'image/png',
-    'hl:sha256': SNAPSHOT_SHA256,
-    'hl:width': 640,
-    'hl:height': 240,
-    'hl:page': 7,
-    'hl:cropRect': [8, 18, 112, 56],
-    'hl:padding': 2,
-    'hl:unit': 'pt',
+    'llm_wiki:sha256': SNAPSHOT_SHA256,
+    'llm_wiki:width': 640,
+    'llm_wiki:height': 240,
+    'llm_wiki:page': 7,
+    'llm_wiki:cropRect': [8, 18, 112, 56],
+    'llm_wiki:padding': 2,
+    'llm_wiki:unit': 'pt',
   });
   assert.equal('body' in result, false);
   assert.deepEqual(internal, before, 'the pure mapper mutated its input');
@@ -147,7 +147,7 @@ test('normalizes every repository IRI to a relative POSIX path', () => {
   const result = toPortablePdfAnnotation(mappingInput({
     sourcePath: 'papers\\Source Paper.pdf',
     annotationPath:
-      `.hl\\annotations\\pdf\\${PDF_SHA256}\\discussion-1.jsonld`,
+      `.llm_wiki\\annotations\\pdf\\${PDF_SHA256}\\discussion-1.jsonld`,
     learningNotePath: 'wiki\\learning\\Source explanation.md',
     annotation: annotation({
       snapshot: {
@@ -157,11 +157,11 @@ test('normalizes every repository IRI to a relative POSIX path', () => {
     }),
   }));
 
-  assert.equal(result.id, 'urn:human-learning:annotation:discussion-1');
+  assert.equal(result.id, 'urn:llm_wiki:annotation:discussion-1');
   assert.equal(result.target.source.id, '../../../../papers/Source%20Paper.pdf');
   assert.equal(result.body?.id, '../../../../wiki/learning/Source%20explanation.md');
   assert.equal(
-    result['hl:snapshot']?.id,
+    result['llm_wiki:snapshot']?.id,
     '../assets/discussion-1/selection.png',
   );
   assert.doesNotMatch(JSON.stringify(result), /file:\/\/|\\\\/u);
@@ -177,7 +177,7 @@ test('normalizes every repository IRI to a relative POSIX path', () => {
 });
 
 test('scans portable annotations and preserves the original exact quote', async () => {
-  const workspaceRoot = mkdtempSync(join(tmpdir(), 'hl-portable-pdf-scan-'));
+  const workspaceRoot = mkdtempSync(join(tmpdir(), 'llm-wiki-portable-pdf-scan-'));
   try {
     const input = mappingInput({
       learningNotePath: 'wiki/learning/Explanation.md',
@@ -206,7 +206,7 @@ test('scans portable annotations and preserves the original exact quote', async 
           [10, 38, 80, 54],
         ],
         learningNotePath: 'wiki/learning/Explanation.md',
-        snapshotPath: '.hl/annotations/pdf/assets/discussion-1/selection.png',
+        snapshotPath: '.llm_wiki/annotations/pdf/assets/discussion-1/selection.png',
       }],
     );
   } finally {
@@ -215,11 +215,11 @@ test('scans portable annotations and preserves the original exact quote', async 
 });
 
 test('scanner skips malformed documents, wrong hashes, and symbolic links', async t => {
-  const workspaceRoot = mkdtempSync(join(tmpdir(), 'hl-portable-pdf-invalid-'));
+  const workspaceRoot = mkdtempSync(join(tmpdir(), 'llm-wiki-portable-pdf-invalid-'));
   try {
     const directory = join(
       workspaceRoot,
-      '.hl',
+      '.llm_wiki',
       'annotations',
       'pdf',
       PDF_SHA256,
@@ -236,7 +236,7 @@ test('scanner skips malformed documents, wrong hashes, and symbolic links', asyn
           ...valid.target,
           source: {
             ...valid.target.source,
-            'hl:sha256': 'c'.repeat(64),
+            'llm_wiki:sha256': 'c'.repeat(64),
           },
         },
       }),
@@ -261,7 +261,7 @@ test('scanner skips malformed documents, wrong hashes, and symbolic links', asyn
     assert.deepEqual(
       (await scanPortablePdfAnnotations(workspaceRoot))
         .map(record => record.annotationPath),
-      [`.hl/annotations/pdf/${PDF_SHA256}/discussion-1.jsonld`],
+      [`.llm_wiki/annotations/pdf/${PDF_SHA256}/discussion-1.jsonld`],
     );
   } finally {
     rmSync(workspaceRoot, { recursive: true, force: true });
@@ -269,11 +269,11 @@ test('scanner skips malformed documents, wrong hashes, and symbolic links', asyn
 });
 
 test('scanner rejects malformed JSON-LD claims', async () => {
-  const workspaceRoot = mkdtempSync(join(tmpdir(), 'hl-portable-pdf-claims-'));
+  const workspaceRoot = mkdtempSync(join(tmpdir(), 'llm-wiki-portable-pdf-claims-'));
   try {
     const directory = join(
       workspaceRoot,
-      '.hl',
+      '.llm_wiki',
       'annotations',
       'pdf',
       PDF_SHA256,
@@ -286,10 +286,10 @@ test('scanner rejects malformed JSON-LD claims', async () => {
       record.target.selector.find(candidate => candidate.type === type);
     const invalid = [
       ['context', record => {
-        record['@context'] = ['http://www.w3.org/ns/anno.jsonld', { hl: 'urn:other:' }];
+        record['@context'] = ['http://www.w3.org/ns/anno.jsonld', { llm_wiki: 'urn:other:' }];
       }],
       ['annotation-id', record => {
-        record.id = 'urn:human-learning:annotation:someone-else';
+        record.id = 'urn:llm_wiki:annotation:someone-else';
       }],
       ['source-format', record => {
         record.target.source.format = 'text/plain';
@@ -298,25 +298,25 @@ test('scanner rejects malformed JSON-LD claims', async () => {
         record.body.format = 'text/plain';
       }],
       ['snapshot-format', record => {
-        record['hl:snapshot'].format = 'image/jpeg';
+        record['llm_wiki:snapshot'].format = 'image/jpeg';
       }],
       ['page', record => {
         selector(record, 'FragmentSelector').value = 'page=0';
       }],
       ['page-mismatch', record => {
-        selector(record, 'hl:PdfRectSelector')['hl:page'] = 8;
+        selector(record, 'llm_wiki:PdfRectSelector')['llm_wiki:page'] = 8;
       }],
       ['snapshot-page-mismatch', record => {
-        record['hl:snapshot']['hl:page'] = 8;
+        record['llm_wiki:snapshot']['llm_wiki:page'] = 8;
       }],
       ['unit', record => {
-        selector(record, 'hl:PdfRectSelector')['hl:unit'] = 'px';
+        selector(record, 'llm_wiki:PdfRectSelector')['llm_wiki:unit'] = 'px';
       }],
       ['origin', record => {
-        selector(record, 'hl:PdfRectSelector')['hl:origin'] = 'bottom-left';
+        selector(record, 'llm_wiki:PdfRectSelector')['llm_wiki:origin'] = 'bottom-left';
       }],
       ['coordinates', record => {
-        selector(record, 'hl:PdfRectSelector')['hl:coordinates'] = 'x,y,width,height';
+        selector(record, 'llm_wiki:PdfRectSelector')['llm_wiki:coordinates'] = 'x,y,width,height';
       }],
       ['source-path', record => {
         record.target.source.id = '../../../../../outside.pdf';
@@ -325,12 +325,12 @@ test('scanner rejects malformed JSON-LD claims', async () => {
         record.body.id = 'file:///tmp/Explanation.md';
       }],
       ['snapshot-path', record => {
-        record['hl:snapshot'].id = '../../../../../outside.png';
+        record['llm_wiki:snapshot'].id = '../../../../../outside.png';
       }],
       ['unqualified-text-items', record => {
-        const text = selector(record, 'hl:PdfTextItemSelector');
-        text['hl:start'] = { textItemIndex: 4, charOffset: 2 };
-        text['hl:end'] = { textItemIndex: 5, charOffset: 9 };
+        const text = selector(record, 'llm_wiki:PdfTextItemSelector');
+        text['llm_wiki:start'] = { textItemIndex: 4, charOffset: 2 };
+        text['llm_wiki:end'] = { textItemIndex: 5, charOffset: 9 };
       }],
     ];
 
@@ -344,7 +344,7 @@ test('scanner rejects malformed JSON-LD claims', async () => {
     assert.deepEqual(
       (await scanPortablePdfAnnotations(workspaceRoot))
         .map(record => record.annotationPath),
-      [`.hl/annotations/pdf/${PDF_SHA256}/discussion-1.jsonld`],
+      [`.llm_wiki/annotations/pdf/${PDF_SHA256}/discussion-1.jsonld`],
     );
   } finally {
     rmSync(workspaceRoot, { recursive: true, force: true });
@@ -352,10 +352,10 @@ test('scanner rejects malformed JSON-LD claims', async () => {
 });
 
 test('scanner rejects symlinked metadata ancestors', async t => {
-  const parts = ['.hl', 'annotations', 'pdf'];
+  const parts = ['.llm_wiki', 'annotations', 'pdf'];
   for (let linkIndex = 0; linkIndex < parts.length; linkIndex += 1) {
-    const workspaceRoot = mkdtempSync(join(tmpdir(), 'hl-portable-pdf-link-root-'));
-    const outsideRoot = mkdtempSync(join(tmpdir(), 'hl-portable-pdf-link-target-'));
+    const workspaceRoot = mkdtempSync(join(tmpdir(), 'llm-wiki-portable-pdf-link-root-'));
+    const outsideRoot = mkdtempSync(join(tmpdir(), 'llm-wiki-portable-pdf-link-target-'));
     try {
       const linkPath = join(workspaceRoot, ...parts.slice(0, linkIndex + 1));
       const targetDirectory = join(
@@ -391,14 +391,14 @@ test('scanner rejects symlinked metadata ancestors', async t => {
 });
 
 test('portable mirror writes never follow a symlinked metadata ancestor', t => {
-  const workspaceRoot = mkdtempSync(join(tmpdir(), 'hl-portable-pdf-write-root-'));
-  const outsideRoot = mkdtempSync(join(tmpdir(), 'hl-portable-pdf-write-target-'));
+  const workspaceRoot = mkdtempSync(join(tmpdir(), 'llm-wiki-portable-pdf-write-root-'));
+  const outsideRoot = mkdtempSync(join(tmpdir(), 'llm-wiki-portable-pdf-write-target-'));
   try {
     const pdfPath = join(workspaceRoot, 'papers', 'Paper.pdf');
     mkdirSync(dirname(pdfPath), { recursive: true });
     writeFileSync(pdfPath, '%PDF-1.7\nportable-write\n');
     try {
-      symlinkSync(outsideRoot, join(workspaceRoot, '.hl'), 'dir');
+      symlinkSync(outsideRoot, join(workspaceRoot, '.llm_wiki'), 'dir');
     } catch (error) {
       if (['EPERM', 'EACCES', 'ENOSYS'].includes(error?.code)) {
         t.diagnostic(`symbolic-link assertion skipped: ${error.code}`);
@@ -423,8 +423,8 @@ test('portable mirror writes never follow a symlinked metadata ancestor', t => {
 });
 
 test('canonical sidecar updates survive a failed portable mirror and backfill later', t => {
-  const workspaceRoot = mkdtempSync(join(tmpdir(), 'hl-portable-pdf-best-effort-root-'));
-  const outsideRoot = mkdtempSync(join(tmpdir(), 'hl-portable-pdf-best-effort-target-'));
+  const workspaceRoot = mkdtempSync(join(tmpdir(), 'llm-wiki-portable-pdf-best-effort-root-'));
+  const outsideRoot = mkdtempSync(join(tmpdir(), 'llm-wiki-portable-pdf-best-effort-target-'));
   try {
     const pdfPath = join(workspaceRoot, 'papers', 'Paper.pdf');
     mkdirSync(dirname(pdfPath), { recursive: true });
@@ -493,7 +493,7 @@ test('canonical sidecar updates survive a failed portable mirror and backfill la
 });
 
 test('vault persistence creates the portable mirror and later links its Markdown note', async () => {
-  const workspaceRoot = mkdtempSync(join(tmpdir(), 'hl-portable-pdf-store-'));
+  const workspaceRoot = mkdtempSync(join(tmpdir(), 'llm-wiki-portable-pdf-store-'));
   try {
     const pdfPath = join(workspaceRoot, 'papers', 'Paper.pdf');
     mkdirSync(dirname(pdfPath), { recursive: true });
@@ -516,7 +516,7 @@ test('vault persistence creates the portable mirror and later links its Markdown
 
     const mirrorPath = join(
       workspaceRoot,
-      '.hl',
+      '.llm_wiki',
       'annotations',
       'pdf',
       store.pdfSha256,
@@ -536,7 +536,7 @@ test('vault persistence creates the portable mirror and later links its Markdown
 });
 
 test('loading a legacy vault sidecar backfills missing portable mirrors', () => {
-  const workspaceRoot = mkdtempSync(join(tmpdir(), 'hl-portable-pdf-backfill-'));
+  const workspaceRoot = mkdtempSync(join(tmpdir(), 'llm-wiki-portable-pdf-backfill-'));
   try {
     const pdfPath = join(workspaceRoot, 'papers', 'Paper.pdf');
     mkdirSync(dirname(pdfPath), { recursive: true });
@@ -564,7 +564,7 @@ test('loading a legacy vault sidecar backfills missing portable mirrors', () => 
     writeFileSync(store.sidecarPath, sidecar);
     const mirrorPath = join(
       workspaceRoot,
-      '.hl',
+      '.llm_wiki',
       'annotations',
       'pdf',
       store.pdfSha256,

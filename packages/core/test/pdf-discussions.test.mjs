@@ -168,7 +168,7 @@ test('round-trips optional Codex model provenance without changing version 1', (
 });
 
 test('computes the full PDF hash and routes missing documents for both layouts', () => {
-  const root = mkdtempSync(join(tmpdir(), 'hl-pdf-discussions-'));
+  const root = mkdtempSync(join(tmpdir(), 'llm-wiki-pdf-discussions-'));
   const vaultRoot = join(root, 'vault');
   const storageRoot = join(root, 'global');
   const pdfPath = join(root, 'paper.pdf');
@@ -188,11 +188,11 @@ test('computes the full PDF hash and routes missing documents for both layouts',
   });
   assert.equal(
     vaultStore.sidecarPath,
-    join(vaultRoot, '.hl', 'annotations', 'pdf', `${expectedHash}.json`),
+    join(vaultRoot, '.llm_wiki', 'annotations', 'pdf', `${expectedHash}.json`),
   );
   assert.equal(
     vaultStore.assetsPath,
-    join(vaultRoot, '.hl', 'annotations', 'pdf', 'assets'),
+    join(vaultRoot, '.llm_wiki', 'annotations', 'pdf', 'assets'),
   );
   assert.deepEqual(vaultStore.load(), {
     version: 1,
@@ -221,7 +221,7 @@ test('computes the full PDF hash and routes missing documents for both layouts',
 });
 
 test('does not reuse a cached PDF hash after a same-size, same-mtime path replacement', () => {
-  const root = mkdtempSync(join(tmpdir(), 'hl-pdf-discussions-hash-cache-'));
+  const root = mkdtempSync(join(tmpdir(), 'llm-wiki-pdf-discussions-hash-cache-'));
   const pdfPath = join(root, 'paper.pdf');
   const pdfUri = pathToFileURL(pdfPath);
   const firstBytes = Buffer.from('%PDF-1.7\ncache-one\n', 'utf8');
@@ -332,7 +332,7 @@ test('falls back to quote and PDF rectangles rounded to 0.01 points', () => {
 });
 
 test('atomically saves and reloads a PDF discussion document', () => {
-  const root = mkdtempSync(join(tmpdir(), 'hl-pdf-discussions-save-'));
+  const root = mkdtempSync(join(tmpdir(), 'llm-wiki-pdf-discussions-save-'));
   const pdfPath = join(root, 'paper.pdf');
   writeFileSync(pdfPath, Buffer.from('%PDF-1.7\natomic-save\n', 'utf8'));
   const options = {
@@ -358,7 +358,7 @@ test('atomically saves and reloads a PDF discussion document', () => {
 });
 
 test('rejects a stale save instead of silently losing another store update', () => {
-  const root = mkdtempSync(join(tmpdir(), 'hl-pdf-discussions-conflict-'));
+  const root = mkdtempSync(join(tmpdir(), 'llm-wiki-pdf-discussions-conflict-'));
   const pdfPath = join(root, 'paper.pdf');
   writeFileSync(pdfPath, Buffer.from('%PDF-1.7\nconflicting-save\n', 'utf8'));
   const options = {
@@ -391,7 +391,7 @@ test('rejects a stale save instead of silently losing another store update', () 
 });
 
 test('serializes update mutators across independent Node processes without losing annotations', async () => {
-  const root = mkdtempSync(join(tmpdir(), 'hl-pdf-discussions-process-update-'));
+  const root = mkdtempSync(join(tmpdir(), 'llm-wiki-pdf-discussions-process-update-'));
   const pdfPath = join(root, 'paper.pdf');
   writeFileSync(pdfPath, Buffer.from('%PDF-1.7\nprocess-update\n', 'utf8'));
   const options = {
@@ -444,7 +444,7 @@ test('serializes update mutators across independent Node processes without losin
 });
 
 test('protects an invalid sidecar from overwrite through the poisoned store instance', () => {
-  const root = mkdtempSync(join(tmpdir(), 'hl-pdf-discussions-invalid-'));
+  const root = mkdtempSync(join(tmpdir(), 'llm-wiki-pdf-discussions-invalid-'));
   const pdfPath = join(root, 'paper.pdf');
   writeFileSync(pdfPath, Buffer.from('%PDF-1.7\ninvalid-sidecar\n', 'utf8'));
   const store = new PdfDiscussionStore({
@@ -479,7 +479,7 @@ test('protects an invalid sidecar from overwrite through the poisoned store inst
 });
 
 test('revalidates an existing sidecar immediately before saving', () => {
-  const root = mkdtempSync(join(tmpdir(), 'hl-pdf-discussions-save-guard-'));
+  const root = mkdtempSync(join(tmpdir(), 'llm-wiki-pdf-discussions-save-guard-'));
   const pdfPath = join(root, 'paper.pdf');
   writeFileSync(pdfPath, Buffer.from('%PDF-1.7\nsave-guard\n', 'utf8'));
   const store = new PdfDiscussionStore({
@@ -503,7 +503,7 @@ test('revalidates an existing sidecar immediately before saving', () => {
 });
 
 test('preserves running turns for the controller to recover using owner liveness', () => {
-  const root = mkdtempSync(join(tmpdir(), 'hl-pdf-discussions-recovery-'));
+  const root = mkdtempSync(join(tmpdir(), 'llm-wiki-pdf-discussions-recovery-'));
   const pdfPath = join(root, 'paper.pdf');
   writeFileSync(pdfPath, Buffer.from('%PDF-1.7\nstale-running\n', 'utf8'));
   const options = {
@@ -537,7 +537,7 @@ test('preserves running turns for the controller to recover using owner liveness
 });
 
 test('writes and reads relative PNG snapshot assets in both layouts', () => {
-  const root = mkdtempSync(join(tmpdir(), 'hl-pdf-discussions-snapshot-'));
+  const root = mkdtempSync(join(tmpdir(), 'llm-wiki-pdf-discussions-snapshot-'));
   const pdfPath = join(root, 'paper.pdf');
   const png = Buffer.from(
     'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
@@ -572,7 +572,7 @@ test('writes and reads relative PNG snapshot assets in both layouts', () => {
 
 test('reads only bounded snapshots whose bytes, PNG metadata, and digest match', () => {
   const maximumSnapshotBytes = 5 * 1024 * 1024;
-  const root = mkdtempSync(join(tmpdir(), 'hl-pdf-discussions-verified-snapshot-'));
+  const root = mkdtempSync(join(tmpdir(), 'llm-wiki-pdf-discussions-verified-snapshot-'));
   const pdfPath = join(root, 'paper.pdf');
   const png = Buffer.from(
     'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
@@ -627,7 +627,7 @@ test('reads only bounded snapshots whose bytes, PNG metadata, and digest match',
 });
 
 test('rejects symlinked snapshot files and ancestor directories for reads and writes', t => {
-  const root = mkdtempSync(join(tmpdir(), 'hl-pdf-discussions-snapshot-symlink-'));
+  const root = mkdtempSync(join(tmpdir(), 'llm-wiki-pdf-discussions-snapshot-symlink-'));
   const pdfPath = join(root, 'paper.pdf');
   const png = Buffer.from(
     'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
@@ -684,7 +684,7 @@ test('rejects symlinked snapshot files and ancestor directories for reads and wr
 });
 
 test('rejects symlinked source and target snapshot assets during import', t => {
-  const root = mkdtempSync(join(tmpdir(), 'hl-pdf-discussions-import-symlink-'));
+  const root = mkdtempSync(join(tmpdir(), 'llm-wiki-pdf-discussions-import-symlink-'));
   const pdfPath = join(root, 'paper.pdf');
   const png = Buffer.from(
     'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
@@ -735,7 +735,7 @@ test('rejects symlinked source and target snapshot assets during import', t => {
 });
 
 test('rejects absolute persisted snapshot paths without overwriting the sidecar', () => {
-  const root = mkdtempSync(join(tmpdir(), 'hl-pdf-discussions-relative-'));
+  const root = mkdtempSync(join(tmpdir(), 'llm-wiki-pdf-discussions-relative-'));
   const pdfPath = join(root, 'paper.pdf');
   writeFileSync(pdfPath, Buffer.from('%PDF-1.7\nrelative-snapshot\n', 'utf8'));
   const store = new PdfDiscussionStore({
@@ -761,7 +761,7 @@ test('rejects absolute persisted snapshot paths without overwriting the sidecar'
 });
 
 test('imports global discussions into a vault without changing conflicts or the source', () => {
-  const root = mkdtempSync(join(tmpdir(), 'hl-pdf-discussions-import-'));
+  const root = mkdtempSync(join(tmpdir(), 'llm-wiki-pdf-discussions-import-'));
   const pdfPath = join(root, 'paper.pdf');
   const basePng = Buffer.from(
     'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
@@ -847,7 +847,7 @@ test('imports global discussions into a vault without changing conflicts or the 
 });
 
 test('does not let a unique global annotation overwrite a retained vault snapshot path', () => {
-  const root = mkdtempSync(join(tmpdir(), 'hl-pdf-discussions-import-alias-'));
+  const root = mkdtempSync(join(tmpdir(), 'llm-wiki-pdf-discussions-import-alias-'));
   const pdfPath = join(root, 'paper.pdf');
   const basePng = Buffer.from(
     'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
@@ -908,7 +908,7 @@ test('does not let a unique global annotation overwrite a retained vault snapsho
 });
 
 test('treats case-only snapshot paths as collisions during import', () => {
-  const root = mkdtempSync(join(tmpdir(), 'hl-pdf-discussions-import-case-alias-'));
+  const root = mkdtempSync(join(tmpdir(), 'llm-wiki-pdf-discussions-import-case-alias-'));
   const pdfPath = join(root, 'paper.pdf');
   const basePng = Buffer.from(
     'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',

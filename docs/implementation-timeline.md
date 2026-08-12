@@ -1,7 +1,7 @@
-# Human Learning — Implementation Timeline
+# LLM Wiki — Implementation Timeline
 
 > Current status: this is a historical roadmap. It still mentions planned
-> `hl://` work because that was the earlier design. The implemented MVP now uses
+> `llm-wiki://` work because that was the earlier design. The implemented MVP now uses
 > native Markdown/Obsidian-compatible links. See
 > [reference model.md](reference%20model.md) for current link formats.
 
@@ -21,20 +21,20 @@
 | Task | Effort | Notes |
 |---|---|---|
 | pnpm monorepo scaffolding | 2d | Workspaces, tsconfig paths, eslint, build scripts |
-| `packages/core` — workspace/config | 2d | `.hl/config.yaml` read/write, vault detection |
+| `packages/core` — workspace/config | 2d | `.llm_wiki/config.yaml` read/write, vault detection |
 | SQLite migration system | 2d | better-sqlite3, migration runner, schema versioning |
-| `hl init`, `hl status`, `hl doctor` | 2d | Workspace bootstrap, validation, diagnostics |
+| `llm_wiki init`, `llm_wiki status`, `llm_wiki doctor` | 2d | Workspace bootstrap, validation, diagnostics |
 | Source registry + hashing | 3d | `sources` table, SHA256, metadata extraction |
 | Markdown ingestion | 2d | Frontmatter parse, heading extraction, chunking |
 | Code file ingestion | 1d | Line-range chunking, language detection |
 | Basic PDF text ingestion | 2d | Extract text per page via PDF.js headless; no layout index yet |
 | Chunks table + SQLite FTS5 | 2d | Content hashing, incremental chunk updates |
-| `hl ingest`, `hl add` | 2d | CLI commands with `--recursive`, `--json` |
-| `hl search --mode lexical` | 2d | BM25 via FTS5, JSON output for agents |
+| `llm_wiki ingest`, `llm_wiki add` | 2d | CLI commands with `--recursive`, `--json` |
+| `llm_wiki search --mode lexical` | 2d | BM25 via FTS5, JSON output for agents |
 
 **Deliverables**:
-- `hl init demo-vault && hl doctor --json` succeeds
-- `hl ingest notes/ && hl search "FlashAttention" --json` returns results
+- `llm_wiki init demo-vault && llm_wiki doctor --json` succeeds
+- `llm_wiki ingest notes/ && llm_wiki search "FlashAttention" --json` returns results
 
 **Risk**: better-sqlite3 native compilation. Verify VS Code extension host + Electron compatibility during this phase. If problematic, evaluate `sql.js` (WASM) as fallback.
 
@@ -46,39 +46,39 @@
 
 | Task | Effort | Notes |
 |---|---|---|
-| `hl://` URI parser | 2d | Formal grammar, normalization, validation |
-| Standard markdown link parser | 2d | `[label](hl://...)` extraction |
+| `llm-wiki://` URI parser | 2d | Formal grammar, normalization, validation |
+| Standard markdown link parser | 2d | `[label](llm-wiki://...)` extraction |
 | Wikilink parser | 1d | `[[Note]]`, `[[Note#Heading]]`, `[[Note\|Alias]]` |
 | Links table + queries | 2d | Forward links, backlinks by note/source/anchor |
-| `hl links rebuild` | 1d | Full reparse of all notes |
-| `hl links check` | 2d | Resolve targets, detect broken/stale, diagnostics |
-| `hl links check --fix --dry-run` | 2d | Safe auto-repair (exact matches only), ambiguity reports |
-| Agent context export | 2d | `.hl/agent/selection.md` + `selection.json` |
-| `hl context export`, `hl context current` | 1d | CLI with `--anchor`, `--source`, `--lines` flags |
+| `llm_wiki links rebuild` | 1d | Full reparse of all notes |
+| `llm_wiki links check` | 2d | Resolve targets, detect broken/stale, diagnostics |
+| `llm_wiki links check --fix --dry-run` | 2d | Safe auto-repair (exact matches only), ambiguity reports |
+| Agent context export | 2d | `.llm_wiki/agent/selection.md` + `selection.json` |
+| `llm_wiki context export`, `llm_wiki context current` | 1d | CLI with `--anchor`, `--source`, `--lines` flags |
 | `AGENTS.md` + `CLAUDE.md` generation | 2d | Templates with vault rules, raw protection, citation rules |
-| Codex skill skeleton | 1d | `.agents/skills/human-learning/SKILL.md` |
-| Claude commands skeleton | 1d | `.claude/commands/hl-*.md` |
+| Codex skill skeleton | 1d | `.agents/skills/llm-wiki/SKILL.md` |
+| Claude commands skeleton | 1d | `.claude/commands/llm-wiki-*.md` |
 
 **Deliverables**:
-- `hl links rebuild && hl links check --json` resolves real links
-- `hl context export --source notes/Concepts/Foo.md` writes selection files
+- `llm_wiki links rebuild && llm_wiki links check --json` resolves real links
+- `llm_wiki context export --source notes/Concepts/Foo.md` writes selection files
 - `AGENTS.md` and `CLAUDE.md` exist with correct rules
 
 ---
 
 ## Phase 2: VS Code Extension MVP (Weeks 7–9)
 
-**Goal**: VS Code extension activates, `hl://` links are clickable, backlinks panel works, context export works from editor.
+**Goal**: VS Code extension activates, `llm-wiki://` links are clickable, backlinks panel works, context export works from editor.
 
 | Task | Effort | Notes |
 |---|---|---|
 | Extension skeleton | 2d | `extension.ts`, activation events, package.json manifest |
-| Workspace detection | 1d | Detect `.hl/` presence, activate accordingly |
-| `hl://` DocumentLinkProvider | 2d | Cmd-click routing for `hl://note`, `hl://code` links |
-| URI dispatcher | 2d | Route `hl://note/...` → open note; `hl://code/...` → open at line |
+| Workspace detection | 1d | Detect `.llm_wiki/` presence, activate accordingly |
+| `llm-wiki://` DocumentLinkProvider | 2d | Cmd-click routing for `llm-wiki://note`, `llm-wiki://code` links |
+| URI dispatcher | 2d | Route `llm-wiki://note/...` → open note; `llm-wiki://code/...` → open at line |
 | HoverProvider | 2d | Preview note heading, code snippet on hover |
-| Command: Add Selection to Agent Context | 2d | Write `.hl/agent/selection.*` from native editor selection |
-| Command: Open Anchor | 1d | Parse `hl://` URI and dispatch |
+| Command: Add Selection to Agent Context | 2d | Write `.llm_wiki/agent/selection.*` from native editor selection |
+| Command: Open Anchor | 1d | Parse `llm-wiki://` URI and dispatch |
 | Backlinks TreeView | 2d | `TreeDataProvider`, refresh on file changes |
 | Forward Links TreeView | 1d | Same pattern as backlinks |
 | Agent Context TreeView | 1d | Show current `selection.md`, export controls |
@@ -86,15 +86,15 @@
 | FileSystemWatcher | 1d | Re-parse on note changes, debounced |
 
 **Deliverables**:
-- Click `[source](hl://code/src/kernel.cu?lines=80-145)` → opens file at line 80
+- Click `[source](llm-wiki://code/src/kernel.cu?lines=80-145)` → opens file at line 80
 - Sidebar shows backlinks/forward links for current note
-- "Add Selection to Agent Context" populates `.hl/agent/selection.md`
+- "Add Selection to Agent Context" populates `.llm_wiki/agent/selection.md`
 
 ---
 
 ## Phase 3: PDF System (Weeks 10–16)
 
-**Goal**: PDF viewer works, text selection creates anchors, `hl://pdf` links navigate bidirectionally.
+**Goal**: PDF viewer works, text selection creates anchors, `llm-wiki://pdf` links navigate bidirectionally.
 
 ### Phase 3a — Engine Research Spike (Weeks 10–11)
 
@@ -114,9 +114,9 @@
 |---|---|---|
 | PDF layout index tables | 3d | `pdf_pages`, `pdf_text_blocks`, `pdf_text_spans`, `pdf_char_map` |
 | Headless PDF extraction helper | 3d | CLI-side quote-to-rect via PDF.js (or PyMuPDF subprocess if needed) |
-| `hl anchor create-pdf --quote` | 2d | Normalize, search, validate, persist anchor |
-| `hl anchor resolve`, `hl anchor validate` | 2d | Lookup, source hash check, text quote re-extraction |
-| `hl anchor repair` | 1d | Search by text_quote when rects stale |
+| `llm_wiki anchor create-pdf --quote` | 2d | Normalize, search, validate, persist anchor |
+| `llm_wiki anchor resolve`, `llm_wiki anchor validate` | 2d | Lookup, source hash check, text quote re-extraction |
+| `llm_wiki anchor repair` | 1d | Search by text_quote when rects stale |
 
 ### Phase 3c — PDF Viewer + Navigation (Weeks 14–16)
 
@@ -125,9 +125,9 @@
 | PDF webview custom editor | 3d | `CustomReadonlyEditorProvider`, webview host |
 | Page rendering + navigation | 2d | Zoom, scroll, page thumbnails |
 | Text selection → anchor | 2d | Selection → page rects → anchor creation |
-| Insert source link from PDF | 1d | Write `hl://pdf/...` link into active markdown editor |
+| Insert source link from PDF | 1d | Write `llm-wiki://pdf/...` link into active markdown editor |
 | Note → PDF jump (`jumpToAnchor`) | 2d | Scroll to page, highlight rect, pulse animation |
-| Reference sidecar generation | 2d | `.hl/references/pdf/*.json` from SQLite links |
+| Reference sidecar generation | 2d | `.llm_wiki/references/pdf/*.json` from SQLite links |
 | Reference overlay rendering | 2d | Draw highlights from sidecar, distinct from user annotations |
 | PDF → note referenced-by popup | 2d | Click overlay → list of citing notes → open at line |
 
@@ -143,9 +143,9 @@
 | Task | Effort | Notes |
 |---|---|---|
 | LearningObjects table + schema | 2d | Implement the `LearningObject` interface from feature list §8 |
-| `hl review create --anchor` | 2d | Create concept_card, cloze_card, code_trace from anchor |
-| `hl review due` | 1d | Query due items sorted by priority |
-| `hl review record --item` | 2d | Record attempt, confidence, latency, hints used |
+| `llm_wiki review create --anchor` | 2d | Create concept_card, cloze_card, code_trace from anchor |
+| `llm_wiki review due` | 1d | Query due items sorted by priority |
+| `llm_wiki review record --item` | 2d | Record attempt, confidence, latency, hints used |
 | Bootstrap spaced scheduler | 3d | Simple interval doubling (1d, 3d, 7d, 14d, 30d, 90d) |
 | Review queue TreeView | 2d | Due items, new items, forgotten items |
 | Review session webview | 3d | Active recall prompt → reveal answer → self-grade → next |
@@ -170,17 +170,17 @@
 | CodeMirror 6 webview integration | 3d | Mirror VS Code TextDocument, sync edits |
 | Source mode + reading mode | 2d | Toggle between raw and rendered |
 | Hybrid live preview mode | 3d | Active line raw, inactive lines rendered via decorations |
-| Link rendering (chips) | 2d | Render `hl://` links as styled chips |
+| Link rendering (chips) | 2d | Render `llm-wiki://` links as styled chips |
 | Inline backlink badges | 1d | Show count near headings |
-| Selection bridge | 1d | Webview selection → `.hl/agent/selection.*` |
+| Selection bridge | 1d | Webview selection → `.llm_wiki/agent/selection.*` |
 
 ### Phase 5b — Activity + Daily Summaries (Weeks 24–25)
 
 | Task | Effort | Notes |
 |---|---|---|
 | Activity logging (opt-in) | 2d | Open/view/select/export events to `activity.jsonl` |
-| `hl today` | 2d | Generate daily study summary markdown |
-| `hl today --write` | 1d | Write into `notes/Daily Notes/` |
+| `llm_wiki today` | 2d | Generate daily study summary markdown |
+| `llm_wiki today --write` | 1d | Write into `notes/Daily Notes/` |
 | Activity TreeView | 1d | Today's viewed sources, selections, links |
 | Privacy controls | 1d | Opt-in default, disable per event type, inspectable data |
 
@@ -188,15 +188,15 @@
 
 | Task | Effort | Notes |
 |---|---|---|
-| MCP stdio server | 2d | `hl mcp stdio` |
+| MCP stdio server | 2d | `llm_wiki mcp stdio` |
 | Read-only tools | 2d | `get_current_selection`, `search`, `get_anchor`, `get_related`, `get_backlinks`, `get_forward_links`, `check_links`, `summarize_today`, `learning.get_due` |
 | Mutating tools (config-gated) | 1d | `ingest`, `refresh_embeddings`, `learning.record_review` |
-| Resources + prompts | 1d | `hl://selection/current`, prompt templates |
+| Resources + prompts | 1d | `llm-wiki://selection/current`, prompt templates |
 
 **Deliverables**:
 - CodeMirror editor: active line shows raw markdown, inactive lines render
-- `hl today --write` produces a daily study summary
-- Claude Code configured with MCP can call `hl.search`, `hl.get_backlinks`
+- `llm_wiki today --write` produces a daily study summary
+- Claude Code configured with MCP can call `llm_wiki.search`, `llm_wiki.get_backlinks`
 
 ---
 
@@ -207,8 +207,8 @@
 | Task | Effort | Notes |
 |---|---|---|
 | Embedding provider abstraction | 3d | OpenAI-compatible, ollama, local GGUF adapters |
-| Remote embeddings + hybrid search | 3d | RRF fusion, `hl search --mode hybrid` |
-| Incremental embedding refresh | 2d | Hash-based change detection, `hl embeddings refresh --changed` |
+| Remote embeddings + hybrid search | 3d | RRF fusion, `llm_wiki search --mode hybrid` |
+| Incremental embedding refresh | 2d | Hash-based change detection, `llm_wiki embeddings refresh --changed` |
 | HTML snapshot viewer | 4d | Sanitize, render, DOM selection, anchors |
 | Zotero metadata import | 2d | Better BibTeX key mapping, source metadata enrichment |
 | Obsidian import/export | 2d | Wikilink conversion, frontmatter mapping |
@@ -236,8 +236,8 @@ Week 27+    ████████  Phase 6: Advanced Features             ←
 
 | Milestone | Week | What ships |
 |---|---|---|
-| **M0: CLI works** | 3 | `hl init`, `hl ingest`, `hl search`, `hl links check` |
-| **M1: VS Code clickable** | 9 | `hl://` links navigate, backlinks visible, context exports |
+| **M0: CLI works** | 3 | `llm_wiki init`, `llm_wiki ingest`, `llm_wiki search`, `llm_wiki links check` |
+| **M1: VS Code clickable** | 9 | `llm-wiki://` links navigate, backlinks visible, context exports |
 | **M2: PDF anchors work** | 16 | Select text → anchor → link → bidirectional jump |
 | **M3: Review works** | 20 | Create review items, review queue, bootstrap scheduler |
 | **M4: First serious release** | 26 | Hybrid editor, activity, daily summaries, MCP |

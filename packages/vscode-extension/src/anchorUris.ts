@@ -1,13 +1,13 @@
 import * as vscode from 'vscode';
 
-const EXTENSION_ID = 'human-learning.human-learning-vscode';
+const EXTENSION_ID = 'llm-wiki.llm-wiki-vscode';
 const OPEN_ANCHOR_PATH = '/open-anchor';
 const TARGET_QUERY_KEY = 'target';
 const TARGET_ENCODING_PREFIX = 'v1.';
 const MAX_TARGET_LENGTH = 32 * 1024;
 const MAX_ENCODED_TARGET_LENGTH = MAX_TARGET_LENGTH * 4;
 
-export function humanLearningOpenAnchorUri(target: string): string | undefined {
+export function llmWikiOpenAnchorUri(target: string): string | undefined {
   const normalized = normalizeTarget(target);
   if (!normalized) return undefined;
   const encoded = Buffer.from(normalized, 'utf8').toString('base64url');
@@ -15,7 +15,7 @@ export function humanLearningOpenAnchorUri(target: string): string | undefined {
     + `?${TARGET_QUERY_KEY}=${TARGET_ENCODING_PREFIX}${encoded}`;
 }
 
-export function humanLearningAnchorTarget(
+export function llmWikiAnchorTarget(
   uri: Pick<vscode.Uri, 'scheme' | 'authority' | 'path' | 'query'>,
 ): string | undefined {
   if (
@@ -41,9 +41,9 @@ export function humanLearningAnchorTarget(
   return normalizeTarget(decoded);
 }
 
-export function humanLearningAnchorTargetFromString(value: string): string | undefined {
+export function llmWikiAnchorTargetFromString(value: string): string | undefined {
   try {
-    return humanLearningAnchorTarget(vscode.Uri.parse(value));
+    return llmWikiAnchorTarget(vscode.Uri.parse(value));
   } catch {
     return undefined;
   }

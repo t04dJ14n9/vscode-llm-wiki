@@ -116,10 +116,10 @@ function loadTsModule(relativePath, mocks = {}) {
     }
     if (request === './anchorUris') {
       return {
-        humanLearningAnchorTarget: uri => {
+        llmWikiAnchorTarget: uri => {
           if (
             uri.scheme !== 'cursor'
-            || uri.authority !== 'human-learning.human-learning-vscode'
+            || uri.authority !== 'llm-wiki.llm-wiki-vscode'
             || uri.path !== '/open-anchor'
           ) return undefined;
           const encoded = new URLSearchParams(uri.query).get('target') ?? '';
@@ -197,7 +197,7 @@ test('activation reopens an already-open markdown vault note in the custom edito
 
   const { activate } = loadTsModule('src/extension.ts', {
     vscode,
-    '@human-learning/core': {
+    '@llm-wiki/core': {
       detectVaultRoot: () => '/vault',
       openDatabase: async () => ({}),
       closeDatabase: () => undefined,
@@ -222,7 +222,7 @@ test('activation reopens an already-open markdown vault note in the custom edito
     './uriDispatcher': { dispatchUri: () => undefined },
     './pdfEditorProvider': {
       PdfEditorProvider: class {
-        static viewType = 'human-learning.pdfViewer';
+        static viewType = 'llm-wiki.pdfViewer';
         constructor() {}
         getActiveWebview() {
           return undefined;
@@ -231,7 +231,7 @@ test('activation reopens an already-open markdown vault note in the custom edito
     },
     './markdownEditorProvider': {
       MarkdownEditorProvider: class {
-        static viewType = 'human-learning.markdownEditor';
+        static viewType = 'llm-wiki.markdownEditor';
         constructor() {}
       },
     },
@@ -241,7 +241,7 @@ test('activation reopens an already-open markdown vault note in the custom edito
       },
       registerMarkdownOutlineTreeProvider: () => ({ refresh() {} }),
     },
-    './wikiLinks': { notePathToUri: value => `hl://note/${value}` },
+    './wikiLinks': { notePathToUri: value => `llm-wiki://note/${value}` },
   });
 
   const context = {
@@ -256,13 +256,13 @@ test('activation reopens an already-open markdown vault note in the custom edito
     [
       'vscode.openWith',
       activeDocumentUri,
-      'human-learning.markdownEditor',
+      'llm-wiki.markdownEditor',
     ],
   );
   assert.equal(outlineRegisterCount, 1);
 });
 
-test('activation routes product URI anchor links through the Human Learning dispatcher', async () => {
+test('activation routes product URI anchor links through the LLM Wiki dispatcher', async () => {
   const dispatchCalls = [];
   const warningMessages = [];
   const vscode = createVscodeMock({
@@ -286,19 +286,19 @@ test('activation routes product URI anchor links through the Human Learning disp
   const encodedTarget = `v1.${Buffer.from(target, 'utf8').toString('base64url')}`;
   await vscode.__registeredUriHandlers[0].handleUri({
     scheme: 'cursor',
-    authority: 'human-learning.human-learning-vscode',
+    authority: 'llm-wiki.llm-wiki-vscode',
     path: '/open-anchor',
     query: `target=${encodedTarget}`,
   });
   await vscode.__registeredUriHandlers[0].handleUri({
     scheme: 'cursor',
-    authority: 'human-learning.human-learning-vscode',
+    authority: 'llm-wiki.llm-wiki-vscode',
     path: '/unexpected',
     query: `target=${encodedTarget}`,
   });
 
   assert.deepEqual(dispatchCalls, [['/vault', target]]);
-  assert.deepEqual(warningMessages, ['This Human Learning link is invalid.']);
+  assert.deepEqual(warningMessages, ['This LLM Wiki link is invalid.']);
 });
 
 test('activation registers one multi-root-aware immutable anchor-file bridge', () => {
@@ -343,7 +343,7 @@ test('selection export follows the active Markdown or PDF tab and opens an agent
     executeCommandCalls: [],
     activeDocumentUri: undefined,
     activeTabUri: markdownSelection.uri,
-    activeTabViewType: 'human-learning.markdownEditor',
+    activeTabViewType: 'llm-wiki.markdownEditor',
     treeProviderIds,
   });
 
@@ -358,9 +358,9 @@ test('selection export follows the active Markdown or PDF tab and opens an agent
       return selection === undefined
         ? false
         : {
-            directoryPath: `/vault/.hl/agent/exports/export-${calls.length}`,
-            markdownPath: `/vault/.hl/agent/exports/export-${calls.length}/selection.md`,
-            jsonPath: `/vault/.hl/agent/exports/export-${calls.length}/selection.json`,
+            directoryPath: `/vault/.llm_wiki/agent/exports/export-${calls.length}`,
+            markdownPath: `/vault/.llm_wiki/agent/exports/export-${calls.length}/selection.md`,
+            jsonPath: `/vault/.llm_wiki/agent/exports/export-${calls.length}/selection.json`,
           };
     },
     syncSelectionExportAttachment: async () => undefined,
@@ -370,7 +370,7 @@ test('selection export follows the active Markdown or PDF tab and opens an agent
   };
   mocks['./pdfEditorProvider'] = {
     PdfEditorProvider: class {
-      static viewType = 'human-learning.pdfViewer';
+      static viewType = 'llm-wiki.pdfViewer';
       constructor() {}
       getActiveWebview() {
         return undefined;
@@ -382,7 +382,7 @@ test('selection export follows the active Markdown or PDF tab and opens an agent
   };
   mocks['./markdownEditorProvider'] = {
     MarkdownEditorProvider: class {
-      static viewType = 'human-learning.markdownEditor';
+      static viewType = 'llm-wiki.markdownEditor';
       async captureActiveSelectionContext() {
         return markdownSelection;
       }
@@ -392,17 +392,17 @@ test('selection export follows the active Markdown or PDF tab and opens an agent
   const { activate } = loadTsModule('src/extension.ts', mocks);
 
   activate({ subscriptions: [] });
-  await vscode.__registeredCommands['human-learning.addSelectionToContext']();
+  await vscode.__registeredCommands['llm-wiki.addSelectionToContext']();
   vscode.window.tabGroups.activeTabGroup.activeTab.input.viewType = undefined;
-  await vscode.__registeredCommands['human-learning.addSelectionToContext']();
+  await vscode.__registeredCommands['llm-wiki.addSelectionToContext']();
   vscode.window.tabGroups.activeTabGroup.activeTab.input.uri = pdfSelection.uri;
   vscode.window.tabGroups.activeTabGroup.activeTab.input.viewType =
-    'human-learning.pdfViewer';
-  await vscode.__registeredCommands['human-learning.addSelectionToContext']();
+    'llm-wiki.pdfViewer';
+  await vscode.__registeredCommands['llm-wiki.addSelectionToContext']();
 
   assert.deepEqual(treeProviderIds.sort(), [
-    'hl-backlinks',
-    'hl-forward-links',
+    'llm-wiki-backlinks',
+    'llm-wiki-forward-links',
   ]);
   assert.deepEqual(calls, [
     { vaultRoot: '/vault', selection: markdownSelection },
@@ -410,8 +410,8 @@ test('selection export follows the active Markdown or PDF tab and opens an agent
     { vaultRoot: '/vault', selection: pdfSelection },
   ]);
   assert.deepEqual(handoffs, [
-    '/vault/.hl/agent/exports/export-1/selection.md',
-    '/vault/.hl/agent/exports/export-3/selection.md',
+    '/vault/.llm_wiki/agent/exports/export-1/selection.md',
+    '/vault/.llm_wiki/agent/exports/export-3/selection.md',
   ]);
 });
 
@@ -445,7 +445,7 @@ test('selection exports use the workspace folder that owns each selected documen
     executeCommandCalls: [],
     activeDocumentUri: undefined,
     activeTabUri: markdownSelection.uri,
-    activeTabViewType: 'human-learning.markdownEditor',
+    activeTabViewType: 'llm-wiki.markdownEditor',
   });
   vscode.workspace.workspaceFolders = [
     { uri: { fsPath: '/vault-a' } },
@@ -462,7 +462,7 @@ test('selection exports use the workspace folder that owns each selected documen
     addSelectionToContext: async (vaultRoot, options) => {
       const selection = await options.getActiveSelectionContext();
       exports.push({ vaultRoot, selection });
-      const directoryPath = `${vaultRoot}/.hl/agent/exports/export-${exports.length}`;
+      const directoryPath = `${vaultRoot}/.llm_wiki/agent/exports/export-${exports.length}`;
       return {
         directoryPath,
         markdownPath: `${directoryPath}/selection.md`,
@@ -483,7 +483,7 @@ test('selection exports use the workspace folder that owns each selected documen
   };
   mocks['./markdownEditorProvider'] = {
     MarkdownEditorProvider: class {
-      static viewType = 'human-learning.markdownEditor';
+      static viewType = 'llm-wiki.markdownEditor';
       async captureActiveSelectionContext() {
         markdownCaptureCount += 1;
         return markdownSelection;
@@ -492,7 +492,7 @@ test('selection exports use the workspace folder that owns each selected documen
   };
   mocks['./pdfEditorProvider'] = {
     PdfEditorProvider: class {
-      static viewType = 'human-learning.pdfViewer';
+      static viewType = 'llm-wiki.pdfViewer';
       getActiveWebview() {
         return undefined;
       }
@@ -506,13 +506,13 @@ test('selection exports use the workspace folder that owns each selected documen
   const { activate } = loadTsModule('src/extension.ts', mocks);
   activate({ subscriptions: [] });
 
-  await vscode.__registeredCommands['human-learning.addSelectionToContext']();
+  await vscode.__registeredCommands['llm-wiki.addSelectionToContext']();
   vscode.window.tabGroups.activeTabGroup.activeTab.input = {
     uri: pdfSelection.uri,
-    viewType: 'human-learning.pdfViewer',
+    viewType: 'llm-wiki.pdfViewer',
   };
-  await vscode.__registeredCommands['human-learning.addSelectionToContext']();
-  await vscode.__registeredCommands['human-learning.addSelectionToChat']({
+  await vscode.__registeredCommands['llm-wiki.addSelectionToContext']();
+  await vscode.__registeredCommands['llm-wiki.addSelectionToChat']({
     selection: suppliedPdfSelection,
   });
   vscode.window.tabGroups.activeTabGroup.activeTab.input = {
@@ -533,7 +533,7 @@ test('selection exports use the workspace folder that owns each selected documen
       end: { line: 7 },
     },
   };
-  await vscode.__registeredCommands['human-learning.addSelectionToContext']();
+  await vscode.__registeredCommands['llm-wiki.addSelectionToContext']();
 
   assert.deepEqual(
     exports.map(({ vaultRoot, selection }) => ({
@@ -568,12 +568,12 @@ test('selection exports use the workspace folder that owns each selected documen
   assert.equal(pdfCaptureCount, 1);
   assert.equal(nativeGetTextCount, 1);
   assert.deepEqual(agentHandoffs, [
-    '/vault-b/.hl/agent/exports/export-1/selection.md',
-    '/vault-a/.hl/agent/exports/export-2/selection.md',
-    '/vault-b/.hl/agent/exports/export-4/selection.md',
+    '/vault-b/.llm_wiki/agent/exports/export-1/selection.md',
+    '/vault-a/.llm_wiki/agent/exports/export-2/selection.md',
+    '/vault-b/.llm_wiki/agent/exports/export-4/selection.md',
   ]);
   assert.deepEqual(cursorHandoffs, [
-    '/vault-b/.hl/agent/exports/export-3/selection.md',
+    '/vault-b/.llm_wiki/agent/exports/export-3/selection.md',
   ]);
 });
 
@@ -602,7 +602,7 @@ test('generic Add to Chat routes exact Markdown and PDF exports directly to Curs
     executeCommandCalls: [],
     activeDocumentUri: undefined,
     activeTabUri: markdownSelection.uri,
-    activeTabViewType: 'human-learning.markdownEditor',
+    activeTabViewType: 'llm-wiki.markdownEditor',
   });
   const mocks = createActivationMocks({ vscode });
   mocks['./agentContext'] = {
@@ -611,7 +611,7 @@ test('generic Add to Chat routes exact Markdown and PDF exports directly to Curs
         vaultRoot,
         selection: await options.getActiveSelectionContext(),
       });
-      const directoryPath = `/vault/.hl/agent/exports/export-${exports.length}`;
+      const directoryPath = `/vault/.llm_wiki/agent/exports/export-${exports.length}`;
       return {
         directoryPath,
         markdownPath: `${directoryPath}/selection.md`,
@@ -654,7 +654,7 @@ test('generic Add to Chat routes exact Markdown and PDF exports directly to Curs
   };
   mocks['./pdfEditorProvider'] = {
     PdfEditorProvider: class {
-      static viewType = 'human-learning.pdfViewer';
+      static viewType = 'llm-wiki.pdfViewer';
       constructor() {}
       getActiveWebview() {
         return undefined;
@@ -663,7 +663,7 @@ test('generic Add to Chat routes exact Markdown and PDF exports directly to Curs
   };
   mocks['./markdownEditorProvider'] = {
     MarkdownEditorProvider: class {
-      static viewType = 'human-learning.markdownEditor';
+      static viewType = 'llm-wiki.markdownEditor';
       async captureActiveSelectionContext() {
         return markdownSelection;
       }
@@ -673,17 +673,17 @@ test('generic Add to Chat routes exact Markdown and PDF exports directly to Curs
   const { activate } = loadTsModule('src/extension.ts', mocks);
   activate({ subscriptions: [] });
 
-  await vscode.__registeredCommands['human-learning.addSelectionToChat']();
-  await vscode.__registeredCommands['human-learning.addSelectionToChat']({
+  await vscode.__registeredCommands['llm-wiki.addSelectionToChat']();
+  await vscode.__registeredCommands['llm-wiki.addSelectionToChat']({
     selection: pdfSelection,
     snapshotPng,
   });
-  await vscode.__registeredCommands['human-learning.addSelectionToAgent']({
+  await vscode.__registeredCommands['llm-wiki.addSelectionToAgent']({
     agentId: 'codex',
     selection: pdfSelection,
     snapshotPng,
   });
-  await vscode.__registeredCommands['human-learning.addSelectionToCursorChat']({
+  await vscode.__registeredCommands['llm-wiki.addSelectionToCursorChat']({
     selection: pdfSelection,
     snapshotPng,
   });
@@ -697,21 +697,21 @@ test('generic Add to Chat routes exact Markdown and PDF exports directly to Curs
   assert.deepEqual(pickerCalls, []);
   assert.deepEqual(explicitCalls, [{
     agentId: 'codex',
-    markdownPath: '/vault/.hl/agent/exports/export-3/selection.md',
-    attachments: ['/vault/.hl/agent/exports/export-3/selection.png'],
+    markdownPath: '/vault/.llm_wiki/agent/exports/export-3/selection.md',
+    attachments: ['/vault/.llm_wiki/agent/exports/export-3/selection.png'],
   }]);
   assert.deepEqual(cursorCalls, [
     {
-      markdownPath: '/vault/.hl/agent/exports/export-1/selection.md',
+      markdownPath: '/vault/.llm_wiki/agent/exports/export-1/selection.md',
       attachments: [],
     },
     {
-      markdownPath: '/vault/.hl/agent/exports/export-2/selection.md',
-      attachments: ['/vault/.hl/agent/exports/export-2/selection.png'],
+      markdownPath: '/vault/.llm_wiki/agent/exports/export-2/selection.md',
+      attachments: ['/vault/.llm_wiki/agent/exports/export-2/selection.png'],
     },
     {
-      markdownPath: '/vault/.hl/agent/exports/export-4/selection.md',
-      attachments: ['/vault/.hl/agent/exports/export-4/selection.png'],
+      markdownPath: '/vault/.llm_wiki/agent/exports/export-4/selection.md',
+      attachments: ['/vault/.llm_wiki/agent/exports/export-4/selection.png'],
     },
   ]);
   assert.deepEqual(
@@ -722,22 +722,22 @@ test('generic Add to Chat routes exact Markdown and PDF exports directly to Curs
     })),
     [
       {
-        directoryPath: '/vault/.hl/agent/exports/export-1',
+        directoryPath: '/vault/.llm_wiki/agent/exports/export-1',
         fileName: 'selection.png',
         bytes: undefined,
       },
       {
-        directoryPath: '/vault/.hl/agent/exports/export-2',
+        directoryPath: '/vault/.llm_wiki/agent/exports/export-2',
         fileName: 'selection.png',
         bytes: snapshotPng,
       },
       {
-        directoryPath: '/vault/.hl/agent/exports/export-3',
+        directoryPath: '/vault/.llm_wiki/agent/exports/export-3',
         fileName: 'selection.png',
         bytes: snapshotPng,
       },
       {
-        directoryPath: '/vault/.hl/agent/exports/export-4',
+        directoryPath: '/vault/.llm_wiki/agent/exports/export-4',
         fileName: 'selection.png',
         bytes: snapshotPng,
       },
@@ -790,7 +790,7 @@ test('activation provides explicit agent capabilities to PDF hosts and sets the 
     };
     mocks['./pdfEditorProvider'] = {
       PdfEditorProvider: class {
-        static viewType = 'human-learning.pdfViewer';
+        static viewType = 'llm-wiki.pdfViewer';
         constructor(_context, options) {
           providerOptions.push(options);
         }
@@ -812,9 +812,9 @@ test('activation provides explicit agent capabilities to PDF hosts and sets the 
     assert.deepEqual(providerActivations, []);
     assert.deepEqual(
       executeCommandCalls.find(
-        ([command, key]) => command === 'setContext' && key === 'humanLearningHostIsCursor',
+        ([command, key]) => command === 'setContext' && key === 'llmWikiHostIsCursor',
       ),
-      ['setContext', 'humanLearningHostIsCursor', cursorAgent],
+      ['setContext', 'llmWikiHostIsCursor', cursorAgent],
     );
   }
 });
@@ -826,7 +826,7 @@ test('PDF Cmd-L asks the active webview for the same crop-aware agent handoff', 
     executeCommandCalls: [],
     activeDocumentUri: undefined,
     activeTabUri: pdfUri,
-    activeTabViewType: 'human-learning.pdfViewer',
+    activeTabViewType: 'llm-wiki.pdfViewer',
   });
   const mocks = createActivationMocks({ vscode });
   mocks['./agentContext'] = {
@@ -834,7 +834,7 @@ test('PDF Cmd-L asks the active webview for the same crop-aware agent handoff', 
   };
   mocks['./pdfEditorProvider'] = {
     PdfEditorProvider: class {
-      static viewType = 'human-learning.pdfViewer';
+      static viewType = 'llm-wiki.pdfViewer';
       async addSelectionToCursorChat() {
         requested += 1;
       }
@@ -846,7 +846,7 @@ test('PDF Cmd-L asks the active webview for the same crop-aware agent handoff', 
 
   const { activate } = loadTsModule('src/extension.ts', mocks);
   activate({ subscriptions: [] });
-  await vscode.__registeredCommands['human-learning.addSelectionToChat']();
+  await vscode.__registeredCommands['llm-wiki.addSelectionToChat']();
 
   assert.equal(requested, 1);
 });
@@ -859,7 +859,7 @@ test('explicit agent command without selection re-requests the active PDF for th
     executeCommandCalls: [],
     activeDocumentUri: undefined,
     activeTabUri: pdfUri,
-    activeTabViewType: 'human-learning.pdfViewer',
+    activeTabViewType: 'llm-wiki.pdfViewer',
   });
   const mocks = createActivationMocks({ vscode });
   mocks['./agentContext'] = {
@@ -867,7 +867,7 @@ test('explicit agent command without selection re-requests the active PDF for th
   };
   mocks['./pdfEditorProvider'] = {
     PdfEditorProvider: class {
-      static viewType = 'human-learning.pdfViewer';
+      static viewType = 'llm-wiki.pdfViewer';
       async addSelectionToAgent(agentId) {
         explicitRequests.push(agentId);
       }
@@ -882,7 +882,7 @@ test('explicit agent command without selection re-requests the active PDF for th
 
   const { activate } = loadTsModule('src/extension.ts', mocks);
   activate({ subscriptions: [] });
-  await vscode.__registeredCommands['human-learning.addSelectionToAgent']({
+  await vscode.__registeredCommands['llm-wiki.addSelectionToAgent']({
     agentId: 'codex',
   });
 
@@ -907,9 +907,9 @@ test('Add to Chat falls back to immutable text when crop persistence fails', asy
   const mocks = createActivationMocks({ vscode });
   mocks['./agentContext'] = {
     addSelectionToContext: async () => ({
-      directoryPath: '/vault/.hl/agent/exports/export-1',
-      markdownPath: '/vault/.hl/agent/exports/export-1/selection.md',
-      jsonPath: '/vault/.hl/agent/exports/export-1/selection.json',
+      directoryPath: '/vault/.llm_wiki/agent/exports/export-1',
+      markdownPath: '/vault/.llm_wiki/agent/exports/export-1/selection.md',
+      jsonPath: '/vault/.llm_wiki/agent/exports/export-1/selection.json',
     }),
     syncSelectionExportAttachment: async () => {
       throw new Error('read-only filesystem');
@@ -930,13 +930,13 @@ test('Add to Chat falls back to immutable text when crop persistence fails', asy
 
   const { activate } = loadTsModule('src/extension.ts', mocks);
   activate({ subscriptions: [] });
-  await vscode.__registeredCommands['human-learning.addSelectionToChat']({
+  await vscode.__registeredCommands['llm-wiki.addSelectionToChat']({
     selection,
     snapshotPng: Uint8Array.from([10, 20, 30]),
   });
 
   assert.deepEqual(cursorHandoffs, [{
-    contextPath: '/vault/.hl/agent/exports/export-1/selection.md',
+    contextPath: '/vault/.llm_wiki/agent/exports/export-1/selection.md',
     attachmentPaths: [],
   }]);
   assert.ok(warningMessages.includes(
@@ -974,9 +974,9 @@ test('Cursor Browser selection is exported with its crop and routed to the activ
     addSelectionToContext: async (vaultRoot, options) => {
       exports.push({ vaultRoot, selection: await options.getActiveSelectionContext() });
       return {
-        directoryPath: '/vault/.hl/agent/exports/browser',
-        markdownPath: '/vault/.hl/agent/exports/browser/selection.md',
-        jsonPath: '/vault/.hl/agent/exports/browser/selection.json',
+        directoryPath: '/vault/.llm_wiki/agent/exports/browser',
+        markdownPath: '/vault/.llm_wiki/agent/exports/browser/selection.md',
+        jsonPath: '/vault/.llm_wiki/agent/exports/browser/selection.json',
       };
     },
     syncSelectionExportAttachment: async (exported, fileName, bytes) => {
@@ -1000,15 +1000,15 @@ test('Cursor Browser selection is exported with its crop and routed to the activ
   const { activate } = loadTsModule('src/extension.ts', mocks);
   activate({ subscriptions: [] });
   await vscode.__registeredCommands[
-    'human-learning.addCursorBrowserSelectionToChat'
+    'llm-wiki.addCursorBrowserSelectionToChat'
   ]();
 
   assert.deepEqual(exports, [{ vaultRoot: '/vault', selection }]);
   assert.equal(attachments[0].fileName, 'selection.png');
   assert.equal(attachments[0].bytes, snapshotPng);
   assert.deepEqual(handoffs, [{
-    contextPath: '/vault/.hl/agent/exports/browser/selection.md',
-    attachmentPaths: ['/vault/.hl/agent/exports/browser/selection.png'],
+    contextPath: '/vault/.llm_wiki/agent/exports/browser/selection.md',
+    attachmentPaths: ['/vault/.llm_wiki/agent/exports/browser/selection.png'],
   }]);
 });
 
@@ -1040,9 +1040,9 @@ test('experimental owned reader routes its validated text and synthetic crop thr
     addSelectionToContext: async (vaultRoot, options) => {
       exports.push({ vaultRoot, selection: await options.getActiveSelectionContext() });
       return {
-        directoryPath: '/vault/.hl/agent/exports/reader',
-        markdownPath: '/vault/.hl/agent/exports/reader/selection.md',
-        jsonPath: '/vault/.hl/agent/exports/reader/selection.json',
+        directoryPath: '/vault/.llm_wiki/agent/exports/reader',
+        markdownPath: '/vault/.llm_wiki/agent/exports/reader/selection.md',
+        jsonPath: '/vault/.llm_wiki/agent/exports/reader/selection.json',
       };
     },
     syncSelectionExportAttachment: async (exported, fileName, bytes) =>
@@ -1071,8 +1071,8 @@ test('experimental owned reader routes its validated text and synthetic crop thr
 
   assert.deepEqual(exports, [{ vaultRoot: '/vault', selection }]);
   assert.deepEqual(handoffs, [{
-    contextPath: '/vault/.hl/agent/exports/reader/selection.md',
-    attachmentPaths: ['/vault/.hl/agent/exports/reader/selection.png'],
+    contextPath: '/vault/.llm_wiki/agent/exports/reader/selection.md',
+    attachmentPaths: ['/vault/.llm_wiki/agent/exports/reader/selection.png'],
   }]);
 });
 
@@ -1087,7 +1087,7 @@ test('activation reopens an already-open PDF vault file in the custom viewer', a
 
   const { activate } = loadTsModule('src/extension.ts', {
     vscode,
-    '@human-learning/core': {
+    '@llm-wiki/core': {
       detectVaultRoot: () => '/vault',
       openDatabase: async () => ({}),
       closeDatabase: () => undefined,
@@ -1118,7 +1118,7 @@ test('activation reopens an already-open PDF vault file in the custom viewer', a
     './uriDispatcher': { dispatchUri: () => undefined },
     './pdfEditorProvider': {
       PdfEditorProvider: class {
-        static viewType = 'human-learning.pdfViewer';
+        static viewType = 'llm-wiki.pdfViewer';
         constructor() {}
         getActiveWebview() {
           return undefined;
@@ -1127,7 +1127,7 @@ test('activation reopens an already-open PDF vault file in the custom viewer', a
     },
     './markdownEditorProvider': {
       MarkdownEditorProvider: class {
-        static viewType = 'human-learning.markdownEditor';
+        static viewType = 'llm-wiki.markdownEditor';
         constructor() {}
       },
     },
@@ -1135,7 +1135,7 @@ test('activation reopens an already-open PDF vault file in the custom viewer', a
       registerMarkdownOutlineProvider: () => undefined,
       registerMarkdownOutlineTreeProvider: () => ({ refresh() {} }),
     },
-    './wikiLinks': { notePathToUri: value => `hl://note/${value}` },
+    './wikiLinks': { notePathToUri: value => `llm-wiki://note/${value}` },
   });
 
   const context = {
@@ -1152,7 +1152,7 @@ test('activation reopens an already-open PDF vault file in the custom viewer', a
     [
       'vscode.openWith',
       activeDocumentUri,
-      'human-learning.pdfViewer',
+      'llm-wiki.pdfViewer',
     ],
   );
 });
@@ -1167,7 +1167,7 @@ test('activation reopens a startup PDF when it becomes the active text editor af
 
   const { activate } = loadTsModule('src/extension.ts', {
     vscode,
-    '@human-learning/core': {
+    '@llm-wiki/core': {
       detectVaultRoot: () => '/vault',
       openDatabase: async () => ({}),
       closeDatabase: () => undefined,
@@ -1192,7 +1192,7 @@ test('activation reopens a startup PDF when it becomes the active text editor af
     './uriDispatcher': { dispatchUri: () => undefined },
     './pdfEditorProvider': {
       PdfEditorProvider: class {
-        static viewType = 'human-learning.pdfViewer';
+        static viewType = 'llm-wiki.pdfViewer';
         constructor() {}
         getActiveWebview() {
           return undefined;
@@ -1201,7 +1201,7 @@ test('activation reopens a startup PDF when it becomes the active text editor af
     },
     './markdownEditorProvider': {
       MarkdownEditorProvider: class {
-        static viewType = 'human-learning.markdownEditor';
+        static viewType = 'llm-wiki.markdownEditor';
         constructor() {}
       },
     },
@@ -1209,7 +1209,7 @@ test('activation reopens a startup PDF when it becomes the active text editor af
       registerMarkdownOutlineProvider: () => undefined,
       registerMarkdownOutlineTreeProvider: () => ({ refresh() {} }),
     },
-    './wikiLinks': { notePathToUri: value => `hl://note/${value}` },
+    './wikiLinks': { notePathToUri: value => `llm-wiki://note/${value}` },
   });
 
   const context = {
@@ -1232,7 +1232,7 @@ test('activation reopens a startup PDF when it becomes the active text editor af
     [
       'vscode.openWith',
       activeDocumentUri,
-      'human-learning.pdfViewer',
+      'llm-wiki.pdfViewer',
     ],
   );
 });
@@ -1248,7 +1248,7 @@ test('activation retries reopening a startup PDF while VS Code keeps it in the t
 
   const { activate } = loadTsModule('src/extension.ts', {
     vscode,
-    '@human-learning/core': {
+    '@llm-wiki/core': {
       detectVaultRoot: () => '/vault',
       openDatabase: async () => ({}),
       closeDatabase: () => undefined,
@@ -1273,7 +1273,7 @@ test('activation retries reopening a startup PDF while VS Code keeps it in the t
     './uriDispatcher': { dispatchUri: () => undefined },
     './pdfEditorProvider': {
       PdfEditorProvider: class {
-        static viewType = 'human-learning.pdfViewer';
+        static viewType = 'llm-wiki.pdfViewer';
         constructor() {}
         getActiveWebview() {
           return undefined;
@@ -1282,7 +1282,7 @@ test('activation retries reopening a startup PDF while VS Code keeps it in the t
     },
     './markdownEditorProvider': {
       MarkdownEditorProvider: class {
-        static viewType = 'human-learning.markdownEditor';
+        static viewType = 'llm-wiki.markdownEditor';
         constructor() {}
       },
     },
@@ -1290,7 +1290,7 @@ test('activation retries reopening a startup PDF while VS Code keeps it in the t
       registerMarkdownOutlineProvider: () => undefined,
       registerMarkdownOutlineTreeProvider: () => ({ refresh() {} }),
     },
-    './wikiLinks': { notePathToUri: value => `hl://note/${value}` },
+    './wikiLinks': { notePathToUri: value => `llm-wiki://note/${value}` },
   });
 
   const context = {
@@ -1303,7 +1303,7 @@ test('activation retries reopening a startup PDF while VS Code keeps it in the t
   const pdfReopenCalls = executeCommandCalls.filter(([command, uri, viewType]) =>
     command === 'vscode.openWith'
     && uri?.fsPath === activeDocumentUri.fsPath
-    && viewType === 'human-learning.pdfViewer'
+    && viewType === 'llm-wiki.pdfViewer'
   );
 
   assert.ok(
@@ -1340,7 +1340,7 @@ test('activation reopens a startup PDF that is visible even when no active text 
 
   const { activate } = loadTsModule('src/extension.ts', {
     vscode,
-    '@human-learning/core': {
+    '@llm-wiki/core': {
       detectVaultRoot: () => '/vault',
       openDatabase: async () => ({}),
       closeDatabase: () => undefined,
@@ -1365,7 +1365,7 @@ test('activation reopens a startup PDF that is visible even when no active text 
     './uriDispatcher': { dispatchUri: () => undefined },
     './pdfEditorProvider': {
       PdfEditorProvider: class {
-        static viewType = 'human-learning.pdfViewer';
+        static viewType = 'llm-wiki.pdfViewer';
         constructor() {}
         getActiveWebview() {
           return undefined;
@@ -1374,7 +1374,7 @@ test('activation reopens a startup PDF that is visible even when no active text 
     },
     './markdownEditorProvider': {
       MarkdownEditorProvider: class {
-        static viewType = 'human-learning.markdownEditor';
+        static viewType = 'llm-wiki.markdownEditor';
         constructor() {}
       },
     },
@@ -1382,7 +1382,7 @@ test('activation reopens a startup PDF that is visible even when no active text 
       registerMarkdownOutlineProvider: () => undefined,
       registerMarkdownOutlineTreeProvider: () => ({ refresh() {} }),
     },
-    './wikiLinks': { notePathToUri: value => `hl://note/${value}` },
+    './wikiLinks': { notePathToUri: value => `llm-wiki://note/${value}` },
   });
 
   const context = {
@@ -1396,12 +1396,12 @@ test('activation reopens a startup PDF that is visible even when no active text 
     executeCommandCalls.find(([command, uri, viewType]) =>
       command === 'vscode.openWith'
       && uri?.fsPath === '/vault/raw/pdf/ddia.pdf'
-      && viewType === 'human-learning.pdfViewer'
+      && viewType === 'llm-wiki.pdfViewer'
     ),
     [
       'vscode.openWith',
       { fsPath: '/vault/raw/pdf/ddia.pdf', scheme: 'file' },
-      'human-learning.pdfViewer',
+      'llm-wiki.pdfViewer',
     ],
   );
 });
@@ -1417,7 +1417,7 @@ test('activation reopens a startup PDF tab even when VS Code has not created a t
 
   const { activate } = loadTsModule('src/extension.ts', {
     vscode,
-    '@human-learning/core': {
+    '@llm-wiki/core': {
       detectVaultRoot: () => '/vault',
       openDatabase: async () => ({}),
       closeDatabase: () => undefined,
@@ -1442,7 +1442,7 @@ test('activation reopens a startup PDF tab even when VS Code has not created a t
     './uriDispatcher': { dispatchUri: () => undefined },
     './pdfEditorProvider': {
       PdfEditorProvider: class {
-        static viewType = 'human-learning.pdfViewer';
+        static viewType = 'llm-wiki.pdfViewer';
         constructor() {}
         getActiveWebview() {
           return undefined;
@@ -1451,7 +1451,7 @@ test('activation reopens a startup PDF tab even when VS Code has not created a t
     },
     './markdownEditorProvider': {
       MarkdownEditorProvider: class {
-        static viewType = 'human-learning.markdownEditor';
+        static viewType = 'llm-wiki.markdownEditor';
         constructor() {}
       },
     },
@@ -1459,7 +1459,7 @@ test('activation reopens a startup PDF tab even when VS Code has not created a t
       registerMarkdownOutlineProvider: () => undefined,
       registerMarkdownOutlineTreeProvider: () => ({ refresh() {} }),
     },
-    './wikiLinks': { notePathToUri: value => `hl://note/${value}` },
+    './wikiLinks': { notePathToUri: value => `llm-wiki://note/${value}` },
   });
 
   const context = {
@@ -1473,12 +1473,12 @@ test('activation reopens a startup PDF tab even when VS Code has not created a t
     executeCommandCalls.find(([command, uri, viewType]) =>
       command === 'vscode.openWith'
       && uri?.fsPath === '/vault/raw/pdf/ddia.pdf'
-      && viewType === 'human-learning.pdfViewer'
+      && viewType === 'llm-wiki.pdfViewer'
     ),
     [
       'vscode.openWith',
       { fsPath: '/vault/raw/pdf/ddia.pdf', scheme: 'file' },
-      'human-learning.pdfViewer',
+      'llm-wiki.pdfViewer',
     ],
   );
 });
@@ -1492,7 +1492,7 @@ test('activation registers a Vim mode toggle command for the markdown custom edi
 
   const { activate } = loadTsModule('src/extension.ts', {
     vscode,
-    '@human-learning/core': {
+    '@llm-wiki/core': {
       detectVaultRoot: () => '/vault',
       openDatabase: async () => ({}),
       closeDatabase: () => undefined,
@@ -1517,7 +1517,7 @@ test('activation registers a Vim mode toggle command for the markdown custom edi
     './uriDispatcher': { dispatchUri: () => undefined },
     './pdfEditorProvider': {
       PdfEditorProvider: class {
-        static viewType = 'human-learning.pdfViewer';
+        static viewType = 'llm-wiki.pdfViewer';
         constructor() {}
         getActiveWebview() {
           return undefined;
@@ -1526,7 +1526,7 @@ test('activation registers a Vim mode toggle command for the markdown custom edi
     },
     './markdownEditorProvider': {
       MarkdownEditorProvider: class {
-        static viewType = 'human-learning.markdownEditor';
+        static viewType = 'llm-wiki.markdownEditor';
         constructor() {}
         async toggleVimMode() {
           toggleCount += 1;
@@ -1538,7 +1538,7 @@ test('activation registers a Vim mode toggle command for the markdown custom edi
       registerMarkdownOutlineProvider: () => undefined,
       registerMarkdownOutlineTreeProvider: () => ({ refresh() {} }),
     },
-    './wikiLinks': { notePathToUri: value => `hl://note/${value}` },
+    './wikiLinks': { notePathToUri: value => `llm-wiki://note/${value}` },
   });
 
   const context = {
@@ -1548,11 +1548,11 @@ test('activation registers a Vim mode toggle command for the markdown custom edi
   activate(context);
   await new Promise(resolve => setTimeout(resolve, 0));
 
-  assert.ok(vscode.__registeredCommands['human-learning.toggleVimMode']);
-  await vscode.__registeredCommands['human-learning.toggleVimMode']();
+  assert.ok(vscode.__registeredCommands['llm-wiki.toggleVimMode']);
+  await vscode.__registeredCommands['llm-wiki.toggleVimMode']();
 
   assert.equal(toggleCount, 1);
-  assert.deepEqual(informationMessages.at(-1), 'Human Learning Vim mode enabled');
+  assert.deepEqual(informationMessages.at(-1), 'LLM Wiki Vim mode enabled');
 });
 
 test('activation registers PDF view mode toggle commands', async () => {
@@ -1564,7 +1564,7 @@ test('activation registers PDF view mode toggle commands', async () => {
   const mocks = createActivationMocks({ vscode });
   mocks['./pdfEditorProvider'] = {
     PdfEditorProvider: class {
-      static viewType = 'human-learning.pdfViewer';
+      static viewType = 'llm-wiki.pdfViewer';
       constructor() {}
       getActiveWebview() {
         return {
@@ -1580,8 +1580,8 @@ test('activation registers PDF view mode toggle commands', async () => {
   const { activate } = loadTsModule('src/extension.ts', mocks);
 
   activate({ subscriptions: [] });
-  await vscode.__registeredCommands['human-learning.pdfToggleContinuousScroll']();
-  await vscode.__registeredCommands['human-learning.pdfToggleTwoPageView']();
+  await vscode.__registeredCommands['llm-wiki.pdfToggleContinuousScroll']();
+  await vscode.__registeredCommands['llm-wiki.pdfToggleTwoPageView']();
 
   assert.deepEqual(pdfMessages, [
     { type: 'toggleContinuousScroll' },
@@ -1606,7 +1606,7 @@ test('openPdfMarkdownColumns command opens the active PDF beside an available ma
   const mocks = createActivationMocks({ vscode });
   mocks['./pdfEditorProvider'] = {
     PdfEditorProvider: class {
-      static viewType = 'human-learning.pdfViewer';
+      static viewType = 'llm-wiki.pdfViewer';
       constructor() {}
       getActiveWebview() {
         return { pdfUri };
@@ -1617,25 +1617,25 @@ test('openPdfMarkdownColumns command opens the active PDF beside an available ma
   const { activate } = loadTsModule('src/extension.ts', mocks);
 
   activate({ subscriptions: [] });
-  await vscode.__registeredCommands['human-learning.openPdfMarkdownColumns']();
+  await vscode.__registeredCommands['llm-wiki.openPdfMarkdownColumns']();
 
   assert.deepEqual(executeCommandCalls.filter(([command]) => command === 'vscode.openWith'), [
     [
       'vscode.openWith',
       pdfUri,
-      'human-learning.pdfViewer',
+      'llm-wiki.pdfViewer',
       vscode.ViewColumn.One,
     ],
     [
       'vscode.openWith',
       markdownUri,
-      'human-learning.markdownEditor',
+      'llm-wiki.markdownEditor',
       vscode.ViewColumn.Beside,
     ],
   ]);
 });
 
-test('activation routes markdown link targets through the Human Learning dispatcher', async () => {
+test('activation routes markdown link targets through the LLM Wiki dispatcher', async () => {
   const executeCommandCalls = [];
   const openExternalCalls = [];
   const dispatched = [];
@@ -1646,7 +1646,7 @@ test('activation routes markdown link targets through the Human Learning dispatc
 
   const { activate } = loadTsModule('src/extension.ts', {
     vscode,
-    '@human-learning/core': {
+    '@llm-wiki/core': {
       detectVaultRoot: () => '/vault',
       openDatabase: async () => ({}),
       closeDatabase: () => undefined,
@@ -1671,7 +1671,7 @@ test('activation routes markdown link targets through the Human Learning dispatc
     './uriDispatcher': { dispatchUri: (...args) => dispatched.push(args) },
     './pdfEditorProvider': {
       PdfEditorProvider: class {
-        static viewType = 'human-learning.pdfViewer';
+        static viewType = 'llm-wiki.pdfViewer';
         constructor() {}
         getActiveWebview() {
           return undefined;
@@ -1680,7 +1680,7 @@ test('activation routes markdown link targets through the Human Learning dispatc
     },
     './markdownEditorProvider': {
       MarkdownEditorProvider: class {
-        static viewType = 'human-learning.markdownEditor';
+        static viewType = 'llm-wiki.markdownEditor';
         constructor() {}
       },
     },
@@ -1688,14 +1688,14 @@ test('activation routes markdown link targets through the Human Learning dispatc
       registerMarkdownOutlineProvider: () => undefined,
       registerMarkdownOutlineTreeProvider: () => ({ refresh() {} }),
     },
-    './wikiLinks': { notePathToUri: value => `hl://note/${value}` },
+    './wikiLinks': { notePathToUri: value => `llm-wiki://note/${value}` },
   });
 
   activate({ subscriptions: [] });
   await new Promise(resolve => setTimeout(resolve, 0));
 
-  assert.ok(vscode.__registeredCommands['human-learning.openLinkTarget']);
-  await vscode.__registeredCommands['human-learning.openLinkTarget']('https://example.com/docs');
+  assert.ok(vscode.__registeredCommands['llm-wiki.openLinkTarget']);
+  await vscode.__registeredCommands['llm-wiki.openLinkTarget']('https://example.com/docs');
 
   assert.equal(openExternalCalls.length, 0);
   assert.equal(dispatched.length, 1);
@@ -1704,7 +1704,7 @@ test('activation routes markdown link targets through the Human Learning dispatc
   assert.equal(dispatched[0].length, 2);
 });
 
-test('activation refreshes Human Learning side panes when the active custom editor tab changes', async () => {
+test('activation refreshes LLM Wiki side panes when the active custom editor tab changes', async () => {
   const executeCommandCalls = [];
   const providerInstances = [];
   const activeDocumentUri = { fsPath: '/vault/notes/Concepts/FlashAttention.md', scheme: 'file' };
@@ -1723,7 +1723,7 @@ test('activation refreshes Human Learning side panes when the active custom edit
 
   const { activate } = loadTsModule('src/extension.ts', {
     vscode,
-    '@human-learning/core': {
+    '@llm-wiki/core': {
       detectVaultRoot: () => '/vault',
       openDatabase: async () => ({}),
       closeDatabase: () => undefined,
@@ -1744,7 +1744,7 @@ test('activation refreshes Human Learning side panes when the active custom edit
     './uriDispatcher': { dispatchUri: () => undefined },
     './pdfEditorProvider': {
       PdfEditorProvider: class {
-        static viewType = 'human-learning.pdfViewer';
+        static viewType = 'llm-wiki.pdfViewer';
         constructor() {}
         getActiveWebview() {
           return undefined;
@@ -1753,7 +1753,7 @@ test('activation refreshes Human Learning side panes when the active custom edit
     },
     './markdownEditorProvider': {
       MarkdownEditorProvider: class {
-        static viewType = 'human-learning.markdownEditor';
+        static viewType = 'llm-wiki.markdownEditor';
         constructor() {}
       },
     },
@@ -1761,7 +1761,7 @@ test('activation refreshes Human Learning side panes when the active custom edit
       registerMarkdownOutlineProvider: () => undefined,
       registerMarkdownOutlineTreeProvider: () => ({ refresh() {} }),
     },
-    './wikiLinks': { notePathToUri: value => `hl://note/${value}` },
+    './wikiLinks': { notePathToUri: value => `llm-wiki://note/${value}` },
   });
 
   activate({ subscriptions: [] });
@@ -1788,14 +1788,14 @@ test('openInMarkdownEditor command opens the active custom markdown tab URI', as
   const { activate } = loadTsModule('src/extension.ts', createActivationMocks({ vscode }));
 
   activate({ subscriptions: [] });
-  await vscode.__registeredCommands['human-learning.openInMarkdownEditor']();
+  await vscode.__registeredCommands['llm-wiki.openInMarkdownEditor']();
 
   assert.deepEqual(
     executeCommandCalls.find(([command]) => command === 'vscode.openWith'),
     [
       'vscode.openWith',
       activeTabUri,
-      'human-learning.markdownEditor',
+      'llm-wiki.markdownEditor',
     ],
   );
 });
@@ -1825,7 +1825,7 @@ test('openLearningDiscussion opens the durable Markdown note without a chat pane
   const { activate } = loadTsModule('src/extension.ts', mocks);
   activate({ subscriptions: [] });
 
-  await vscode.__registeredCommands['human-learning.openLearningDiscussion']({
+  await vscode.__registeredCommands['llm-wiki.openLearningDiscussion']({
     discussionId: 'discussion-durable',
     notePath: 'wiki/learning/durable.md',
   });
@@ -1836,7 +1836,7 @@ test('openLearningDiscussion opens the durable Markdown note without a chat pane
   }]);
   const openCall = executeCommandCalls.find(([command]) => command === 'vscode.openWith');
   assert.equal(openCall[1].fsPath, '/vault/wiki/learning/durable.md');
-  assert.equal(openCall[2], 'human-learning.markdownEditor');
+  assert.equal(openCall[2], 'llm-wiki.markdownEditor');
 });
 
 test('combined activation treats any folder as a filesystem wiki without opening SQLite', async () => {
@@ -1856,7 +1856,7 @@ test('combined activation treats any folder as a filesystem wiki without opening
 
   const { activate } = loadTsModule('src/extension.ts', {
     vscode,
-    '@human-learning/core': {
+    '@llm-wiki/core': {
       openDatabase: async () => {
         databaseOpenCount += 1;
         throw new Error('SQLite must not open in the simplified extension');
@@ -1872,7 +1872,7 @@ test('combined activation treats any folder as a filesystem wiki without opening
     './uriDispatcher': { dispatchUri: () => undefined },
     './pdfEditorProvider': {
       PdfEditorProvider: class {
-        static viewType = 'human-learning.pdfViewer';
+        static viewType = 'llm-wiki.pdfViewer';
         constructor(_context, options) {
           providerOptions.push(options);
         }
@@ -1883,7 +1883,7 @@ test('combined activation treats any folder as a filesystem wiki without opening
     },
     './markdownEditorProvider': {
       MarkdownEditorProvider: class {
-        static viewType = 'human-learning.markdownEditor';
+        static viewType = 'llm-wiki.markdownEditor';
       },
     },
     './markdownSymbols': {
@@ -1914,7 +1914,7 @@ test('combined activation treats any folder as a filesystem wiki without opening
   });
 
   assert.equal(customEditorRegistrations.length, 2);
-  assert.equal(customEditorRegistrations[0].viewType, 'human-learning.pdfViewer');
+  assert.equal(customEditorRegistrations[0].viewType, 'llm-wiki.pdfViewer');
   assert.equal(providerOptions.length, 1);
   assert.equal(providerOptions[0].vaultRoot, '/documents');
   assert.equal(providerOptions[0].documentRoot, '/documents');
@@ -1986,7 +1986,7 @@ test('no-folder activation keeps custom viewers read-only and gates repository l
   };
   mocks['./markdownEditorProvider'] = {
     MarkdownEditorProvider: class {
-      static viewType = 'human-learning.markdownEditor';
+      static viewType = 'llm-wiki.markdownEditor';
       constructor(_context, learningNoteStore) {
         markdownStores.push(learningNoteStore);
       }
@@ -1994,7 +1994,7 @@ test('no-folder activation keeps custom viewers read-only and gates repository l
   };
   mocks['./pdfEditorProvider'] = {
     PdfEditorProvider: class {
-      static viewType = 'human-learning.pdfViewer';
+      static viewType = 'llm-wiki.pdfViewer';
       constructor(_context, options) {
         providerOptions.push(options);
       }
@@ -2045,27 +2045,27 @@ test('no-folder activation keeps custom viewers read-only and gates repository l
   assert.equal(treeProviderIds.length, 0);
   assert.equal(watcherCount, 0);
   assert.ok(informationMessages.includes(
-    'Human Learning viewers ready — open a folder to enable learning notes and repository features.',
+    'LLM Wiki viewers ready — open a folder to enable learning notes and repository features.',
   ));
 
-  await vscode.__registeredCommands['human-learning.generateDailyNote']();
-  await vscode.__registeredCommands['human-learning.syncRepository']();
-  await vscode.__registeredCommands['human-learning.addSelectionToContext']();
+  await vscode.__registeredCommands['llm-wiki.generateDailyNote']();
+  await vscode.__registeredCommands['llm-wiki.syncRepository']();
+  await vscode.__registeredCommands['llm-wiki.addSelectionToContext']();
   assert.equal(dailyNoteCount, 0);
   assert.equal(syncCount, 0);
   assert.equal(exportedSelectionCount, 0);
   assert.equal(warningMessages.length, 3);
   assert.ok(warningMessages.every(message =>
-    message === 'Open a folder to use Human Learning notes and repository features.'
+    message === 'Open a folder to use LLM Wiki notes and repository features.'
   ));
 
-  await vscode.__registeredCommands['human-learning.openPdfTarget']({
+  await vscode.__registeredCommands['llm-wiki.openPdfTarget']({
     pdfPath: '/outside/read-only.pdf',
     page: 3,
   });
   assert.deepEqual(openedPdfTargets, [['/outside/read-only.pdf', 3, undefined]]);
 
-  await vscode.__registeredCommands['human-learning.openPdfTarget']({
+  await vscode.__registeredCommands['llm-wiki.openPdfTarget']({
     pdfPath: 'relative.pdf',
   });
   assert.deepEqual(openedPdfTargets, [['/outside/read-only.pdf', 3, undefined]]);
@@ -2102,7 +2102,7 @@ test('production activation leaves Ask PDF and Codex uncomposed', () => {
   };
   mocks['./pdfEditorProvider'] = {
     PdfEditorProvider: class {
-      static viewType = 'human-learning.pdfViewer';
+      static viewType = 'llm-wiki.pdfViewer';
       constructor(_context, options) { providerOptions.push(options); }
       getActiveWebview() { return undefined; }
     },
@@ -2118,15 +2118,15 @@ test('production activation leaves Ask PDF and Codex uncomposed', () => {
   assert.equal(codexClientCount, 0);
   assert.equal(discussionControllerCount, 0);
   assert.equal(outputChannels.length, 0);
-  assert.equal(configurationSections.includes('humanLearning.agent'), false);
-  assert.equal(vscode.__registeredCommands['human-learning.pdfAskSelection'], undefined);
+  assert.equal(configurationSections.includes('llmWiki.agent'), false);
+  assert.equal(vscode.__registeredCommands['llm-wiki.pdfAskSelection'], undefined);
   assert.equal(providerOptions[0].discussionController, undefined);
 });
 
 function createActivationMocks({ vscode, core = {} }) {
   return {
     vscode,
-    '@human-learning/core': {
+    '@llm-wiki/core': {
       detectVaultRoot: () => '/vault',
       openDatabase: async () => ({}),
       closeDatabase: () => undefined,
@@ -2153,7 +2153,7 @@ function createActivationMocks({ vscode, core = {} }) {
     './uriDispatcher': { dispatchUri: () => undefined },
     './pdfEditorProvider': {
       PdfEditorProvider: class {
-        static viewType = 'human-learning.pdfViewer';
+        static viewType = 'llm-wiki.pdfViewer';
         constructor() {}
         getActiveWebview() {
           return undefined;
@@ -2162,7 +2162,7 @@ function createActivationMocks({ vscode, core = {} }) {
     },
     './markdownEditorProvider': {
       MarkdownEditorProvider: class {
-        static viewType = 'human-learning.markdownEditor';
+        static viewType = 'llm-wiki.markdownEditor';
         constructor() {}
       },
     },
@@ -2170,7 +2170,7 @@ function createActivationMocks({ vscode, core = {} }) {
       registerMarkdownOutlineProvider: () => undefined,
       registerMarkdownOutlineTreeProvider: () => ({ refresh() {} }),
     },
-    './wikiLinks': { notePathToUri: value => `hl://note/${value.split('/').map(encodeURIComponent).join('/')}` },
+    './wikiLinks': { notePathToUri: value => `llm-wiki://note/${value.split('/').map(encodeURIComponent).join('/')}` },
   };
 }
 

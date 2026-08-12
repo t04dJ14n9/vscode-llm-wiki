@@ -1,14 +1,14 @@
-# Human Learning MVP Implementation Plan
+# LLM Wiki MVP Implementation Plan
 
 > Historical note: this plan was written before the native reference-model
 > change. The current implementation uses Obsidian/native markdown-compatible
-> links instead of generated `hl://` links.
+> links instead of generated `llm-wiki://` links.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build a working Human Learning MVP with CLI, PDFium PDF editor, CodeMirror 6 markdown editor, embeddings, anchors, and bidirectional links.
+**Goal:** Build a working LLM Wiki MVP with CLI, PDFium PDF editor, CodeMirror 6 markdown editor, embeddings, anchors, and bidirectional links.
 
-**Architecture:** Keep `packages/core` as the canonical service layer over `.hl/index.sqlite`; expose it through `packages/cli`; adapt `paper-link` webview/editor patterns into `packages/vscode-extension` while using `hl://` links and the core database. Raw files and markdown remain the source of truth, while SQLite and embeddings are rebuildable indexes.
+**Architecture:** Keep `packages/core` as the canonical service layer over `.llm_wiki/index.sqlite`; expose it through `packages/cli`; adapt `paper-link` webview/editor patterns into `packages/vscode-extension` while using `llm-wiki://` links and the core database. Raw files and markdown remain the source of truth, while SQLite and embeddings are rebuildable indexes.
 
 **Tech Stack:** TypeScript, pnpm workspaces, SQL.js, Commander, VS Code Extension API, EmbedPDF/PDFium, CodeMirror 6, Node built-in test runner.
 
@@ -28,7 +28,7 @@ Create tests that initialize a temp vault, ingest notes, rebuild links, refresh 
 
 - [ ] **Step 2: Run tests to verify failure**
 
-Run: `pnpm --filter @human-learning/core test`
+Run: `pnpm --filter @llm-wiki/core test`
 
 Expected: fails because embedding, anchor, and context APIs are missing.
 
@@ -38,7 +38,7 @@ Add `metadata_json` to chunks and vector storage to `chunk_embeddings`, plus mig
 
 - [ ] **Step 4: Run tests to verify progress**
 
-Run: `pnpm --filter @human-learning/core test`
+Run: `pnpm --filter @llm-wiki/core test`
 
 Expected: still fails on missing APIs.
 
@@ -59,7 +59,7 @@ Assert `createPdfAnchorFromQuote`, `resolveAnchor`, `exportSourceContext`, `refr
 
 - [ ] **Step 2: Run tests to verify failure**
 
-Run: `pnpm --filter @human-learning/core test`
+Run: `pnpm --filter @llm-wiki/core test`
 
 Expected: fails because APIs are not implemented.
 
@@ -69,7 +69,7 @@ Implement deterministic hash-vector embeddings, quote-based PDF/text anchor crea
 
 - [ ] **Step 4: Run tests**
 
-Run: `pnpm --filter @human-learning/core test`
+Run: `pnpm --filter @llm-wiki/core test`
 
 Expected: passes.
 
@@ -90,17 +90,17 @@ Use `node packages/cli/dist/main.js` in a temp vault and assert JSON output for 
 
 - [ ] **Step 2: Run tests to verify failure**
 
-Run: `pnpm --filter @human-learning/cli test`
+Run: `pnpm --filter @llm-wiki/cli test`
 
 Expected: fails because new commands are missing.
 
 - [ ] **Step 3: Implement commands**
 
-Add `hl anchor create-pdf|resolve`, `hl context export`, `hl embeddings refresh|status`, and support `search --mode semantic|hybrid`.
+Add `llm_wiki anchor create-pdf|resolve`, `llm_wiki context export`, `llm_wiki embeddings refresh|status`, and support `search --mode semantic|hybrid`.
 
 - [ ] **Step 4: Run CLI tests**
 
-Run: `pnpm --filter @human-learning/cli test`
+Run: `pnpm --filter @llm-wiki/cli test`
 
 Expected: passes.
 
@@ -113,7 +113,7 @@ Expected: passes.
 - Create: `packages/vscode-extension/src/markdownEditorProvider.ts`
 - Create: `packages/vscode-extension/webview-src/pdf-viewer.ts`
 - Create: `packages/vscode-extension/webview-src/markdown-editor.ts`
-- Create: `packages/vscode-extension/webview-src/extensions/hlLinks.ts`
+- Create: `packages/vscode-extension/webview-src/extensions/llmWikiLinks.ts`
 - Create: `packages/vscode-extension/webview-src/vscode.d.ts`
 - Modify: `packages/vscode-extension/src/extension.ts`
 - Modify: `packages/vscode-extension/src/uriDispatcher.ts`
@@ -124,15 +124,15 @@ Install CodeMirror and EmbedPDF packages into the extension package.
 
 - [ ] **Step 2: Implement PDF editor**
 
-Adapt the reference PDFium webview pattern for `human-learning.pdfViewer`, persist anchors through core, and insert `hl://pdf/...` markdown links.
+Adapt the reference PDFium webview pattern for `llm-wiki.pdfViewer`, persist anchors through core, and insert `llm-wiki://pdf/...` markdown links.
 
 - [ ] **Step 3: Implement markdown editor**
 
-Use CodeMirror 6 as a `CustomTextEditorProvider`; keep raw markdown as the document and render `hl://` links as widgets on inactive lines.
+Use CodeMirror 6 as a `CustomTextEditorProvider`; keep raw markdown as the document and render `llm-wiki://` links as widgets on inactive lines.
 
 - [ ] **Step 4: Build extension**
 
-Run: `pnpm --filter human-learning-vscode build`
+Run: `pnpm --filter llm-wiki-vscode build`
 
 Expected: webpack emits `extension.js`, `pdf-viewer.js`, `markdown-editor.js`, and `pdfium.wasm`.
 

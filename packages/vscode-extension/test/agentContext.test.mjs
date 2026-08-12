@@ -19,14 +19,14 @@ import ts from 'typescript';
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 function productAnchorUri(target) {
-  return 'cursor://human-learning.human-learning-vscode/open-anchor?target='
+  return 'cursor://llm-wiki.llm-wiki-vscode/open-anchor?target='
     + `v1.${Buffer.from(target, 'utf8').toString('base64url')}`;
 }
 
 function encodedAnchorFile(target) {
   const text = JSON.stringify({ version: 1, target }, null, 2);
   return {
-    fileName: `source-${createHash('sha256').update(text).digest('hex')}.hlanchor`,
+    fileName: `source-${createHash('sha256').update(text).digest('hex')}.llm_wiki_anchor`,
     text,
     payload: { version: 1, target },
   };
@@ -38,7 +38,7 @@ function loadTsModule(relativePath, mocks = {}) {
       encodeAnchorFile: encodedAnchorFile,
     },
     './anchorUris': {
-      humanLearningOpenAnchorUri: productAnchorUri,
+      llmWikiOpenAnchorUri: productAnchorUri,
     },
     ...mocks,
   };
@@ -73,7 +73,7 @@ function loadTsModule(relativePath, mocks = {}) {
 const filesystemWiki = loadTsModule('src/filesystemWiki.ts');
 
 test('addSelectionToContext exports a custom markdown editor selection when no native editor is active', async () => {
-  const vaultRoot = mkdtempSync(join(tmpdir(), 'hl-agent-context-'));
+  const vaultRoot = mkdtempSync(join(tmpdir(), 'llm-wiki-agent-context-'));
   const errors = [];
   const informationMessages = [];
   const vscode = {
@@ -88,7 +88,7 @@ test('addSelectionToContext exports a custom markdown editor selection when no n
   };
   const { addSelectionToContext } = loadTsModule('src/agentContext.ts', {
     vscode,
-    '@human-learning/core': {
+    '@llm-wiki/core': {
       openDatabase: async () => ({}),
       closeDatabase: () => undefined,
       getBacklinks: () => [],
@@ -97,7 +97,7 @@ test('addSelectionToContext exports a custom markdown editor selection when no n
     },
     './filesystemWiki': filesystemWiki,
     './wikiLinks': {
-      notePathToUri: value => `hl://note/${value.split('/').map(encodeURIComponent).join('/')}`,
+      notePathToUri: value => `llm-wiki://note/${value.split('/').map(encodeURIComponent).join('/')}`,
     },
   });
 
@@ -111,13 +111,13 @@ test('addSelectionToContext exports a custom markdown editor selection when no n
       }),
     });
 
-    const markdown = readFileSync(join(vaultRoot, '.hl', 'agent', 'selection.md'), 'utf8');
-    const json = JSON.parse(readFileSync(join(vaultRoot, '.hl', 'agent', 'selection.json'), 'utf8'));
+    const markdown = readFileSync(join(vaultRoot, '.llm_wiki', 'agent', 'selection.md'), 'utf8');
+    const json = JSON.parse(readFileSync(join(vaultRoot, '.llm_wiki', 'agent', 'selection.json'), 'utf8'));
 
     assert.equal(errors.length, 0);
     assert.ok(exported);
     assert.equal(isAbsolute(exported.directoryPath), true);
-    assert.equal(dirname(exported.directoryPath), join(vaultRoot, '.hl', 'agent', 'exports'));
+    assert.equal(dirname(exported.directoryPath), join(vaultRoot, '.llm_wiki', 'agent', 'exports'));
     assert.equal(readFileSync(exported.markdownPath, 'utf8'), markdown);
     assert.deepEqual(JSON.parse(readFileSync(exported.jsonPath, 'utf8')), json);
     assert.match(
@@ -128,14 +128,14 @@ test('addSelectionToContext exports a custom markdown editor selection when no n
       markdown,
       /\*\*Citation requirement\*\*: In chat responses, reuse the exact Source link above\./,
     );
-    assert.doesNotMatch(markdown, /\*\*(?:Open in Human Learning|Portable anchor)\*\*/);
+    assert.doesNotMatch(markdown, /\*\*(?:Open in LLM Wiki|Portable anchor)\*\*/);
     assert.match(
       markdown,
       /\*\*Visual evidence\*\*: \[selection\.png\]\(\.\/selection\.png\) when present/,
     );
     assert.match(markdown, /## Standard Softmax\n\n\$softmax\(x_i\)\$/);
     assert.equal(json.source, 'notes/Concepts/Online Softmax.md');
-    assert.equal(json.anchor_uri, 'hl://note/notes/Concepts/Online%20Softmax.md#L5-L7');
+    assert.equal(json.anchor_uri, 'llm-wiki://note/notes/Concepts/Online%20Softmax.md#L5-L7');
     assert.equal(fileURLToPath(json.chat_uri), exported.anchorPath);
     assert.equal(markdown.includes(`](<${json.chat_uri}>)`), true);
     assert.deepEqual(
@@ -145,7 +145,7 @@ test('addSelectionToContext exports a custom markdown editor selection when no n
     const anchorBytes = readFileSync(exported.anchorPath);
     assert.equal(
       basename(exported.anchorPath),
-      `source-${createHash('sha256').update(anchorBytes).digest('hex')}.hlanchor`,
+      `source-${createHash('sha256').update(anchorBytes).digest('hex')}.llm_wiki_anchor`,
     );
     assert.equal(
       json.open_uri,
@@ -154,7 +154,7 @@ test('addSelectionToContext exports a custom markdown editor selection when no n
     assert.deepEqual(json.lines, { start: 5, end: 7 });
     assert.equal(json.text, '## Standard Softmax\n\n$softmax(x_i)$');
     assert.deepEqual(informationMessages, [
-      'Selection exported to .hl/agent/selection.md + .hl/agent/selection.json',
+      'Selection exported to .llm_wiki/agent/selection.md + .llm_wiki/agent/selection.json',
     ]);
   } finally {
     rmSync(vaultRoot, { recursive: true, force: true });
@@ -162,7 +162,7 @@ test('addSelectionToContext exports a custom markdown editor selection when no n
 });
 
 test('addSelectionToContext preserves explicit source labels and anchors for PDF selections', async () => {
-  const vaultRoot = mkdtempSync(join(tmpdir(), 'hl-agent-context-pdf-'));
+  const vaultRoot = mkdtempSync(join(tmpdir(), 'llm-wiki-agent-context-pdf-'));
   const errors = [];
   const informationMessages = [];
   const vscode = {
@@ -177,7 +177,7 @@ test('addSelectionToContext preserves explicit source labels and anchors for PDF
   };
   const { addSelectionToContext } = loadTsModule('src/agentContext.ts', {
     vscode,
-    '@human-learning/core': {
+    '@llm-wiki/core': {
       openDatabase: async () => ({}),
       closeDatabase: () => undefined,
       getBacklinks: () => [{ from_note_path: 'notes/Paper Notes.md', from_line: 12 }],
@@ -186,7 +186,7 @@ test('addSelectionToContext preserves explicit source labels and anchors for PDF
     },
     './filesystemWiki': filesystemWiki,
     './wikiLinks': {
-      notePathToUri: value => `hl://note/${value.split('/').map(encodeURIComponent).join('/')}`,
+      notePathToUri: value => `llm-wiki://note/${value.split('/').map(encodeURIComponent).join('/')}`,
     },
   });
 
@@ -213,8 +213,8 @@ test('addSelectionToContext preserves explicit source labels and anchors for PDF
       }),
     });
 
-    const markdown = readFileSync(join(vaultRoot, '.hl', 'agent', 'selection.md'), 'utf8');
-    const json = JSON.parse(readFileSync(join(vaultRoot, '.hl', 'agent', 'selection.json'), 'utf8'));
+    const markdown = readFileSync(join(vaultRoot, '.llm_wiki', 'agent', 'selection.md'), 'utf8');
+    const json = JSON.parse(readFileSync(join(vaultRoot, '.llm_wiki', 'agent', 'selection.json'), 'utf8'));
 
     assert.equal(errors.length, 0);
     assert.ok(exported);
@@ -255,7 +255,7 @@ test('addSelectionToContext preserves explicit source labels and anchors for PDF
     });
     assert.deepEqual(json.backlinks, [{ from: 'notes/Paper Notes.md', line: 1 }]);
     assert.deepEqual(informationMessages, [
-      'Selection exported to .hl/agent/selection.md + .hl/agent/selection.json',
+      'Selection exported to .llm_wiki/agent/selection.md + .llm_wiki/agent/selection.json',
     ]);
   } finally {
     rmSync(vaultRoot, { recursive: true, force: true });
@@ -263,7 +263,7 @@ test('addSelectionToContext preserves explicit source labels and anchors for PDF
 });
 
 test('web selections keep their directly clickable HTTPS source instead of an anchor bridge', async () => {
-  const vaultRoot = mkdtempSync(join(tmpdir(), 'hl-agent-context-web-'));
+  const vaultRoot = mkdtempSync(join(tmpdir(), 'llm-wiki-agent-context-web-'));
   const { addSelectionToContext } = loadAgentContext(vscodeMock(vaultRoot));
   const anchorUri =
     'https://example.com/article?edition=full#:~:text=selected%20web%20passage';
@@ -285,14 +285,14 @@ test('web selections keep their directly clickable HTTPS source instead of an an
     const json = JSON.parse(readFileSync(exported.jsonPath, 'utf8'));
     assert.equal(json.chat_uri, anchorUri);
     assert.equal(markdown.includes(`](<${anchorUri}>)`), true);
-    assert.equal(markdown.includes('.hlanchor'), false);
+    assert.equal(markdown.includes('.llm_wiki_anchor'), false);
   } finally {
     rmSync(vaultRoot, { recursive: true, force: true });
   }
 });
 
 test('native code selections export a clickable local code anchor bridge', async () => {
-  const vaultRoot = mkdtempSync(join(tmpdir(), 'hl-agent-context-code-'));
+  const vaultRoot = mkdtempSync(join(tmpdir(), 'llm-wiki-agent-context-code-'));
   const { addSelectionToContext } = loadAgentContext(vscodeMock(vaultRoot));
   try {
     const exported = await addSelectionToContext(vaultRoot, {
@@ -321,7 +321,7 @@ test('native code selections export a clickable local code anchor bridge', async
 });
 
 test('selection markdown uses a fence longer than every backtick run in the selected text', async () => {
-  const vaultRoot = mkdtempSync(join(tmpdir(), 'hl-agent-context-fence-'));
+  const vaultRoot = mkdtempSync(join(tmpdir(), 'llm-wiki-agent-context-fence-'));
   const { addSelectionToContext } = loadAgentContext(vscodeMock(vaultRoot));
   const text = [
     '```ts',
@@ -343,7 +343,7 @@ test('selection markdown uses a fence longer than every backtick run in the sele
 });
 
 test('selection export remains usable when bounded backlink context cannot be loaded', async () => {
-  const vaultRoot = mkdtempSync(join(tmpdir(), 'hl-agent-context-link-failure-'));
+  const vaultRoot = mkdtempSync(join(tmpdir(), 'llm-wiki-agent-context-link-failure-'));
   const vscode = vscodeMock(vaultRoot);
   const { addSelectionToContext } = loadTsModule('src/agentContext.ts', {
     vscode,
@@ -358,7 +358,7 @@ test('selection export remains usable when bounded backlink context cannot be lo
         throw new Error('must not run without an index');
       },
     },
-    './wikiLinks': { notePathToUri: value => `hl://note/${value}` },
+    './wikiLinks': { notePathToUri: value => `llm-wiki://note/${value}` },
   });
   try {
     const exported = await addSelectionToContext(vaultRoot, {
@@ -374,7 +374,7 @@ test('selection export remains usable when bounded backlink context cannot be lo
 });
 
 test('concurrent selection exports publish distinct matched immutable snapshots and matched latest aliases', async () => {
-  const vaultRoot = mkdtempSync(join(tmpdir(), 'hl-agent-context-concurrent-'));
+  const vaultRoot = mkdtempSync(join(tmpdir(), 'llm-wiki-agent-context-concurrent-'));
   const vscode = vscodeMock(vaultRoot);
   const { addSelectionToContext } = loadAgentContext(vscode);
 
@@ -408,9 +408,9 @@ test('concurrent selection exports publish distinct matched immutable snapshots 
         { version: 1, target: json.anchor_uri },
       );
     }
-    const latestMarkdown = readFileSync(join(vaultRoot, '.hl', 'agent', 'selection.md'), 'utf8');
+    const latestMarkdown = readFileSync(join(vaultRoot, '.llm_wiki', 'agent', 'selection.md'), 'utf8');
     const latestJson = JSON.parse(
-      readFileSync(join(vaultRoot, '.hl', 'agent', 'selection.json'), 'utf8'),
+      readFileSync(join(vaultRoot, '.llm_wiki', 'agent', 'selection.json'), 'utf8'),
     );
     assert.match(latestMarkdown, new RegExp(latestJson.text));
   } finally {
@@ -419,15 +419,15 @@ test('concurrent selection exports publish distinct matched immutable snapshots 
 });
 
 for (const unsafePath of [
-  ['.hl'],
-  ['.hl', 'agent'],
-  ['.hl', 'agent', 'exports'],
-  ['.hl', 'agent', 'selection.md'],
-  ['.hl', 'agent', 'selection.json'],
+  ['.llm_wiki'],
+  ['.llm_wiki', 'agent'],
+  ['.llm_wiki', 'agent', 'exports'],
+  ['.llm_wiki', 'agent', 'selection.md'],
+  ['.llm_wiki', 'agent', 'selection.json'],
 ]) {
   test(`selection export rejects symlinked ${unsafePath.join('/')}`, async () => {
-    const vaultRoot = mkdtempSync(join(tmpdir(), 'hl-agent-context-symlink-'));
-    const outside = mkdtempSync(join(tmpdir(), 'hl-agent-context-outside-'));
+    const vaultRoot = mkdtempSync(join(tmpdir(), 'llm-wiki-agent-context-symlink-'));
+    const outside = mkdtempSync(join(tmpdir(), 'llm-wiki-agent-context-outside-'));
     const linkPath = join(vaultRoot, ...unsafePath);
     const isAlias = unsafePath.at(-1)?.startsWith('selection.');
     const target = isAlias ? join(outside, 'sentinel') : outside;
@@ -452,7 +452,7 @@ for (const unsafePath of [
 }
 
 test('selection crop sync writes immutable and latest copies, then removes only the latest alias', async () => {
-  const vaultRoot = mkdtempSync(join(tmpdir(), 'hl-agent-context-attachment-'));
+  const vaultRoot = mkdtempSync(join(tmpdir(), 'llm-wiki-agent-context-attachment-'));
   const {
     addSelectionToContext,
     syncSelectionExportAttachment,
@@ -468,7 +468,7 @@ test('selection crop sync writes immutable and latest copies, then removes only 
       'selection.png',
       bytes,
     );
-    const aliasPath = join(vaultRoot, '.hl', 'agent', 'selection.png');
+    const aliasPath = join(vaultRoot, '.llm_wiki', 'agent', 'selection.png');
     assert.equal(immutablePath, join(exported.directoryPath, 'selection.png'));
     assert.deepEqual(readFileSync(immutablePath), Buffer.from(bytes));
     assert.deepEqual(readFileSync(aliasPath), Buffer.from(bytes));
@@ -485,7 +485,7 @@ test('selection crop sync writes immutable and latest copies, then removes only 
 });
 
 test('a new selection export clears the prior crop alias but preserves its immutable snapshot', async () => {
-  const vaultRoot = mkdtempSync(join(tmpdir(), 'hl-agent-context-fresh-selection-'));
+  const vaultRoot = mkdtempSync(join(tmpdir(), 'llm-wiki-agent-context-fresh-selection-'));
   const {
     addSelectionToContext,
     syncSelectionExportAttachment,
@@ -501,7 +501,7 @@ test('a new selection export clears the prior crop alias but preserves its immut
       'selection.png',
       bytes,
     );
-    const latestCrop = join(vaultRoot, '.hl', 'agent', 'selection.png');
+    const latestCrop = join(vaultRoot, '.llm_wiki', 'agent', 'selection.png');
     assert.ok(immutableCrop);
     assert.equal(existsSync(latestCrop), true);
 
@@ -511,7 +511,7 @@ test('a new selection export clears the prior crop alias but preserves its immut
 
     assert.ok(second);
     assert.equal(existsSync(latestCrop), false);
-    assert.equal(existsSync(join(vaultRoot, '.hl', 'agent', 'selection.png')), false);
+    assert.equal(existsSync(join(vaultRoot, '.llm_wiki', 'agent', 'selection.png')), false);
     assert.deepEqual(readFileSync(immutableCrop), Buffer.from(bytes));
     assert.match(
       readFileSync(second.markdownPath, 'utf8'),
@@ -524,9 +524,9 @@ test('a new selection export clears the prior crop alias but preserves its immut
 
 test('selection crop sync never follows immutable or latest target symlinks', async () => {
   for (const targetKind of ['immutable', 'alias']) {
-    const vaultRoot = mkdtempSync(join(tmpdir(), 'hl-agent-context-attachment-link-'));
+    const vaultRoot = mkdtempSync(join(tmpdir(), 'llm-wiki-agent-context-attachment-link-'));
     const outside = join(
-      mkdtempSync(join(tmpdir(), 'hl-agent-context-attachment-outside-')),
+      mkdtempSync(join(tmpdir(), 'llm-wiki-agent-context-attachment-outside-')),
       'sentinel',
     );
     writeFileSync(outside, 'outside');
@@ -538,7 +538,7 @@ test('selection crop sync never follows immutable or latest target symlinks', as
       assert.ok(exported);
       const target = targetKind === 'immutable'
         ? join(exported.directoryPath, 'selection.png')
-        : join(vaultRoot, '.hl', 'agent', 'selection.png');
+        : join(vaultRoot, '.llm_wiki', 'agent', 'selection.png');
       symlinkSync(outside, target);
 
       await assert.rejects(
@@ -587,12 +587,12 @@ function loadAgentContext(vscode) {
       getBacklinks: () => [],
       getForwardLinks: () => [],
     },
-    './wikiLinks': { notePathToUri: value => `hl://note/${value}` },
+    './wikiLinks': { notePathToUri: value => `llm-wiki://note/${value}` },
   });
 }
 
 test('addSelectionToContext returns false and skips files when no exportable selection exists', async () => {
-  const vaultRoot = mkdtempSync(join(tmpdir(), 'hl-agent-context-empty-'));
+  const vaultRoot = mkdtempSync(join(tmpdir(), 'llm-wiki-agent-context-empty-'));
   const errors = [];
   const vscode = {
     workspace: {
@@ -606,7 +606,7 @@ test('addSelectionToContext returns false and skips files when no exportable sel
   };
   const { addSelectionToContext } = loadTsModule('src/agentContext.ts', {
     vscode,
-    '@human-learning/core': {
+    '@llm-wiki/core': {
       openDatabase: async () => ({}),
       closeDatabase: () => undefined,
       getBacklinks: () => [],
@@ -615,7 +615,7 @@ test('addSelectionToContext returns false and skips files when no exportable sel
     },
     './filesystemWiki': filesystemWiki,
     './wikiLinks': {
-      notePathToUri: value => `hl://note/${value}`,
+      notePathToUri: value => `llm-wiki://note/${value}`,
     },
   });
 
@@ -631,7 +631,7 @@ test('addSelectionToContext returns false and skips files when no exportable sel
 
     assert.equal(exported, false);
     assert.deepEqual(errors, ['No text selected']);
-    assert.throws(() => readFileSync(join(vaultRoot, '.hl', 'agent', 'selection.md'), 'utf8'), {
+    assert.throws(() => readFileSync(join(vaultRoot, '.llm_wiki', 'agent', 'selection.md'), 'utf8'), {
       code: 'ENOENT',
     });
   } finally {
@@ -640,7 +640,7 @@ test('addSelectionToContext returns false and skips files when no exportable sel
 });
 
 test('addSelectionToContext never expands an empty native selection to the whole document', async () => {
-  const vaultRoot = mkdtempSync(join(tmpdir(), 'hl-agent-context-native-empty-'));
+  const vaultRoot = mkdtempSync(join(tmpdir(), 'llm-wiki-agent-context-native-empty-'));
   const errors = [];
   const vscode = {
     workspace: {
@@ -665,7 +665,7 @@ test('addSelectionToContext never expands an empty native selection to the whole
   };
   const { addSelectionToContext } = loadTsModule('src/agentContext.ts', {
     vscode,
-    '@human-learning/core': {
+    '@llm-wiki/core': {
       openDatabase: async () => ({}),
       closeDatabase: () => undefined,
       getBacklinks: () => [],
@@ -674,7 +674,7 @@ test('addSelectionToContext never expands an empty native selection to the whole
     },
     './filesystemWiki': filesystemWiki,
     './wikiLinks': {
-      notePathToUri: value => `hl://note/${value}`,
+      notePathToUri: value => `llm-wiki://note/${value}`,
     },
   });
 
@@ -683,7 +683,7 @@ test('addSelectionToContext never expands an empty native selection to the whole
 
     assert.equal(exported, false);
     assert.deepEqual(errors, ['No text selected']);
-    assert.throws(() => readFileSync(join(vaultRoot, '.hl', 'agent', 'selection.md'), 'utf8'), {
+    assert.throws(() => readFileSync(join(vaultRoot, '.llm_wiki', 'agent', 'selection.md'), 'utf8'), {
       code: 'ENOENT',
     });
   } finally {

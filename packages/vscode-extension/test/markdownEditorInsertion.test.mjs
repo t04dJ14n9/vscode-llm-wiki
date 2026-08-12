@@ -293,7 +293,7 @@ test('markdown editor provider renames the note when the webview title changes',
   assert.deepEqual(executeCommandCalls.at(-1), [
     'vscode.openWith',
     renameCalls[0][1],
-    'human-learning.markdownEditor',
+    'llm-wiki.markdownEditor',
   ]);
 });
 
@@ -626,7 +626,7 @@ test('markdown editor provider exposes the active custom markdown selection as r
   });
   assert.deepEqual(executeCommandCalls.at(-1), [
     'setContext',
-    'humanLearningMarkdownHasSelection',
+    'llmWikiMarkdownHasSelection',
     true,
   ]);
 
@@ -636,7 +636,7 @@ test('markdown editor provider exposes the active custom markdown selection as r
   });
   assert.deepEqual(executeCommandCalls.at(-1), [
     'setContext',
-    'humanLearningMarkdownHasSelection',
+    'llmWikiMarkdownHasSelection',
     false,
   ]);
 });
@@ -767,7 +767,7 @@ test('markdown editor provider routes Cursor selection intent through the shared
   await panel.fireMessage({ type: 'addSelectionToCursorChat' });
 
   assert.deepEqual(executeCommandCalls.at(-1), [
-    'human-learning.addSelectionToCursorChat',
+    'llm-wiki.addSelectionToCursorChat',
   ]);
 });
 
@@ -817,7 +817,7 @@ test('markdown editor provider routes openUri messages through the host link tar
   await panel.fireMessage({ type: 'openUri', uri: 'https://example.com/docs' });
 
   assert.deepEqual(executeCommandCalls.at(-1), [
-    'human-learning.openLinkTarget',
+    'llm-wiki.openLinkTarget',
     'https://example.com/docs',
   ]);
 });
@@ -841,7 +841,7 @@ test('markdown annotation clicks route note identity to the durable-note command
   });
 
   assert.deepEqual(executeCommandCalls.at(-1), [
-    'human-learning.openLearningDiscussion',
+    'llm-wiki.openLearningDiscussion',
     {
       discussionId: 'discussion-durable',
       notePath: 'wiki/learning/durable.md',
@@ -889,9 +889,9 @@ test('markdown editor provider resolves generated daily and learning-note links 
   });
 
   assert.deepEqual(executeCommandCalls.slice(-3), [
-    ['human-learning.openLinkTarget', 'wiki/learning/Memory%20Systems.md'],
-    ['human-learning.openLinkTarget', 'notes/Concepts/Memory.md#L4-L5'],
-    ['human-learning.openLinkTarget', 'notes/Concepts/Root Link.md#Overview'],
+    ['llm-wiki.openLinkTarget', 'wiki/learning/Memory%20Systems.md'],
+    ['llm-wiki.openLinkTarget', 'notes/Concepts/Memory.md#L4-L5'],
+    ['llm-wiki.openLinkTarget', 'notes/Concepts/Root Link.md#Overview'],
   ]);
 });
 

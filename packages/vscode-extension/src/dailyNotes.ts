@@ -16,10 +16,10 @@ import {
   sep,
 } from 'node:path';
 
-const REVIEW_START = '<!-- human-learning:review-plan:start -->';
-const REVIEW_END = '<!-- human-learning:review-plan:end -->';
-const CARRIED_START = '<!-- human-learning:carried-tasks:start -->';
-const CARRIED_END = '<!-- human-learning:carried-tasks:end -->';
+const REVIEW_START = '<!-- llm-wiki:review-plan:start -->';
+const REVIEW_END = '<!-- llm-wiki:review-plan:end -->';
+const CARRIED_START = '<!-- llm-wiki:carried-tasks:start -->';
+const CARRIED_END = '<!-- llm-wiki:carried-tasks:end -->';
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
 export interface GenerateDailyNoteOptions {

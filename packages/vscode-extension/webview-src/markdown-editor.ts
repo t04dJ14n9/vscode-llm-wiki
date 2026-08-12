@@ -33,7 +33,7 @@ import {
 import { applyInsertText } from './insertText';
 import { copySelectionToClipboard, handleCopy, handlePaste } from './markdownClipboard';
 import { closeObsidianContextMenu, showObsidianContextMenu } from './obsidianContextMenu';
-import { humanLearningHighlightStyle } from './markdownTheme';
+import { llmWikiHighlightStyle } from './markdownTheme';
 import {
   hybridRendering,
   initialBodyPositionAfterFrontmatter,
@@ -69,7 +69,7 @@ class HlLinkWidget extends WidgetType {
   override toDOM(): HTMLElement {
     const button = document.createElement('button');
     button.type = 'button';
-    button.className = 'cm-hl-link';
+    button.className = 'cm-llm-wiki-link';
     button.dataset.sourceFrom = String(this.sourceFrom);
     button.dataset.sourceTo = String(this.sourceTo);
     if (isExternalUri(this.uri)) {
@@ -504,7 +504,7 @@ class TextReplacementWidget extends WidgetType {
   }
 }
 
-const hlLinkRendering = ViewPlugin.fromClass(class {
+const llmWikiLinkRendering = ViewPlugin.fromClass(class {
   decorations: DecorationSet;
 
   constructor(view: EditorView) {
@@ -530,25 +530,25 @@ let applyingHostUpdate = false;
 let vimModeEnabled = false;
 let currentNotePath: string | undefined;
 let knownNotePaths: string[] = [];
-let humanLearningVimMotionsInstalled = false;
-let humanLearningVimExCommandsInstalled = false;
-let humanLearningVimMarkdownKeysInstalled = false;
+let llmWikiVimMotionsInstalled = false;
+let llmWikiVimExCommandsInstalled = false;
+let llmWikiVimMarkdownKeysInstalled = false;
 let wikiLinkCompletionPending = false;
 
 type EditorCommand = (view: EditorView) => boolean;
 type EditorPresentationSettings = Partial<Record<'fontFamily' | 'fontSize' | 'fontWeight' | 'lineHeight' | 'letterSpacing', string>>;
 type MarkdownEditorTestWindow = Window & {
   __cmView?: EditorView;
-  __hlCommands?: Record<string, EditorCommand>;
-  __hlVimModeEnabled?: () => boolean;
+  __llmWikiCommands?: Record<string, EditorCommand>;
+  __llmWikiVimModeEnabled?: () => boolean;
 };
 
 const editorSettingToCssVariable = {
-  fontFamily: '--hl-editor-font-family',
-  fontSize: '--hl-editor-font-size',
-  fontWeight: '--hl-editor-font-weight',
-  lineHeight: '--hl-editor-line-height',
-  letterSpacing: '--hl-editor-letter-spacing',
+  fontFamily: '--llm-wiki-editor-font-family',
+  fontSize: '--llm-wiki-editor-font-size',
+  fontWeight: '--llm-wiki-editor-font-weight',
+  lineHeight: '--llm-wiki-editor-line-height',
+  letterSpacing: '--llm-wiki-editor-letter-spacing',
 } satisfies Record<keyof EditorPresentationSettings, string>;
 
 const vimModeCompartment = new Compartment();
@@ -720,22 +720,22 @@ function restoreEditorFocusAfterShortcut(editorView: EditorView): void {
   window.setTimeout(() => editorView.focus(), 0);
 }
 
-installHumanLearningVimMotions();
-installHumanLearningVimExCommands();
-installHumanLearningVimMarkdownKeys();
+installLlmWikiVimMotions();
+installLlmWikiVimExCommands();
+installLlmWikiVimMarkdownKeys();
 
-function installHumanLearningVimMotions(): void {
-  if (humanLearningVimMotionsInstalled) return;
+function installLlmWikiVimMotions(): void {
+  if (llmWikiVimMotionsInstalled) return;
 
   // The upstream Vim motion falls back to visual coordinates when it sees
   // replaced ranges. Hybrid markdown previews deliberately replace inactive
   // source lines, so document-line movement is the behavior we need here.
   Vim.defineMotion('moveByLines', moveByDocumentLines);
-  humanLearningVimMotionsInstalled = true;
+  llmWikiVimMotionsInstalled = true;
 }
 
-function installHumanLearningVimExCommands(): void {
-  if (humanLearningVimExCommandsInstalled) return;
+function installLlmWikiVimExCommands(): void {
+  if (llmWikiVimExCommandsInstalled) return;
 
   Vim.defineEx('write', 'w', () => {
     vscode.postMessage({ type: 'save' });
@@ -749,21 +749,21 @@ function installHumanLearningVimExCommands(): void {
   Vim.defineEx('x', 'x', () => {
     vscode.postMessage({ type: 'saveAndClose' });
   });
-  humanLearningVimExCommandsInstalled = true;
+  llmWikiVimExCommandsInstalled = true;
 }
 
-function installHumanLearningVimMarkdownKeys(): void {
-  if (humanLearningVimMarkdownKeysInstalled) return;
+function installLlmWikiVimMarkdownKeys(): void {
+  if (llmWikiVimMarkdownKeysInstalled) return;
 
-  Vim.defineAction('humanLearningInsertOpenBracket', cm => {
+  Vim.defineAction('llmWikiInsertOpenBracket', cm => {
     insertMarkdownPunctuationFromVimAction(cm, '[');
   });
-  Vim.defineAction('humanLearningInsertDash', cm => {
+  Vim.defineAction('llmWikiInsertDash', cm => {
     insertMarkdownPunctuationFromVimAction(cm, '-');
   });
-  Vim.mapCommand('[', 'action', 'humanLearningInsertOpenBracket', {}, { context: 'normal', isEdit: true });
-  Vim.mapCommand('-', 'action', 'humanLearningInsertDash', {}, { context: 'normal', isEdit: true });
-  humanLearningVimMarkdownKeysInstalled = true;
+  Vim.mapCommand('[', 'action', 'llmWikiInsertOpenBracket', {}, { context: 'normal', isEdit: true });
+  Vim.mapCommand('-', 'action', 'llmWikiInsertDash', {}, { context: 'normal', isEdit: true });
+  llmWikiVimMarkdownKeysInstalled = true;
 }
 
 function moveByDocumentLines(
@@ -831,7 +831,7 @@ function createView(text: string, title?: string): EditorView {
         history(),
         drawSelection(),
         markdown({ codeLanguages: languages }),
-        syntaxHighlighting(humanLearningHighlightStyle, { fallback: true }),
+        syntaxHighlighting(llmWikiHighlightStyle, { fallback: true }),
         bracketMatching(),
         search({ top: true }),
         autocompletion({
@@ -841,7 +841,7 @@ function createView(text: string, title?: string): EditorView {
           override: [wikiLinkCompletionSource],
         }),
         hybridRendering(),
-        hlLinkRendering,
+        llmWikiLinkRendering,
         learningAnnotationField,
         learningAnnotationPopover,
         EditorView.baseTheme({
@@ -988,10 +988,10 @@ function createView(text: string, title?: string): EditorView {
             backgroundColor: 'var(--vscode-editor-background)',
             color: 'var(--vscode-editor-foreground)',
             fontFamily: 'var(--vscode-font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif)',
-            fontSize: 'var(--hl-editor-font-size, 16px)',
-            fontWeight: 'var(--hl-editor-font-weight, var(--vscode-editor-font-weight, normal))',
-            lineHeight: 'var(--hl-editor-line-height, 24px)',
-            letterSpacing: 'var(--hl-editor-letter-spacing, normal)',
+            fontSize: 'var(--llm-wiki-editor-font-size, 16px)',
+            fontWeight: 'var(--llm-wiki-editor-font-weight, var(--vscode-editor-font-weight, normal))',
+            lineHeight: 'var(--llm-wiki-editor-line-height, 24px)',
+            letterSpacing: 'var(--llm-wiki-editor-letter-spacing, normal)',
             caretColor: editorCaret,
           },
           '.cm-scroller': {
@@ -1029,7 +1029,7 @@ function createView(text: string, title?: string): EditorView {
             fontSize: 'var(--vscode-editor-font-size, 14px)',
             fontWeight: 'var(--vscode-editor-font-weight, normal)',
             fontVariantNumeric: 'tabular-nums',
-            letterSpacing: 'var(--hl-editor-letter-spacing, normal)',
+            letterSpacing: 'var(--llm-wiki-editor-letter-spacing, normal)',
           },
           '.cm-foldGutter': {
             minWidth: '18px',
@@ -1052,9 +1052,9 @@ function createView(text: string, title?: string): EditorView {
             boxSizing: 'border-box',
             minWidth: '22px',
             width: '22px',
-            height: 'var(--hl-editor-line-height, 24px)',
+            height: 'var(--llm-wiki-editor-line-height, 24px)',
             padding: '0',
-            lineHeight: 'var(--hl-editor-line-height, 24px)',
+            lineHeight: 'var(--llm-wiki-editor-line-height, 24px)',
             textAlign: 'right',
             cursor: 'default',
           },
@@ -1077,14 +1077,14 @@ function createView(text: string, title?: string): EditorView {
             backgroundColor: 'var(--vscode-editorWidget-background, var(--vscode-sideBar-background, #252526))',
             color: 'var(--vscode-editor-foreground)',
             boxShadow: '0 -2px 8px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.28))',
-            fontFamily: 'var(--hl-editor-font-family, var(--vscode-editor-font-family, ui-monospace, Menlo, monospace))',
-            fontSize: 'var(--hl-editor-font-size, var(--vscode-editor-font-size, 14px))',
-            lineHeight: 'var(--hl-editor-line-height, 20px)',
+            fontFamily: 'var(--llm-wiki-editor-font-family, var(--vscode-editor-font-family, ui-monospace, Menlo, monospace))',
+            fontSize: 'var(--llm-wiki-editor-font-size, var(--vscode-editor-font-size, 14px))',
+            lineHeight: 'var(--llm-wiki-editor-line-height, 20px)',
           },
           '.cm-panel.cm-vim-panel input': {
             flex: '1 1 auto',
             minWidth: '0',
-            height: 'calc(var(--hl-editor-line-height, 20px) + 2px)',
+            height: 'calc(var(--llm-wiki-editor-line-height, 20px) + 2px)',
             margin: '0 0 0 6px',
             padding: '0',
             border: '0',
@@ -1257,7 +1257,7 @@ function createView(text: string, title?: string): EditorView {
             backgroundColor: 'var(--vscode-list-activeSelectionBackground, var(--vscode-list-hoverBackground, rgba(90, 93, 94, 0.31)))',
             color: 'var(--vscode-list-activeSelectionForeground, var(--vscode-editor-foreground, inherit))',
           },
-          '.cm-hl-link': {
+          '.cm-llm-wiki-link': {
             display: 'inline',
             maxWidth: '32rem',
             border: '0',
@@ -1274,15 +1274,15 @@ function createView(text: string, title?: string): EditorView {
             whiteSpace: 'normal',
             verticalAlign: 'baseline',
           },
-          '.cm-hl-link:hover': {
+          '.cm-llm-wiki-link:hover': {
             color: 'var(--vscode-textLink-activeForeground, var(--vscode-textLink-foreground))',
             backgroundColor: 'transparent',
           },
-          '.cm-hl-link:focus-visible, .cm-active-link-label:focus-visible': {
+          '.cm-llm-wiki-link:focus-visible, .cm-active-link-label:focus-visible': {
             outline: '1px solid var(--vscode-contrastBorder, var(--vscode-focusBorder, currentColor))',
             outlineOffset: '1px',
           },
-          '.cm-hl-link.cm-external-link::after': {
+          '.cm-llm-wiki-link.cm-external-link::after': {
             content: '"↗"',
             display: 'inline-block',
             marginLeft: '4px',
@@ -1340,7 +1340,7 @@ function createView(text: string, title?: string): EditorView {
             borderRadius: '4px',
             padding: '1px 5px',
             color: 'var(--vscode-textPreformat-foreground, inherit)',
-            fontFamily: 'var(--hl-editor-font-family, var(--vscode-editor-font-family, ui-monospace, Menlo, monospace))',
+            fontFamily: 'var(--llm-wiki-editor-font-family, var(--vscode-editor-font-family, ui-monospace, Menlo, monospace))',
           },
           '.cm-active-math-delimiter': {
             color: 'var(--vscode-symbolIcon-operatorForeground, var(--vscode-editor-foreground))',
@@ -1387,19 +1387,19 @@ function createView(text: string, title?: string): EditorView {
   editorView.dom.addEventListener('copy', event => {
     handleCopy(event, editorView);
   }, true);
-  editorView.dom.addEventListener('human-learning-title-rename', event => {
+  editorView.dom.addEventListener('llm-wiki-title-rename', event => {
     const nextTitle = (event as CustomEvent<{ title?: unknown }>).detail?.title;
     if (typeof nextTitle === 'string') {
       vscode.postMessage({ type: 'renameTitle', title: nextTitle });
     }
   });
-  editorView.dom.addEventListener('human-learning-open-uri', event => {
+  editorView.dom.addEventListener('llm-wiki-open-uri', event => {
     const uri = (event as CustomEvent<{ uri?: unknown }>).detail?.uri;
     if (typeof uri === 'string' && uri.length > 0) {
       vscode.postMessage({ type: 'openUri', uri });
     }
   });
-  editorView.dom.addEventListener('human-learning-copy-text', event => {
+  editorView.dom.addEventListener('llm-wiki-copy-text', event => {
     const text = (event as CustomEvent<{ text?: unknown }>).detail?.text;
     if (typeof text === 'string') {
       vscode.postMessage({ type: 'copyText', text });
@@ -1720,7 +1720,7 @@ function updateCursorSelectionPrompt(editorView: EditorView): void {
   if (!cursorSelectionPrompt) {
     const button = document.createElement('button');
     button.type = 'button';
-    button.className = 'hl-cursor-selection-prompt';
+    button.className = 'llm-wiki-cursor-selection-prompt';
     button.setAttribute('aria-label', `Add to Chat ${cursorSelectionShortcutLabel()}`);
     const label = document.createElement('span');
     label.className = 'add-to-chat-label';
@@ -1772,11 +1772,11 @@ function cursorSelectionShortcutLabel(): string {
 }
 
 function ensureCursorSelectionPromptStyles(): void {
-  if (document.getElementById('hl-cursor-selection-prompt-styles')) return;
+  if (document.getElementById('llm-wiki-cursor-selection-prompt-styles')) return;
   const style = document.createElement('style');
-  style.id = 'hl-cursor-selection-prompt-styles';
+  style.id = 'llm-wiki-cursor-selection-prompt-styles';
   style.textContent = `
-    .hl-cursor-selection-prompt {
+    .llm-wiki-cursor-selection-prompt {
       position: fixed;
       z-index: 1000;
       box-sizing: border-box;
@@ -1794,14 +1794,14 @@ function ensureCursorSelectionPromptStyles(): void {
       white-space: nowrap;
       cursor: pointer;
     }
-    .hl-cursor-selection-prompt:hover {
+    .llm-wiki-cursor-selection-prompt:hover {
       background: var(--vscode-toolbar-hoverBackground, rgba(127, 127, 127, .16));
     }
-    .hl-cursor-selection-prompt:focus-visible {
+    .llm-wiki-cursor-selection-prompt:focus-visible {
       outline: 2px solid var(--vscode-focusBorder, #007fd4);
       outline-offset: 1px;
     }
-    .hl-cursor-selection-prompt .add-to-chat-shortcut {
+    .llm-wiki-cursor-selection-prompt .add-to-chat-shortcut {
       display: inline-flex;
       align-items: center;
       height: 18px;
@@ -2655,8 +2655,8 @@ function nonNegativeInteger(value: unknown): number | undefined {
     ? value
     : undefined;
 }
-(window as MarkdownEditorTestWindow).__hlCommands = obsidianLikeCommands;
-(window as MarkdownEditorTestWindow).__hlVimModeEnabled = () => vimModeEnabled;
+(window as MarkdownEditorTestWindow).__llmWikiCommands = obsidianLikeCommands;
+(window as MarkdownEditorTestWindow).__llmWikiVimModeEnabled = () => vimModeEnabled;
 
 function applyEditorPresentationSettings(settings: unknown): void {
   const style = document.documentElement.style;
@@ -3292,5 +3292,5 @@ function selectionTouchesSource(
 }
 
 function isExternalUri(uri: string): boolean {
-  return /^[a-z][a-z0-9+.-]*:/i.test(uri) && !uri.startsWith('hl://');
+  return /^[a-z][a-z0-9+.-]*:/i.test(uri) && !uri.startsWith('llm-wiki://');
 }

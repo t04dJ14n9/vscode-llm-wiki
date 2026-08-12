@@ -4,7 +4,7 @@
 
 **Goal:** Add deterministic provider-specific PDF selection buttons in VS Code and Cursor, keep Cursor's direct Add to Chat action, and make every installed provider work from a cold extension state without submitting a prompt.
 
-**Architecture:** `agentHandoff.ts` remains the single registry for supported provider extensions, data-handoff commands, capabilities, activation, and provider adapters. The PDF host supplies a serializable capability matrix to its webview and routes explicit provider IDs through a new Human Learning command; selection export remains shared and adds a portable sibling-image link for Claude Code. Cursor's generic action bypasses provider selection and uses only Cursor Agent.
+**Architecture:** `agentHandoff.ts` remains the single registry for supported provider extensions, data-handoff commands, capabilities, activation, and provider adapters. The PDF host supplies a serializable capability matrix to its webview and routes explicit provider IDs through a new LLM Wiki command; selection export remains shared and adds a portable sibling-image link for Claude Code. Cursor's generic action bypasses provider selection and uses only Cursor Agent.
 
 **Tech Stack:** TypeScript, VS Code Extension API, shared PDF webview, Node test runner, Playwright, webpack, pnpm.
 
@@ -13,7 +13,7 @@
 - Stock VS Code shows **Copy Link** plus **Send to Codex**, **Send to Claude Code**, and **Send to CodeBuddy** only when their extensions expose supported data-handoff commands.
 - Cursor shows those installed-provider buttons and retains **Add to Chat** as a direct Cursor Agent action.
 - The generic Add to Chat command, title/context actions, and Cmd/Ctrl+L
-  keybinding are enabled only when `humanLearningHostIsCursor` is true; stock
+  keybinding are enabled only when `llmWikiHostIsCursor` is true; stock
   VS Code retains **Send Selection to Agent…** as its non-PDF picker.
 - An installed provider with `Extension.isActive === false` is visible and is explicitly activated on click before its command is revalidated and invoked.
 - Focus/open-only commands never count as provider handoff capabilities.
@@ -247,7 +247,7 @@ Extend the existing sequential-export test so an export with a crop followed
 by one without a crop asserts:
 
 ```js
-assert.equal(existsSync(join(vaultRoot, '.hl', 'agent', 'selection.png')), false);
+assert.equal(existsSync(join(vaultRoot, '.llm_wiki', 'agent', 'selection.png')), false);
 assert.match(
   readFileSync(second.markdownPath, 'utf8'),
   /\[selection\.png\]\(\.\/selection\.png\) when present/,
@@ -332,7 +332,7 @@ onDidChangeAgentCapabilities?: vscode.Event<void>;
 
 ```ts
 export const ADD_SELECTION_TO_AGENT_COMMAND =
-  'human-learning.addSelectionToAgent';
+  'llm-wiki.addSelectionToAgent';
 
 interface AddSelectionToAgentInput extends AddSelectionToChatInput {
   agentId: ExternalAgentId;
@@ -367,7 +367,7 @@ In `extensionActivation.test.mjs`, mock
 `handoffSelectionToAgentId` and `handoffSelectionToCursor` separately. Assert:
 
 ```js
-await registered['human-learning.addSelectionToAgent']({
+await registered['llm-wiki.addSelectionToAgent']({
   agentId: 'codex',
   selection,
   snapshotPng,
@@ -378,7 +378,7 @@ assert.deepEqual(explicitCalls, [{
   attachments: [exportedCropPath],
 }]);
 
-await registered['human-learning.addSelectionToCursorChat']({
+await registered['llm-wiki.addSelectionToCursorChat']({
   selection,
   snapshotPng,
 });
@@ -395,14 +395,14 @@ Also assert activation owns exactly one capability source, adds it to
 Assert activation sets:
 
 ```js
-['setContext', 'humanLearningHostIsCursor', false] // VS Code
-['setContext', 'humanLearningHostIsCursor', true]  // Cursor
+['setContext', 'llmWikiHostIsCursor', false] // VS Code
+['setContext', 'llmWikiHostIsCursor', true]  // Cursor
 ```
 
 In `buildArtifacts.test.mjs`, replace the provider-neutral generic-action test
 with assertions that every menu/keybinding contribution for
-`human-learning.addSelectionToChat` contains `humanLearningHostIsCursor`, while
-`human-learning.addSelectionToContext` remains available in both products.
+`llm-wiki.addSelectionToChat` contains `llmWikiHostIsCursor`, while
+`llm-wiki.addSelectionToContext` remains available in both products.
 
 - [ ] **Step 2: Write failing PDF provider protocol tests**
 
@@ -413,7 +413,7 @@ In `pdfSelectionContext.test.mjs`:
 - fire the injected capability-change event and assert all live PDF webviews
   receive a refreshed payload;
 - invoke `handleSelectionAction(pdfUri, 'sendToAgent', anchor, png, 'codex')`
-  and assert `human-learning.addSelectionToAgent` receives the normalized
+  and assert `llm-wiki.addSelectionToAgent` receives the normalized
   selection, agent ID, and validated PNG;
 - assert an invalid agent ID produces no command call.
 
@@ -422,7 +422,7 @@ In `pdfSelectionContext.test.mjs`:
 Run:
 
 ```bash
-pnpm --filter human-learning-vscode build
+pnpm --filter llm-wiki-vscode build
 node --test --test-name-pattern="explicit agent|agent handoff capabilities|Cursor handoff routes" packages/vscode-extension/test/extensionActivation.test.mjs packages/vscode-extension/test/pdfSelectionContext.test.mjs
 ```
 
@@ -453,19 +453,19 @@ const sent = target.kind === 'cursor'
 
 Register:
 
-- `human-learning.addSelectionToChat` with `{ kind: 'cursor' }`;
-- `human-learning.addSelectionToCursorChat` with `{ kind: 'cursor' }`;
-- `human-learning.addSelectionToAgent` after validating
+- `llm-wiki.addSelectionToChat` with `{ kind: 'cursor' }`;
+- `llm-wiki.addSelectionToCursorChat` with `{ kind: 'cursor' }`;
+- `llm-wiki.addSelectionToAgent` after validating
   `agentId ∈ {'codex','claude','codebuddy'}`.
 
 Keep the existing PDF re-request behavior when a command is invoked without an
 explicit selection. Keep the product-neutral
-`human-learning.addSelectionToContext` command on the provider picker.
+`llm-wiki.addSelectionToContext` command on the provider picker.
 
-Set `humanLearningHostIsCursor` during activation from the capability source's
+Set `llmWikiHostIsCursor` during activation from the capability source's
 immediate `read().cursorAgent` snapshot. In `package.json`, add
-`"enablement": "humanLearningHostIsCursor"` to the generic Add to Chat command
-and add `humanLearningHostIsCursor &&` to all of its menu/keybinding `when`
+`"enablement": "llmWikiHostIsCursor"` to the generic Add to Chat command
+and add `llmWikiHostIsCursor &&` to all of its menu/keybinding `when`
 clauses. Do not gate **Send Selection to Agent…**.
 
 - [ ] **Step 5: Add PDF capability and explicit-action plumbing**
@@ -489,7 +489,7 @@ In `PdfEditorProvider`:
 - retain `'addToCursorChat'` as the direct Cursor action.
 
 Remove the unconditional generated-HTML assignment
-`window.__humanLearningAddToCursorChat = true`; capability messages are now
+`window.__llmWikiAddToCursorChat = true`; capability messages are now
 authoritative.
 
 - [ ] **Step 6: Run focused host tests and verify GREEN**
@@ -587,7 +587,7 @@ second capability message changes actions in the already-open viewer.
 Run:
 
 ```bash
-pnpm --filter human-learning-vscode build
+pnpm --filter llm-wiki-vscode build
 pnpm exec playwright test packages/vscode-extension/test/e2e/pdf-viewer.spec.ts -g "installed provider|explicit provider|Cursor keeps|capability message"
 ```
 
@@ -597,7 +597,7 @@ provider action UI.
 - [ ] **Step 3: Implement validated webview capability state**
 
 In `pdf-viewer.ts`, replace the static
-`__humanLearningAddToCursorChat` flag with class state initialized to:
+`__llmWikiAddToCursorChat` flag with class state initialized to:
 
 ```ts
 private agentCapabilities: AgentSurfaceCapabilities = {
@@ -674,8 +674,8 @@ git commit -m "feat: show explicit PDF agent actions"
 **Files:**
 - Modify locally: `demo-vault/AGENTS.md`
 - Modify locally: `demo-vault/CLAUDE.md`
-- Modify locally: `demo-vault/.agents/skills/human-learning/SKILL.md`
-- Modify locally: `demo-vault/.claude/commands/hl-explain-selection.md`
+- Modify locally: `demo-vault/.agents/skills/llm-wiki/SKILL.md`
+- Modify locally: `demo-vault/.claude/commands/llm-wiki-explain-selection.md`
 - Modify: `packages/vscode-extension/test/buildArtifacts.test.mjs`
 
 **Interfaces:**
@@ -697,7 +697,7 @@ test('production PDF bundle contains explicit provider actions and no static Cur
     'Send to Claude Code',
     'Send to CodeBuddy',
   ]) assert.equal(bundle.includes(value), true);
-  assert.equal(bundle.includes('__humanLearningAddToCursorChat'), false);
+  assert.equal(bundle.includes('__llmWikiAddToCursorChat'), false);
 });
 ```
 
@@ -717,7 +717,7 @@ Forbidden wording:
 
 - [ ] **Step 2: Update the four local vault guidance files**
 
-Preserve current Source-link, immutable `.hlanchor`, theme, Vim, outline, and
+Preserve current Source-link, immutable `.llm_wiki_anchor`, theme, Vim, outline, and
 `raw/` rules. Replace only the stale provider-neutral action wording with the
 approved explicit matrix and linked-image behavior.
 
@@ -728,7 +728,7 @@ Do not edit `.gitignore` and do not force-add `demo-vault/`.
 Run:
 
 ```bash
-pnpm --filter human-learning-vscode test
+pnpm --filter llm-wiki-vscode test
 ```
 
 Expected: production bundles build and every extension Node test passes.
@@ -739,7 +739,7 @@ Run:
 
 ```bash
 rg -n "Send to Codex|Send to Claude Code|Send to CodeBuddy|agentHandoffCapabilities" packages/vscode-extension/dist/pdf-viewer.js
-rg -n "Add to Chat targets a compatible supported agent|native image attachment" demo-vault/AGENTS.md demo-vault/CLAUDE.md demo-vault/.agents/skills/human-learning/SKILL.md demo-vault/.claude/commands/hl-explain-selection.md
+rg -n "Add to Chat targets a compatible supported agent|native image attachment" demo-vault/AGENTS.md demo-vault/CLAUDE.md demo-vault/.agents/skills/llm-wiki/SKILL.md demo-vault/.claude/commands/llm-wiki-explain-selection.md
 ```
 
 Expected: the bundle contains all explicit capabilities; the forbidden vault
@@ -796,12 +796,12 @@ do not weaken product assertions.
 
 Use unique user-data directories and remote-debugging ports. Load:
 
-- the current Human Learning extension development path;
+- the current LLM Wiki extension development path;
 - each product's normal external-extension directory;
 - `demo-vault`;
 - the freshly built `dist/extension.js`.
 
-Record process argv, PID/start time, Human Learning ID/version/activation,
+Record process argv, PID/start time, LLM Wiki ID/version/activation,
 external provider ID/version, and production bundle hashes.
 
 - [ ] **Step 4: Verify the cold-start button matrix before activation**
@@ -822,8 +822,8 @@ is absent.
 
 For every host/provider row:
 
-1. Select a real PDF passage through Human Learning.
-2. Click that provider's Human Learning button.
+1. Select a real PDF passage through LLM Wiki.
+2. Click that provider's LLM Wiki button.
 3. Confirm the provider changes to `isActive === true`.
 4. Inspect its draft and verify `selection.md` arrived.
 5. Verify PNG arrival for Codex, CodeBuddy, and Cursor.

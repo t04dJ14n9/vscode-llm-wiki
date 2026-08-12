@@ -14,7 +14,7 @@
 - Do not add React, React DOM, Tailwind CSS, shadcn/ui, Apps SDK UI, or another presentation dependency.
 - Keep PDF pages white in every VS Code theme.
 - Keep `#4dabf7` reserved for PDF provenance and `#e88968` reserved for agent activity.
-- Keep Ask PDF available without `.hl`, with PDF bytes unmodified and no internal anchor ID in portable links or prompts.
+- Keep Ask PDF available without `.llm_wiki`, with PDF bytes unmodified and no internal anchor ID in portable links or prompts.
 - Keep combined and standalone implementations byte-identical for every mirrored source file.
 - Preserve the current dirty worktree; do not reset, stash, broadly format, or stage generated artifacts and live test-vault residue.
 - Treat assistant Markdown and webview-provided model IDs as untrusted input.
@@ -95,7 +95,7 @@ test('round-trips optional Codex model provenance without changing version 1', (
 
 - [ ] **Step 2: Run the focused test and confirm it fails**
 
-Run: `pnpm --filter @human-learning/core build && node --test --test-name-pattern="Codex model provenance" packages/core/test/pdf-discussions.test.mjs`
+Run: `pnpm --filter @llm-wiki/core build && node --test --test-name-pattern="Codex model provenance" packages/core/test/pdf-discussions.test.mjs`
 
 Expected: FAIL because Zod strips `codexModel` and `lastTurn.model`.
 
@@ -124,7 +124,7 @@ export const PdfDiscussionLastTurnV1Schema = z.object({
 
 - [ ] **Step 4: Run core tests**
 
-Run: `pnpm --filter @human-learning/core test`
+Run: `pnpm --filter @llm-wiki/core test`
 
 Expected: all core tests PASS and existing version-1 documents remain valid.
 
@@ -208,7 +208,7 @@ test('lists every visible Codex model page and forwards model overrides', async 
 
 - [ ] **Step 3: Run the client test and confirm it fails**
 
-Run: `pnpm --filter human-learning-vscode build && node --test --test-name-pattern="lists every visible Codex model" packages/vscode-extension/test/codexAppServerClient.test.mjs`
+Run: `pnpm --filter llm-wiki-vscode build && node --test --test-name-pattern="lists every visible Codex model" packages/vscode-extension/test/codexAppServerClient.test.mjs`
 
 Expected: FAIL because `listModels` does not exist and model overrides are stripped.
 
@@ -251,7 +251,7 @@ Copy `model` with `copyDefined` in `startThread`, and include it in the `turn/st
 
 - [ ] **Step 5: Run client tests and mirrored-source checks**
 
-Run: `pnpm --filter human-learning-vscode test`
+Run: `pnpm --filter llm-wiki-vscode test`
 
 Run: `cmp packages/vscode-extension/src/codexAppServerClient.ts packages/vscode-pdf-extension/src/codexAppServerClient.ts`
 
@@ -322,7 +322,7 @@ test('validates, forwards, persists, retries, and restores the selected model', 
 
 - [ ] **Step 2: Run focused controller tests and confirm failure**
 
-Run: `pnpm --filter human-learning-vscode build && node --test --test-name-pattern="selected model" packages/vscode-extension/test/pdfDiscussionController.test.mjs`
+Run: `pnpm --filter llm-wiki-vscode build && node --test --test-name-pattern="selected model" packages/vscode-extension/test/pdfDiscussionController.test.mjs`
 
 Expected: FAIL because the client/controller interfaces and sidecar state do not carry a model.
 
@@ -437,7 +437,7 @@ Normalize `model` with the same 8 KiB string limit as questions, reject empty va
 
 - [ ] **Step 6: Run controller and host tests plus parity checks**
 
-Run: `pnpm --filter human-learning-vscode test`
+Run: `pnpm --filter llm-wiki-vscode test`
 
 Run: `cmp packages/vscode-extension/src/pdfDiscussionController.ts packages/vscode-pdf-extension/src/pdfDiscussionController.ts && cmp packages/vscode-extension/src/pdfDiscussionProtocol.ts packages/vscode-pdf-extension/src/pdfDiscussionProtocol.ts && cmp packages/vscode-extension/src/pdfEditorProvider.ts packages/vscode-pdf-extension/src/pdfEditorProvider.ts`
 
@@ -502,7 +502,7 @@ await expect(panel.getByRole('textbox', { name: 'Ask a follow-up' })).toBeFocuse
 
 - [ ] **Step 2: Run the Ask PDF Playwright spec and confirm semantic failures**
 
-Run: `pnpm --filter human-learning-vscode build && pnpm exec playwright test packages/vscode-extension/test/e2e/ask-pdf.spec.ts --project=chromium`
+Run: `pnpm --filter llm-wiki-vscode build && pnpm exec playwright test packages/vscode-extension/test/e2e/ask-pdf.spec.ts --project=chromium`
 
 Expected: FAIL on the new heading/details/model/SVG/stability assertions.
 
@@ -546,7 +546,7 @@ Create the `<aside>`, header, controlled `<details>`, ordered transcript, persis
 - [ ] **Step 4: Install the approved local token/style layer**
 
 ```ts
-const ASK_PDF_STYLE_ID = 'human-learning-ask-pdf-styles';
+const ASK_PDF_STYLE_ID = 'llm-wiki-ask-pdf-styles';
 
 export function installAskPdfPanelStyles(): void {
   if (document.getElementById(ASK_PDF_STYLE_ID)) return;
@@ -579,7 +579,7 @@ On first consented panel open send `pdfDiscussionListModels`; use the catalog de
 
 - [ ] **Step 6: Run semantic and interaction tests**
 
-Run: `pnpm --filter human-learning-vscode build && pnpm exec playwright test packages/vscode-extension/test/e2e/ask-pdf.spec.ts --project=chromium`
+Run: `pnpm --filter llm-wiki-vscode build && pnpm exec playwright test packages/vscode-extension/test/e2e/ask-pdf.spec.ts --project=chromium`
 
 Expected: semantic, streaming, model-picker, drag/resize, minimized, responsive, and accessibility tests PASS.
 
@@ -641,7 +641,7 @@ Inspect every generated PNG for white PDF pages, blue source provenance, warm ru
 
 - [ ] **Step 4: Run standalone and viewer regression suites**
 
-Run: `pnpm --filter human-learning-vscode test:e2e`
+Run: `pnpm --filter llm-wiki-vscode test:e2e`
 
 Run: `pnpm exec playwright test packages/vscode-extension/test/e2e/pdf-viewer.spec.ts packages/vscode-extension/test/e2e/ask-pdf.spec.ts --project=chromium`
 
@@ -672,10 +672,10 @@ git commit -m "test: cover Codex-quiet Ask PDF workflow"
 - [ ] **Step 1: Run required automated verification**
 
 ```bash
-pnpm --filter @human-learning/core test
-pnpm --filter human-learning-vscode test
-pnpm --filter human-learning-vscode test:e2e
-pnpm --filter human-learning-vscode test:vscode-e2e
+pnpm --filter @llm-wiki/core test
+pnpm --filter llm-wiki-vscode test
+pnpm --filter llm-wiki-vscode test:e2e
+pnpm --filter llm-wiki-vscode test:vscode-e2e
 pnpm build:extension
 pnpm build:pdf-extension
 ```

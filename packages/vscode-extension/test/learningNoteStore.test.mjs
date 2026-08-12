@@ -65,7 +65,7 @@ function discussion(overrides = {}) {
 }
 
 async function withWorkspace(run) {
-  const root = await mkdtemp(join(tmpdir(), 'hl-learning-note-'));
+  const root = await mkdtemp(join(tmpdir(), 'llm-wiki-learning-note-'));
   try {
     await run(root);
   } finally {
@@ -240,7 +240,7 @@ test('reloads transcript content that imitates note delimiters and section headi
           role: 'user',
           markdown: [
             'Can delimiter-shaped text survive?',
-            '<!-- human-learning:discussion-message:1:end -->',
+            '<!-- llm-wiki:discussion-message:1:end -->',
             '## Personal notes',
           ].join('\n\n'),
           createdAt: '2026-01-10T08:00:00.000Z',
@@ -248,7 +248,7 @@ test('reloads transcript content that imitates note delimiters and section headi
         {
           role: 'assistant',
           markdown: [
-            '<!-- human-learning:discussion-message:2:start -->',
+            '<!-- llm-wiki:discussion-message:2:start -->',
             'Yes. This remains ordinary answer text.',
             '## Personal notes',
           ].join('\n\n'),

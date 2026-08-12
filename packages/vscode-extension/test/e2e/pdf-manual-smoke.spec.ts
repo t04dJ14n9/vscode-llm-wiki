@@ -10,13 +10,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 
-const smokePdfPath = process.env.HL_PDF_SMOKE_PATH;
+const smokePdfPath = process.env.LLM_WIKI_PDF_SMOKE_PATH;
 
-test.skip(!smokePdfPath, 'Set HL_PDF_SMOKE_PATH to run the real-PDF selection smoke test');
+test.skip(!smokePdfPath, 'Set LLM_WIKI_PDF_SMOKE_PATH to run the real-PDF selection smoke test');
 
 test('real PDF page 18 selects only the opening rendering paragraph and preserves zoom', async ({ page }) => {
   test.setTimeout(180_000);
-  if (!smokePdfPath) throw new Error('HL_PDF_SMOKE_PATH is required');
+  if (!smokePdfPath) throw new Error('LLM_WIKI_PDF_SMOKE_PATH is required');
   expect(existsSync(smokePdfPath), `PDF does not exist: ${smokePdfPath}`).toBe(true);
   const browserErrors: string[] = [];
   page.on('console', message => {
@@ -73,7 +73,7 @@ test('real PDF page 18 selects only the opening rendering paragraph and preserve
   await expect.poll(() => latestSelectionSnippet(page), { timeout: 10_000 })
     .toContain('When most people think about computer games');
   const snippet = await latestSelectionSnippet(page);
-  console.log(`HL_PDF_SMOKE_SNIPPET=${JSON.stringify(snippet)}`);
+  console.log(`LLM_WIKI_PDF_SMOKE_SNIPPET=${JSON.stringify(snippet)}`);
 
   expect(snippet).toMatch(/^When most people think about computer games\b/);
   expect(snippet).toMatch(/ways in which stylized effects can be achieved\.$/);
@@ -96,7 +96,7 @@ test('real PDF page 18 selects only the opening rendering paragraph and preserve
 
 test('real PDF page 56 keeps a margin caption out of the body selection', async ({ page }) => {
   test.setTimeout(180_000);
-  if (!smokePdfPath) throw new Error('HL_PDF_SMOKE_PATH is required');
+  if (!smokePdfPath) throw new Error('LLM_WIKI_PDF_SMOKE_PATH is required');
   const pdf = prepareSinglePageSmokePdf(smokePdfPath, 56);
   await page.route('**/fixtures/manual-smoke.pdf', async route => {
     await route.fulfill({
@@ -165,7 +165,7 @@ test('real PDF page 56 keeps a margin caption out of the body selection', async 
 
 test('real PDF page 190 keeps the Figure 12.12 caption out of the spot-light paragraph selection', async ({ page }) => {
   test.setTimeout(180_000);
-  if (!smokePdfPath) throw new Error('HL_PDF_SMOKE_PATH is required');
+  if (!smokePdfPath) throw new Error('LLM_WIKI_PDF_SMOKE_PATH is required');
   const pdf = prepareSinglePageSmokePdf(smokePdfPath, 190);
   await page.route('**/fixtures/manual-smoke.pdf', async route => {
     await route.fulfill({
@@ -231,7 +231,7 @@ test('real PDF page 190 keeps the Figure 12.12 caption out of the spot-light par
 
 test('real PDF page 2 restores a stripped join marker for whole-word selection', async ({ page }) => {
   test.setTimeout(180_000);
-  if (!smokePdfPath) throw new Error('HL_PDF_SMOKE_PATH is required');
+  if (!smokePdfPath) throw new Error('LLM_WIKI_PDF_SMOKE_PATH is required');
   const pdf = prepareSinglePageSmokePdf(smokePdfPath, 2);
   await page.route('**/fixtures/manual-smoke.pdf', async route => {
     await route.fulfill({
@@ -362,7 +362,7 @@ async function visiblePageIds(page: Page): Promise<string[]> {
 }
 
 function preparePageEighteenSmokePdf(sourcePath: string): Buffer {
-  const directory = mkdtempSync(join(tmpdir(), 'human-learning-pdf-smoke-'));
+  const directory = mkdtempSync(join(tmpdir(), 'llm-wiki-pdf-smoke-'));
   try {
     const blankPage = join(directory, 'blank.pdf');
     const sourcePattern = join(directory, 'source-%d.pdf');
@@ -389,7 +389,7 @@ function preparePageEighteenSmokePdf(sourcePath: string): Buffer {
 }
 
 function prepareSinglePageSmokePdf(sourcePath: string, page: number): Buffer {
-  const directory = mkdtempSync(join(tmpdir(), 'human-learning-pdf-smoke-'));
+  const directory = mkdtempSync(join(tmpdir(), 'llm-wiki-pdf-smoke-'));
   try {
     const outputPattern = join(directory, 'source-%d.pdf');
     const output = join(directory, `source-${page}.pdf`);

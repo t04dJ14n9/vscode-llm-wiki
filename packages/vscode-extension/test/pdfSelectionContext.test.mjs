@@ -77,7 +77,7 @@ test('PDF editor provider exposes portable database-free agent context with norm
   };
   const { PdfEditorProvider } = loadTsModule('src/pdfEditorProvider.ts', {
     vscode,
-    '@human-learning/core': {
+    '@llm-wiki/core': {
       pdfHref: (sourcePath, options) => {
         pdfHrefCalls.push({ sourcePath, options });
         return portablePdfHref(sourcePath, options);
@@ -160,7 +160,7 @@ test('PDF Cursor handoff routes exact selection and an optional validated crop t
     PdfEditorProvider,
   } = loadTsModule('src/pdfEditorProvider.ts', {
     vscode,
-    '@human-learning/core': { pdfHref: portablePdfHref },
+    '@llm-wiki/core': { pdfHref: portablePdfHref },
   });
   const provider = new PdfEditorProvider(
     { extensionUri: { fsPath: '/extension' } },
@@ -214,7 +214,7 @@ test('PDF Cursor handoff routes exact selection and an optional validated crop t
       },
     },
   };
-  assert.equal(ADD_SELECTION_TO_CURSOR_CHAT_COMMAND, 'human-learning.addSelectionToCursorChat');
+  assert.equal(ADD_SELECTION_TO_CURSOR_CHAT_COMMAND, 'llm-wiki.addSelectionToCursorChat');
   assert.equal(commands.length, 2);
   assert.equal(commands[0][0], ADD_SELECTION_TO_CURSOR_CHAT_COMMAND);
   assert.deepEqual(commands[0][1].selection, selection);
@@ -243,7 +243,7 @@ test('PDF explicit agent handoff routes normalized selection and validated crop 
     PdfEditorProvider,
   } = loadTsModule('src/pdfEditorProvider.ts', {
     vscode,
-    '@human-learning/core': { pdfHref: portablePdfHref },
+    '@llm-wiki/core': { pdfHref: portablePdfHref },
   });
   const provider = new PdfEditorProvider(
     { extensionUri: { fsPath: '/extension' } },
@@ -276,7 +276,7 @@ test('PDF explicit agent handoff routes normalized selection and validated crop 
     'unknown',
   );
 
-  assert.equal(ADD_SELECTION_TO_AGENT_COMMAND, 'human-learning.addSelectionToAgent');
+  assert.equal(ADD_SELECTION_TO_AGENT_COMMAND, 'llm-wiki.addSelectionToAgent');
   assert.equal(commands.length, 1);
   assert.equal(commands[0][0], ADD_SELECTION_TO_AGENT_COMMAND);
   assert.equal(commands[0][1].agentId, 'codex');
@@ -308,7 +308,7 @@ test('stock VS Code explicit provider capture warns only for a literal crop fail
     PdfEditorProvider,
   } = loadTsModule('src/pdfEditorProvider.ts', {
     vscode,
-    '@human-learning/core': { pdfHref: portablePdfHref },
+    '@llm-wiki/core': { pdfHref: portablePdfHref },
   });
   const context = {
     extensionUri: { fsPath: '/extension' },
@@ -420,7 +420,7 @@ test('concurrent explicit PDF provider captures correlate by request ID without 
     PdfEditorProvider,
   } = loadTsModule('src/pdfEditorProvider.ts', {
     vscode,
-    '@human-learning/core': { pdfHref: portablePdfHref },
+    '@llm-wiki/core': { pdfHref: portablePdfHref },
   });
   const provider = new PdfEditorProvider(
     { extensionUri: { fsPath: '/extension' }, subscriptions: [] },
@@ -524,7 +524,7 @@ test('no-selection explicit PDF request cannot taint a later ordinary Cursor act
     PdfEditorProvider,
   } = loadTsModule('src/pdfEditorProvider.ts', {
     vscode,
-    '@human-learning/core': { pdfHref: portablePdfHref },
+    '@llm-wiki/core': { pdfHref: portablePdfHref },
   });
   const provider = new PdfEditorProvider(
     { extensionUri: { fsPath: '/extension' }, subscriptions: [] },
@@ -591,7 +591,7 @@ test('selection update clears an unanswered explicit PDF agent request', async (
     PdfEditorProvider,
   } = loadTsModule('src/pdfEditorProvider.ts', {
     vscode,
-    '@human-learning/core': { pdfHref: portablePdfHref },
+    '@llm-wiki/core': { pdfHref: portablePdfHref },
   });
   const provider = new PdfEditorProvider(
     { extensionUri: { fsPath: '/extension' }, subscriptions: [] },
@@ -659,7 +659,7 @@ test('ordinary Cursor re-request does not consume a pending explicit PDF agent r
     PdfEditorProvider,
   } = loadTsModule('src/pdfEditorProvider.ts', {
     vscode,
-    '@human-learning/core': { pdfHref: portablePdfHref },
+    '@llm-wiki/core': { pdfHref: portablePdfHref },
   });
   const provider = new PdfEditorProvider(
     { extensionUri: { fsPath: '/extension' }, subscriptions: [] },
@@ -720,7 +720,7 @@ test('ordinary Cursor re-request does not consume a pending explicit PDF agent r
     requestId,
   });
   assert.equal(commands.length, 2);
-  assert.equal(commands[1][0], 'human-learning.addSelectionToAgent');
+  assert.equal(commands[1][0], 'llm-wiki.addSelectionToAgent');
   assert.equal(commands[1][1].agentId, 'codex');
 });
 
@@ -740,7 +740,7 @@ test('combined PDF context keys clear on deactivation and restore with its selec
   };
   const { PdfEditorProvider } = loadTsModule('src/pdfEditorProvider.ts', {
     vscode,
-    '@human-learning/core': { pdfHref: portablePdfHref },
+    '@llm-wiki/core': { pdfHref: portablePdfHref },
   });
   const provider = new PdfEditorProvider(
     { extensionUri: { fsPath: '/extension' }, subscriptions: [] },
@@ -777,8 +777,8 @@ test('combined PDF context keys clear on deactivation and restore with its selec
 
   assert.equal(provider.getActiveWebview(), undefined);
   assert.deepEqual(commands, [
-    ['setContext', 'humanLearningPdfOpen', false],
-    ['setContext', 'humanLearningPdfHasSelection', false],
+    ['setContext', 'llmWikiPdfOpen', false],
+    ['setContext', 'llmWikiPdfHasSelection', false],
   ]);
 
   commands.length = 0;
@@ -787,8 +787,8 @@ test('combined PDF context keys clear on deactivation and restore with its selec
 
   assert.equal(provider.getActiveWebview()?.pdfUri, pdfUri);
   assert.deepEqual(commands, [
-    ['setContext', 'humanLearningPdfOpen', true],
-    ['setContext', 'humanLearningPdfHasSelection', true],
+    ['setContext', 'llmWikiPdfOpen', true],
+    ['setContext', 'llmWikiPdfHasSelection', true],
   ]);
 });
 
@@ -803,7 +803,7 @@ test('PDF provider falls back to one visible PDF without guessing between visibl
   };
   const { PdfEditorProvider } = loadTsModule('src/pdfEditorProvider.ts', {
     vscode,
-    '@human-learning/core': { pdfHref: portablePdfHref },
+    '@llm-wiki/core': { pdfHref: portablePdfHref },
   });
   const provider = new PdfEditorProvider(
     { extensionUri: { fsPath: '/extension' }, subscriptions: [] },
@@ -859,7 +859,7 @@ test('PDF copy link action uses a portable URL without persistence or highlight 
   };
   const { PdfEditorProvider } = loadTsModule('src/pdfEditorProvider.ts', {
     vscode,
-    '@human-learning/core': {
+    '@llm-wiki/core': {
       pdfHref: (sourcePath, options) => {
         pdfHrefCalls.push({ sourcePath, options });
         return portablePdfHref(sourcePath, options);
@@ -931,7 +931,7 @@ test('removed selection actions are rejected without clipboard or command side e
   };
   const { PdfEditorProvider } = loadTsModule('src/pdfEditorProvider.ts', {
     vscode,
-    '@human-learning/core': {
+    '@llm-wiki/core': {
       pdfHref: portablePdfHref,
     },
   });
@@ -978,7 +978,7 @@ test('PDF provider transports page-scoped text fragments without database resolu
     };
     const { PdfEditorProvider } = loadTsModule(relativePath, {
       vscode,
-      '@human-learning/core': {
+      '@llm-wiki/core': {
         openDatabase: () => { throw new Error('portable navigation must not open the database'); },
         pdfHref: portablePdfHref,
       },
@@ -996,7 +996,7 @@ test('PDF provider transports page-scoped text fragments without database resolu
     assert.equal(commandCalls.length, 1);
     assert.equal(commandCalls[0][0], 'vscode.openWith');
     assert.equal(commandCalls[0][1].fsPath, '/vault/raw/pdf/paper.pdf');
-    assert.equal(commandCalls[0][2], 'human-learning.pdfViewer');
+    assert.equal(commandCalls[0][2], 'llm-wiki.pdfViewer');
     assert.deepEqual(posted, [{
       type: 'goToAnchor',
       anchor: { page: 7, textFragment },
@@ -1028,7 +1028,7 @@ test('PDF provider preserves encoded path text and rejects literal traversal', a
   };
   const { PdfEditorProvider } = loadTsModule('src/pdfEditorProvider.ts', {
     vscode,
-    '@human-learning/core': { pdfHref: portablePdfHref },
+    '@llm-wiki/core': { pdfHref: portablePdfHref },
   });
   const provider = new PdfEditorProvider({ extensionUri: { fsPath: '/extension' } }, '/vault');
   provider.webviews.set('file:///vault/%2e%2e/secret.pdf', {
@@ -1044,7 +1044,7 @@ test('PDF provider preserves encoded path text and rejects literal traversal', a
   assert.equal(commandCalls.length, 1);
   assert.equal(commandCalls[0][0], 'vscode.openWith');
   assert.equal(commandCalls[0][1].fsPath, '/vault/%2e%2e/secret.pdf');
-  assert.equal(commandCalls[0][2], 'human-learning.pdfViewer');
+  assert.equal(commandCalls[0][2], 'llm-wiki.pdfViewer');
   assert.deepEqual(errors, [
     'Cannot open PDF outside the document root: ../secret.pdf',
   ]);
@@ -1081,7 +1081,7 @@ test('PDF provider queues anchor navigation until a newly opened webview is read
   };
   const { PdfEditorProvider } = loadTsModule('src/pdfEditorProvider.ts', {
     vscode,
-    '@human-learning/core': { pdfHref: portablePdfHref },
+    '@llm-wiki/core': { pdfHref: portablePdfHref },
   });
   const provider = new PdfEditorProvider(
     { extensionUri: { fsPath: '/extension' }, subscriptions: [] },
@@ -1129,7 +1129,7 @@ test('PDF provider queues anchor navigation until a newly opened webview is read
   assert.deepEqual(commandCalls.at(-1), [
     'vscode.openWith',
     pdfUri,
-    'human-learning.pdfViewer',
+    'llm-wiki.pdfViewer',
   ]);
 });
 
@@ -1166,7 +1166,7 @@ test('agent handoff capabilities precede PDF loading and refresh across live web
   };
   const { PdfEditorProvider } = loadTsModule('src/pdfEditorProvider.ts', {
     vscode,
-    '@human-learning/core': { pdfHref: portablePdfHref },
+    '@llm-wiki/core': { pdfHref: portablePdfHref },
   });
   const context = { extensionUri: { fsPath: '/extension' }, subscriptions: [] };
   const provider = new PdfEditorProvider(context, {
@@ -1257,7 +1257,7 @@ test('PDF provider does not schedule delayed loads that can outlive disposed web
   };
   const { PdfEditorProvider } = loadTsModule('src/pdfEditorProvider.ts', {
     vscode,
-    '@human-learning/core': { pdfHref: portablePdfHref },
+    '@llm-wiki/core': { pdfHref: portablePdfHref },
   });
   const provider = new PdfEditorProvider(
     { extensionUri: { fsPath: '/extension' }, subscriptions: [] },
@@ -1289,7 +1289,7 @@ test('PDF provider does not schedule delayed loads that can outlive disposed web
 });
 
 test('combined PDF provider loads global Ask PDF state outside a vault', async () => {
-  const tempRoot = mkdtempSync(join(tmpdir(), 'hl-combined-pdf-no-vault-'));
+  const tempRoot = mkdtempSync(join(tmpdir(), 'llm-wiki-combined-pdf-no-vault-'));
   const pdfPath = join(tempRoot, 'paper.pdf');
   writeFileSync(pdfPath, Buffer.from('%PDF-no-vault', 'utf8'));
 
@@ -1346,7 +1346,7 @@ test('combined PDF provider loads global Ask PDF state outside a vault', async (
   };
   const { PdfEditorProvider } = loadTsModule('src/pdfEditorProvider.ts', {
     vscode,
-    '@human-learning/core': {
+    '@llm-wiki/core': {
       pdfHref: portablePdfHref,
     },
     './pdfDiscussionController': {
@@ -1426,7 +1426,7 @@ test('PDF rectangle selection copies the exact PDF++ embed-link shape without pe
   };
   const { PdfEditorProvider, formatPdfRectangleEmbed } = loadTsModule('src/pdfEditorProvider.ts', {
     vscode,
-    '@human-learning/core': {
+    '@llm-wiki/core': {
       openDatabase: () => { throw new Error('rectangle copy must not open the anchor database'); },
     },
   });
@@ -1447,7 +1447,7 @@ test('PDF rectangle selection copies the exact PDF++ embed-link shape without pe
   assert.deepEqual(clipboard, [
     '![[Topics/AI/LLM/cs336/Resources/lectures/lecture_03.pdf#page=1&rect=155,149,323,267|lecture_03, p.1]]',
   ]);
-  assert.deepEqual(messages, ['Human Learning PDF rectangular embed link copied']);
+  assert.deepEqual(messages, ['LLM Wiki PDF rectangular embed link copied']);
 });
 
 test('PDF page links use the exact PDF++ wikilink shape', () => {
@@ -1457,7 +1457,7 @@ test('PDF page links use the exact PDF++ wikilink shape', () => {
   };
   const { formatPdfPageLink } = loadTsModule('src/pdfEditorProvider.ts', {
     vscode,
-    '@human-learning/core': {},
+    '@llm-wiki/core': {},
   });
 
   assert.equal(
@@ -1482,7 +1482,7 @@ test('PDF outline payloads are bounded, normalized, and reveal the exact destina
     normalizePdfOutlineEntries,
   } = loadTsModule('src/pdfEditorProvider.ts', {
     vscode,
-    '@human-learning/core': {},
+    '@llm-wiki/core': {},
   });
   const entries = normalizePdfOutlineEntries([{
     title: '  Section   12.2  ',

@@ -1,24 +1,24 @@
-# Human Learning MVP Design
+# LLM Wiki MVP Design
 
 > Historical note: this spec captured the initial MVP design. The current
-> implementation no longer generates `hl://` links for user-facing notes; see
+> implementation no longer generates `llm-wiki://` links for user-facing notes; see
 > `docs/reference model.md` for the current native reference model.
 
 ## Goal
 
-Ship a local-first MVP that turns this repository into a usable Human Learning vault tool on a local MacBook: a working `hl` CLI, a VS Code PDF viewer backed by PDFium/EmbedPDF, a CodeMirror 6 markdown editor, deterministic local embedding search, and bidirectional links/backlinks over canonical `hl://` links.
+Ship a local-first MVP that turns this repository into a usable LLM Wiki vault tool on a local MacBook: a working `llm_wiki` CLI, a VS Code PDF viewer backed by PDFium/EmbedPDF, a CodeMirror 6 markdown editor, deterministic local embedding search, and bidirectional links/backlinks over canonical `llm-wiki://` links.
 
 ## Scope
 
 The MVP includes:
 
-- Vault bootstrap and validation with `.hl/`, `raw/`, `notes/`, agent instruction files, and rebuildable SQLite state.
+- Vault bootstrap and validation with `.llm_wiki/`, `raw/`, `notes/`, agent instruction files, and rebuildable SQLite state.
 - Markdown/code/text ingestion into chunks with lexical search and deterministic local embeddings.
 - PDF source registration and quote-based anchor creation with persisted `anchors` records.
-- Link graph rebuild/check/backlinks/forward-links for standard markdown `hl://` links and wikilinks.
+- Link graph rebuild/check/backlinks/forward-links for standard markdown `llm-wiki://` links and wikilinks.
 - CLI commands for `init`, `status`, `doctor`, `ingest`, `search`, `links`, `anchor`, `context`, and `embeddings`.
 - VS Code custom PDF editor for local PDFs using EmbedPDF/PDFium, selection toolbar, link insertion, and note-to-PDF anchor jumps.
-- VS Code custom markdown editor using CodeMirror 6 with source/hybrid visual editing, `hl://` link rendering, and command dispatch.
+- VS Code custom markdown editor using CodeMirror 6 with source/hybrid visual editing, `llm-wiki://` link rendering, and command dispatch.
 - Local verification on a sample/demo vault.
 
 The MVP does not include cloud sync, Zotero import, HTML snapshot anchoring, learning/review scheduling, MCP, iPad ink sync, or production-grade semantic models. Embeddings are deterministic hash vectors so the feature works offline and is testable without API keys; remote/local model providers can replace the provider later without changing CLI shape.
@@ -31,11 +31,11 @@ The MVP does not include cloud sync, Zotero import, HTML snapshot anchoring, lea
 
 `packages/vscode-extension` provides the interactive surfaces. It registers:
 
-- `human-learning.pdfViewer` via `CustomReadonlyEditorProvider` for PDFs.
-- `human-learning.markdownEditor` via `CustomTextEditorProvider` for markdown.
+- `llm-wiki.pdfViewer` via `CustomReadonlyEditorProvider` for PDFs.
+- `llm-wiki.markdownEditor` via `CustomTextEditorProvider` for markdown.
 - Document links, URI dispatch, backlinks/forward-links/problems views, and context export commands.
 
-The extension borrows the proven message-passing and webview patterns from `reference/paper-link`, but stores graph data in `.hl/index.sqlite` instead of PaperLink's JSON index.
+The extension borrows the proven message-passing and webview patterns from `reference/paper-link`, but stores graph data in `.llm_wiki/index.sqlite` instead of PaperLink's JSON index.
 
 ## Data Model
 
@@ -65,7 +65,7 @@ Page-only links are allowed as a fallback:
 3. A text selection captures its page, exact text, and adjacent context in the webview.
 4. The extension sends the selector to `core` to build a portable PDF target.
 5. The user inserts or copies the returned page/text-fragment Markdown link.
-6. `hl links rebuild` or the file watcher indexes the note.
+6. `llm_wiki links rebuild` or the file watcher indexes the note.
 7. Clicking the markdown link dispatches to the PDF editor, opens the PDF, scrolls to the page, and highlights the matching text.
 
 For the MVP, quote-based CLI anchors use page-text search plus page-level locator when exact geometry is not available headlessly. Interactive selections from the webview can store selection indices from EmbedPDF.
@@ -82,21 +82,21 @@ The MVP embedding provider is deterministic and local:
 - Hash tokens into a fixed-size vector.
 - L2-normalize the vector.
 - Store vector JSON in SQLite.
-- `hl embeddings refresh --changed` refreshes missing or stale vectors.
-- `hl search --mode semantic|hybrid` ranks chunks by cosine similarity or reciprocal-rank fusion.
+- `llm_wiki embeddings refresh --changed` refreshes missing or stale vectors.
+- `llm_wiki search --mode semantic|hybrid` ranks chunks by cosine similarity or reciprocal-rank fusion.
 
 This validates the embedding pipeline, CLI, schema, and search UX without network keys or native dependencies.
 
 ## Error Handling
 
-- CLI commands return nonzero for missing vaults, missing paths, invalid `hl://` URIs, and unresolved anchors.
+- CLI commands return nonzero for missing vaults, missing paths, invalid `llm-wiki://` URIs, and unresolved anchors.
 - Link checks mark missing note/source/anchor targets as broken.
 - PDF operations fall back to page-level anchors when precise rects are not available.
 - The extension shows VS Code errors for invalid URIs, missing files, webview load failures, and anchor lookup failures.
 
 ## Testing
 
-Core tests use Node's built-in `node:test` against temporary vaults. Tests cover init/migrations, ingestion, lexical/semantic/hybrid search, `hl://` parsing, link rebuild/check/backlinks, anchor creation/resolution, and context export.
+Core tests use Node's built-in `node:test` against temporary vaults. Tests cover init/migrations, ingestion, lexical/semantic/hybrid search, `llm-wiki://` parsing, link rebuild/check/backlinks, anchor creation/resolution, and context export.
 
 CLI smoke tests build packages, create a temporary vault, run commands through `node packages/cli/dist/main.js`, and assert JSON output.
 
@@ -109,14 +109,14 @@ Extension verification builds webpack bundles and checks that the PDF and markdo
 - A demo vault can run:
 
 ```bash
-hl init
-hl ingest notes --recursive
-hl embeddings refresh --changed
-hl search "attention" --mode hybrid --json
-hl links rebuild
-hl links check --json
-hl anchor create-pdf raw/pdf/sample.pdf --quote "..."
-hl context export --source notes/Concepts/Foo.md --json
+llm_wiki init
+llm_wiki ingest notes --recursive
+llm_wiki embeddings refresh --changed
+llm_wiki search "attention" --mode hybrid --json
+llm_wiki links rebuild
+llm_wiki links check --json
+llm_wiki anchor create-pdf raw/pdf/sample.pdf --quote "..."
+llm_wiki context export --source notes/Concepts/Foo.md --json
 ```
 
 - VS Code can open markdown through the CodeMirror editor and PDFs through the PDFium-backed custom editor.

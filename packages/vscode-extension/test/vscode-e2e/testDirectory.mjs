@@ -6,7 +6,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_LOCAL_TEST_DIR = resolve(__dirname, '.vscode-test');
 
 export function resolveVsCodeE2eTestDir({
-  override = process.env.HL_VSCODE_E2E_TEST_DIR,
+  override = process.env.LLM_WIKI_VSCODE_E2E_TEST_DIR,
   platform = process.platform,
   localTestDir = DEFAULT_LOCAL_TEST_DIR,
   temporaryRoot = '/tmp',
@@ -22,5 +22,5 @@ export function resolveVsCodeE2eTestDir({
     .update(resolve(localTestDir))
     .digest('hex')
     .slice(0, 12);
-  return resolve(temporaryRoot, `hl-vscode-e2e-${workspaceKey}`);
+  return resolve(temporaryRoot, `llm-wiki-vscode-e2e-${workspaceKey}`);
 }

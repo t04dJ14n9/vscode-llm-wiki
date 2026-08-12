@@ -4,8 +4,8 @@ import process from 'node:process';
 import { closeSync } from 'node:fs';
 
 const EXPECTED_ARGS = ['app-server', '--listen', 'stdio://'];
-const EXPECTED_CLIENT_NAME = 'human-learning-vscode';
-const EXPECTED_CLIENT_TITLE = 'Human Learning';
+const EXPECTED_CLIENT_NAME = 'llm-wiki-vscode';
+const EXPECTED_CLIENT_TITLE = 'LLM Wiki';
 const VISIBLE_MODELS = new Set(['gpt-5.4', 'gpt-5.4-mini']);
 
 if (JSON.stringify(process.argv.slice(2)) !== JSON.stringify(EXPECTED_ARGS)) {
@@ -192,7 +192,7 @@ function handleInitialize(message) {
       : clientInfo.version === 'fixture-desktop-version'
         ? 'Codex Desktop/0.144.1 (Mac OS 26.5.2; arm64) fixture'
         : clientInfo.version === 'fixture-integration-user-agent'
-          ? 'human-learning-vscode/0.144.1 (Mac OS 26.5.2; arm64) dumb (human-learning-vscode; 0.1.0)'
+          ? 'llm-wiki-vscode/0.144.1 (Mac OS 26.5.2; arm64) dumb (llm-wiki-vscode; 0.1.0)'
           : 'codex_cli_rs/0.144.1 (fixture)';
   clientVersion = clientInfo.version;
   initializeResponseSent = true;

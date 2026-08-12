@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Human Learning PDF Viewer Fixture</title>
+<title>LLM Wiki PDF Viewer Fixture</title>
 <style>
   :root {
     --vscode-editor-background: #1e1e1e;
@@ -484,7 +484,7 @@
     window.__mockState = {};
     window.__pdfiumWasmUrl = '/dist/pdfium.wasm';
     const params = new URLSearchParams(window.location.search);
-    window.__humanLearningAskPdfEnabled = params.get('askPdf') === '1';
+    window.__llmWikiAskPdfEnabled = params.get('askPdf') === '1';
     window.acquireVsCodeApi = () => ({
       postMessage: async (message) => {
         window.__mockMessages.push(message);

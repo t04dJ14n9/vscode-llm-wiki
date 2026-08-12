@@ -92,9 +92,9 @@ export function registerExperimentalOwnedBrowser(
   options: ExperimentalOwnedBrowserOptions,
 ): ExperimentalOwnedBrowserController {
   const controller = new OwnedBrowserController(options);
-  const openCommand = options.openCommand ?? 'human-learning.experimentalBrowser.open';
+  const openCommand = options.openCommand ?? 'llm-wiki.experimentalBrowser.open';
   const sendCommand = options.sendSelectionCommand
-    ?? 'human-learning.experimentalBrowser.sendSelection';
+    ?? 'llm-wiki.experimentalBrowser.sendSelection';
   const subscriptions = [
     vscode.commands.registerCommand(openCommand, async (value?: unknown) => {
       const candidate = typeof value === 'string' ? value : undefined;
@@ -125,7 +125,7 @@ class OwnedBrowserController implements ExperimentalOwnedBrowserController {
     if (!this.panel) {
       this.panel = vscode.window.createWebviewPanel(
         EXPERIMENTAL_BROWSER_VIEW_TYPE,
-        'Human Learning Browser (Experimental)',
+        'LLM Wiki Browser (Experimental)',
         vscode.ViewColumn.Beside,
         {
           enableScripts: true,
@@ -410,7 +410,7 @@ export function selectionContextFromBrowserCapture(
     metadata: {
       kind: 'web',
       contentTrust: 'untrusted',
-      browser: 'human-learning-owned-experimental',
+      browser: 'llm-wiki-owned-experimental',
       title: page.title,
       selectedText: capture.text,
       prefix: capture.prefix,
@@ -660,16 +660,16 @@ export function renderExperimentalOwnedBrowserHtml(
 <head>
   <meta charset="utf-8">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'; object-src 'none'; connect-src 'none'; img-src blob: data:; media-src 'none'; font-src ${webview.cspSource}; style-src 'nonce-${escapeAttribute(nonce)}'; script-src 'nonce-${escapeAttribute(nonce)}' ${webview.cspSource};">
-  <meta name="hl-csp-nonce" content="${escapeAttribute(nonce)}">
+  <meta name="llm-wiki-csp-nonce" content="${escapeAttribute(nonce)}">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Human Learning Browser (Experimental)</title>
+  <title>LLM Wiki Browser (Experimental)</title>
   <style nonce="${escapeAttribute(nonce)}">
     html,body{height:100%;margin:0;overflow:hidden;background:var(--vscode-editor-background);color:var(--vscode-editor-foreground);font:13px var(--vscode-font-family,sans-serif)}
     #app{height:100%}
   </style>
 </head>
 <body>
-  <div id="app" aria-label="Human Learning experimental browser"></div>
+  <div id="app" aria-label="LLM Wiki experimental browser"></div>
   <script nonce="${escapeAttribute(nonce)}" src="${escapeAttribute(scriptUri.toString())}"></script>
 </body>
 </html>`;

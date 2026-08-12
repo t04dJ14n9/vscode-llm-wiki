@@ -182,12 +182,12 @@ test('completed review dates stay completed and review checkboxes are not carrie
       [
         '# 2026-08-09',
         '',
-        '<!-- human-learning:review-plan:start -->',
+        '<!-- llm-wiki:review-plan:start -->',
         '## Review plan',
         '',
         '- [x] [Active Recall](../learning/Recall.md) — due 2026-08-08',
         '- [ ] [Active Recall](../learning/Recall.md) — due 2026-08-09',
-        '<!-- human-learning:review-plan:end -->',
+        '<!-- llm-wiki:review-plan:end -->',
         '',
         '## Today',
         '',
@@ -291,7 +291,7 @@ test('regeneration is idempotent and preserves manual content and checkbox edits
 });
 
 function createWorkspace() {
-  return mkdtempSync(join(tmpdir(), 'human-learning-daily-'));
+  return mkdtempSync(join(tmpdir(), 'llm-wiki-daily-'));
 }
 
 function writeMarkdown(workspaceRoot, relativePath, markdown) {

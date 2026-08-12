@@ -6,7 +6,7 @@ import {
   sep,
   win32,
 } from 'node:path';
-import { classifyReferenceTarget } from '@human-learning/core';
+import { classifyReferenceTarget } from '@llm-wiki/core';
 
 export const ANCHOR_FILE_VERSION = 1;
 export const ANCHOR_FILE_MAX_BYTES = 16 * 1024;
@@ -48,7 +48,7 @@ export function encodeAnchorFile(
   if (bytes.byteLength > ANCHOR_FILE_MAX_BYTES) return undefined;
   const hash = createHash('sha256').update(bytes).digest('hex');
   return Object.freeze({
-    fileName: `source-${hash}.hlanchor`,
+    fileName: `source-${hash}.llm_wiki_anchor`,
     text,
     payload,
   });

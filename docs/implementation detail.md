@@ -1,4 +1,4 @@
-# Human Learning: Current Implementation Detail
+# LLM Wiki: Current Implementation Detail
 
 > This document describes the simplified combined desktop implementation. The
 > architectural rationale and user-facing flow are in
@@ -32,7 +32,7 @@ removed.
 
 ## 2. Combined extension output
 
-`pnpm --filter human-learning-vscode build` emits:
+`pnpm --filter llm-wiki-vscode build` emits:
 
 | Artifact | Purpose |
 | --- | --- |
@@ -43,16 +43,16 @@ removed.
 | `dist/pdfium.wasm` | Local PDF renderer |
 
 The combined output does not include `sql.js`, `sql-wasm.wasm`, a SQLite
-binding, or a required `.hl/index.sqlite`.
+binding, or a required `.llm_wiki/index.sqlite`.
 
 ## 3. Activation and host integration
 
 [`src/extension.ts`](../packages/vscode-extension/src/extension.ts) is the one
 entry point for VS Code and Cursor. It registers:
 
-- `human-learning.markdownEditor`;
-- `human-learning.pdfViewer`;
-- Backlinks and Forward Links in the Human Learning activity view;
+- `llm-wiki.markdownEditor`;
+- `llm-wiki.pdfViewer`;
+- Backlinks and Forward Links in the LLM Wiki activity view;
 - context-aware Markdown Outline and PDF Outline panels in the main Explorer
   sidebar;
 - source navigation, selection, daily-note, graph, Git-sync, Markdown, and PDF
@@ -80,10 +80,10 @@ The active runtime has no opaque knowledge database. Durable state is:
 | user-chosen `*.pdf` | original PDF sources |
 | `wiki/learning/*.md` | readable source quote, summary, full Q&A, and review dates |
 | `wiki/daily/*.md` | manual daily plan, carried TODOs, and due reviews |
-| `.hl/annotations/pdf/<sha256>.json` | current v1 PDF discussion/viewer state |
-| `.hl/annotations/pdf/<sha256>/<annotation-id>.jsonld` | portable per-annotation mirror |
-| `.hl/annotations/pdf/assets/…` | best-effort bounded PNG selection screenshots |
-| `.hl/agent/selection.{md,json,png}` | latest handoff aliases; PNG exists only for a validated PDF crop |
+| `.llm_wiki/annotations/pdf/<sha256>.json` | current v1 PDF discussion/viewer state |
+| `.llm_wiki/annotations/pdf/<sha256>/<annotation-id>.jsonld` | portable per-annotation mirror |
+| `.llm_wiki/annotations/pdf/assets/…` | best-effort bounded PNG selection screenshots |
+| `.llm_wiki/agent/selection.{md,json,png}` | latest handoff aliases; PNG exists only for a validated PDF crop |
 
 These are ordinary files. Git provides diff, history, merge, remote update, and
 recovery. There is no required ingest step: commands retaining the old
@@ -96,10 +96,10 @@ The current migration state deliberately writes three representations:
 1. `wiki/learning/*.md` is the Q&A authority. It contains the exact Markdown
    quote or canonical PDF extracted quote, portable source link, concise
    answer, full transcript, and review schedule.
-2. `.hl/annotations/pdf/<pdf-sha256>.json` is the v1 runtime sidecar used by
+2. `.llm_wiki/annotations/pdf/<pdf-sha256>.json` is the v1 runtime sidecar used by
    the PDF UI. It contains geometry, text offsets, selection identity,
    transcript/turn state, summary state, and snapshot metadata.
-3. `.hl/annotations/pdf/<pdf-sha256>/<annotation-id>.jsonld` is the portable
+3. `.llm_wiki/annotations/pdf/<pdf-sha256>/<annotation-id>.jsonld` is the portable
    W3C-shaped mirror. It stores relative repository IRIs, quote/page/geometry
    selectors, the learning-note body link when available, and snapshot
    metadata.
@@ -119,9 +119,9 @@ the mirror with:
 
 - `TextQuoteSelector.exact` plus prefix/suffix when available;
 - an RFC 8118 `FragmentSelector` whose value is `page=N`;
-- `hl:PdfRectSelector` rectangles in `pt`, top-left origin, with
+- `llm_wiki:PdfRectSelector` rectangles in `pt`, top-left origin, with
   `left,top,right,bottom` coordinates;
-- optional PDF text-item offsets and `hl:snapshot` metadata.
+- optional PDF text-item offsets and `llm_wiki:snapshot` metadata.
 
 For a PDF outside the repository, v1 runtime state is stored below the
 extension's host-controlled global storage. If that PDF later opens inside a
@@ -159,14 +159,14 @@ provides a conservative fallback rather than guessing a fuzzy location.
 ```text
 selection
   -> exact source packet
-  -> immutable .hl/agent/exports/<id>/selection.md
+  -> immutable .llm_wiki/agent/exports/<id>/selection.md
   -> active supported agent draft
   -> learner reviews and submits
 ```
 
 The automatic selection prompt, context menu, and `Cmd+L` / `Ctrl+L` shortcut
-all dispatch the provider-neutral `human-learning.addSelectionToChat` command.
-The legacy `human-learning.addSelectionToCursorChat` ID remains an internal
+all dispatch the provider-neutral `llm-wiki.addSelectionToChat` command.
+The legacy `llm-wiki.addSelectionToCursorChat` ID remains an internal
 compatibility alias for older webview bundles. The shared `agentHandoff.ts`
 router prefers stable editor-tab evidence, uses feature-detected Cursor support
 only as a fallback, asks when ambiguous, never submits, and does not read the
@@ -178,7 +178,7 @@ Cursor hosts expose private, feature-detected Browser commands that let the
 extension read the active selection, collect bounded surrounding text, verify
 the active tab and URL before and after capture, and request a validated PNG
 crop. Stock VS Code does not expose another extension's Simple Browser DOM or
-pixels, so Human Learning does not attempt to inspect it.
+pixels, so LLM Wiki does not attempt to inspect it.
 
 For stock VS Code and portable testing, **Open Experimental Web Reader** opens
 an extension-owned, script-free reading surface. The host fetches only
@@ -190,7 +190,7 @@ optional synthetic context image. Both browser paths use the same provider
 router and never submit the draft.
 
 Clicking a saved Markdown annotation invokes
-`human-learning.openLearningDiscussion` for compatibility. The host confines
+`llm-wiki.openLearningDiscussion` for compatibility. The host confines
 the requested path to `wiki/learning/`, checks that its frontmatter ID matches,
 and opens the durable Markdown note. It does not restore a Learning Chat
 sidebar or start an agent thread.
@@ -281,13 +281,13 @@ Ask PDF uses:
 The extension, not the agent, owns Ask PDF's durable file writes. A separate
 [`agentHandoff.ts`](../packages/vscode-extension/src/agentHandoff.ts) path
 exports exact Markdown text or the canonical PDF extracted quote to
-`.hl/agent/selection.*` and attaches the immutable Markdown export to an
+`.llm_wiki/agent/selection.*` and attaches the immutable Markdown export to an
 available Codex, Claude Code, Cursor Agent, or CodeBuddy sidebar.
 
 **Add to Chat** exposes that shared path in both custom editors; the PDF path
 may attach a validated crop PNG beside `selection.md`. The router updates the
 chosen provider's draft and never submits it. External answers remain owned by
-the provider and are not automatically written into Human Learning notes.
+the provider and are not automatically written into LLM Wiki notes.
 
 ## 10. Filesystem wiki and graph
 
@@ -308,7 +308,7 @@ legend, and accessible text fallback. The graph contains only explicit
 Markdown/frontmatter relationships.
 
 The separate core `scanPortablePdfAnnotations()` API walks only
-`.hl/annotations/pdf/<sha256>/*.jsonld`. It is tested as a migration and
+`.llm_wiki/annotations/pdf/<sha256>/*.jsonld`. It is tested as a migration and
 interchange surface but is not wired into this Markdown wiki or graph path.
 
 ## 11. Daily notes
@@ -387,9 +387,9 @@ same Markdown, JSON, and Git source-of-truth model.
 Use scoped commands for the simplified product:
 
 ```bash
-pnpm --filter human-learning-vscode exec tsc --noEmit
-pnpm --filter @human-learning/core test
-pnpm --filter human-learning-vscode test
+pnpm --filter llm-wiki-vscode exec tsc --noEmit
+pnpm --filter @llm-wiki/core test
+pnpm --filter llm-wiki-vscode test
 pnpm exec playwright test --config playwright.config.ts
 ```
 
