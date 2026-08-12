@@ -159,8 +159,53 @@ def render_frontmatter(metadata: dict[str, Any], body: str) -> str:
     return "\n".join(lines)
 
 
+def strip_fenced_code_blocks(body: str) -> str:
+    """Blank CommonMark fenced blocks while preserving surrounding lines."""
+    output: list[str] = []
+    fence_character: str | None = None
+    fence_length = 0
+    for line in body.splitlines(keepends=True):
+        candidate = line.rstrip("\r\n")
+        stripped = candidate.lstrip(" ")
+        indentation = len(candidate) - len(stripped)
+        marker_character: str | None = None
+        marker_length = 0
+        marker_rest = ""
+        if indentation <= 3 and stripped[:1] in {"`", "~"}:
+            marker_character = stripped[0]
+            marker_length = len(stripped) - len(
+                stripped.lstrip(marker_character)
+            )
+            marker_rest = stripped[marker_length:]
+
+        is_marker = marker_character is not None and marker_length >= 3
+        if fence_character is None:
+            if is_marker and not (
+                marker_character == "`" and "`" in marker_rest
+            ):
+                fence_character = marker_character
+                fence_length = marker_length
+                output.append("\n" if line.endswith(("\n", "\r")) else "")
+            else:
+                output.append(line)
+            continue
+
+        closes_fence = (
+            is_marker
+            and marker_character == fence_character
+            and marker_length >= fence_length
+            and not marker_rest.strip()
+        )
+        output.append("\n" if line.endswith(("\n", "\r")) else "")
+        if closes_fence:
+            fence_character = None
+            fence_length = 0
+    return "".join(output)
+
+
 def markdown_targets(body: str) -> tuple[MarkdownTarget, ...]:
     """Extract local standard Markdown and wiki-link destinations."""
+    body = strip_fenced_code_blocks(body)
     targets: list[MarkdownTarget] = []
     for match in MARKDOWN_LINK.finditer(body):
         destination = match.group(1).strip()

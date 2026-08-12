@@ -528,6 +528,19 @@ Fixture paper text.
         )
         self.assertIn("source.footnote", self.issue_codes())
 
+    def test_footnote_examples_in_fenced_code_are_not_claims(self) -> None:
+        self._rewrite_document(
+            PAGE_PATHS["Concept"],
+            body_change=lambda body: (
+                body
+                + "\n```markdown\n"
+                + "Example claim.[^example-only]\n\n"
+                + "[^example-only]: Example-only source\n"
+                + "```\n"
+            ),
+        )
+        self.assertNotIn("source.footnote", self.issue_codes())
+
     def test_bundle_relative_source_path_resolves(self) -> None:
         self._rewrite_document(
             PAGE_PATHS["Concept"],
@@ -566,6 +579,15 @@ Fixture paper text.
             body_change=lambda body: body + "\n[Missing](missing.md)\n",
         )
         self.assertIn("link.missing", self.issue_codes())
+
+    def test_relative_markdown_link_wins_over_duplicate_basenames(
+        self,
+    ) -> None:
+        self._rewrite_document(
+            "README.md",
+            body_change=lambda body: body + "\n[Root index](index.md)\n",
+        )
+        self.assertNotIn("link.ambiguous", self.issue_codes())
 
     def test_page_requires_two_compiled_crosslinks(self) -> None:
         relative = PAGE_PATHS["Concept"]

@@ -75,6 +75,19 @@ class VaultlibTests(unittest.TestCase):
             ],
         )
 
+    def test_markdown_targets_ignore_fenced_examples(self) -> None:
+        body = (
+            "```markdown\n"
+            "[Example](missing.md) and [[also-missing]]\n"
+            "```\n\n"
+            "[Real](real.md)\n"
+        )
+
+        self.assertEqual(
+            [(item.kind, item.target) for item in markdown_targets(body)],
+            [("markdown", "real.md")],
+        )
+
     def test_resolve_local_target_rejects_workspace_escape(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)

@@ -20,6 +20,7 @@ from vaultlib import (
     resolve_local_target,
     sha256_bytes,
     slugify_title,
+    strip_fenced_code_blocks,
 )
 
 NANOCHAT_COMMIT = "92d63d4e8bb4df75c3b71618f31ddde2378b2bcd"
@@ -713,6 +714,7 @@ def _check_footnotes(
     require_each_source: bool,
 ) -> list[Issue]:
     issues: list[Issue] = []
+    body = strip_fenced_code_blocks(body)
     references = set(FOOTNOTE_REFERENCE.findall(body))
     definitions = set(FOOTNOTE_DEFINITION.findall(body))
     for label in sorted(references):
@@ -1095,11 +1097,15 @@ def _resolve_link(
     vault_root: Path,
     source_path: Path,
     target: str,
+    kind: str,
     markdown_files: tuple[Path, ...],
 ) -> tuple[Path | None, bool]:
     path_part = target.split("#", 1)[0].split("?", 1)[0]
     if not path_part:
         return source_path.resolve(), False
+    direct = resolve_local_target(source_path, target, vault_root)
+    if kind == "markdown":
+        return direct, False
     if "/" not in path_part and "\\" not in path_part:
         stem = Path(path_part).stem.casefold()
         candidates = [
@@ -1111,7 +1117,7 @@ def _resolve_link(
             return candidates[0], False
         if len(candidates) > 1:
             return None, True
-    return resolve_local_target(source_path, target, vault_root), False
+    return direct, False
 
 
 def check_links(
@@ -1136,6 +1142,7 @@ def check_links(
                 vault_root,
                 path,
                 link.target,
+                link.kind,
                 markdown_files,
             )
             if ambiguous:
