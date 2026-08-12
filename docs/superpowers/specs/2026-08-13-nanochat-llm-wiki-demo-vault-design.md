@@ -30,8 +30,8 @@ sample becomes a reviewed repository artifact. A local
 `.DS_Store`, temporary extraction files, and editor-specific projections.
 
 Production extension behavior is not changed merely to accommodate the sample.
-Focused test support may be added where needed to prove the extension can read
-the resulting vault.
+A focused demo-vault reading smoke test is added to the existing extension test
+harness to prove the extension can read the resulting vault.
 
 ## Standards and Design Principles
 
@@ -123,9 +123,9 @@ they are not used as the sole evidence for compiled claims.
 
 The canonical arXiv title is normalized into the companion filename:
 
-1. Unicode-normalize and transliterate where practical.
-2. Lowercase.
-3. Replace punctuation and whitespace runs with one hyphen.
+1. Apply Unicode NFKD normalization and remove combining marks.
+2. Lowercase and retain ASCII letters and digits.
+3. Replace every remaining punctuation or whitespace run with one hyphen.
 4. Trim leading and trailing hyphens.
 5. Add `.md`; use the identical basename for the PDF.
 
@@ -269,11 +269,10 @@ The sample contains the following substantive pages in addition to indexes:
 - `where-do-the-paper-ideas-appear-in-nanochat.md`
 - `why-does-nanochat-use-bits-per-byte.md`
 
-Pages are concise, cross-linked, and grounded. A page must link to at least two
-other compiled pages unless its role makes that structurally impossible.
-Multi-source claims carry nearby relative source links in addition to the
-frontmatter source list. Project orientation stays in
-`projects/nanochat.md`; it is not duplicated as a wiki entity.
+Pages are concise, cross-linked, and grounded. Every substantive page links to
+at least two other compiled pages. Multi-source claims carry nearby relative
+source links in addition to the frontmatter source list. Project orientation
+stays in `projects/nanochat.md`; it is not duplicated as a wiki entity.
 
 ## Knowledge Flow
 
@@ -445,7 +444,8 @@ The extension reading test must demonstrate:
 - the PDF reader can display the archived arXiv paper and follow a supported
   internal link.
 
-Test output and, where practical, screenshots provide evidence for the final
+Test output plus screenshots of the root knowledge hub, one paper opened in the
+PDF reader, and one code-backed navigation path provide evidence for the final
 handoff.
 
 ## Non-goals
@@ -457,4 +457,3 @@ handoff.
 - No exhaustive survey of all LLM literature.
 - No production extension feature changes unless the reading test exposes a
   concrete defect that the user separately authorizes fixing.
-
