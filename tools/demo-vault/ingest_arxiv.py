@@ -9,7 +9,7 @@ import sys
 import tempfile
 import urllib.request
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import Callable, Literal
@@ -342,6 +342,29 @@ def _publish_without_overwrite(staged: Path, final: Path) -> None:
         ) from error
 
 
+def _generated_timestamp(
+    generated_at: datetime | None,
+    ingested_date: date | None,
+) -> str:
+    if generated_at is None:
+        if ingested_date is not None:
+            generated_at = datetime.combine(
+                ingested_date,
+                datetime.min.time(),
+                tzinfo=timezone.utc,
+            )
+        else:
+            generated_at = datetime.now(timezone.utc)
+    elif generated_at.tzinfo is None:
+        generated_at = generated_at.replace(tzinfo=timezone.utc)
+    return (
+        generated_at.astimezone(timezone.utc)
+        .replace(microsecond=0)
+        .isoformat()
+        .replace("+00:00", "Z")
+    )
+
+
 def ingest_paper(
     vault_root: Path,
     ref: ArxivRef,
@@ -350,6 +373,7 @@ def ingest_paper(
     pdf_loader: Callable[[ArxivRef, Path], None] = download_arxiv_pdf,
     extractor: Callable[[Path, Path], str] = extract_with_pdftotext,
     ingested_date: date | None = None,
+    generated_at: datetime | None = None,
 ) -> IngestResult:
     """Fetch and atomically publish one immutable Markdown/PDF pair."""
     vault_root = vault_root.resolve()
@@ -381,9 +405,8 @@ def ingest_paper(
         staged_markdown = stage / "paper.md"
 
         pdf_loader(ref, staged_pdf)
-        if not staged_pdf.exists() or not staged_pdf.read_bytes().startswith(
-            b"%PDF-"
-        ):
+        pdf_bytes = staged_pdf.read_bytes() if staged_pdf.exists() else b""
+        if not pdf_bytes.startswith(b"%PDF-"):
             raise IngestError(
                 f"download for {ref.versioned} is missing or is not a PDF"
             )
@@ -407,13 +430,33 @@ def ingest_paper(
             + "\n"
         )
         body_sha256 = sha256_bytes(canonical_body.encode("utf-8"))
-        pdf_sha256 = sha256_bytes(staged_pdf.read_bytes())
+        pdf_sha256 = sha256_bytes(pdf_bytes)
         effective_date = ingested_date or date.today()
         companion_metadata = {
+            "type": "Paper",
             "title": paper.title,
+            "description": f"Immutable arXiv snapshot of {paper.title}.",
+            "resource": source_url(ref),
+            "tags": ["paper"],
+            "status": "stable",
+            "generated": {
+                "by": "process:arxiv-ingest",
+                "at": _generated_timestamp(generated_at, ingested_date),
+            },
+            "sources": [
+                {
+                    "id": "arxiv-record",
+                    "resource": source_url(ref),
+                    "title": f"arXiv record for {paper.title}",
+                    "last_modified": paper.revised,
+                }
+            ],
+            "authors": list(paper.authors),
             "source_type": "paper",
             "source_url": source_url(ref),
             "ingested": effective_date.isoformat(),
+            "submitted": paper.submitted,
+            "revised": paper.revised,
             "sha256": body_sha256,
             "arxiv": {"id": ref.paper_id, "version": ref.version},
             "license": {
@@ -421,8 +464,9 @@ def ingest_paper(
                 "url": CANONICAL_LICENSE_URL,
             },
             "attachment": {
-                "path": f"assets/{basename}.pdf",
+                "resource": f"assets/{basename}.pdf",
                 "media_type": "application/pdf",
+                "bytes": len(pdf_bytes),
                 "sha256": pdf_sha256,
             },
             "extraction": {

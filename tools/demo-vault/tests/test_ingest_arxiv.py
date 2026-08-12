@@ -108,8 +108,48 @@ class IngestArxivTests(unittest.TestCase):
         document = parse_frontmatter(
             result.markdown_path.read_text(encoding="utf-8")
         )
+        self.assertEqual(document.metadata["type"], "Paper")
+        self.assertEqual(
+            document.metadata["resource"],
+            "https://arxiv.org/abs/1508.07909v5",
+        )
+        self.assertEqual(document.metadata["status"], "stable")
+        self.assertEqual(document.metadata["tags"], ["paper"])
+        self.assertEqual(
+            document.metadata["authors"],
+            ["Rico Sennrich", "Barry Haddow", "Alexandra Birch"],
+        )
+        self.assertEqual(
+            document.metadata["generated"],
+            {
+                "by": "process:arxiv-ingest",
+                "at": "2026-08-13T00:00:00Z",
+            },
+        )
+        self.assertEqual(
+            document.metadata["sources"],
+            [
+                {
+                    "id": "arxiv-record",
+                    "resource": "https://arxiv.org/abs/1508.07909v5",
+                    "title": (
+                        "arXiv record for Neural Machine Translation of "
+                        "Rare Words with Subword Units"
+                    ),
+                    "last_modified": "2016-06-10",
+                }
+            ],
+        )
         self.assertEqual(
             document.metadata["arxiv"], {"id": "1508.07909", "version": 5}
+        )
+        self.assertEqual(
+            document.metadata["attachment"]["resource"],
+            f"assets/{SLUG}.pdf",
+        )
+        self.assertEqual(
+            document.metadata["attachment"]["bytes"],
+            len(b"%PDF-1.7\nfixture\n"),
         )
         self.assertEqual(
             document.metadata["attachment"]["sha256"],
