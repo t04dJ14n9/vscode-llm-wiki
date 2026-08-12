@@ -2627,15 +2627,17 @@ class PdfViewer {
       try {
         const page = this.pages.get(anchor.page);
         const rects = validPdfRects(anchor.rects);
-        const crop = page && rects.length
-          ? capturePdfSelectionCrop({
-              canvas: page.canvas,
-              pageWidth: Number(page.pageObj.size.width),
-              pageHeight: Number(page.pageObj.size.height),
-            }, { page: anchor.page, rects }, { throwOnCaptureError: true })
-          : undefined;
-        if (crop?.startsWith('data:image/png;base64,')) {
-          message.snapshotPngBase64 = crop.slice('data:image/png;base64,'.length);
+        if (page && rects.length) {
+          const crop = capturePdfSelectionCrop({
+            canvas: page.canvas,
+            pageWidth: Number(page.pageObj.size.width),
+            pageHeight: Number(page.pageObj.size.height),
+          }, { page: anchor.page, rects }, { throwOnCaptureError: true });
+          if (crop?.startsWith('data:image/png;base64,')) {
+            message.snapshotPngBase64 = crop.slice('data:image/png;base64,'.length);
+          } else {
+            message.cropCaptureFailed = true;
+          }
         }
       } catch {
         message.cropCaptureFailed = true;

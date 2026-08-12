@@ -819,6 +819,25 @@ test('provider action reports a crop capture exception and stays text-only', asy
   expect(correlatedAction).not.toHaveProperty('snapshotPngBase64');
 });
 
+test('provider action reports crop failure when a valid selection cannot get a 2d context', async ({ page }) => {
+  await page.goto('http://localhost:8979/pdf-viewer.html?host=vscode&agents=codex');
+  await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 1/, { timeout: 10_000 });
+
+  await selectPdfTextRange(page, 0, 26);
+  await page.evaluate(() => {
+    HTMLCanvasElement.prototype.getContext = () => null;
+  });
+
+  await page.getByRole('button', { name: 'Send to Codex', exact: true }).click();
+  const action = await waitForSelectionAction(page, 'sendToAgent');
+  expect(action).toMatchObject({
+    action: 'sendToAgent',
+    agentId: 'codex',
+    cropCaptureFailed: true,
+  });
+  expect(action).not.toHaveProperty('snapshotPngBase64');
+});
+
 test('provider action omits crop failure when selection geometry is unavailable', async ({ page }) => {
   await page.goto('http://localhost:8979/pdf-viewer.html?host=vscode&agents=codex');
   await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 1/, { timeout: 10_000 });
