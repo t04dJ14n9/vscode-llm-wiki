@@ -349,6 +349,8 @@ test('stock VS Code explicit provider command requests a correlated selection ca
   });
   commands.length = 0;
   await provider.addSelectionToAgent('codex');
+  const requestId = posted.at(-1)?.requestId;
+  assert.equal(typeof requestId, 'string');
   await receiveMessage({
     type: 'selectionAction',
     action: 'addToCursorChat',
@@ -358,13 +360,118 @@ test('stock VS Code explicit provider command requests a correlated selection ca
       suffix: 'after context',
       snippet: 'Selected PDF passage',
     },
+    requestId,
   });
 
-  assert.deepEqual(posted.at(-1), { type: 'captureSelectionForAgent' });
+  assert.deepEqual(posted.at(-1), { type: 'captureSelectionForAgent', requestId });
   assert.equal(commands.length, 1);
   assert.equal(commands[0][0], ADD_SELECTION_TO_AGENT_COMMAND);
   assert.equal(commands[0][1].agentId, 'codex');
   assert.equal(commands[0][1].selection.text, 'Selected PDF passage');
+});
+
+test('concurrent explicit PDF provider captures correlate by request ID without Cursor fallback', async () => {
+  const commands = [];
+  const posted = [];
+  let receiveMessage;
+  const vscode = {
+    workspace: {
+      asRelativePath: uri => uri.fsPath.replace('/vault/', ''),
+    },
+    commands: {
+      executeCommand: async (...args) => { commands.push(args); },
+    },
+    Uri: {
+      joinPath: (...parts) => ({ parts, toString: () => 'vscode-resource' }),
+    },
+  };
+  const {
+    ADD_SELECTION_TO_AGENT_COMMAND,
+    PdfEditorProvider,
+  } = loadTsModule('src/pdfEditorProvider.ts', {
+    vscode,
+    '@human-learning/core': { pdfHref: portablePdfHref },
+  });
+  const provider = new PdfEditorProvider(
+    { extensionUri: { fsPath: '/extension' }, subscriptions: [] },
+    '/vault',
+  );
+  const pdfUri = {
+    scheme: 'file',
+    fsPath: '/vault/raw/pdf/paper.pdf',
+    toString: () => 'file:///vault/raw/pdf/paper.pdf',
+  };
+  const webview = {
+    options: {},
+    cspSource: 'vscode-webview:',
+    asWebviewUri: uri => uri,
+    onDidReceiveMessage: listener => {
+      receiveMessage = listener;
+      return { dispose() {} };
+    },
+    postMessage: async message => {
+      posted.push(message);
+      return true;
+    },
+  };
+  await provider.resolveCustomEditor(
+    { uri: pdfUri },
+    {
+      active: true,
+      webview,
+      onDidChangeViewState: () => ({ dispose() {} }),
+      onDidDispose: () => ({ dispose() {} }),
+    },
+    {},
+  );
+  const anchor = {
+    page: 3,
+    prefix: 'before context',
+    suffix: 'after context',
+    snippet: 'Selected PDF passage',
+  };
+  await receiveMessage({ type: 'selectionChanged', anchor });
+  commands.length = 0;
+  posted.length = 0;
+
+  await provider.addSelectionToAgent('codex');
+  await provider.addSelectionToAgent('claude');
+
+  assert.equal(posted.length, 2);
+  assert.equal(posted[0].type, 'captureSelectionForAgent');
+  assert.equal(posted[1].type, 'captureSelectionForAgent');
+  assert.equal(typeof posted[0].requestId, 'string');
+  assert.equal(typeof posted[1].requestId, 'string');
+  assert.notEqual(posted[0].requestId, posted[1].requestId);
+
+  await receiveMessage({
+    type: 'selectionAction',
+    action: 'addToCursorChat',
+    anchor,
+    requestId: posted[1].requestId,
+  });
+  await receiveMessage({
+    type: 'selectionAction',
+    action: 'addToCursorChat',
+    anchor,
+    requestId: posted[0].requestId,
+  });
+
+  assert.deepEqual(
+    commands.map(([command, payload]) => [command, payload.agentId]),
+    [
+      [ADD_SELECTION_TO_AGENT_COMMAND, 'claude'],
+      [ADD_SELECTION_TO_AGENT_COMMAND, 'codex'],
+    ],
+  );
+
+  await receiveMessage({
+    type: 'selectionAction',
+    action: 'addToCursorChat',
+    anchor,
+    requestId: 'unknown-request',
+  });
+  assert.equal(commands.length, 2);
 });
 
 test('no-selection explicit PDF request cannot taint a later ordinary Cursor action', async () => {
@@ -502,8 +609,9 @@ test('selection update clears an unanswered explicit PDF agent request', async (
   assert.equal(commands[0][0], ADD_SELECTION_TO_CURSOR_CHAT_COMMAND);
 });
 
-test('new Cursor re-request supersedes a pending explicit PDF agent request', async () => {
+test('ordinary Cursor re-request does not consume a pending explicit PDF agent request', async () => {
   const commands = [];
+  const posted = [];
   let receiveMessage;
   const vscode = {
     workspace: {
@@ -540,7 +648,10 @@ test('new Cursor re-request supersedes a pending explicit PDF agent request', as
       receiveMessage = listener;
       return { dispose() {} };
     },
-    postMessage: async () => true,
+    postMessage: async message => {
+      posted.push(message);
+      return true;
+    },
   };
   await provider.resolveCustomEditor(
     { uri: pdfUri },
@@ -560,6 +671,8 @@ test('new Cursor re-request supersedes a pending explicit PDF agent request', as
   });
   commands.length = 0;
   await provider.addSelectionToAgent('codex');
+  const requestId = posted.at(-1)?.requestId;
+  assert.equal(typeof requestId, 'string');
   await provider.addSelectionToCursorChat();
   await receiveMessage({
     type: 'selectionAction',
@@ -569,6 +682,16 @@ test('new Cursor re-request supersedes a pending explicit PDF agent request', as
 
   assert.equal(commands.length, 1);
   assert.equal(commands[0][0], ADD_SELECTION_TO_CURSOR_CHAT_COMMAND);
+
+  await receiveMessage({
+    type: 'selectionAction',
+    action: 'addToCursorChat',
+    anchor: { page: 3, snippet: 'Selected PDF passage' },
+    requestId,
+  });
+  assert.equal(commands.length, 2);
+  assert.equal(commands[1][0], 'human-learning.addSelectionToAgent');
+  assert.equal(commands[1][1].agentId, 'codex');
 });
 
 test('combined PDF context keys clear on deactivation and restore with its selection', async () => {

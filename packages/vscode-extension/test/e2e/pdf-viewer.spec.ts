@@ -689,10 +689,14 @@ test('stock VS Code honors provider capture requests but ignores direct Cursor r
   await selectPdfTextRange(page, 0, 26);
   await page.evaluate(() => {
     window.__mockMessages = [];
-    window.postMessage({ type: 'captureSelectionForAgent' }, '*');
+    window.postMessage({
+      type: 'captureSelectionForAgent',
+      requestId: 'provider-capture-1',
+    }, '*');
   });
   expect(await waitForSelectionAction(page, 'addToCursorChat')).toMatchObject({
     action: 'addToCursorChat',
+    requestId: 'provider-capture-1',
     snapshotPngBase64: expect.any(String),
   });
 

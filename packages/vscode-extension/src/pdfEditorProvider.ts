@@ -73,10 +73,10 @@ interface ActivePdfWebview {
   pdfUri: vscode.Uri;
   ready: boolean;
   pendingAnchor?: PdfAnchorNavigation;
-  pendingSelectionAgentRequest?: {
+  pendingSelectionAgentRequests?: Map<string, {
     agentId: ExternalAgentId;
     selectionKey: string;
-  };
+  }>;
   selection?: PdfSelectionAnchor;
   outline?: PdfOutlineEntry[];
   postMessage(message: unknown): void;
@@ -117,6 +117,7 @@ export const ADD_SELECTION_TO_AGENT_COMMAND =
   'human-learning.addSelectionToAgent';
 
 const PDF_DISCUSSION_CONSENT_KEY = 'humanLearning.pdf.askPdfConsent';
+const MAX_PENDING_SELECTION_AGENT_REQUESTS = 32;
 
 export interface OpenCodexThreadResult {
   threadId: string;
@@ -169,6 +170,7 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
     return disposable;
   };
   private activeKey: string | undefined;
+  private selectionAgentRequestSequence = 0;
 
   constructor(context: vscode.ExtensionContext, options: PdfEditorProviderOptions);
   constructor(
@@ -264,7 +266,6 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
   async addSelectionToCursorChat(): Promise<void> {
     const active = this.getActiveWebview();
     if (!active) return;
-    active.pendingSelectionAgentRequest = undefined;
     active.postMessage({ type: 'addSelectionToCursorChat' });
   }
 
@@ -273,8 +274,14 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
     if (!active || !isExternalAgentId(agentId)) return;
     const selectionKey = pdfSelectionAnchorKey(active.selection);
     if (!selectionKey) return;
-    active.pendingSelectionAgentRequest = { agentId, selectionKey };
-    active.postMessage({ type: 'captureSelectionForAgent' });
+    const requestId = `pdf-agent-${++this.selectionAgentRequestSequence}`;
+    const requests = active.pendingSelectionAgentRequests ??= new Map();
+    if (requests.size >= MAX_PENDING_SELECTION_AGENT_REQUESTS) {
+      const oldestRequestId = requests.keys().next().value;
+      if (oldestRequestId !== undefined) requests.delete(oldestRequestId);
+    }
+    requests.set(requestId, { agentId, selectionKey });
+    active.postMessage({ type: 'captureSelectionForAgent', requestId });
   }
 
   async getActiveSelectionContext(): Promise<SelectionContext | undefined> {
@@ -380,22 +387,35 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
           break;
         }
         case 'selectionAction': {
-          const pendingRequest = message.action === 'addToCursorChat'
-            ? active.pendingSelectionAgentRequest
-            : undefined;
-          active.pendingSelectionAgentRequest = undefined;
-          const pendingAgentId = pendingRequest
-            && pendingRequest.selectionKey === pdfSelectionAnchorKey(message.anchor)
-            ? pendingRequest.agentId
-            : undefined;
+          if (Object.prototype.hasOwnProperty.call(message, 'requestId')) {
+            const requestId = typeof message.requestId === 'string' && message.requestId.length > 0
+              ? message.requestId
+              : undefined;
+            if (!requestId) break;
+            const pendingRequest = active.pendingSelectionAgentRequests?.get(requestId);
+            active.pendingSelectionAgentRequests?.delete(requestId);
+            if (
+              !pendingRequest
+              || message.action !== 'addToCursorChat'
+              || pendingRequest.selectionKey !== pdfSelectionAnchorKey(message.anchor)
+            ) {
+              break;
+            }
+            await this.handleSelectionAction(
+              pdfUri,
+              'sendToAgent',
+              message.anchor,
+              message.snapshotPngBase64,
+              pendingRequest.agentId,
+            );
+            break;
+          }
           await this.handleSelectionAction(
             pdfUri,
-            message.action === 'addToCursorChat' && pendingAgentId
-              ? 'sendToAgent'
-              : message.action,
+            message.action,
             message.anchor,
             message.snapshotPngBase64,
-            pendingAgentId ?? message.agentId,
+            message.agentId,
           );
           break;
         }
@@ -447,6 +467,7 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
     });
 
     webviewPanel.onDidDispose(async () => {
+      active.pendingSelectionAgentRequests?.clear();
       this.webviews.delete(key);
       this.firePdfOutlineChanged(pdfUri);
       if (this.activeKey === key) {
@@ -972,7 +993,7 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
   private async updateActiveSelection(key: string, anchor: unknown): Promise<void> {
     const active = this.webviews.get(key);
     if (!active) return;
-    active.pendingSelectionAgentRequest = undefined;
+    active.pendingSelectionAgentRequests?.clear();
     active.selection = normalizePdfSelectionAnchor(anchor);
     if (this.activeKey === key) {
       await vscode.commands.executeCommand('setContext', 'humanLearningPdfHasSelection', Boolean(active.selection));

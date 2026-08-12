@@ -517,9 +517,13 @@ class PdfViewer {
           if (this.agentCapabilities.cursorAgent) this.addCurrentSelectionToCursorChat();
           break;
         }
-        case 'captureSelectionForAgent':
-          this.addCurrentSelectionToCursorChat();
+        case 'captureSelectionForAgent': {
+          const requestId = typeof message.requestId === 'string' && message.requestId.length > 0
+            ? message.requestId
+            : undefined;
+          if (requestId) this.addCurrentSelectionToCursorChat(requestId);
           break;
+        }
         default:
           this.askPanel?.handleHostMessage(message);
           break;
@@ -2614,9 +2618,11 @@ class PdfViewer {
     action: PdfTextSelectionAction,
     anchor: PdfAnchor,
     agentId?: ExternalAgentId,
+    requestId?: string,
   ): void {
     const message: Record<string, unknown> = { type: 'selectionAction', action, anchor };
     if (action === 'sendToAgent' && agentId) message.agentId = agentId;
+    if (requestId) message.requestId = requestId;
     if (action === 'addToCursorChat' || action === 'sendToAgent') {
       try {
         const page = this.pages.get(anchor.page);
@@ -2636,10 +2642,10 @@ class PdfViewer {
     vscode.postMessage(message);
   }
 
-  private addCurrentSelectionToCursorChat(): boolean {
+  private addCurrentSelectionToCursorChat(requestId?: string): boolean {
     const current = this.selectionAnchorFromNativeRange();
     if (!current || current.anchor.multiPage) return false;
-    this.postTextSelectionAction('addToCursorChat', current.anchor);
+    this.postTextSelectionAction('addToCursorChat', current.anchor, undefined, requestId);
     return true;
   }
 
