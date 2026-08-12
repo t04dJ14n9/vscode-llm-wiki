@@ -6,6 +6,9 @@ node_modules/
 **/node_modules/
 .pnpm-store/
 
+__pycache__/
+*.py[cod]
+
 dist/
 **/dist/
 build/
