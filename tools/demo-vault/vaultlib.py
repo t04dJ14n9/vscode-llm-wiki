@@ -52,6 +52,11 @@ class MarkdownTarget:
     kind: Literal["markdown", "wiki"]
 
 
+def default_vault_root() -> Path:
+    """Return the repository's distributable demo-vault bundle root."""
+    return Path(__file__).resolve().parents[2] / "demo-vault"
+
+
 def slugify_title(title: str) -> str:
     """Normalize a canonical source title into its immutable raw basename."""
     normalized = unicodedata.normalize("NFKD", title)

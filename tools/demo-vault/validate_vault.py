@@ -5,6 +5,7 @@ import argparse
 from pathlib import Path
 
 from vault_checks import validate_vault
+from vaultlib import default_vault_root
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -14,7 +15,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--vault",
         type=Path,
-        default=Path(__file__).resolve().parents[1],
+        default=default_vault_root(),
     )
     arguments = parser.parse_args(argv)
     issues = validate_vault(arguments.vault)

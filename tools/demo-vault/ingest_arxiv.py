@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Callable, Literal
 
 from vaultlib import (
+    default_vault_root,
     parse_frontmatter,
     render_frontmatter,
     sha256_bytes,
@@ -473,7 +474,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--vault",
         type=Path,
-        default=Path(__file__).resolve().parents[1],
+        default=default_vault_root(),
     )
     arguments = parser.parse_args(argv)
     try:

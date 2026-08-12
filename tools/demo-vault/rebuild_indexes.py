@@ -6,7 +6,12 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from vaultlib import TAG_REGISTRY, parse_frontmatter, render_frontmatter
+from vaultlib import (
+    TAG_REGISTRY,
+    default_vault_root,
+    parse_frontmatter,
+    render_frontmatter,
+)
 
 TYPE_DIRECTORIES = {
     "summary": "summaries",
@@ -187,7 +192,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--vault",
         type=Path,
-        default=Path(__file__).resolve().parents[1],
+        default=default_vault_root(),
     )
     arguments = parser.parse_args(argv)
     try:
