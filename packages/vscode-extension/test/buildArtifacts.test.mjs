@@ -136,6 +136,19 @@ test('combined PDF artifacts retain dormant Ask protocol but omit removed select
   }
 });
 
+test('production PDF bundle contains provider dispatch contract and no static Cursor flag', () => {
+  const bundle = readFileSync(join(dist, 'pdf-viewer.js'), 'utf8');
+  for (const value of [
+    'agentHandoffCapabilities',
+    'sendToAgent',
+    'Send to ',
+    'Codex',
+    'Claude Code',
+    'CodeBuddy',
+  ]) assert.equal(bundle.includes(value), true);
+  assert.equal(bundle.includes('__humanLearningAddToCursorChat'), false);
+});
+
 test('webview webpack entries use VS Code webview size budgets', () => {
   const configs = require('../webpack.config.js');
   const byName = new Map(configs.map(config => [config.name, config]));
