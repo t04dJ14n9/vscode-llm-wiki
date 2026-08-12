@@ -136,6 +136,91 @@ test('explicit cold Codex handoff activates, refreshes commands, then attaches',
   ]);
 });
 
+test('Codex reports total failure and skips the crop when selection.md attachment fails', async () => {
+  const calls = [];
+  const warnings = [];
+  const selection = {
+    scheme: 'file',
+    fsPath: '/vault/.hl/agent/selection.md',
+  };
+  const crop = {
+    scheme: 'file',
+    fsPath: '/vault/.hl/agent/selection.png',
+  };
+  const command = 'chatgpt.addFileToThread';
+  const vscode = {
+    commands: {
+      getCommands: async () => [command],
+      executeCommand: async (...args) => {
+        calls.push(args);
+        throw new Error('selection rejected');
+      },
+    },
+    extensions: extensionRegistry(installedExtension(
+      'openai.chatgpt',
+      [command],
+      { isActive: true },
+    )),
+    window: {
+      showWarningMessage: message => warnings.push(message),
+    },
+  };
+  const { handoffSelectionToAgentId } = loadAgentHandoff(vscode);
+
+  assert.equal(
+    await handoffSelectionToAgentId('codex', selection, [crop]),
+    false,
+  );
+  assert.deepEqual(calls, [[command, selection]]);
+  assert.deepEqual(warnings, [
+    'Codex could not attach the selection.',
+  ]);
+});
+
+test('Codex reports partial success when only the optional crop attachment fails', async () => {
+  const calls = [];
+  const warnings = [];
+  const selection = {
+    scheme: 'file',
+    fsPath: '/vault/.hl/agent/selection.md',
+  };
+  const crop = {
+    scheme: 'file',
+    fsPath: '/vault/.hl/agent/selection.png',
+  };
+  const command = 'chatgpt.addFileToThread';
+  const vscode = {
+    commands: {
+      getCommands: async () => [command],
+      executeCommand: async (...args) => {
+        calls.push(args);
+        if (args[1] === crop) throw new Error('crop rejected');
+      },
+    },
+    extensions: extensionRegistry(installedExtension(
+      'openai.chatgpt',
+      [command],
+      { isActive: true },
+    )),
+    window: {
+      showWarningMessage: message => warnings.push(message),
+    },
+  };
+  const { handoffSelectionToAgentId } = loadAgentHandoff(vscode);
+
+  assert.equal(
+    await handoffSelectionToAgentId('codex', selection, [crop]),
+    true,
+  );
+  assert.deepEqual(calls, [
+    [command, selection],
+    [command, crop],
+  ]);
+  assert.deepEqual(warnings, [
+    'Codex attached selection.md, but could not attach the optional image. Continue with text context or try again.',
+  ]);
+});
+
 test('explicit activation failure does not fall back to another provider', async () => {
   const executedCommands = [];
   const warnings = [];

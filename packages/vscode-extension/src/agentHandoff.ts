@@ -396,8 +396,16 @@ async function executeAgentHandoff(
     editor.selection = new vscode.Selection(new vscode.Position(0, 0), end);
     await vscode.commands.executeCommand(command);
   } else if (agent.id === 'codex') {
-    for (const uri of uniqueLocalUris([contextUri, ...attachmentUris])) {
-      await vscode.commands.executeCommand(command, uri);
+    const attachments = uniqueLocalUris([contextUri, ...attachmentUris]);
+    await vscode.commands.executeCommand(command, attachments[0]!);
+    for (const uri of attachments.slice(1)) {
+      try {
+        await vscode.commands.executeCommand(command, uri);
+      } catch {
+        vscode.window.showWarningMessage(
+          'Codex attached selection.md, but could not attach the optional image. Continue with text context or try again.',
+        );
+      }
     }
   } else if (agent.id === 'codebuddy' && attachmentUris.length) {
     const attachments = uniqueLocalUris([contextUri, ...attachmentUris]);
