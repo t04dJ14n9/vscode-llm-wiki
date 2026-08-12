@@ -453,13 +453,14 @@ const sent = target.kind === 'cursor'
 
 Register:
 
-- `human-learning.addSelectionToChat` with `{ kind: 'picker' }`;
+- `human-learning.addSelectionToChat` with `{ kind: 'cursor' }`;
 - `human-learning.addSelectionToCursorChat` with `{ kind: 'cursor' }`;
 - `human-learning.addSelectionToAgent` after validating
   `agentId ∈ {'codex','claude','codebuddy'}`.
 
 Keep the existing PDF re-request behavior when a command is invoked without an
-explicit selection.
+explicit selection. Keep the product-neutral
+`human-learning.addSelectionToContext` command on the provider picker.
 
 Set `humanLearningHostIsCursor` during activation from the capability source's
 immediate `read().cursorAgent` snapshot. In `package.json`, add
