@@ -1129,13 +1129,20 @@ def check_links(
     compiled = {path.resolve() for path in _compiled_pages(vault_root)}
     for path in markdown_files:
         text = path.read_text(encoding="utf-8")
+        metadata: dict[str, object] = {}
         if text.startswith("---\n"):
             try:
-                body = parse_frontmatter(text, source=path).body
+                document = parse_frontmatter(text, source=path)
+                metadata = document.metadata
+                body = document.body
             except ValueError:
                 continue
         else:
             body = text
+        if metadata.get("type") == "Paper":
+            body = body.partition(
+                "\n## Mechanically extracted full text"
+            )[0]
         compiled_targets: set[Path] = set()
         for link in markdown_targets(body):
             target, ambiguous = _resolve_link(

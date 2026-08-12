@@ -74,6 +74,7 @@ class _ArxivHtmlParser(HTMLParser):
         super().__init__(convert_charrefs=True)
         self.meta: dict[str, list[str]] = {}
         self.license_url: str | None = None
+        self.in_license_block = False
         self.in_submission_history = False
         self.submission_history: list[str] = []
 
@@ -91,16 +92,21 @@ class _ArxivHtmlParser(HTMLParser):
         elif tag.lower() == "a":
             rel = attributes.get("rel", "").lower().split()
             href = attributes.get("href")
-            if "license" in rel and href:
+            if ("license" in rel or self.in_license_block) and href:
                 self.license_url = href
         elif tag.lower() == "div":
             classes = attributes.get("class", "").split()
+            if "abs-license" in classes:
+                self.in_license_block = True
             if "submission-history" in classes:
                 self.in_submission_history = True
 
     def handle_endtag(self, tag: str) -> None:
-        if tag.lower() == "div" and self.in_submission_history:
-            self.in_submission_history = False
+        if tag.lower() == "div":
+            if self.in_license_block:
+                self.in_license_block = False
+            if self.in_submission_history:
+                self.in_submission_history = False
 
     def handle_data(self, data: str) -> None:
         if self.in_submission_history:
@@ -528,10 +534,11 @@ def main(argv: list[str] | None = None) -> int:
     except (IngestError, OSError, subprocess.CalledProcessError) as error:
         print(f"ERROR: {error}", file=sys.stderr)
         return 1
+    vault_root = arguments.vault.resolve()
     print(
         result.status,
-        result.markdown_path.relative_to(arguments.vault),
-        result.pdf_path.relative_to(arguments.vault),
+        result.markdown_path.relative_to(vault_root),
+        result.pdf_path.relative_to(vault_root),
     )
     return 0
 

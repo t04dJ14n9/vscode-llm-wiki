@@ -1,9 +1,12 @@
+import io
 import subprocess
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from datetime import date
 from pathlib import Path
+from unittest.mock import patch
 
 SCRIPTS = Path(__file__).resolve().parents[1]
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
@@ -12,8 +15,10 @@ sys.path.insert(0, str(SCRIPTS))
 from ingest_arxiv import (
     ArxivRef,
     IngestError,
+    IngestResult,
     PaperMetadata,
     ingest_paper,
+    main,
     parse_arxiv_metadata_html,
     parse_arxiv_ref,
 )
@@ -98,6 +103,32 @@ class IngestArxivTests(unittest.TestCase):
             ArxivRef("1508.07909", 5), html
         )
         self.assertEqual(metadata, paper_metadata())
+
+    def test_metadata_parser_reads_current_abs_license_markup(self) -> None:
+        fixture = (FIXTURES / "arxiv-1508.07909v5.html").read_text(
+            encoding="utf-8"
+        )
+        current_markup = fixture.replace(
+            (
+                '<a rel="license" '
+                'href="http://creativecommons.org/licenses/by/4.0/">'
+            ),
+            (
+                '<div class="abs-license"><a '
+                'href="http://creativecommons.org/licenses/by/4.0/" '
+                'class="has_license">'
+            ),
+        ).replace("</a>\n", "</a></div>\n", 1)
+
+        metadata = parse_arxiv_metadata_html(
+            ArxivRef("1508.07909", 5), current_markup
+        )
+
+        self.assertEqual(metadata.license_id, "CC-BY-4.0")
+        self.assertEqual(
+            metadata.license_url,
+            "https://creativecommons.org/licenses/by/4.0/",
+        )
 
     def test_ingest_publishes_matching_companion_and_pdf_atomically(self) -> None:
         result = self.ingest()
@@ -222,6 +253,24 @@ class IngestArxivTests(unittest.TestCase):
             second.pdf_path.name,
             f"{SLUG}-arxiv-1508.07909-v5.pdf",
         )
+
+    def test_main_reports_paths_when_vault_argument_is_relative(self) -> None:
+        vault = Path.cwd() / "demo-vault"
+        result = IngestResult(
+            vault / "raw" / f"{SLUG}.md",
+            vault / "raw" / "assets" / f"{SLUG}.pdf",
+            "created",
+        )
+        output = io.StringIO()
+
+        with patch("ingest_arxiv.ingest_paper", return_value=result):
+            with redirect_stdout(output):
+                exit_code = main(
+                    ["--vault", "demo-vault", "--id", "1508.07909v5"]
+                )
+
+        self.assertEqual(exit_code, 0)
+        self.assertIn(f"raw/{SLUG}.md", output.getvalue())
 
 
 if __name__ == "__main__":

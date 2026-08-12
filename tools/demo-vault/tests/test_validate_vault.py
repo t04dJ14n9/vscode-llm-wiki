@@ -580,6 +580,19 @@ Fixture paper text.
         )
         self.assertIn("link.missing", self.issue_codes())
 
+    def test_links_inside_mechanically_extracted_paper_text_are_ignored(
+        self,
+    ) -> None:
+        self._rewrite_document(
+            "raw/fixture-paper.md",
+            body_change=lambda body: body.replace(
+                "Fixture paper text.",
+                "A PDF extraction token that resembles [slides](slides).",
+            ),
+        )
+
+        self.assertNotIn("link.missing", self.issue_codes())
+
     def test_relative_markdown_link_wins_over_duplicate_basenames(
         self,
     ) -> None:
