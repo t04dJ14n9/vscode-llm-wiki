@@ -10,22 +10,32 @@ from typing import Any, Literal
 from urllib.parse import unquote
 
 ALLOWED_PAGE_TYPES = frozenset(
-    {"summary", "entity", "concept", "comparison", "query"}
+    {"Summary", "Entity", "Concept", "Comparison", "Query"}
 )
-ALLOWED_STATUSES = frozenset({"draft", "stable", "deprecated", "contested"})
+ALLOWED_STATUSES = frozenset({"draft", "stable", "deprecated"})
 TAG_REGISTRY = (
+    "alignment",
     "architecture",
     "attention",
+    "data",
     "data-curation",
     "datasets",
+    "distributed-training",
     "evaluation",
     "inference",
+    "language-models",
     "numerics",
+    "open-knowledge-format",
+    "operations",
     "optimization",
+    "paper",
     "post-training",
     "pretraining",
     "project-nanochat",
+    "provenance",
     "reinforcement-learning",
+    "reproducibility",
+    "sampling",
     "small-models",
     "tokenization",
     "training-systems",
@@ -173,7 +183,10 @@ def resolve_local_target(
     path_part = target.split("#", 1)[0].split("?", 1)[0]
     if not path_part:
         return source_file.resolve()
-    candidate = (source_file.parent / path_part).resolve()
+    if path_part.startswith("/"):
+        candidate = (vault_root / path_part.lstrip("/")).resolve()
+    else:
+        candidate = (source_file.parent / path_part).resolve()
     try:
         candidate.relative_to(vault_root.resolve())
     except ValueError:

@@ -85,6 +85,21 @@ class VaultlibTests(unittest.TestCase):
                 resolve_local_target(source, "../../../outside.md", root)
             )
 
+    def test_resolve_local_target_supports_bundle_relative_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            source = root / "concepts" / "page.md"
+            target = root / "raw" / "paper.md"
+            source.parent.mkdir(parents=True)
+            target.parent.mkdir(parents=True)
+            source.write_text("# page\n", encoding="utf-8")
+            target.write_text("# paper\n", encoding="utf-8")
+
+            self.assertEqual(
+                resolve_local_target(source, "/raw/paper.md", root),
+                target.resolve(),
+            )
+
     def test_sha256_bytes_is_lowercase_hex(self) -> None:
         self.assertEqual(
             sha256_bytes(b"nanochat"),
