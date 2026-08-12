@@ -69,6 +69,10 @@ In Cursor:
 
 The generic **Add to Chat** action does not select Codex, Claude Code, or
 CodeBuddy. Those destinations are always chosen through their explicit actions.
+The generic command, editor-title action, editor context item, and Cmd/Ctrl+L
+keybinding are enabled only in Cursor. Stock VS Code retains the provider picker
+under **Send Selection to Agent…**, but exposes no ambiguous generic **Add to
+Chat** UI.
 
 ### PDF selection context menu
 
