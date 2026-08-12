@@ -78,6 +78,31 @@ test.describe('LLM Wiki — E2E Bidirectional Links', () => {
     }, searchCaret);
   }
 
+  async function prepareVimBlockCursor(
+    page: import('@playwright/test').Page,
+    cursorForeground: string,
+    editorForeground: string,
+    editorBackground: string,
+  ) {
+    await page.evaluate(({ cursor, foreground, background }) => {
+      document.documentElement.style.setProperty('--vscode-editorCursor-foreground', cursor);
+      document.documentElement.style.setProperty('--vscode-editor-foreground', foreground);
+      document.documentElement.style.setProperty('--vscode-editor-background', background);
+      window.postMessage({ type: 'setText', text: 'Theme-derived Vim cursor.' }, '*');
+      window.postMessage({ type: 'setVimMode', enabled: true }, '*');
+    }, {
+      cursor: cursorForeground,
+      foreground: editorForeground,
+      background: editorBackground,
+    });
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+    await page.locator('.cm-content').click();
+    await page.keyboard.press('Escape');
+    const block = page.locator('.cm-vimCursorLayer .cm-fat-cursor').first();
+    await expect(block).toBeVisible();
+    return block;
+  }
+
   test('markdown editor loads, receives setText, and renders native source links as clickable widgets', async ({ page }) => {
     await page.goto('http://localhost:8979/test.html');
     await waitForEditorBootstrap(page);
@@ -945,6 +970,58 @@ test.describe('LLM Wiki — E2E Bidirectional Links', () => {
       searchCaret: 'rgb(101, 67, 33)',
       vimCaret: 'rgb(101, 67, 33)',
     });
+  });
+
+  test('Vim normal cursor follows the VS Code cursor and background tokens', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+    await waitForEditorBootstrap(page);
+    const block = await prepareVimBlockCursor(page, '#123456', '#654321', '#fedcba');
+
+    const focused = await block.evaluate(element => {
+      const style = getComputedStyle(element);
+      return { background: style.backgroundColor, color: style.color };
+    });
+    await page.locator('#tab-editor').focus();
+    await page.waitForFunction(() => !document.querySelector('.cm-editor')?.classList.contains('cm-focused'));
+    const unfocusedOutline = await block.evaluate(element => getComputedStyle(element).outlineColor);
+
+    expect({ focused, unfocusedOutline }).toEqual({
+      focused: { background: 'rgb(18, 52, 86)', color: 'rgb(254, 220, 186)' },
+      unfocusedOutline: 'rgb(18, 52, 86)',
+    });
+  });
+
+  test('Vim normal cursor falls back to the VS Code editor foreground token', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+    await waitForEditorBootstrap(page);
+    const block = await prepareVimBlockCursor(page, 'initial', '#654321', '#fedcba');
+
+    const focused = await block.evaluate(element => {
+      const style = getComputedStyle(element);
+      return { background: style.backgroundColor, color: style.color };
+    });
+    await page.locator('#tab-editor').focus();
+    await page.waitForFunction(() => !document.querySelector('.cm-editor')?.classList.contains('cm-focused'));
+    const unfocusedOutline = await block.evaluate(element => getComputedStyle(element).outlineColor);
+
+    expect({ focused, unfocusedOutline }).toEqual({
+      focused: { background: 'rgb(101, 67, 33)', color: 'rgb(254, 220, 186)' },
+      unfocusedOutline: 'rgb(101, 67, 33)',
+    });
+  });
+
+  test('Vim normal cursor follows a live VS Code theme token change', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+    await waitForEditorBootstrap(page);
+    const block = await prepareVimBlockCursor(page, '#123456', '#654321', '#fedcba');
+
+    await page.evaluate(() => {
+      document.documentElement.style.setProperty('--vscode-editorCursor-foreground', '#abcdef');
+    });
+
+    await expect.poll(() =>
+      block.evaluate(element => getComputedStyle(element).backgroundColor)
+    ).toBe('rgb(171, 205, 239)');
   });
 
   test('markdown editor search panel uses compact VS Code find-widget layout', async ({ page }) => {

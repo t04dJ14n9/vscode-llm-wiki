@@ -1061,6 +1061,14 @@ function createView(text: string, title?: string): EditorView {
           '.cm-cursor, .cm-dropCursor': {
             borderLeftColor: editorCaret,
           },
+          '.cm-vimCursorLayer .cm-fat-cursor': {
+            backgroundColor: `${editorCaret} !important`,
+            color: 'var(--vscode-editor-background) !important',
+          },
+          '&:not(.cm-focused) .cm-vimCursorLayer .cm-fat-cursor': {
+            background: 'none !important',
+            outlineColor: `${editorCaret} !important`,
+          },
           '.cm-selectionBackground': {
             backgroundColor: 'var(--vscode-editor-inactiveSelectionBackground, rgba(127, 127, 127, 0.24))',
           },
