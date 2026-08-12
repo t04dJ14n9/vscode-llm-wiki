@@ -73,7 +73,10 @@ interface ActivePdfWebview {
   pdfUri: vscode.Uri;
   ready: boolean;
   pendingAnchor?: PdfAnchorNavigation;
-  pendingSelectionAgentId?: ExternalAgentId;
+  pendingSelectionAgentRequest?: {
+    agentId: ExternalAgentId;
+    selectionKey: string;
+  };
   selection?: PdfSelectionAnchor;
   outline?: PdfOutlineEntry[];
   postMessage(message: unknown): void;
@@ -261,14 +264,16 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
   async addSelectionToCursorChat(): Promise<void> {
     const active = this.getActiveWebview();
     if (!active) return;
-    active.pendingSelectionAgentId = undefined;
+    active.pendingSelectionAgentRequest = undefined;
     active.postMessage({ type: 'addSelectionToCursorChat' });
   }
 
   async addSelectionToAgent(agentId: ExternalAgentId): Promise<void> {
     const active = this.getActiveWebview();
     if (!active || !isExternalAgentId(agentId)) return;
-    active.pendingSelectionAgentId = agentId;
+    const selectionKey = pdfSelectionAnchorKey(active.selection);
+    if (!selectionKey) return;
+    active.pendingSelectionAgentRequest = { agentId, selectionKey };
     active.postMessage({ type: 'addSelectionToCursorChat' });
   }
 
@@ -375,10 +380,14 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
           break;
         }
         case 'selectionAction': {
-          const pendingAgentId = message.action === 'addToCursorChat'
-            ? active.pendingSelectionAgentId
+          const pendingRequest = message.action === 'addToCursorChat'
+            ? active.pendingSelectionAgentRequest
             : undefined;
-          active.pendingSelectionAgentId = undefined;
+          active.pendingSelectionAgentRequest = undefined;
+          const pendingAgentId = pendingRequest
+            && pendingRequest.selectionKey === pdfSelectionAnchorKey(message.anchor)
+            ? pendingRequest.agentId
+            : undefined;
           await this.handleSelectionAction(
             pdfUri,
             message.action === 'addToCursorChat' && pendingAgentId
@@ -963,6 +972,7 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
   private async updateActiveSelection(key: string, anchor: unknown): Promise<void> {
     const active = this.webviews.get(key);
     if (!active) return;
+    active.pendingSelectionAgentRequest = undefined;
     active.selection = normalizePdfSelectionAnchor(anchor);
     if (this.activeKey === key) {
       await vscode.commands.executeCommand('setContext', 'humanLearningPdfHasSelection', Boolean(active.selection));
@@ -1389,6 +1399,23 @@ function normalizePdfSelectionAnchor(anchor: unknown): PdfSelectionAnchor | unde
     suffix: normalizePdfMessageText(raw.suffix),
     snippet,
   };
+}
+
+function pdfSelectionAnchorKey(anchor: unknown): string | undefined {
+  const selection = normalizePdfSelectionAnchor(anchor);
+  if (!selection) return undefined;
+  return JSON.stringify([
+    selection.page,
+    selection.textItemIndex ?? null,
+    selection.charOffset ?? null,
+    selection.endTextItemIndex ?? null,
+    selection.endCharOffset ?? null,
+    selection.length ?? null,
+    selection.rects ?? [],
+    selection.prefix ?? '',
+    selection.suffix ?? '',
+    selection.snippet,
+  ]);
 }
 
 function toPdfDiscussionAnnotationSnapshot(
