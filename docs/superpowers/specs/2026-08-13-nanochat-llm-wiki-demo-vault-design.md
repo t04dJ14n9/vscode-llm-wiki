@@ -1,459 +1,540 @@
 # Nanochat LLM Wiki Demo Vault Design
 
+## Status
+
+Approved for implementation.
+
 ## Objective
 
-Replace the ignored, stateful `demo-vault/` with a tracked, self-contained
-sample LLM wiki that demonstrates the intended product experience:
+Replace the ignored, stateful `demo-vault/` with a tracked, distributable
+Open Knowledge Format (OKF) v0.2 bundle about building a small language model.
+The bundle uses Andrej Karpathy's Nanochat repository and a curated,
+redistributable arXiv corpus to demonstrate:
 
-- immutable, locally readable source evidence;
+- immutable local evidence;
 - a pinned source-code project;
 - meaningful, interlinked compiled knowledge;
-- Google Open Knowledge Format (OKF) v0.2 compatibility;
-- Karpathy/Hermes-style wiki maintenance;
-- normal agent workflows documented in `AGENTS.md`; and
-- verified reading, navigation, source tracing, and PDF viewing through the
-  repository's VS Code extension.
+- hierarchical progressive disclosure;
+- human- and agent-readable provenance;
+- normal ingest, compile, query, lint, and maintenance workflows; and
+- a smooth reading experience through this repository's extension in both
+  VS Code and Cursor.
 
-The sample domain is the end-to-end construction of a small language model,
-using Andrej Karpathy's Nanochat repository and a curated arXiv research corpus.
+The finished artifact is a real sample wiki, not a fixture made only to satisfy
+tests. A reader should be able to start at `demo-vault/index.md`, understand
+Nanochat's end-to-end training path, follow a claim into a source paper or
+pinned code file, and read the archived PDF without leaving the editor.
 
-## Replacement Scope
-
-`demo-vault/` is replaced in full. The existing ignored content is development
-debris rather than source material for the new sample. The replacement removes
-the old `.llm_wiki/` runtime database and caches, debug notes, `.omc/` state,
-legacy `notes/`, and the topic-partitioned `raw/` tree.
-
-The root `.gitignore` entry that ignores all of `demo-vault/` is removed so the
-sample becomes a reviewed repository artifact. A local
-`demo-vault/.gitignore` excludes runtime state such as `.llm_wiki/`,
-`.DS_Store`, temporary extraction files, and editor-specific projections.
-
-Production extension behavior is not changed merely to accommodate the sample.
-A focused demo-vault reading smoke test is added to the existing extension test
-harness to prove the extension can read the resulting vault.
-
-## Standards and Design Principles
+## Standards
 
 The design combines:
 
-- OKF v0.2, with `wiki/` as the conforming bundle root;
-- the Hermes LLM Wiki division between immutable raw evidence and agent-owned
-  compiled pages;
-- the DeltaForceVault separation of `raw/`, `projects/`, and `wiki/`;
-- plain Markdown and filesystem navigation, with no database or embeddings;
-- stable source paths and explicit provenance; and
-- a real Git submodule for project source instead of copied repository files.
+- Google Open Knowledge Format v0.2;
+- Karpathy's flat, plain-file LLM wiki approach;
+- the Hermes research workflow's separation of source capture and compiled
+  knowledge;
+- the DeltaForceVault separation of raw evidence, projects, and durable
+  knowledge;
+- Git and Git LFS for durable distribution;
+- a Git submodule for upstream project source; and
+- ordinary Markdown links rather than a required database or vector index.
 
-`raw/` and `projects/` are outside the OKF bundle. They are evidence layers, not
-compiled knowledge pages.
+OKF is the interoperability floor. The repository adds a stricter
+`nanochat-wiki` profile for deterministic indexes, immutable paper snapshots,
+attachment integrity, project pinning, and editorial link quality. Consumers
+must still tolerate unknown OKF types and extension fields.
 
-## Target Layout
+## Bundle Boundary
+
+`demo-vault/` itself is the OKF bundle root and the unit of distribution.
+There is no nested `wiki/` bundle.
+
+Every non-reserved Markdown file anywhere below `demo-vault/` is therefore an
+OKF concept document and must contain parseable YAML frontmatter with a
+non-empty `type`. `index.md` and `log.md` retain their reserved OKF meanings.
+
+Reusable agent skills, producer scripts, and their tests live outside the
+bundle. This prevents implementation documentation such as `SKILL.md` from
+being misclassified as bundle concepts and keeps the distributable bundle
+focused on knowledge and evidence.
+
+## Repository Layout
 
 ```text
-demo-vault/
-├── README.md
-├── SCHEMA.md
-├── AGENTS.md
-├── CLAUDE.md
-├── index.md
-├── log.md
-├── .gitattributes
-├── .gitignore
+human-learning/
+├── .gitmodules
 ├── .agents/
 │   └── skills/
 │       └── llm-wiki/
 │           ├── SKILL.md
 │           └── references/
 │               ├── arxiv-ingestion.md
-│               └── frontmatter.md
-├── scripts/
-│   ├── ingest_arxiv.py
-│   ├── rebuild_indexes.py
-│   ├── validate_vault.py
-│   └── tests/
-├── raw/
-│   ├── <canonical-paper-title>.md
-│   └── assets/
-│       └── <canonical-paper-title>.pdf
-├── projects/
-│   ├── index.md
-│   ├── nanochat.md
-│   └── code/
-│       └── nanochat/                 # Git submodule
-└── wiki/
+│               ├── authoring-workflow.md
+│               └── okf-profile.md
+├── tools/
+│   └── demo-vault/
+│       ├── __init__.py
+│       ├── vaultlib.py
+│       ├── ingest_arxiv.py
+│       ├── rebuild_indexes.py
+│       ├── validate_vault.py
+│       └── tests/
+└── demo-vault/
     ├── index.md
+    ├── log.md
+    ├── README.md
+    ├── SCHEMA.md
+    ├── AGENTS.md
+    ├── .gitattributes
+    ├── .gitignore
+    ├── raw/
+    │   ├── index.md
+    │   ├── <canonical-paper-title>.md
+    │   └── assets/
+    │       ├── index.md
+    │       └── <canonical-paper-title>.pdf
+    ├── projects/
+    │   ├── index.md
+    │   ├── nanochat.md
+    │   └── code/
+    │       ├── index.md
+    │       └── nanochat/                 # exact-commit Git submodule
     ├── summaries/
-    │   └── index.md
+    │   ├── index.md
+    │   └── *.md
     ├── entities/
-    │   └── index.md
+    │   ├── index.md
+    │   └── *.md
     ├── concepts/
-    │   └── index.md
+    │   ├── index.md
+    │   └── *.md
     ├── comparisons/
-    │   └── index.md
+    │   ├── index.md
+    │   └── *.md
     └── queries/
-        └── index.md
+        ├── index.md
+        └── *.md
 ```
 
-There is deliberately no `raw/index.md`, no raw topic hierarchy, no copied
-Nanochat source under `raw/assets/`, no SQLite index, and no committed
-extension runtime state.
+There is no committed SQLite database, embedding index, extracted cache,
+editor state, copied Nanochat snapshot, or duplicate source tree.
 
-## Raw Research Corpus
+## Hierarchical Index Contract
 
-The initial corpus contains eight version-pinned arXiv papers whose arXiv
-records identify the paper as CC BY 4.0:
+Every visible directory owned by the bundle has an `index.md`, including
+`raw/`, `raw/assets/`, `projects/`, and `projects/code/`.
 
-| Area | Paper | Pinned source |
-| --- | --- | --- |
-| Tokenization | Neural Machine Translation of Rare Words with Subword Units | `1508.07909v5` |
-| Data curation | The FineWeb Datasets: Decanting the Web for the Finest Text Data at Scale | `2406.17557v2` |
-| Data and evaluation | DataComp-LM: In search of the next generation of training sets for language models | `2406.11794v4` |
-| Small-model training | SmolLM2: When Smol Goes Big -- Data-Centric Training of a Small Language Model | `2502.02737v1` |
-| Architecture | GQA: Training Generalized Multi-Query Transformer Models from Multi-Head Checkpoints | `2305.13245v3` |
-| Attention systems | FlashAttention-3: Fast and Accurate Attention with Asynchrony and Low-precision | `2407.08608v2` |
-| Numerical formats | FP8 Formats for Deep Learning | `2209.05433v2` |
-| Post-training | Direct Preference Optimization: Your Language Model is Secretly a Reward Model | `2305.18290v3` |
+The only exceptions are:
 
-Canonical papers with incompatible or insufficient redistribution rights may
-appear as external further-reading links, but their PDFs are not mirrored and
-they are not used as the sole evidence for compiled claims.
+- hidden or ignored runtime directories;
+- version-control internals; and
+- `projects/code/nanochat/`, which is an opaque upstream Git submodule and is
+  indexed by its parent without being modified.
 
-### Title-derived filenames
+Indexes implement progressive disclosure:
 
-The canonical arXiv title is normalized into the companion filename:
+1. An index lists only immediate child concepts, resources, and directories.
+2. A directory entry links to that child's `index.md`.
+3. Concept entries are grouped under their exact `type`.
+4. Resource entries such as PDFs and the Nanochat gitlink have descriptive
+   sections.
+5. Entries use relative Markdown links.
+6. Titles and descriptions come from concept metadata or a deterministic
+   resource record; the generator never invents them with an LLM.
+7. Entries are sorted case-insensitively by display title.
+8. Regeneration is byte-for-byte deterministic.
 
-1. Apply Unicode NFKD normalization and remove combining marks.
-2. Lowercase and retain ASCII letters and digits.
-3. Replace every remaining punctuation or whitespace run with one hyphen.
-4. Trim leading and trailing hyphens.
-5. Add `.md`; use the identical basename for the PDF.
+The root index begins with the only index frontmatter allowed by this profile:
 
-For example:
+```yaml
+---
+okf_version: "0.2"
+---
+```
+
+All other indexes contain no frontmatter. The root index links every
+top-level knowledge/evidence directory and the root concepts. It does not
+flatten the whole bundle.
+
+Directory size does not trigger automatic repartitioning. Paths are concept
+IDs, so automatic moves would destabilize links and history. A future
+human-reviewed taxonomy migration may introduce subdirectories and update all
+references atomically.
+
+## Concept Documents
+
+The bundle uses descriptive, open OKF types:
+
+| Location | Type |
+| --- | --- |
+| `README.md`, `SCHEMA.md` | `Reference` |
+| `AGENTS.md` | `Playbook` |
+| `raw/*.md` | `Paper` |
+| `projects/*.md` | `Software Project` |
+| `summaries/*.md` | `Summary` |
+| `entities/*.md` | `Entity` |
+| `concepts/*.md` | `Concept` |
+| `comparisons/*.md` | `Comparison` |
+| `queries/*.md` | `Query` |
+
+All concept documents carry:
+
+```yaml
+---
+type: Concept
+title: Human-readable title
+description: A single-sentence orientation.
+tags: [registered, taxonomy, values]
+status: draft
+generated:
+  by: codex/gpt-5
+  at: 2026-08-13T00:00:00Z
+sources:
+  - id: stable-source-id
+    resource: ../raw/source-title.md
+    title: Source title
+---
+```
+
+`type` is the only field required by base OKF. The stricter profile requires
+`title`, `description`, `tags`, `status`, `generated.by`, `generated.at`, and
+at least one source for substantive compiled pages. Root operator references
+may cite the OKF specification and repository sources instead.
+
+Lifecycle values are only `draft`, `stable`, and `deprecated`. A genuine
+disagreement is represented with extension metadata and symmetric concept
+links, not a non-standard lifecycle status.
+
+Specific externally sourced claims use Markdown footnotes whose labels match
+`sources[].id`. Links between bundle concepts remain ordinary Markdown links.
+Relative links are preferred in bodies for editor portability; all OKF
+path-valued fields may also contain external URLs or bundle-relative paths.
+
+`generated` records authorship, not verification. `verified` is added only
+after an actual process or human has checked content against its sources.
+Machine validation uses a `process:` actor and never masquerades as human
+review.
+
+## Raw Paper Evidence
+
+Raw paper companions are flat under `raw/`. Each has a matching PDF under
+`raw/assets/` with the same basename:
 
 ```text
 raw/neural-machine-translation-of-rare-words-with-subword-units.md
 raw/assets/neural-machine-translation-of-rare-words-with-subword-units.pdf
 ```
 
-ArXiv IDs and versions belong in metadata, not the ordinary filename. If a
-different source normalizes to an existing basename, append
-`-arxiv-<id>-v<version>` only to the colliding newcomer. Existing raw
-snapshots are never renamed or overwritten. Re-ingesting the same ID and
-version with the same hashes is a no-op; a changed or newer version becomes a
-new snapshot and is surfaced for review.
+### Filename normalization
 
-### Raw companion contract
+The canonical arXiv title becomes the basename:
 
-Each raw paper companion contains:
+1. Unicode NFKD normalization.
+2. Remove combining marks.
+3. Lowercase.
+4. Retain ASCII letters and digits.
+5. Replace every other run with one hyphen.
+6. Trim leading and trailing hyphens.
+7. Add `.md` or `.pdf`.
 
-```yaml
----
-title: Exact canonical paper title
-source_type: paper
-source_url: https://arxiv.org/abs/<id>v<version>
-ingested: YYYY-MM-DD
-sha256: <sha256 of the Markdown body>
-arxiv:
-  id: "<id>"
-  version: <version>
-license:
-  id: CC-BY-4.0
-  url: https://creativecommons.org/licenses/by/4.0/
-attachment:
-  path: assets/<title-slug>.pdf
-  media_type: application/pdf
-  sha256: <sha256 of the PDF>
-extraction:
-  tool: pdftotext
-  version: <observed tool version>
----
-```
+ArXiv IDs and versions remain metadata, not ordinary filenames. A true
+basename collision appends `-arxiv-<id>-v<version>` to the newcomer. Existing
+snapshots are never renamed or overwritten.
 
-The body includes the exact title, authors, publication/version metadata,
-abstract, a local attachment link, an extraction-lossiness notice, and
-mechanically extracted full text. It contains no agent-written summary or
-interpretation.
+### Companion contract
 
-PDFs and common binary image assets under `raw/assets/` are declared in
-`.gitattributes` for Git LFS. Markdown companions remain ordinary Git files.
+Each paper companion is an OKF `Paper` with:
+
+- exact title and authors;
+- exact versioned arXiv resource;
+- abstract and submission/version metadata;
+- accepted redistribution license and license URL;
+- immutable arXiv ID and version;
+- local PDF path, media type, byte size, and SHA-256;
+- Markdown-body SHA-256;
+- extraction tool and version;
+- a local attachment link;
+- an extraction-lossiness notice; and
+- mechanically extracted full text.
+
+The body contains no agent-authored summary or interpretation. Durable
+interpretation belongs in compiled pages.
+
+The ingester accepts only an exact `<id>v<version>`, verifies metadata and
+license, downloads the exact PDF, extracts text, calculates hashes, and
+publishes the pair atomically. Re-ingesting identical bytes is a no-op. Any
+different bytes or newer version become a separate snapshot requiring review.
+
+The initial corpus contains at least the following license-verified papers,
+plus additional papers selected after inspecting Nanochat's pinned
+implementation:
+
+- Neural Machine Translation of Rare Words with Subword Units;
+- The FineWeb Datasets;
+- DataComp-LM;
+- SmolLM2;
+- GQA;
+- FlashAttention-3;
+- FP8 Formats for Deep Learning; and
+- Direct Preference Optimization.
+
+Only papers whose exact arXiv version permits repository redistribution are
+archived. Other important work may appear as external further reading, but a
+non-redistributable PDF is never committed.
+
+PDFs and common binary image formats are tracked by extension-specific Git LFS
+rules. Markdown indexes under `raw/assets/` remain normal Git files.
 
 ## Nanochat Project
 
-`projects/code/nanochat/` is a Git submodule for
-`https://github.com/karpathy/nanochat.git`, pinned to:
+`projects/code/nanochat/` is a Git submodule of:
 
 ```text
-92d63d4e8bb4df75c3b71618f31ddde2378b2bcd
+https://github.com/karpathy/nanochat.git
 ```
 
-The sample does not copy Nanochat files into `raw/`. `projects/nanochat.md` is
-the single project card and records the repository URL, default branch, pinned
-commit, MIT license, purpose, and orientation links. `projects/index.md` is a
-generated project catalog.
+The gitlink is pinned to an exact reviewed commit. `projects/nanochat.md`
+records the repository URL, default branch, commit, license, purpose, major
+entry points, and related compiled pages.
 
-Wiki claims about Nanochat implementation cite both the project card and
-specific relative files in the submodule. The pinned commit recorded in the
-card must match the repository gitlink. The README and `AGENTS.md` explain
-`git submodule update --init --recursive` for fresh clones.
+`projects/code/index.md` records the gitlink as an indexed code resource and
+links to useful upstream files. The validator checks agreement among:
 
-## OKF Wiki Bundle
+- `.gitmodules`;
+- the repository gitlink;
+- the initialized submodule `HEAD`; and
+- `projects/nanochat.md`.
 
-`wiki/` is the OKF v0.2 bundle root. `wiki/index.md` declares
-`okf_version: "0.2"`. Every non-reserved Markdown page below `wiki/` has
-parseable YAML frontmatter with:
+The OKF validator treats the submodule as an opaque nested repository. It does
+not require upstream Nanochat Markdown files to carry OKF frontmatter.
 
-```yaml
----
-title: Human-readable page title
-type: summary | entity | concept | comparison | query
-description: One-sentence orientation
-tags: [registered, taxonomy, values]
-sources:
-  - id: stable-source-id
-    resource: ../../raw/<source-title>.md
-    title: Source title
-status: draft | stable | deprecated
-generated:
-  by: codex/<version>
----
-```
+## Compiled Knowledge
 
-Code-backed sources may use a relative resource under
-`../../projects/code/nanochat/` and include an extension key for the pinned
-commit. OKF readers must tolerate extension keys.
+The initial wiki contains substantial, source-grounded pages rather than
+empty category scaffolds.
 
-Generated index pages are deterministic, clearly marked, and excluded from the
-ordinary concept-page frontmatter requirement. The root `index.md` is a thin
-navigation hub to `wiki/index.md` and `projects/index.md`. `log.md` is the one
-append-only operations log; there is no `wiki/log.md`.
-
-### Initial compiled page inventory
-
-The sample contains the following substantive pages in addition to indexes:
-
-**Summaries**
+### Summaries
 
 - `nanochat-end-to-end-training-pipeline.md`
 - `research-corpus-overview.md`
+- `from-pretraining-to-chat-model.md`
 
-**Entities**
+### Entities
 
 - `fineweb.md`
 - `datacomp-lm.md`
 - `smollm2-and-smoltalk.md`
+- `nanochat-model-family.md`
 
-**Concepts**
+### Concepts
 
 - `byte-pair-encoding.md`
 - `bits-per-byte.md`
 - `decoder-only-transformers.md`
+- `rotary-position-embeddings.md`
+- `rms-normalization.md`
 - `grouped-query-attention.md`
 - `flash-attention.md`
 - `kv-caching.md`
 - `low-precision-training.md`
 - `pretraining-data-curation.md`
 - `compute-optimal-training.md`
+- `gradient-accumulation-and-distributed-training.md`
+- `adamw-and-muon-optimization.md`
 - `supervised-fine-tuning.md`
+- `chat-formatting.md`
 - `preference-and-policy-optimization.md`
+- `inference-and-sampling.md`
+- `language-model-evaluation.md`
 
-**Comparisons**
+### Comparisons
 
 - `fineweb-vs-datacomp-lm.md`
+- `multi-head-vs-multi-query-vs-grouped-query-attention.md`
 - `bf16-vs-fp8.md`
+- `adamw-vs-muon.md`
 - `dpo-vs-on-policy-reinforcement-learning.md`
 
-**Queries**
+### Queries
 
 - `how-does-nanochat-turn-text-into-a-chat-model.md`
 - `where-do-the-paper-ideas-appear-in-nanochat.md`
 - `why-does-nanochat-use-bits-per-byte.md`
+- `what-dominates-a-nanochat-training-run.md`
+- `how-can-a-reader-reproduce-the-pipeline.md`
 
-Pages are concise, cross-linked, and grounded. Every substantive page links to
-at least two other compiled pages. Multi-source claims carry nearby relative
-source links in addition to the frontmatter source list. Project orientation
-stays in `projects/nanochat.md`; it is not duplicated as a wiki entity.
+Inventory may grow when the pinned source reveals a central concept that the
+listed pages cannot accurately cover. It must not shrink below a coherent
+end-to-end explanation.
+
+Each substantive page:
+
+- answers one durable question;
+- cites raw papers and/or exact Nanochat files;
+- contains nearby claim-level attribution;
+- links to at least two related compiled pages where editorially meaningful;
+- distinguishes source facts from synthesis;
+- avoids duplicating raw full text; and
+- is concise enough to load independently.
 
 ## Knowledge Flow
 
-The intended reading path is:
+The primary paper-backed path is:
 
 ```text
-root index
-  -> end-to-end summary or filed query
-  -> focused concepts/entities/comparisons
-  -> raw paper companions and Nanochat project card
-  -> local PDFs and pinned source files
+index.md
+  -> summaries/index.md
+  -> nanochat-end-to-end-training-pipeline.md
+  -> concepts/<focused-concept>.md
+  -> raw/<paper>.md
+  -> raw/assets/<paper>.pdf
 ```
 
-Raw companions are discoverable through wiki provenance links and repository
-search, not through a raw index. Paper companions link to their matching local
-PDF. Code-backed pages link through the project card to files in the pinned
-submodule. The result should support forward navigation, backlinks, and graph
-exploration without a secondary database.
+The primary code-backed path is:
 
-## `AGENTS.md` Operator Workflows
+```text
+index.md
+  -> projects/index.md
+  -> nanochat.md
+  -> projects/code/index.md
+  -> projects/code/nanochat/<exact-file>
+```
 
-`demo-vault/AGENTS.md` is the canonical operator handbook. It contains
-executable, repository-relative workflows rather than only high-level rules.
-At minimum it documents:
+Queries provide task-oriented entry points, while summaries provide narrative
+entry points. Indexes expose only the next level; cross-links form the richer
+graph.
 
-### Orientation
+## Operator Workflows
 
-1. Read `SCHEMA.md`.
-2. Read `wiki/index.md` and `projects/index.md`.
-3. Read the most recent entries in `log.md`.
-4. Search existing pages before creating new ones.
-5. Confirm the Nanochat submodule is initialized before making code-backed
-   claims.
+`demo-vault/AGENTS.md` is both an OKF `Playbook` and the canonical operator
+handbook. It documents executable, repository-relative workflows for:
 
-### Ingest
+- orientation;
+- versioned arXiv ingestion;
+- local-file and web-clip capture;
+- compiling or updating concepts;
+- answering and optionally filing queries;
+- conflict handling;
+- rebuilding indexes;
+- full lint and integrity validation;
+- Nanochat submodule initialization and advancement;
+- Git LFS checks; and
+- reproducing VS Code and Cursor reading acceptance.
 
-- Use a versioned arXiv ID.
-- Run `python3 scripts/ingest_arxiv.py --id <id>v<version>`.
-- Verify title, version, license, attachment, extraction, and hashes.
-- Never hand-edit an existing raw snapshot.
-- Compile durable takeaways into typed wiki pages rather than into `raw/`.
-- Rebuild indexes, lint, and append the ingest operation to `log.md`.
+Commands invoke scripts outside the bundle, for example:
 
-The handbook also describes equivalent handling for a web clip or a
-user-supplied local file even though the starter corpus contains papers.
+```bash
+python3 ../tools/demo-vault/ingest_arxiv.py \
+  --vault . \
+  --id 1508.07909v5
 
-### Compile and update
+python3 ../tools/demo-vault/rebuild_indexes.py --vault . --check
+python3 ../tools/demo-vault/validate_vault.py --vault .
+python3 -m unittest discover -s ../tools/demo-vault/tests
+```
 
-- Search for existing entity/concept coverage.
-- Create a page only when the subject is central or appears in multiple
-  sources.
-- Preserve source links near claims.
-- Add reciprocal cross-links where meaningful.
-- Follow the conflict policy instead of silently replacing a contradictory
-  claim.
-- Rebuild indexes and record the operation.
+The handbook requires reading `SCHEMA.md`, `index.md`, and the newest entries
+in `log.md` before mutation. Raw snapshots are never hand-edited.
 
-### Query
+`log.md` is a newest-first, ISO-date-grouped bundle history. It records
+material ingest, compilation, migration, project-pin, and deprecation events.
 
-- Read compiled pages first.
-- Follow provenance into raw or project evidence only as needed.
-- Cite the pages and evidence used.
-- File only substantial, expensive-to-rederive answers under `queries/` or
-  `comparisons/`.
-- Rebuild, lint, and log when a query is filed.
+## Reusable Skill and Tooling
 
-### Lint and rebuild
+`.agents/skills/llm-wiki/SKILL.md` packages setup and maintenance for another
+repository. It:
 
-- `python3 scripts/rebuild_indexes.py --check` checks deterministic indexes.
-- `python3 scripts/rebuild_indexes.py` intentionally updates them.
-- `python3 scripts/validate_vault.py` runs the complete structural and
-  provenance validation.
-- `python3 -m unittest discover -s scripts/tests` runs the workflow tests.
+- discovers whether a vault is new or existing;
+- preserves existing content unless replacement is explicit;
+- establishes an OKF root and hierarchical indexes;
+- configures LFS patterns without capturing Markdown;
+- installs or points to deterministic producer tools;
+- distinguishes immutable evidence from compiled knowledge;
+- orients before mutation;
+- enforces source-backed writing and conflict escalation; and
+- finishes by rebuilding, validating, and reporting evidence.
 
-### Conflict handling
+The scripts have focused responsibilities:
 
-- Record both positions with dates and sources.
-- Mark affected pages as contested and add symmetric contradiction links.
-- Stop short of resolving a genuine contradiction without human direction.
-- Lint treats malformed conflict metadata as an error.
+- `vaultlib.py`: shared parsing, paths, hashing, title normalization, link
+  resolution, and typed data structures;
+- `ingest_arxiv.py`: exact-version, license-gated, atomic paper capture;
+- `rebuild_indexes.py`: bottom-up deterministic indexes for every owned
+  directory;
+- `validate_vault.py`: base OKF conformance plus the stricter profile; and
+- `tests/`: behavior-level unit and integration tests using local fixtures.
 
-### Project/submodule maintenance
+## Validation
 
-- Confirm the project card, `.gitmodules`, and gitlink agree.
-- Record intentional submodule advances in `log.md`.
-- Never duplicate project source in `raw/`.
-- Keep wiki code citations pinned to a resolvable commit.
+Validation proves:
 
-### Extension reading smoke test
+- every non-reserved Markdown file is a valid OKF concept;
+- root and nested reserved files follow their contracts;
+- every owned bundle directory has a current index;
+- every index entry resolves and every immediate visible child is indexed;
+- paper filenames derive from canonical titles;
+- paper metadata, body hashes, attachments, and PDF hashes agree;
+- accepted license metadata exists;
+- compiled sources resolve or are valid external URLs;
+- footnote/source IDs agree;
+- internal Markdown links resolve, except explicitly allowed future links;
+- lifecycle, actor, timestamp, and tag fields follow the profile;
+- conflict metadata is symmetric;
+- `.gitattributes` sends binary assets, not Markdown, to LFS;
+- no forbidden caches or databases are committed;
+- Nanochat project metadata and gitlink agree; and
+- generated indexes are reproducible with no diff.
 
-The handbook includes the exact build/launch steps and the reading path used
-for final acceptance so a future agent can reproduce the extension test.
+Base OKF compatibility remains permissive: unknown types and extension keys
+are preserved rather than rejected. Profile validation is explicitly labeled
+as stricter than generic OKF consumption.
 
-`CLAUDE.md` points agents to `AGENTS.md` and adds only provider-specific
-details; it does not maintain a divergent copy of the workflows.
+## Extension Acceptance
 
-## Bundled Skill and Scripts
+Automated extension coverage uses the real `demo-vault/` as a reading fixture
+or a copied sandbox of it. Tests prove:
 
-`.agents/skills/llm-wiki/SKILL.md` packages the setup and maintenance workflow
-for reuse. It instructs an agent to orient before acting, preserve raw
-immutability, use the scripts as canonical mechanics, keep page creation
-editorial, update indexes and the log, and surface conflicts.
+- root and nested index pages render;
+- relative Markdown links navigate correctly;
+- headings and outline remain usable on long raw companions;
+- backlinks connect compiled and evidence pages;
+- search finds canonical paper titles and core concepts;
+- a concept can open its raw companion and local PDF;
+- a code-backed concept can open the project card and a file in the submodule;
+- local PDFs render and supported internal PDF links navigate; and
+- runtime state is created only in ignored locations.
 
-The scripts have narrow responsibilities:
+Final manual acceptance opens the same bundle in:
 
-- `ingest_arxiv.py`: fetch one exact paper version, enforce license policy,
-  generate the title-derived companion, download the PDF, extract text, and
-  calculate hashes without partially committing a failed ingest.
-- `rebuild_indexes.py`: deterministically generate the root, project, bundle,
-  and per-type indexes; it never creates a raw index.
-- `validate_vault.py`: check schema, provenance, links, files, hashes,
-  conflicts, submodule metadata, generated indexes, and forbidden state.
+1. a VS Code Extension Development Host; and
+2. Cursor with the built extension installed or loaded.
 
-The initial corpus is ingested through the same workflow delivered in the
-sample rather than by constructing paper files through an unrelated one-off
-path.
+The documented reading paths are exercised with screenshots and concise
+notes. If acceptance exposes a concrete extension defect that blocks or
+roughens these paths, the defect is reproduced by a failing test and fixed in
+scope.
 
-## Failure and Integrity Policy
+## Completion Evidence
 
-- Downloads use exact versioned URLs and fail closed on HTTP, metadata,
-  license, PDF, or extraction errors.
-- Ingestion stages work in a temporary directory and publish the Markdown/PDF
-  pair only after all checks succeed.
-- Existing raw files are never silently overwritten.
-- Hash mismatches, missing attachments, and title/path disagreements are hard
-  validation failures.
-- Generators do not guess missing titles, descriptions, or page types.
-- A genuine knowledge conflict is recorded and routed to a human.
-- Missing submodules produce an actionable orientation error, not fabricated
-  code claims.
-- Generated indexes are byte-for-byte reproducible.
+The implementation is complete only when:
 
-## Testing and Acceptance
-
-Script tests cover:
-
-- canonical-title slugging and collisions;
-- raw companion and attachment hashing;
-- rejection of unversioned or incompatible arXiv inputs;
-- failed-ingest atomicity;
-- OKF page validation and allowed types;
-- deterministic index generation with no raw index;
-- broken Markdown links and wiki links;
-- tag and source validation;
-- conflict symmetry;
-- submodule/card agreement; and
-- rejection of legacy runtime/database artifacts.
-
-Repository verification includes:
-
-1. all script tests pass;
-2. `validate_vault.py` passes from `demo-vault/`;
-3. index regeneration produces no diff;
-4. all eight title-derived Markdown/PDF pairs exist with matching hashes;
-5. Git LFS reports the expected PDF objects;
-6. the Nanochat gitlink resolves to the pinned commit;
-7. the extension's normal checks and production bundle build pass; and
-8. the rebuilt vault is opened through the Extension Development Host.
-
-The extension reading test must demonstrate:
-
-- `index.md` opens the compiled knowledge hub;
-- wiki links and backlinks navigate among meaningful pages;
-- a paper-backed concept opens its raw companion and local PDF;
-- a code-backed concept opens `projects/nanochat.md` and a Nanochat source
-  file;
-- search finds a paper by its canonical title-derived filename;
-- outlines and Markdown rendering remain usable; and
-- the PDF reader can display the archived arXiv paper and follow a supported
-  internal link.
-
-Test output plus screenshots of the root knowledge hub, one paper opened in the
-PDF reader, and one code-backed navigation path provide evidence for the final
-handoff.
+1. all producer-tool tests pass;
+2. profile validation passes;
+3. index regeneration in check mode passes;
+4. the planned raw Markdown/PDF pairs exist and hashes match;
+5. Git LFS identifies every archived binary and no Markdown index;
+6. the Nanochat gitlink resolves to the project card's exact commit;
+7. all substantive compiled pages exist, are grounded, and are cross-linked;
+8. extension unit, build, and focused end-to-end checks pass;
+9. the bundle is read successfully in both VS Code and Cursor; and
+10. screenshots and acceptance notes demonstrate both evidence paths.
 
 ## Non-goals
 
 - No iWiki integration.
-- No database, vector store, embeddings, or setup wizard.
-- No Nanochat source fork or copied snapshot.
-- No raw catalog or automatic raw directory partitioning.
-- No exhaustive survey of all LLM literature.
-- No production extension feature changes unless the reading test exposes a
-  concrete defect that the user separately authorizes fixing.
+- No mandatory database, vector store, embeddings, or hosted service.
+- No Nanochat fork or copied source snapshot.
+- No automatic path migration based on directory size.
+- No mirroring of papers without redistribution permission.
+- No unsupported claim of human verification.
+- No broad extension redesign unrelated to the demonstrated reading paths.
