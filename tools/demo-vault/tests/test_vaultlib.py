@@ -113,6 +113,37 @@ class VaultlibTests(unittest.TestCase):
                 target.resolve(),
             )
 
+    def test_resolve_local_target_preserves_existing_extensionless_file(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            source = root / "projects" / "card.md"
+            target = root / "projects" / "code" / "LICENSE"
+            source.parent.mkdir(parents=True)
+            target.parent.mkdir(parents=True)
+            source.write_text("# card\n", encoding="utf-8")
+            target.write_text("MIT\n", encoding="utf-8")
+
+            self.assertEqual(
+                resolve_local_target(source, "code/LICENSE", root),
+                target.resolve(),
+            )
+
+    def test_resolve_local_target_preserves_existing_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            source = root / "projects" / "card.md"
+            target = root / "projects" / "code" / "tasks"
+            source.parent.mkdir(parents=True)
+            target.mkdir(parents=True)
+            source.write_text("# card\n", encoding="utf-8")
+
+            self.assertEqual(
+                resolve_local_target(source, "code/tasks/", root),
+                target.resolve(),
+            )
+
     def test_sha256_bytes_is_lowercase_hex(self) -> None:
         self.assertEqual(
             sha256_bytes(b"nanochat"),

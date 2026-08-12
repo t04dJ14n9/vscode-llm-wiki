@@ -236,6 +236,8 @@ def resolve_local_target(
         candidate.relative_to(vault_root.resolve())
     except ValueError:
         return None
+    if candidate.exists():
+        return candidate
     if candidate.suffix == "":
         candidate = candidate.with_suffix(".md")
     return candidate
