@@ -284,6 +284,143 @@ test('PDF explicit agent handoff routes normalized selection and validated crop 
   assert.deepEqual(Buffer.from(commands[0][1].snapshotPng), png);
 });
 
+test('PDF explicit command re-request preserves its agent across the legacy crop capture reply', async () => {
+  const commands = [];
+  const posted = [];
+  let receiveMessage;
+  const vscode = {
+    workspace: {
+      asRelativePath: uri => uri.fsPath.replace('/vault/', ''),
+    },
+    commands: {
+      executeCommand: async (...args) => { commands.push(args); },
+    },
+    Uri: {
+      joinPath: (...parts) => ({ parts, toString: () => 'vscode-resource' }),
+    },
+  };
+  const {
+    ADD_SELECTION_TO_AGENT_COMMAND,
+    PdfEditorProvider,
+  } = loadTsModule('src/pdfEditorProvider.ts', {
+    vscode,
+    '@human-learning/core': { pdfHref: portablePdfHref },
+  });
+  const context = {
+    extensionUri: { fsPath: '/extension' },
+    subscriptions: [],
+  };
+  const provider = new PdfEditorProvider(context, '/vault');
+  const pdfUri = {
+    scheme: 'file',
+    fsPath: '/vault/raw/pdf/paper.pdf',
+    toString: () => 'file:///vault/raw/pdf/paper.pdf',
+  };
+  const webview = {
+    options: {},
+    cspSource: 'vscode-webview:',
+    asWebviewUri: uri => uri,
+    onDidReceiveMessage: listener => {
+      receiveMessage = listener;
+      return { dispose() {} };
+    },
+    postMessage: async message => {
+      posted.push(message);
+      return true;
+    },
+  };
+  const panel = {
+    active: true,
+    webview,
+    onDidChangeViewState: () => ({ dispose() {} }),
+    onDidDispose: () => ({ dispose() {} }),
+  };
+  await provider.resolveCustomEditor({ uri: pdfUri }, panel, {});
+  commands.length = 0;
+
+  await provider.addSelectionToAgent('codex');
+  await receiveMessage({
+    type: 'selectionAction',
+    action: 'addToCursorChat',
+    anchor: {
+      page: 3,
+      prefix: 'before context',
+      suffix: 'after context',
+      snippet: 'Selected PDF passage',
+    },
+  });
+
+  assert.deepEqual(posted.at(-1), { type: 'addSelectionToCursorChat' });
+  assert.equal(commands.length, 1);
+  assert.equal(commands[0][0], ADD_SELECTION_TO_AGENT_COMMAND);
+  assert.equal(commands[0][1].agentId, 'codex');
+  assert.equal(commands[0][1].selection.text, 'Selected PDF passage');
+});
+
+test('new Cursor re-request supersedes a pending explicit PDF agent request', async () => {
+  const commands = [];
+  let receiveMessage;
+  const vscode = {
+    workspace: {
+      asRelativePath: uri => uri.fsPath.replace('/vault/', ''),
+    },
+    commands: {
+      executeCommand: async (...args) => { commands.push(args); },
+    },
+    Uri: {
+      joinPath: (...parts) => ({ parts, toString: () => 'vscode-resource' }),
+    },
+  };
+  const {
+    ADD_SELECTION_TO_CURSOR_CHAT_COMMAND,
+    PdfEditorProvider,
+  } = loadTsModule('src/pdfEditorProvider.ts', {
+    vscode,
+    '@human-learning/core': { pdfHref: portablePdfHref },
+  });
+  const provider = new PdfEditorProvider(
+    { extensionUri: { fsPath: '/extension' }, subscriptions: [] },
+    '/vault',
+  );
+  const pdfUri = {
+    scheme: 'file',
+    fsPath: '/vault/raw/pdf/paper.pdf',
+    toString: () => 'file:///vault/raw/pdf/paper.pdf',
+  };
+  const webview = {
+    options: {},
+    cspSource: 'vscode-webview:',
+    asWebviewUri: uri => uri,
+    onDidReceiveMessage: listener => {
+      receiveMessage = listener;
+      return { dispose() {} };
+    },
+    postMessage: async () => true,
+  };
+  await provider.resolveCustomEditor(
+    { uri: pdfUri },
+    {
+      active: true,
+      webview,
+      onDidChangeViewState: () => ({ dispose() {} }),
+      onDidDispose: () => ({ dispose() {} }),
+    },
+    {},
+  );
+  commands.length = 0;
+
+  await provider.addSelectionToAgent('codex');
+  await provider.addSelectionToCursorChat();
+  await receiveMessage({
+    type: 'selectionAction',
+    action: 'addToCursorChat',
+    anchor: { page: 3, snippet: 'Selected PDF passage' },
+  });
+
+  assert.equal(commands.length, 1);
+  assert.equal(commands[0][0], ADD_SELECTION_TO_CURSOR_CHAT_COMMAND);
+});
+
 test('combined PDF context keys clear on deactivation and restore with its selection', async () => {
   const commands = [];
   let onDidChangeViewState;

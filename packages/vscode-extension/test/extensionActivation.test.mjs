@@ -802,6 +802,45 @@ test('PDF Cmd-L asks the active webview for the same crop-aware agent handoff', 
   assert.equal(requested, 1);
 });
 
+test('explicit agent command without selection re-requests the active PDF for the same agent', async () => {
+  const explicitRequests = [];
+  let cursorRequests = 0;
+  const pdfUri = { fsPath: '/vault/raw/papers/attention.pdf', scheme: 'file' };
+  const vscode = createVscodeMock({
+    executeCommandCalls: [],
+    activeDocumentUri: undefined,
+    activeTabUri: pdfUri,
+    activeTabViewType: 'human-learning.pdfViewer',
+  });
+  const mocks = createActivationMocks({ vscode });
+  mocks['./agentContext'] = {
+    addSelectionToContext: async () => assert.fail('Host must let the PDF webview capture its crop'),
+  };
+  mocks['./pdfEditorProvider'] = {
+    PdfEditorProvider: class {
+      static viewType = 'human-learning.pdfViewer';
+      async addSelectionToAgent(agentId) {
+        explicitRequests.push(agentId);
+      }
+      async addSelectionToCursorChat() {
+        cursorRequests += 1;
+      }
+      getActiveWebview() {
+        return undefined;
+      }
+    },
+  };
+
+  const { activate } = loadTsModule('src/extension.ts', mocks);
+  activate({ subscriptions: [] });
+  await vscode.__registeredCommands['human-learning.addSelectionToAgent']({
+    agentId: 'codex',
+  });
+
+  assert.deepEqual(explicitRequests, ['codex']);
+  assert.equal(cursorRequests, 0);
+});
+
 test('Add to Chat falls back to immutable text when crop persistence fails', async () => {
   const handoffs = [];
   const warningMessages = [];

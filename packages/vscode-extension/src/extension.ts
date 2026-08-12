@@ -177,7 +177,11 @@ function registerCommands(
     const root = requireWorkspaceRoot(workspaceRoot);
     if (!root) return;
     if (!input?.selection && isPdfUri(activeTabUri())) {
-      await pdfEditorProvider?.addSelectionToCursorChat();
+      if (target.kind === 'agent') {
+        await pdfEditorProvider?.addSelectionToAgent(target.agentId);
+      } else {
+        await pdfEditorProvider?.addSelectionToCursorChat();
+      }
       return;
     }
     if (input?.selection && !isSelectionContext(input.selection)) {

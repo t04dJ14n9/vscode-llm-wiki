@@ -73,6 +73,7 @@ interface ActivePdfWebview {
   pdfUri: vscode.Uri;
   ready: boolean;
   pendingAnchor?: PdfAnchorNavigation;
+  pendingSelectionAgentId?: ExternalAgentId;
   selection?: PdfSelectionAnchor;
   outline?: PdfOutlineEntry[];
   postMessage(message: unknown): void;
@@ -258,7 +259,17 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
   }
 
   async addSelectionToCursorChat(): Promise<void> {
-    this.getActiveWebview()?.postMessage({ type: 'addSelectionToCursorChat' });
+    const active = this.getActiveWebview();
+    if (!active) return;
+    active.pendingSelectionAgentId = undefined;
+    active.postMessage({ type: 'addSelectionToCursorChat' });
+  }
+
+  async addSelectionToAgent(agentId: ExternalAgentId): Promise<void> {
+    const active = this.getActiveWebview();
+    if (!active || !isExternalAgentId(agentId)) return;
+    active.pendingSelectionAgentId = agentId;
+    active.postMessage({ type: 'addSelectionToCursorChat' });
   }
 
   async getActiveSelectionContext(): Promise<SelectionContext | undefined> {
@@ -363,15 +374,22 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
           this.flushPendingAnchor(active);
           break;
         }
-        case 'selectionAction':
+        case 'selectionAction': {
+          const pendingAgentId = message.action === 'addToCursorChat'
+            ? active.pendingSelectionAgentId
+            : undefined;
+          active.pendingSelectionAgentId = undefined;
           await this.handleSelectionAction(
             pdfUri,
-            message.action,
+            message.action === 'addToCursorChat' && pendingAgentId
+              ? 'sendToAgent'
+              : message.action,
             message.anchor,
             message.snapshotPngBase64,
-            message.agentId,
+            pendingAgentId ?? message.agentId,
           );
           break;
+        }
         case 'copyText': {
           const text = normalizePdfMessageText(message.text);
           if (text) await vscode.env.clipboard.writeText(text);
