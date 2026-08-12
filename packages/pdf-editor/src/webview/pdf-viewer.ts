@@ -115,6 +115,11 @@ const EXTERNAL_AGENT_LABELS: Readonly<Record<ExternalAgentId, string>> = {
   claude: 'Claude Code',
   codebuddy: 'CodeBuddy',
 };
+const EXTERNAL_AGENT_TOOLBAR_LABELS: Readonly<Record<ExternalAgentId, string>> = {
+  codex: 'Codex',
+  claude: 'Claude',
+  codebuddy: 'CodeBuddy',
+};
 const EXTERNAL_AGENT_ORDER = ['codex', 'claude', 'codebuddy'] as const;
 
 interface PdfAnchor {
@@ -2698,11 +2703,13 @@ class PdfViewer {
       action: PdfTextSelectionAction,
       className = '',
       agentId?: ExternalAgentId,
+      accessibleLabel = label,
     ) => {
       const button = document.createElement('button');
       button.type = 'button';
       button.textContent = label;
       button.className = className;
+      button.setAttribute('aria-label', accessibleLabel);
       button.addEventListener('click', event => {
         event.preventDefault();
         event.stopPropagation();
@@ -2714,6 +2721,13 @@ class PdfViewer {
     };
 
     addButton('Copy Link', 'copyLink');
+    if (this.agentCapabilities.cursorAgent || this.agentCapabilities.providers.length > 0) {
+      const separator = document.createElement('span');
+      separator.className = 'selection-toolbar-separator';
+      separator.setAttribute('role', 'separator');
+      separator.setAttribute('aria-orientation', 'vertical');
+      toolbar.appendChild(separator);
+    }
     if (this.agentCapabilities.cursorAgent) {
       const button = addButton('', 'addToCursorChat', 'secondary cursor-chat-action');
       button.setAttribute('aria-label', `Add to Chat ${cursorSelectionShortcutLabel()}`);
@@ -2726,7 +2740,13 @@ class PdfViewer {
       button.append(label, shortcut);
     }
     for (const provider of this.agentCapabilities.providers) {
-      addButton(`Send to ${provider.label}`, 'sendToAgent', 'secondary', provider.id);
+      addButton(
+        EXTERNAL_AGENT_TOOLBAR_LABELS[provider.id],
+        'sendToAgent',
+        'secondary provider-action',
+        provider.id,
+        `Send to ${provider.label}`,
+      );
     }
 
     document.body.appendChild(toolbar);

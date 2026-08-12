@@ -634,9 +634,9 @@ test('pdf viewer production surface exposes only live selection actions and keep
 });
 
 const providerActionCases = [
-  { id: 'codex', label: 'Send to Codex' },
-  { id: 'claude', label: 'Send to Claude Code' },
-  { id: 'codebuddy', label: 'Send to CodeBuddy' },
+  { id: 'codex', label: 'Send to Codex', visualLabel: 'Codex' },
+  { id: 'claude', label: 'Send to Claude Code', visualLabel: 'Claude' },
+  { id: 'codebuddy', label: 'Send to CodeBuddy', visualLabel: 'CodeBuddy' },
 ] as const;
 
 const providerCapabilitySubsets = Array.from({ length: 8 }, (_, mask) =>
@@ -657,7 +657,7 @@ test.describe('PDF provider action capability matrix', () => {
         const expectedToolbarLabels = [
           'Copy Link',
           ...(host === 'cursor' ? ['Add to Chat'] : []),
-          ...providers.map(provider => provider.label),
+          ...providers.map(provider => provider.visualLabel),
         ];
         expect(
           await visibleSelectionToolbarLabels(page),
@@ -667,9 +667,11 @@ test.describe('PDF provider action capability matrix', () => {
         const toolbar = page.locator('#selection-toolbar');
         for (const provider of providers) {
           const action = toolbar.getByRole('button', { name: provider.label, exact: true });
-          await expect(action).toHaveText(provider.label);
+          await expect(action).toHaveText(provider.visualLabel);
           await expect(action).toHaveAccessibleName(provider.label);
         }
+        await expect(toolbar.locator('.selection-toolbar-separator'))
+          .toHaveCount(host === 'cursor' || providers.length > 0 ? 1 : 0);
 
         await openPdfSelectionContextMenu(page);
         const expectedMenuLabels = [
@@ -716,6 +718,7 @@ test('expanded provider actions follow theme colors and keyboard focus order', a
       const active = document.activeElement;
       if (!(active instanceof HTMLButtonElement) || !active.closest('#selection-toolbar')) return null;
       return active.querySelector<HTMLElement>('.add-to-chat-label')?.textContent?.trim()
+        ?? active.getAttribute('aria-label')
         ?? active.textContent?.trim()
         ?? null;
     });
@@ -746,14 +749,22 @@ test('expanded provider actions follow theme colors and keyboard focus order', a
         background: getComputedStyle(button).backgroundColor,
         foreground: getComputedStyle(button).color,
       })),
-      expectedActionBackground: resolveColor('var(--vscode-button-secondaryBackground)'),
-      expectedActionForeground: resolveColor('var(--vscode-button-secondaryForeground)'),
+      expectedActionBackground: 'rgba(0, 0, 0, 0)',
+      expectedActionForeground: resolveColor(
+        'var(--vscode-editorWidget-foreground, var(--vscode-foreground, var(--vscode-editor-foreground)))',
+      ),
       focusedAction: {
         outlineColor: getComputedStyle(focused).outlineColor,
         outlineStyle: getComputedStyle(focused).outlineStyle,
         outlineWidth: getComputedStyle(focused).outlineWidth,
       },
       expectedFocusColor: resolveColor('var(--vscode-focusBorder)'),
+      geometry: {
+        height: toolbar.getBoundingClientRect().height,
+        buttonRows: new Set(buttons.map(button => Math.round(button.getBoundingClientRect().top))).size,
+        scrollWidth: toolbar.scrollWidth,
+        clientWidth: toolbar.clientWidth,
+      },
     };
   });
 
@@ -766,6 +777,16 @@ test('expanded provider actions follow theme colors and keyboard focus order', a
   expect(themeStyles.focusedAction.outlineColor).toBe(themeStyles.expectedFocusColor);
   expect(themeStyles.focusedAction.outlineStyle).toBe('solid');
   expect(Number.parseFloat(themeStyles.focusedAction.outlineWidth)).toBeGreaterThan(0);
+  expect(themeStyles.geometry.buttonRows).toBe(1);
+  expect(themeStyles.geometry.height).toBeLessThanOrEqual(36);
+  expect(themeStyles.geometry.scrollWidth).toBeLessThanOrEqual(themeStyles.geometry.clientWidth);
+  await expect(page.locator('#selection-toolbar .selection-toolbar-separator')).toHaveCount(1);
+  for (const provider of providerActionCases) {
+    const action = page.locator('#selection-toolbar')
+      .getByRole('button', { name: provider.label, exact: true });
+    await expect(action).toHaveText(provider.visualLabel);
+    await expect(action).toHaveAccessibleName(provider.label);
+  }
 });
 
 test('explicit provider action posts its ID and crop', async ({ page }) => {
@@ -894,8 +915,11 @@ test('capability message validates and updates provider actions in an open viewe
   await selectPdfTextRange(page, 0, 26);
   await expect(page.locator('#selection-toolbar button')).toHaveText([
     'Copy Link',
-    'Send to Claude Code',
+    'Claude',
   ]);
+  await expect(page.locator('#selection-toolbar')
+    .getByRole('button', { name: 'Send to Claude Code', exact: true }))
+    .toHaveText('Claude');
 
   await page.evaluate(() => window.postMessage({
     type: 'agentHandoffCapabilities',
@@ -911,8 +935,8 @@ test('capability message validates and updates provider actions in an open viewe
   await expect(page.locator('#selection-toolbar button')).toHaveText([
     'Copy Link',
     /Add to Chat/,
-    'Send to Codex',
-    'Send to CodeBuddy',
+    'Codex',
+    'CodeBuddy',
   ]);
 
   await openPdfSelectionContextMenu(page);
@@ -965,6 +989,15 @@ test('expanded provider toolbar stays contained in a narrow pane', async ({ page
           ?? '',
         rect: rect(button.getBoundingClientRect()),
       })),
+      responsive: {
+        clientWidth: toolbar.clientWidth,
+        scrollWidth: toolbar.scrollWidth,
+        clientHeight: toolbar.clientHeight,
+        buttonRows: new Set(
+          Array.from(toolbar.querySelectorAll('button'))
+            .map(button => Math.round(button.getBoundingClientRect().top)),
+        ).size,
+      },
     };
   });
 
@@ -979,18 +1012,17 @@ test('expanded provider toolbar stays contained in a narrow pane', async ({ page
   expect(geometry.buttons.map(button => button.label)).toEqual([
     'Copy Link',
     'Add to Chat',
-    'Send to Codex',
-    'Send to Claude Code',
-    'Send to CodeBuddy',
+    'Codex',
+    'Claude',
+    'CodeBuddy',
   ]);
-  for (const button of geometry.buttons) {
-    expect(button.rect.width, button.label).toBeGreaterThan(0);
-    expect(button.rect.height, button.label).toBeGreaterThan(0);
-    expect(button.rect.left, button.label).toBeGreaterThanOrEqual(geometry.toolbar.left);
-    expect(button.rect.right, button.label).toBeLessThanOrEqual(geometry.toolbar.right);
-    expect(button.rect.top, button.label).toBeGreaterThanOrEqual(geometry.toolbar.top);
-    expect(button.rect.bottom, button.label).toBeLessThanOrEqual(geometry.toolbar.bottom);
-  }
+  expect(geometry.responsive.buttonRows).toBe(1);
+  expect(geometry.responsive.clientHeight).toBeLessThanOrEqual(36);
+  expect(geometry.responsive.scrollWidth).toBeGreaterThan(geometry.responsive.clientWidth);
+
+  const codeBuddy = toolbar.getByRole('button', { name: 'Send to CodeBuddy', exact: true });
+  await codeBuddy.scrollIntoViewIfNeeded();
+  await expect(codeBuddy).toBeInViewport();
 });
 
 test('pdf viewer rectangular selection copies PDF++ coordinates in a one-shot drag', async ({ page }) => {

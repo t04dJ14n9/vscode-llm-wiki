@@ -1280,14 +1280,16 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
     }
     .pdf-search-match { position: absolute; border-radius: 2px; background: rgba(255, 214, 10, .40); outline: 1px solid rgba(255, 214, 10, .55); pointer-events: none; }
     .pdf-search-match.selected { background: rgba(177, 151, 252, .48); outline-color: rgba(177, 151, 252, .9); }
-    .selection-toolbar { position: absolute; transform: translateX(-50%); z-index: 20; display: flex; box-sizing: border-box; max-width: calc(100vw - 24px); flex-wrap: wrap; justify-content: center; gap: 4px; padding: 4px; border: 1px solid var(--vscode-panel-border); border-radius: 6px; background: var(--vscode-editorWidget-background); box-shadow: 0 4px 16px rgba(0,0,0,.3); font: 12px var(--vscode-font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif); }
-    .selection-toolbar button { border: 0; border-radius: 4px; padding: 4px 8px; background: var(--vscode-button-background); color: var(--vscode-button-foreground); font: inherit; white-space: nowrap; cursor: pointer; }
+    .selection-toolbar { position: absolute; transform: translateX(-50%); z-index: 20; display: flex; box-sizing: border-box; width: max-content; max-width: calc(100vw - 24px); flex-wrap: nowrap; align-items: center; justify-content: flex-start; gap: 1px; overflow-x: auto; overflow-y: hidden; padding: 3px; border: 1px solid var(--vscode-panel-border); border-radius: 8px; background: var(--vscode-editorWidget-background); box-shadow: 0 4px 14px var(--vscode-widget-shadow, rgba(0,0,0,.32)); scrollbar-width: none; font: 12px var(--vscode-font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif); }
+    .selection-toolbar::-webkit-scrollbar { display: none; }
+    .selection-toolbar button { flex: 0 0 auto; min-height: 26px; border: 0; border-radius: 5px; padding: 0 8px; background: var(--vscode-button-background); color: var(--vscode-button-foreground); font: inherit; white-space: nowrap; cursor: pointer; }
     .selection-toolbar button:hover { background: var(--vscode-button-hoverBackground, var(--vscode-button-background)); }
     .selection-toolbar button:focus-visible { outline: 2px solid var(--vscode-focusBorder, #007fd4); outline-offset: 1px; }
-    .selection-toolbar .secondary { background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); }
-    .selection-toolbar .secondary:hover { background: var(--vscode-button-secondaryHoverBackground, var(--vscode-button-secondaryBackground)); }
-    .selection-toolbar .cursor-chat-action { display: inline-flex; align-items: center; gap: 6px; }
-    .selection-toolbar .cursor-chat-action .add-to-chat-shortcut { display: inline-flex; align-items: center; height: 18px; padding: 0 4px; border: 0; border-radius: 4px; background: var(--vscode-toolbar-hoverBackground, rgba(127,127,127,.16)); color: var(--vscode-input-placeholderForeground, var(--vscode-descriptionForeground, inherit)); font: 11px var(--vscode-font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif); }
+    .selection-toolbar .secondary { background: transparent; color: var(--vscode-editorWidget-foreground, var(--vscode-foreground, var(--vscode-editor-foreground))); }
+    .selection-toolbar .secondary:hover { background: var(--vscode-toolbar-hoverBackground, rgba(127,127,127,.16)); }
+    .selection-toolbar .selection-toolbar-separator { flex: 0 0 auto; width: 1px; height: 15px; margin: 0 1px; background: var(--vscode-panel-border); }
+    .selection-toolbar .cursor-chat-action { display: inline-flex; align-items: center; gap: 5px; }
+    .selection-toolbar .cursor-chat-action .add-to-chat-shortcut { display: inline-flex; align-items: center; height: 16px; padding: 0 3px; border: 0; border-radius: 3px; background: var(--vscode-toolbar-hoverBackground, rgba(127,127,127,.16)); color: var(--vscode-input-placeholderForeground, var(--vscode-descriptionForeground, inherit)); font: 10px var(--vscode-font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif); }
     .error { padding: 24px; color: var(--vscode-errorForeground); }
   </style>
 </head>

@@ -353,22 +353,30 @@
     z-index: 20;
     display: flex;
     box-sizing: border-box;
+    width: max-content;
     max-width: calc(100vw - 24px);
-    flex-wrap: wrap;
-    justify-content: center;
-    gap: 4px;
-    padding: 4px;
+    flex-wrap: nowrap;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 1px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 3px;
     transform: translateX(-50%);
     border: 1px solid var(--vscode-panel-border);
-    border-radius: 6px;
+    border-radius: 8px;
     background: var(--vscode-editorWidget-background);
-    box-shadow: 0 4px 16px rgba(0, 0, 0, .3);
+    box-shadow: 0 4px 14px var(--vscode-widget-shadow, rgba(0, 0, 0, .32));
+    scrollbar-width: none;
     font: 12px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   }
+  .selection-toolbar::-webkit-scrollbar { display: none; }
   .selection-toolbar button {
+    flex: 0 0 auto;
+    min-height: 26px;
     border: 0;
-    border-radius: 4px;
-    padding: 4px 8px;
+    border-radius: 5px;
+    padding: 0 8px;
     background: var(--vscode-button-background);
     color: var(--vscode-button-foreground);
     font: inherit;
@@ -383,26 +391,33 @@
     outline-offset: 1px;
   }
   .selection-toolbar .secondary {
-    background: var(--vscode-button-secondaryBackground);
-    color: var(--vscode-button-secondaryForeground);
+    background: transparent;
+    color: var(--vscode-editorWidget-foreground, var(--vscode-foreground, var(--vscode-editor-foreground)));
   }
   .selection-toolbar .secondary:hover {
-    background: var(--vscode-button-secondaryHoverBackground, var(--vscode-button-secondaryBackground));
+    background: var(--vscode-toolbar-hoverBackground, rgba(127,127,127,.16));
+  }
+  .selection-toolbar .selection-toolbar-separator {
+    flex: 0 0 auto;
+    width: 1px;
+    height: 15px;
+    margin: 0 1px;
+    background: var(--vscode-panel-border);
   }
   .selection-toolbar .cursor-chat-action {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
+    gap: 5px;
   }
   .selection-toolbar .cursor-chat-action .add-to-chat-shortcut {
     display: inline-flex;
-    height: 18px;
+    height: 16px;
     align-items: center;
-    padding: 0 4px;
-    border-radius: 4px;
-    background: var(--vscode-toolbar-hoverBackground);
-    color: var(--vscode-input-placeholderForeground);
-    font-size: 11px;
+    padding: 0 3px;
+    border-radius: 3px;
+    background: var(--vscode-toolbar-hoverBackground, rgba(127,127,127,.16));
+    color: var(--vscode-input-placeholderForeground, var(--vscode-descriptionForeground));
+    font-size: 10px;
   }
 </style>
 </head>
