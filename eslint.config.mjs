@@ -79,6 +79,7 @@ export default [
       '.codegraph/**',
       '.playwright-cli/**',
       '.pnpm-store/**',
+      '.superpowers/**',
       'artifacts/**',
       'demo-vault/**',
       'demos/**',

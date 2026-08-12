@@ -9,6 +9,22 @@ import ts from 'typescript';
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
+test('workspace lint ignores generated SDD evidence', async () => {
+  const workspaceRoot = resolve(packageRoot, '..', '..');
+  const eslint = new ESLint({ cwd: workspaceRoot });
+
+  assert.equal(
+    await eslint.isPathIgnored(
+      resolve(workspaceRoot, '.superpowers/sdd/generated/evidence.mjs'),
+    ),
+    true,
+  );
+  assert.equal(
+    await eslint.isPathIgnored(join(packageRoot, 'src', 'extension.ts')),
+    false,
+  );
+});
+
 test('lint permits only the intentional Ask PDF deferral marker', async () => {
   const sourcePath = join(packageRoot, 'src', 'extension.ts');
   const source = readFileSync(sourcePath, 'utf8');
