@@ -40,8 +40,6 @@ interface AgentTarget {
 const CURSOR_COMMAND = 'composer.addfilestocomposer';
 const CURSOR_COMPOSERS_COMMAND = 'composer.getOrderedSelectedComposerIds';
 const CURSOR_OPEN_COMMAND = 'workbench.action.chat.open';
-const CLAUDE_OPEN_COMMAND = 'claude-vscode.sidebar.open';
-const TYPE_COMMAND = 'type';
 const CLAUDE_HANDOFF_COMMANDS = [
   'claude-vscode.insertAtMention',
   'claude-code.insertAtMentioned',
@@ -485,9 +483,15 @@ async function executeAgentHandoff(
 ): Promise<void> {
   if (agent.id === 'claude') {
     const document = await vscode.workspace.openTextDocument(contextUri);
-    const reference = formatClaudeSelectionReference(contextUri, document.lineCount);
-    await vscode.commands.executeCommand(CLAUDE_OPEN_COMMAND);
-    await vscode.commands.executeCommand(TYPE_COMMAND, { text: reference });
+    const editor = await vscode.window.showTextDocument(document, { preview: true });
+    const temporaryTab = vscode.window.tabGroups.activeTabGroup.activeTab;
+    const end = document.lineAt(Math.max(0, document.lineCount - 1)).range.end;
+    editor.selection = new vscode.Selection(new vscode.Position(0, 0), end);
+    try {
+      await vscode.commands.executeCommand(command);
+    } finally {
+      await closeTemporaryClaudeContextTab(temporaryTab, contextUri);
+    }
   } else if (agent.id === 'codex') {
     const attachments = uniqueLocalUris([contextUri, ...attachmentUris]);
     await vscode.commands.executeCommand(command, attachments[0]!);
@@ -508,14 +512,29 @@ async function executeAgentHandoff(
   }
 }
 
-function formatClaudeSelectionReference(
+async function closeTemporaryClaudeContextTab(
+  tab: vscode.Tab | undefined,
   contextUri: vscode.Uri,
-  lineCount: number,
-): string {
-  const relativePath = vscode.workspace
-    .asRelativePath(contextUri)
-    .replaceAll('\\', '/');
-  return `@${relativePath}#1-${Math.max(1, lineCount)} `;
+): Promise<void> {
+  const input = tab?.input as { uri?: vscode.Uri } | undefined;
+  const uri = input?.uri;
+  if (
+    !tab
+    || !uri
+    || uri.scheme !== contextUri.scheme
+    || uri.fsPath !== contextUri.fsPath
+  ) {
+    return;
+  }
+  try {
+    const closed = await vscode.window.tabGroups.close(tab, true);
+    if (closed) return;
+  } catch {
+    // The mention is already in Claude; report only the cleanup failure.
+  }
+  vscode.window.showWarningMessage(
+    'Claude received selection.md, but LLM Wiki could not close the temporary preview.',
+  );
 }
 
 function uniqueLocalUris(uris: readonly vscode.Uri[]): vscode.Uri[] {

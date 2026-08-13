@@ -662,8 +662,9 @@ test('stable active editor tab routes to Codex without private visibility probes
   assert.deepEqual(calls, [['chatgpt.addFileToThread', uri]]);
 });
 
-test('stable visible Claude editor routes there without reopening its sidebar', async () => {
+test('stable visible Claude editor routes there and restores the source tab', async () => {
   const calls = [];
+  const closedTabs = [];
   const uri = {
     scheme: 'file',
     fsPath: '/vault/.llm_wiki/agent/exports/export-id/selection.md',
@@ -680,7 +681,28 @@ test('stable visible Claude editor routes there without reopening its sidebar', 
       input: { viewType: 'claudeVSCodePanel' },
     },
   };
+  const sourceTab = mainGroup.activeTab;
+  const temporaryTab = {
+    input: { uri },
+  };
+  const end = { line: 1, character: 4 };
+  const document = { lineCount: 2, lineAt: () => ({ range: { end } }) };
+  const editor = {};
+  class Position {
+    constructor(line, character) {
+      this.line = line;
+      this.character = character;
+    }
+  }
+  class Selection {
+    constructor(start, finish) {
+      this.start = start;
+      this.end = finish;
+    }
+  }
   const vscode = {
+    Position,
+    Selection,
     commands: {
       getCommands: async () => [
         'chatgpt.addFileToThread',
@@ -699,21 +721,26 @@ test('stable visible Claude editor routes there without reopening its sidebar', 
       ),
     },
     workspace: {
-      asRelativePath: value => {
-        assert.equal(value, uri);
-        return '.llm_wiki/agent/exports/export-id/selection.md';
-      },
+      asRelativePath: () => '.llm_wiki/agent/exports/export-id/selection.md',
       openTextDocument: async value => {
         assert.equal(value, uri);
-        return { lineCount: 2 };
+        return document;
       },
     },
     window: {
       tabGroups: {
         activeTabGroup: mainGroup,
         all: [mainGroup, claudeGroup],
+        close: async (tab, preserveFocus) => {
+          closedTabs.push([tab, preserveFocus]);
+          mainGroup.activeTab = sourceTab;
+          return true;
+        },
       },
-      showTextDocument: () => assert.fail('Claude must not open selection.md'),
+      showTextDocument: async () => {
+        mainGroup.activeTab = temporaryTab;
+        return editor;
+      },
       showQuickPick: () => assert.fail('one visible chat editor should auto-route'),
       showWarningMessage: () => undefined,
     },
@@ -721,19 +748,16 @@ test('stable visible Claude editor routes there without reopening its sidebar', 
   const { handoffSelectionToAgent } = loadAgentHandoff(vscode);
 
   assert.equal(await handoffSelectionToAgent(uri), 'claude');
-  assert.deepEqual(calls, [
-    ['claude-vscode.sidebar.open'],
-    [
-      'type',
-      {
-        text: '@.llm_wiki/agent/exports/export-id/selection.md#1-2 ',
-      },
-    ],
-  ]);
+  assert.equal(editor.selection.start.line, 0);
+  assert.equal(editor.selection.end, end);
+  assert.deepEqual(calls, [['claude-vscode.insertAtMention']]);
+  assert.deepEqual(closedTabs, [[temporaryTab, true]]);
+  assert.equal(mainGroup.activeTab, sourceTab);
 });
 
 test('multiple visible chat editors show a picker narrowed to those stable targets', async () => {
   const calls = [];
+  const closedTabs = [];
   const pickedIds = [];
   const uri = {
     scheme: 'file',
@@ -754,7 +778,28 @@ test('multiple visible chat editors show a picker narrowed to those stable targe
       input: { viewType: 'claudeVSCodePanel' },
     },
   };
+  const sourceTab = mainGroup.activeTab;
+  const temporaryTab = {
+    input: { uri },
+  };
+  const end = { line: 0, character: 2 };
+  const document = { lineCount: 1, lineAt: () => ({ range: { end } }) };
+  const editor = {};
+  class Position {
+    constructor(line, character) {
+      this.line = line;
+      this.character = character;
+    }
+  }
+  class Selection {
+    constructor(start, finish) {
+      this.start = start;
+      this.end = finish;
+    }
+  }
   const vscode = {
+    Position,
+    Selection,
     commands: {
       getCommands: async () => [
         'chatgpt.addFileToThread',
@@ -776,21 +821,26 @@ test('multiple visible chat editors show a picker narrowed to those stable targe
       getExtension: id => ({ id }),
     },
     workspace: {
-      asRelativePath: value => {
-        assert.equal(value, uri);
-        return '.llm_wiki/agent/exports/export-id/selection.md';
-      },
+      asRelativePath: () => '.llm_wiki/agent/exports/export-id/selection.md',
       openTextDocument: async value => {
         assert.equal(value, uri);
-        return { lineCount: 1 };
+        return document;
       },
     },
     window: {
       tabGroups: {
         activeTabGroup: mainGroup,
         all: [mainGroup, codexGroup, claudeGroup],
+        close: async (tab, preserveFocus) => {
+          closedTabs.push([tab, preserveFocus]);
+          mainGroup.activeTab = sourceTab;
+          return true;
+        },
       },
-      showTextDocument: () => assert.fail('Claude must not open selection.md'),
+      showTextDocument: async () => {
+        mainGroup.activeTab = temporaryTab;
+        return editor;
+      },
       showQuickPick: async items => {
         pickedIds.push(...items.map(item => item.id));
         return items.find(item => item.id === 'claude');
@@ -802,15 +852,11 @@ test('multiple visible chat editors show a picker narrowed to those stable targe
 
   assert.equal(await handoffSelectionToAgent(uri), 'claude');
   assert.deepEqual(pickedIds, ['codex', 'claude']);
-  assert.deepEqual(calls, [
-    ['claude-vscode.sidebar.open'],
-    [
-      'type',
-      {
-        text: '@.llm_wiki/agent/exports/export-id/selection.md#1-1 ',
-      },
-    ],
-  ]);
+  assert.equal(editor.selection.start.line, 0);
+  assert.equal(editor.selection.end, end);
+  assert.deepEqual(calls, [['claude-vscode.insertAtMention']]);
+  assert.deepEqual(closedTabs, [[temporaryTab, true]]);
+  assert.equal(mainGroup.activeTab, sourceTab);
 });
 
 test('installed-extension capability check ignores a stale foreign command', async () => {
@@ -1281,11 +1327,43 @@ test('does not treat focus-only Claude as a handoff target', async () => {
 
 test('Claude prefers insert-at-mention so its current draft receives the exact reference', async () => {
   const calls = [];
+  const closedTabs = [];
   const uri = {
     scheme: 'file',
     fsPath: '/vault/.llm_wiki/agent/exports/export-id/selection.md',
   };
+  const sourceTab = {
+    input: {
+      uri: {
+        scheme: 'file',
+        fsPath: '/vault/raw/pdf/source.pdf',
+      },
+    },
+  };
+  const temporaryTab = {
+    input: { uri },
+  };
+  const tabGroup = {
+    activeTab: sourceTab,
+  };
+  const end = { line: 2, character: 7 };
+  const document = { lineCount: 3, lineAt: () => ({ range: { end } }) };
+  const editor = {};
+  class Position {
+    constructor(line, character) {
+      this.line = line;
+      this.character = character;
+    }
+  }
+  class Selection {
+    constructor(start, finish) {
+      this.start = start;
+      this.end = finish;
+    }
+  }
   const vscode = {
+    Position,
+    Selection,
     commands: {
       getCommands: async () => [
         'claude-vscode.sidebar.open',
@@ -1295,17 +1373,26 @@ test('Claude prefers insert-at-mention so its current draft receives the exact r
       executeCommand: async (...args) => calls.push(args),
     },
     workspace: {
-      asRelativePath: value => {
-        assert.equal(value, uri);
-        return '.llm_wiki/agent/exports/export-id/selection.md';
-      },
+      asRelativePath: () => '.llm_wiki/agent/exports/export-id/selection.md',
       openTextDocument: async value => {
         assert.equal(value, uri);
-        return { lineCount: 3 };
+        return document;
       },
     },
     window: {
-      showTextDocument: () => assert.fail('Claude must not open selection.md'),
+      tabGroups: {
+        activeTabGroup: tabGroup,
+        all: [tabGroup],
+        close: async (tab, preserveFocus) => {
+          closedTabs.push([tab, preserveFocus]);
+          tabGroup.activeTab = sourceTab;
+          return true;
+        },
+      },
+      showTextDocument: async () => {
+        tabGroup.activeTab = temporaryTab;
+        return editor;
+      },
       showQuickPick: () => assert.fail('one provider should not prompt'),
       showWarningMessage: () => undefined,
     },
@@ -1313,47 +1400,81 @@ test('Claude prefers insert-at-mention so its current draft receives the exact r
   const { handoffSelectionToAgent } = loadAgentHandoff(vscode);
 
   assert.equal(await handoffSelectionToAgent(uri), 'claude');
-  assert.deepEqual(calls, [
-    ['claude-vscode.sidebar.open'],
-    [
-      'type',
-      {
-        text: '@.llm_wiki/agent/exports/export-id/selection.md#1-3 ',
-      },
-    ],
-  ]);
+  assert.equal(editor.selection.start.line, 0);
+  assert.equal(editor.selection.end, end);
+  assert.deepEqual(calls, [['claude-vscode.insertAtMention']]);
+  assert.deepEqual(closedTabs, [[temporaryTab, true]]);
+  assert.equal(tabGroup.activeTab, sourceTab);
   assert.equal(
     calls.some(([command]) => /submit|send/i.test(command)),
     false,
   );
 });
 
-test('Claude normalizes Windows separators in its direct full-file reference', async () => {
+test('Claude leaves an unmatched tab alone after inserting its full-file reference', async () => {
   const calls = [];
+  const closedTabs = [];
   const uri = {
     scheme: 'file',
-    fsPath: 'C:\\vault\\.llm_wiki\\agent\\exports\\export-id\\selection.md',
+    fsPath: '/vault/.llm_wiki/agent/exports/export-id/selection.md',
   };
+  const unrelatedTab = {
+    input: {
+      uri: {
+        scheme: 'file',
+        fsPath: '/vault/notes/unrelated.md',
+      },
+    },
+  };
+  const document = {
+    lineCount: 1,
+    lineAt: () => ({
+      range: {
+        end: { line: 0, character: 4 },
+      },
+    }),
+  };
+  const editor = {};
+  class Position {
+    constructor(line, character) {
+      this.line = line;
+      this.character = character;
+    }
+  }
+  class Selection {
+    constructor(start, finish) {
+      this.start = start;
+      this.end = finish;
+    }
+  }
   const vscode = {
+    Position,
+    Selection,
     commands: {
       getCommands: async () => [
-        'claude-vscode.sidebar.open',
         'claude-vscode.insertAtMention',
       ],
       executeCommand: async (...args) => calls.push(args),
     },
     workspace: {
-      asRelativePath: value => {
-        assert.equal(value, uri);
-        return '.llm_wiki\\agent\\exports\\export-id\\selection.md';
-      },
+      asRelativePath: () => '.llm_wiki/agent/exports/export-id/selection.md',
       openTextDocument: async value => {
         assert.equal(value, uri);
-        return { lineCount: 1 };
+        return document;
       },
     },
     window: {
-      showTextDocument: () => assert.fail('Claude must not open selection.md'),
+      tabGroups: {
+        activeTabGroup: {
+          activeTab: unrelatedTab,
+        },
+        all: [],
+        close: async (...args) => {
+          closedTabs.push(args);
+          return true;
+        },
+      },
+      showTextDocument: async () => editor,
       showQuickPick: () => assert.fail('one provider should not prompt'),
       showWarningMessage: () => undefined,
     },
@@ -1361,15 +1482,8 @@ test('Claude normalizes Windows separators in its direct full-file reference', a
   const { handoffSelectionToAgent } = loadAgentHandoff(vscode);
 
   assert.equal(await handoffSelectionToAgent(uri), 'claude');
-  assert.deepEqual(calls, [
-    ['claude-vscode.sidebar.open'],
-    [
-      'type',
-      {
-        text: '@.llm_wiki/agent/exports/export-id/selection.md#1-1 ',
-      },
-    ],
-  ]);
+  assert.deepEqual(calls, [['claude-vscode.insertAtMention']]);
+  assert.deepEqual(closedTabs, []);
 });
 
 test('keeps the exported files when no supported agent is installed', async () => {
