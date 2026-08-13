@@ -1,12 +1,3 @@
----
-type: "Reference"
-title: "LLM Wiki"
-description: "An OKF v0.2 Nanochat knowledge bundle and the VS Code/Cursor extension used to explore it."
-tags: ["language-models", "open-knowledge-format", "project-nanochat"]
-status: "stable"
-generated: {"by": "codex/gpt-5.6", "at": "2026-08-13T00:00:00Z"}
----
-
 # LLM Wiki
 
 LLM Wiki is a local-first learning and research workspace for VS Code and
@@ -14,37 +5,12 @@ Cursor. Open a normal Git repository, study Markdown, PDFs, source code, and
 selected web passages, hand exact source context to an installed coding agent,
 and keep durable learning notes connected to the material that produced them.
 
-This repository is also a source-backed Open Knowledge Format (OKF) v0.2
-bundle about Andrej Karpathy's Nanochat. The knowledge bundle and the extension
-live together at the repository root so the same Markdown, PDFs, provenance,
-indexes, and pinned source tree are directly readable in GitHub, VS Code, and
-Cursor.
-
 The combined VS Code extension is the product. It is local-first,
 filesystem-first, and intentionally has no separate web service, account,
 database, or mobile app.
 
 For the complete design and integration guide, see
 [Architecture and VS Code Integration](docs/architecture-and-vscode-integration.md).
-
-## Start with the Nanochat wiki
-
-- Open the [OKF bundle index](index.md) for one-level navigation.
-- Follow the [Nanochat end-to-end training pipeline](summaries/nanochat-end-to-end-training-pipeline.md).
-- Browse focused [concepts](concepts/index.md), durable [queries](queries/index.md),
-  and decision-oriented [comparisons](comparisons/index.md).
-- Inspect the exact pinned [Nanochat project](projects/index.md).
-- Trace claims into immutable [research evidence](raw/index.md) and archived PDFs.
-- Read the [schema](SCHEMA.md) and [operator handbook](AGENTS.md) before
-  changing the bundle.
-
-Clone with Git LFS and initialize the pinned Nanochat source:
-
-```bash
-git lfs install
-git submodule update --init --recursive
-git lfs pull
-```
 
 ## Learning loop
 
@@ -106,7 +72,7 @@ Provider adapters use the capabilities exposed by installed extensions:
 | Target | Draft handoff | Optional image behavior |
 | --- | --- | --- |
 | Codex | Adds each immutable local file to the current thread draft | Adds `selection.png` separately when supported |
-| Claude Code | Inserts a full-file semantic reference such as `@.llm_wiki/agent/exports/<id>/selection.md#1-10`; VS Code targets the Claude sidebar, while Cursor opens the full Claude editor beside the source | Makes the crop available through a relative `selection.png` link inside the Markdown; no native image-attachment API is claimed |
+| Claude Code | Inserts a full-file semantic reference such as `@.llm_wiki/agent/exports/<id>/selection.md#1-10`; VS Code targets the Claude sidebar, while Cursor opens the full Claude editor beside the source | Makes the crop available through the relative `[selection.png](./selection.png)` link inside the Markdown; no native image-attachment API is claimed |
 | Cursor Agent | Adds the immutable files to the selected composer as exact resources | Adds the validated crop separately |
 | CodeBuddy | Adds `selection.md` as the primary context and sends one attachment batch | Includes the validated crop in that batch |
 
@@ -269,8 +235,8 @@ pnpm exec playwright test --config playwright.config.ts
 
 In VS Code, open this repository and run the **Launch LLM Wiki
 Extension** debug configuration (`F5`). It builds the combined package and
-opens the repository-root OKF bundle in an Extension Development Host. The same
-extension entry point can be launched in Cursor.
+opens `demo-vault` in an Extension Development Host. The same extension entry
+point can be launched in Cursor.
 
 The root `pnpm build`, `pnpm test`, and `pnpm check` commands cover the complete
 repository.

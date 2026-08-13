@@ -29,7 +29,7 @@ Use the repository's ingester. It should:
 Example:
 
 ```bash
-python3 tools/okf/ingest_arxiv.py \
+python3 ../tools/demo-vault/ingest_arxiv.py \
   --vault . \
   --id 1508.07909v5
 ```

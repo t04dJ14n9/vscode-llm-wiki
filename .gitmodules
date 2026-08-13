@@ -1,3 +1,3 @@
-[submodule "projects/code/nanochat"]
-	path = projects/code/nanochat
+[submodule "demo-vault/projects/code/nanochat"]
+	path = demo-vault/projects/code/nanochat
 	url = https://github.com/karpathy/nanochat.git

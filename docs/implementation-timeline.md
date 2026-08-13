@@ -33,7 +33,7 @@
 | `llm_wiki search --mode lexical` | 2d | BM25 via FTS5, JSON output for agents |
 
 **Deliverables**:
-- `python3 tools/okf/validate_vault.py --vault .` succeeds
+- `llm_wiki init demo-vault && llm_wiki doctor --json` succeeds
 - `llm_wiki ingest notes/ && llm_wiki search "FlashAttention" --json` returns results
 
 **Risk**: better-sqlite3 native compilation. Verify VS Code extension host + Electron compatibility during this phase. If problematic, evaluate `sql.js` (WASM) as fallback.

@@ -8,7 +8,7 @@
       "args": [
         "--new-window",
         "--extensionDevelopmentPath=${workspaceFolder}/packages/vscode-extension",
-        "${workspaceFolder}"
+        "${workspaceFolder}/demo-vault"
       ],
       "outFiles": [
         "${workspaceFolder}/packages/vscode-extension/dist/**/*.js"

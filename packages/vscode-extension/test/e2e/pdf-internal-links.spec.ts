@@ -1,8 +1,15 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
+import { existsSync } from 'node:fs';
+import { resolve } from 'node:path';
 
 const viewerUrl = 'http://localhost:8979/pdf-viewer.html?fixture=internal-destinations';
 const shiftedContentsUrl = 'http://localhost:8979/pdf-viewer.html?fixture=shifted-contents-links';
 const shiftedSingleLinkUrl = 'http://localhost:8979/pdf-viewer.html?fixture=shifted-single-link';
+const ddiaViewerUrl = 'http://localhost:8979/pdf-viewer.html?fixture=ddia-local';
+const localDdiaAvailable = existsSync(resolve(
+  process.cwd(),
+  'demo-vault/raw/pdf/ddia.pdf',
+));
 
 test('embedded figure and section destinations become accessible link overlays', async ({ page }) => {
   await openInternalDestinationsFixture(page);
@@ -400,6 +407,188 @@ test('same-page punctuated figure captions focus the figure instead of nearby so
   expect(geometry.focusTopAboveArtwork).toBeGreaterThan(40);
   expect(geometry.focusBottomBelowCaption).toBeGreaterThanOrEqual(0);
   expect(geometry.sourceOverlapArea).toBe(0);
+  await expect(page.locator('#pdf-history-back')).toBeHidden();
+});
+
+test('real DDIA links cover Chapter 2 and Figure 3-9 without covering ordinary schema text', async ({ page }) => {
+  test.skip(!localDdiaAvailable, 'Local DDIA regression corpus is not available');
+  test.setTimeout(60_000);
+
+  await page.setViewportSize({ width: 1_200, height: 900 });
+  await page.goto(ddiaViewerUrl);
+  await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 613/, {
+    timeout: 30_000,
+  });
+
+  const pageInput = page.getByRole('spinbutton', { name: 'Page' });
+  await pageInput.fill('115');
+  await pageInput.press('Enter');
+  await expectCurrentPage(page, 115, 613);
+  await expect(page.locator('#page-115 .text-layer')).toContainText(
+    'Stars and Snowflakes: Schemas for Analytics',
+    { timeout: 30_000 },
+  );
+
+  const chapterLink = page.locator(
+    '#page-115 .pdf-link-overlay[data-target-page="49"]',
+  );
+  const figureLink = page.locator(
+    '#page-115 .pdf-link-overlay[data-target-page="116"]',
+  );
+  await expect(chapterLink).toHaveCount(1);
+  await expect(figureLink).toHaveCount(1);
+  await expect(chapterLink).toHaveAttribute('title', /^Go to Chapter 2\b/);
+  await expect(figureLink).toHaveAttribute('title', /^Go to Figure 3-9\b/);
+  await expect(chapterLink).toHaveAttribute('aria-label', /Chapter 2.*page 49/i);
+  await expect(figureLink).toHaveAttribute('aria-label', /Figure 3-9.*page 116/i);
+
+  const geometry = await page.evaluate(() => {
+    const textSpans = Array.from(
+      document.querySelectorAll<HTMLElement>(
+        '#page-115 .text-layer span[data-item-index]',
+      ),
+    );
+    const byText = (text: string) => {
+      const span = textSpans.find(candidate => candidate.textContent?.includes(text));
+      if (!span) throw new Error(`Missing DDIA text run: ${text}`);
+      return span;
+    };
+    const overlap = (left: DOMRect, right: DOMRect) => ({
+      horizontal: Math.max(
+        0,
+        Math.min(left.right, right.right) - Math.max(left.left, right.left),
+      ),
+      vertical: Math.max(
+        0,
+        Math.min(left.bottom, right.bottom) - Math.max(left.top, right.top),
+      ),
+    });
+    const measure = (text: string, targetPage: string) => {
+      const label = byText(text).getBoundingClientRect();
+      const fragment = document.querySelector<HTMLElement>(
+        `#page-115 .pdf-link-overlay[data-target-page="${targetPage}"] `
+        + '.pdf-link-hit-fragment',
+      )?.getBoundingClientRect();
+      if (!fragment) throw new Error(`Missing DDIA link fragment: ${text}`);
+      const intersection = overlap(label, fragment);
+      const centerLink = document.elementFromPoint(
+        (label.left + label.right) / 2,
+        (label.top + label.bottom) / 2,
+      )?.closest<HTMLElement>('.pdf-link-overlay');
+      return {
+        horizontalCoverage: intersection.horizontal / Math.min(label.width, fragment.width),
+        verticalCoverage: intersection.vertical / Math.min(label.height, fragment.height),
+        centerTargetPage: centerLink?.dataset.targetPage ?? null,
+      };
+    };
+
+    const ordinarySchema = byText('The example schema in').getBoundingClientRect();
+    const schemaLink = document.elementFromPoint(
+      ordinarySchema.left + ordinarySchema.width * 0.78,
+      (ordinarySchema.top + ordinarySchema.bottom) / 2,
+    )?.closest<HTMLElement>('.pdf-link-overlay');
+    return {
+      chapter: measure('Chapter 2', '49'),
+      figure: measure('Figure 3-9', '116'),
+      ordinarySchemaTargetPage: schemaLink?.dataset.targetPage ?? null,
+    };
+  });
+
+  expect(geometry.chapter.horizontalCoverage).toBeGreaterThan(0.9);
+  expect(geometry.chapter.verticalCoverage).toBeGreaterThan(0.9);
+  expect(geometry.chapter.centerTargetPage).toBe('49');
+  expect(geometry.figure.horizontalCoverage).toBeGreaterThan(0.9);
+  expect(geometry.figure.verticalCoverage).toBeGreaterThan(0.9);
+  expect(geometry.figure.centerTargetPage).toBe('116');
+  expect(geometry.ordinarySchemaTargetPage).toBeNull();
+
+  await chapterLink.locator('.pdf-link-hit-fragment').click();
+  await expectCurrentPage(page, 49, 613);
+  await page.locator('#pdf-history-back').click();
+  await expectCurrentPage(page, 115, 613);
+  await figureLink.locator('.pdf-link-hit-fragment').click();
+  await expectCurrentPage(page, 116, 613);
+});
+
+test('real DDIA Figure 3-12 focuses its figure and caption instead of the source prose', async ({ page }) => {
+  test.skip(!localDdiaAvailable, 'Local DDIA regression corpus is not available');
+  test.setTimeout(60_000);
+
+  await page.setViewportSize({ width: 1_200, height: 900 });
+  await page.goto(ddiaViewerUrl);
+  await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 613/, {
+    timeout: 30_000,
+  });
+
+  const pageInput = page.getByRole('spinbutton', { name: 'Page' });
+  await pageInput.fill('124');
+  await pageInput.press('Enter');
+  await expectCurrentPage(page, 124, 613);
+  await expect(page.locator('#page-124 .text-layer')).toContainText(
+    'Figure 3-12. Two dimensions of a data cube',
+    { timeout: 30_000 },
+  );
+
+  const zoomInput = page.getByRole('spinbutton', { name: 'Zoom' });
+  await zoomInput.fill('169');
+  await zoomInput.press('Enter');
+  await expect(zoomInput).toHaveValue('169');
+
+  const figureLink = page.locator(
+    '#page-124 .pdf-link-overlay[data-target-page="124"][title*="Figure 3-12 shows an"]',
+  ).first();
+  await expect(figureLink).toBeVisible();
+  await figureLink.locator('.pdf-link-hit-fragment').first().click();
+  await expectCurrentPage(page, 124, 613);
+
+  const focus = page.locator('#page-124 .highlight-layer .pdf-destination-focus');
+  await expect(focus).toBeVisible();
+  const geometry = await page.evaluate(() => {
+    const spans = Array.from(document.querySelectorAll<HTMLElement>(
+      '#page-124 .text-layer span[data-item-index]',
+    ));
+    const byText = (predicate: (text: string) => boolean, label: string) => {
+      const span = spans.find((candidate) => predicate(candidate.textContent?.trim() ?? ''));
+      if (!span) throw new Error(`Missing DDIA ${label} text run`);
+      return span.getBoundingClientRect();
+    };
+    const intersection = (left: DOMRect, right: DOMRect) => ({
+      width: Math.max(
+        0,
+        Math.min(left.right, right.right) - Math.max(left.left, right.left),
+      ),
+      height: Math.max(
+        0,
+        Math.min(left.bottom, right.bottom) - Math.max(left.top, right.top),
+      ),
+    });
+    const focusRect = document.querySelector<HTMLElement>(
+      '#page-124 .highlight-layer .pdf-destination-focus',
+    )!.getBoundingClientRect();
+    const captionRect = byText(
+      text => text.startsWith('Figure 3-12. Two dimensions'),
+      'Figure 3-12 caption',
+    );
+    const sourceSuffixRect = byText(
+      text => text === 'example.',
+      'Figure 3-12 source suffix',
+    );
+    const captionOverlap = intersection(focusRect, captionRect);
+    const sourceSuffixOverlap = intersection(focusRect, sourceSuffixRect);
+    return {
+      captionCoverage: {
+        horizontal: captionOverlap.width / captionRect.width,
+        vertical: captionOverlap.height / captionRect.height,
+      },
+      focusTopAboveCaption: captionRect.top - focusRect.top,
+      sourceSuffixOverlapArea: sourceSuffixOverlap.width * sourceSuffixOverlap.height,
+    };
+  });
+
+  expect(geometry.captionCoverage.horizontal).toBeGreaterThan(0.9);
+  expect(geometry.captionCoverage.vertical).toBeGreaterThan(0.9);
+  expect(geometry.focusTopAboveCaption).toBeGreaterThan(40);
+  expect(geometry.sourceSuffixOverlapArea).toBe(0);
   await expect(page.locator('#pdf-history-back')).toBeHidden();
 });
 
