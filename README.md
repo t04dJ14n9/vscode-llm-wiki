@@ -72,16 +72,17 @@ Provider adapters use the capabilities exposed by installed extensions:
 | Target | Draft handoff | Optional image behavior |
 | --- | --- | --- |
 | Codex | Adds each immutable local file to the current thread draft | Adds `selection.png` separately when supported |
-| Claude Code | Inserts a full-file semantic reference such as `@.llm_wiki/agent/exports/<id>/selection.md#1-10` | Reads the relative `[selection.png](./selection.png)` link inside the Markdown; no native image-attachment API is claimed |
+| Claude Code | Inserts a full-file semantic reference such as `@.llm_wiki/agent/exports/<id>/selection.md#1-10` | Makes the crop available through the relative `[selection.png](./selection.png)` link inside the Markdown; no native image-attachment API is claimed |
 | Cursor Agent | Adds the immutable files to the selected composer as exact resources | Adds the validated crop separately |
 | CodeBuddy | Adds `selection.md` as the primary context and sends one attachment batch | Includes the validated crop in that batch |
 
 Claude Code's public command currently derives an at-mention from an active
-native text-editor selection rather than accepting a file URI. LLM Wiki uses
-that supported command, then closes the exact temporary preview tab and
-returns the learner to the source PDF or Markdown editor. The resulting draft
-contains the complete immutable file reference without leaving
-`selection.md` open.
+native text-editor selection rather than accepting a file URI. LLM Wiki opens
+the immutable export in a separate temporary editor group, uses that supported
+command, closes only the tab it created, and explicitly restores the source PDF
+or Markdown editor. A `selection.md` tab that was already open is left alone.
+The resulting draft contains the complete immutable file reference without
+leaving a new export tab behind.
 
 Handoffs are deliberately draft-only. LLM Wiki never presses Send, and an
 optional crop failure does not discard the verified text context.

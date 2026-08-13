@@ -669,22 +669,42 @@ test('stable visible Claude editor routes there and restores the source tab', as
     scheme: 'file',
     fsPath: '/vault/.llm_wiki/agent/exports/export-id/selection.md',
   };
-  const mainGroup = {
-    activeTab: {
-      input: {
-        uri: { scheme: 'file' },
-      },
+  const sourceUri = {
+    scheme: 'file',
+    fsPath: '/vault/raw/pdf/source.pdf',
+  };
+  const sourceTab = {
+    input: {
+      uri: sourceUri,
+      viewType: 'llm-wiki.pdfViewer',
     },
+    isPreview: true,
+  };
+  const mainGroup = {
+    viewColumn: 1,
+    activeTab: sourceTab,
+    tabs: [sourceTab],
+  };
+  const claudeTab = {
+    input: { viewType: 'claudeVSCodePanel' },
+    isPreview: false,
   };
   const claudeGroup = {
-    activeTab: {
-      input: { viewType: 'claudeVSCodePanel' },
-    },
+    viewColumn: 2,
+    activeTab: claudeTab,
+    tabs: [claudeTab],
   };
-  const sourceTab = mainGroup.activeTab;
   const temporaryTab = {
     input: { uri },
+    isPreview: true,
   };
+  const temporaryGroup = {
+    viewColumn: 3,
+    activeTab: temporaryTab,
+    tabs: [temporaryTab],
+  };
+  const groups = [mainGroup, claudeGroup];
+  let activeGroup = mainGroup;
   const end = { line: 1, character: 4 };
   const document = { lineCount: 2, lineAt: () => ({ range: { end } }) };
   const editor = {};
@@ -703,6 +723,9 @@ test('stable visible Claude editor routes there and restores the source tab', as
   const vscode = {
     Position,
     Selection,
+    ViewColumn: {
+      Beside: 99,
+    },
     commands: {
       getCommands: async () => [
         'chatgpt.addFileToThread',
@@ -710,7 +733,15 @@ test('stable visible Claude editor routes there and restores the source tab', as
         'claude-vscode.insertAtMention',
         'claude-vscode.focus',
       ],
-      executeCommand: async (...args) => calls.push(args),
+      executeCommand: async (...args) => {
+        calls.push(args);
+        if (args[0] === 'claude-vscode.insertAtMention') {
+          activeGroup = claudeGroup;
+        }
+        if (args[0] === 'vscode.openWith') {
+          activeGroup = mainGroup;
+        }
+      },
     },
     extensions: {
       getExtension: id => (
@@ -721,7 +752,6 @@ test('stable visible Claude editor routes there and restores the source tab', as
       ),
     },
     workspace: {
-      asRelativePath: () => '.llm_wiki/agent/exports/export-id/selection.md',
       openTextDocument: async value => {
         assert.equal(value, uri);
         return document;
@@ -729,16 +759,27 @@ test('stable visible Claude editor routes there and restores the source tab', as
     },
     window: {
       tabGroups: {
-        activeTabGroup: mainGroup,
-        all: [mainGroup, claudeGroup],
+        get activeTabGroup() {
+          return activeGroup;
+        },
+        get all() {
+          return groups;
+        },
         close: async (tab, preserveFocus) => {
           closedTabs.push([tab, preserveFocus]);
-          mainGroup.activeTab = sourceTab;
+          const index = groups.indexOf(temporaryGroup);
+          if (index >= 0) groups.splice(index, 1);
           return true;
         },
       },
-      showTextDocument: async () => {
-        mainGroup.activeTab = temporaryTab;
+      showTextDocument: async (value, options) => {
+        assert.equal(value, document);
+        assert.deepEqual(options, {
+          preview: false,
+          viewColumn: vscode.ViewColumn.Beside,
+        });
+        groups.push(temporaryGroup);
+        activeGroup = temporaryGroup;
         return editor;
       },
       showQuickPick: () => assert.fail('one visible chat editor should auto-route'),
@@ -750,38 +791,74 @@ test('stable visible Claude editor routes there and restores the source tab', as
   assert.equal(await handoffSelectionToAgent(uri), 'claude');
   assert.equal(editor.selection.start.line, 0);
   assert.equal(editor.selection.end, end);
-  assert.deepEqual(calls, [['claude-vscode.insertAtMention']]);
+  assert.deepEqual(calls, [
+    ['claude-vscode.insertAtMention'],
+    [
+      'vscode.openWith',
+      sourceUri,
+      'llm-wiki.pdfViewer',
+      {
+        viewColumn: 1,
+        preserveFocus: false,
+        preview: true,
+      },
+    ],
+  ]);
   assert.deepEqual(closedTabs, [[temporaryTab, true]]);
-  assert.equal(mainGroup.activeTab, sourceTab);
+  assert.equal(activeGroup, mainGroup);
 });
 
 test('multiple visible chat editors show a picker narrowed to those stable targets', async () => {
   const calls = [];
   const closedTabs = [];
   const pickedIds = [];
+  const restoredDocuments = [];
   const uri = {
     scheme: 'file',
-    fsPath: '/vault/.llm_wiki/agent/selection.md',
+    fsPath: '/vault/.llm_wiki/agent/exports/export-id/selection.md',
+  };
+  const sourceUri = {
+    scheme: 'file',
+    fsPath: '/vault/notes/source.md',
+  };
+  const sourceTab = {
+    input: { uri: sourceUri },
+    isPreview: false,
   };
   const mainGroup = {
-    activeTab: {
-      input: { uri: { scheme: 'file' } },
-    },
+    viewColumn: 1,
+    activeTab: sourceTab,
+    tabs: [sourceTab],
+  };
+  const codexTab = {
+    input: { viewType: 'chatgpt.conversationEditor' },
+    isPreview: false,
   };
   const codexGroup = {
-    activeTab: {
-      input: { viewType: 'chatgpt.conversationEditor' },
-    },
+    viewColumn: 2,
+    activeTab: codexTab,
+    tabs: [codexTab],
+  };
+  const claudeTab = {
+    input: { viewType: 'claudeVSCodePanel' },
+    isPreview: false,
   };
   const claudeGroup = {
-    activeTab: {
-      input: { viewType: 'claudeVSCodePanel' },
-    },
+    viewColumn: 3,
+    activeTab: claudeTab,
+    tabs: [claudeTab],
   };
-  const sourceTab = mainGroup.activeTab;
   const temporaryTab = {
     input: { uri },
+    isPreview: true,
   };
+  const temporaryGroup = {
+    viewColumn: 4,
+    activeTab: temporaryTab,
+    tabs: [temporaryTab],
+  };
+  const groups = [mainGroup, codexGroup, claudeGroup];
+  let activeGroup = mainGroup;
   const end = { line: 0, character: 2 };
   const document = { lineCount: 1, lineAt: () => ({ range: { end } }) };
   const editor = {};
@@ -800,6 +877,9 @@ test('multiple visible chat editors show a picker narrowed to those stable targe
   const vscode = {
     Position,
     Selection,
+    ViewColumn: {
+      Beside: 99,
+    },
     commands: {
       getCommands: async () => [
         'chatgpt.addFileToThread',
@@ -815,13 +895,15 @@ test('multiple visible chat editors show a picker narrowed to those stable targe
         if (args[0] === 'composer.getOrderedSelectedComposerIds') {
           assert.fail('stable editor targets should narrow before Cursor probes');
         }
+        if (args[0] === 'claude-vscode.insertAtMention') {
+          activeGroup = claudeGroup;
+        }
       },
     },
     extensions: {
       getExtension: id => ({ id }),
     },
     workspace: {
-      asRelativePath: () => '.llm_wiki/agent/exports/export-id/selection.md',
       openTextDocument: async value => {
         assert.equal(value, uri);
         return document;
@@ -829,17 +911,32 @@ test('multiple visible chat editors show a picker narrowed to those stable targe
     },
     window: {
       tabGroups: {
-        activeTabGroup: mainGroup,
-        all: [mainGroup, codexGroup, claudeGroup],
+        get activeTabGroup() {
+          return activeGroup;
+        },
+        get all() {
+          return groups;
+        },
         close: async (tab, preserveFocus) => {
           closedTabs.push([tab, preserveFocus]);
-          mainGroup.activeTab = sourceTab;
+          const index = groups.indexOf(temporaryGroup);
+          if (index >= 0) groups.splice(index, 1);
           return true;
         },
       },
-      showTextDocument: async () => {
-        mainGroup.activeTab = temporaryTab;
-        return editor;
+      showTextDocument: async (value, options) => {
+        if (value === document) {
+          assert.deepEqual(options, {
+            preview: false,
+            viewColumn: vscode.ViewColumn.Beside,
+          });
+          groups.push(temporaryGroup);
+          activeGroup = temporaryGroup;
+          return editor;
+        }
+        restoredDocuments.push([value, options]);
+        activeGroup = mainGroup;
+        return {};
       },
       showQuickPick: async items => {
         pickedIds.push(...items.map(item => item.id));
@@ -856,7 +953,15 @@ test('multiple visible chat editors show a picker narrowed to those stable targe
   assert.equal(editor.selection.end, end);
   assert.deepEqual(calls, [['claude-vscode.insertAtMention']]);
   assert.deepEqual(closedTabs, [[temporaryTab, true]]);
-  assert.equal(mainGroup.activeTab, sourceTab);
+  assert.deepEqual(restoredDocuments, [[
+    sourceUri,
+    {
+      viewColumn: 1,
+      preserveFocus: false,
+      preview: false,
+    },
+  ]]);
+  assert.equal(activeGroup, mainGroup);
 });
 
 test('installed-extension capability check ignores a stale foreign command', async () => {
@@ -1332,20 +1437,41 @@ test('Claude prefers insert-at-mention so its current draft receives the exact r
     scheme: 'file',
     fsPath: '/vault/.llm_wiki/agent/exports/export-id/selection.md',
   };
+  const sourceUri = {
+    scheme: 'file',
+    fsPath: '/vault/raw/pdf/source.pdf',
+  };
   const sourceTab = {
     input: {
-      uri: {
-        scheme: 'file',
-        fsPath: '/vault/raw/pdf/source.pdf',
-      },
+      uri: sourceUri,
+      viewType: 'llm-wiki.pdfViewer',
     },
+    isPreview: true,
   };
   const temporaryTab = {
     input: { uri },
+    isPreview: true,
   };
-  const tabGroup = {
+  const sourceGroup = {
+    viewColumn: 1,
     activeTab: sourceTab,
+    tabs: [sourceTab],
   };
+  const temporaryGroup = {
+    viewColumn: 2,
+    activeTab: temporaryTab,
+    tabs: [temporaryTab],
+  };
+  const claudeGroup = {
+    viewColumn: 3,
+    activeTab: {
+      input: { viewType: 'claudeVSCodePanel' },
+      isPreview: false,
+    },
+    tabs: [],
+  };
+  const groups = [sourceGroup];
+  let activeGroup = sourceGroup;
   const end = { line: 2, character: 7 };
   const document = { lineCount: 3, lineAt: () => ({ range: { end } }) };
   const editor = {};
@@ -1364,16 +1490,26 @@ test('Claude prefers insert-at-mention so its current draft receives the exact r
   const vscode = {
     Position,
     Selection,
+    ViewColumn: {
+      Beside: 99,
+    },
     commands: {
       getCommands: async () => [
         'claude-vscode.sidebar.open',
         'claude-vscode.insertAtMention',
         'claude-vscode.focus',
       ],
-      executeCommand: async (...args) => calls.push(args),
+      executeCommand: async (...args) => {
+        calls.push(args);
+        if (args[0] === 'claude-vscode.insertAtMention') {
+          activeGroup = claudeGroup;
+        }
+        if (args[0] === 'vscode.openWith') {
+          activeGroup = sourceGroup;
+        }
+      },
     },
     workspace: {
-      asRelativePath: () => '.llm_wiki/agent/exports/export-id/selection.md',
       openTextDocument: async value => {
         assert.equal(value, uri);
         return document;
@@ -1381,16 +1517,27 @@ test('Claude prefers insert-at-mention so its current draft receives the exact r
     },
     window: {
       tabGroups: {
-        activeTabGroup: tabGroup,
-        all: [tabGroup],
+        get activeTabGroup() {
+          return activeGroup;
+        },
+        get all() {
+          return groups;
+        },
         close: async (tab, preserveFocus) => {
           closedTabs.push([tab, preserveFocus]);
-          tabGroup.activeTab = sourceTab;
+          const index = groups.indexOf(temporaryGroup);
+          if (index >= 0) groups.splice(index, 1);
           return true;
         },
       },
-      showTextDocument: async () => {
-        tabGroup.activeTab = temporaryTab;
+      showTextDocument: async (value, options) => {
+        assert.equal(value, document);
+        assert.deepEqual(options, {
+          preview: false,
+          viewColumn: vscode.ViewColumn.Beside,
+        });
+        groups.push(temporaryGroup);
+        activeGroup = temporaryGroup;
         return editor;
       },
       showQuickPick: () => assert.fail('one provider should not prompt'),
@@ -1402,30 +1549,61 @@ test('Claude prefers insert-at-mention so its current draft receives the exact r
   assert.equal(await handoffSelectionToAgent(uri), 'claude');
   assert.equal(editor.selection.start.line, 0);
   assert.equal(editor.selection.end, end);
-  assert.deepEqual(calls, [['claude-vscode.insertAtMention']]);
+  assert.deepEqual(calls, [
+    ['claude-vscode.insertAtMention'],
+    [
+      'vscode.openWith',
+      sourceUri,
+      'llm-wiki.pdfViewer',
+      {
+        viewColumn: 1,
+        preserveFocus: false,
+        preview: true,
+      },
+    ],
+  ]);
   assert.deepEqual(closedTabs, [[temporaryTab, true]]);
-  assert.equal(tabGroup.activeTab, sourceTab);
+  assert.equal(activeGroup, sourceGroup);
   assert.equal(
     calls.some(([command]) => /submit|send/i.test(command)),
     false,
   );
 });
 
-test('Claude leaves an unmatched tab alone after inserting its full-file reference', async () => {
+test('Claude preserves a pre-existing selection tab while restoring the source', async () => {
   const calls = [];
   const closedTabs = [];
   const uri = {
     scheme: 'file',
     fsPath: '/vault/.llm_wiki/agent/exports/export-id/selection.md',
   };
-  const unrelatedTab = {
-    input: {
-      uri: {
-        scheme: 'file',
-        fsPath: '/vault/notes/unrelated.md',
-      },
-    },
+  const sourceUri = {
+    scheme: 'file',
+    fsPath: '/vault/raw/pdf/source.pdf',
   };
+  const sourceTab = {
+    input: {
+      uri: sourceUri,
+      viewType: 'llm-wiki.pdfViewer',
+    },
+    isPreview: true,
+  };
+  const existingSelectionTab = {
+    input: { uri },
+    isPreview: false,
+  };
+  const sourceGroup = {
+    viewColumn: 1,
+    activeTab: sourceTab,
+    tabs: [sourceTab],
+  };
+  const selectionGroup = {
+    viewColumn: 2,
+    activeTab: existingSelectionTab,
+    tabs: [existingSelectionTab],
+  };
+  const groups = [sourceGroup, selectionGroup];
+  let activeGroup = sourceGroup;
   const document = {
     lineCount: 1,
     lineAt: () => ({
@@ -1450,14 +1628,21 @@ test('Claude leaves an unmatched tab alone after inserting its full-file referen
   const vscode = {
     Position,
     Selection,
+    ViewColumn: {
+      Beside: 99,
+    },
     commands: {
       getCommands: async () => [
         'claude-vscode.insertAtMention',
       ],
-      executeCommand: async (...args) => calls.push(args),
+      executeCommand: async (...args) => {
+        calls.push(args);
+        if (args[0] === 'vscode.openWith') {
+          activeGroup = sourceGroup;
+        }
+      },
     },
     workspace: {
-      asRelativePath: () => '.llm_wiki/agent/exports/export-id/selection.md',
       openTextDocument: async value => {
         assert.equal(value, uri);
         return document;
@@ -1465,16 +1650,26 @@ test('Claude leaves an unmatched tab alone after inserting its full-file referen
     },
     window: {
       tabGroups: {
-        activeTabGroup: {
-          activeTab: unrelatedTab,
+        get activeTabGroup() {
+          return activeGroup;
         },
-        all: [],
+        get all() {
+          return groups;
+        },
         close: async (...args) => {
           closedTabs.push(args);
           return true;
         },
       },
-      showTextDocument: async () => editor,
+      showTextDocument: async (value, options) => {
+        assert.equal(value, document);
+        assert.deepEqual(options, {
+          preview: false,
+          viewColumn: vscode.ViewColumn.Beside,
+        });
+        activeGroup = selectionGroup;
+        return editor;
+      },
       showQuickPick: () => assert.fail('one provider should not prompt'),
       showWarningMessage: () => undefined,
     },
@@ -1482,8 +1677,142 @@ test('Claude leaves an unmatched tab alone after inserting its full-file referen
   const { handoffSelectionToAgent } = loadAgentHandoff(vscode);
 
   assert.equal(await handoffSelectionToAgent(uri), 'claude');
-  assert.deepEqual(calls, [['claude-vscode.insertAtMention']]);
+  assert.deepEqual(calls, [
+    ['claude-vscode.insertAtMention'],
+    [
+      'vscode.openWith',
+      sourceUri,
+      'llm-wiki.pdfViewer',
+      {
+        viewColumn: 1,
+        preserveFocus: false,
+        preview: true,
+      },
+    ],
+  ]);
   assert.deepEqual(closedTabs, []);
+  assert.equal(activeGroup, sourceGroup);
+});
+
+test('Claude does not claim delivery when insertion and cleanup both fail', async () => {
+  const calls = [];
+  const warnings = [];
+  const uri = {
+    scheme: 'file',
+    fsPath: '/vault/.llm_wiki/agent/exports/export-id/selection.md',
+  };
+  const sourceUri = {
+    scheme: 'file',
+    fsPath: '/vault/raw/pdf/source.pdf',
+  };
+  const sourceTab = {
+    input: {
+      uri: sourceUri,
+      viewType: 'llm-wiki.pdfViewer',
+    },
+    isPreview: true,
+  };
+  const temporaryTab = {
+    input: { uri },
+    isPreview: true,
+  };
+  const sourceGroup = {
+    viewColumn: 1,
+    activeTab: sourceTab,
+    tabs: [sourceTab],
+  };
+  const temporaryGroup = {
+    viewColumn: 2,
+    activeTab: temporaryTab,
+    tabs: [temporaryTab],
+  };
+  const groups = [sourceGroup];
+  let activeGroup = sourceGroup;
+  const end = { line: 0, character: 4 };
+  const document = { lineCount: 1, lineAt: () => ({ range: { end } }) };
+  const editor = {};
+  class Position {
+    constructor(line, character) {
+      this.line = line;
+      this.character = character;
+    }
+  }
+  class Selection {
+    constructor(start, finish) {
+      this.start = start;
+      this.end = finish;
+    }
+  }
+  const vscode = {
+    Position,
+    Selection,
+    ViewColumn: {
+      Beside: 99,
+    },
+    commands: {
+      getCommands: async () => ['claude-vscode.insertAtMention'],
+      executeCommand: async (...args) => {
+        calls.push(args);
+        if (args[0] === 'claude-vscode.insertAtMention') {
+          throw new Error('insertion failed');
+        }
+        if (args[0] === 'vscode.openWith') {
+          activeGroup = sourceGroup;
+        }
+      },
+    },
+    extensions: extensionRegistry(installedExtension(
+      'anthropic.claude-code',
+      ['claude-vscode.insertAtMention'],
+      { isActive: true },
+    )),
+    workspace: {
+      openTextDocument: async value => {
+        assert.equal(value, uri);
+        return document;
+      },
+    },
+    window: {
+      tabGroups: {
+        get activeTabGroup() {
+          return activeGroup;
+        },
+        get all() {
+          return groups;
+        },
+        close: async () => false,
+      },
+      showTextDocument: async (value, options) => {
+        assert.equal(value, document);
+        assert.deepEqual(options, {
+          preview: false,
+          viewColumn: vscode.ViewColumn.Beside,
+        });
+        groups.push(temporaryGroup);
+        activeGroup = temporaryGroup;
+        return editor;
+      },
+      showWarningMessage: message => warnings.push(message),
+    },
+  };
+  const { handoffSelectionToAgentId } = loadAgentHandoff(vscode);
+
+  assert.equal(await handoffSelectionToAgentId('claude', uri), false);
+  assert.deepEqual(calls, [
+    ['claude-vscode.insertAtMention'],
+    [
+      'vscode.openWith',
+      sourceUri,
+      'llm-wiki.pdfViewer',
+      {
+        viewColumn: 1,
+        preserveFocus: false,
+        preview: true,
+      },
+    ],
+  ]);
+  assert.deepEqual(warnings, ['Claude Code could not attach the selection.']);
+  assert.equal(activeGroup, sourceGroup);
 });
 
 test('keeps the exported files when no supported agent is installed', async () => {

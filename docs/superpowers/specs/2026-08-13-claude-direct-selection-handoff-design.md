@@ -1,6 +1,6 @@
 # Claude Direct Selection Handoff Design
 
-**Date:** 2026-08-13  
+**Date:** 2026-08-13
 **Status:** Approved
 
 ## Problem
@@ -40,8 +40,8 @@ arbitrary file URI or a native file-attachment API.
 - Eliminating Claude's transient native-editor requirement. Its public
   at-mention command reads only the active native text-editor selection.
 - Sending or submitting a Claude message.
-- Attaching the PNG separately to Claude. Claude reads it through the relative
-  link in `selection.md`.
+- Attaching the PNG separately to Claude. The relative link in `selection.md`
+  makes it available when visual evidence is needed.
 - Replacing immutable selection exports or the latest-export aliases.
 
 ## Considered approaches
@@ -63,17 +63,21 @@ production integration contract.
 Use Claude's supported `insertAtMention` command, which requires an active
 native editor:
 
-1. Open the immutable `selection.md` as a preview.
-2. Select its complete line range.
-3. Capture the exact temporary `vscode.Tab`.
-4. Invoke Claude's contributed insertion command.
-5. Close only that captured tab through `vscode.window.tabGroups.close(...,
-   true)`.
+1. Snapshot the active source tab's URI, custom-editor type, view column, and
+   preview state.
+2. Record any `selection.md` tabs that were already open.
+3. Open the immutable export as a pinned temporary text editor in
+   `ViewColumn.Beside`, preventing it from replacing a source or neighboring
+   preview tab.
+4. Select the complete line range and invoke Claude's contributed insertion
+   command.
+5. Close only a matching tab that did not exist before the handoff.
+6. Explicitly reopen the source in its original editor type, column, and
+   preview state.
 
-Closing with preserved focus leaves Claude's draft focused while the previous
-source PDF or Markdown tab becomes selected again. The exported preview may be
-transiently activated because Claude's public API requires it, but it does not
-remain in the editor layout.
+An existing user-owned `selection.md` tab is never closed. Explicit source
+restoration avoids relying on preview replacement or most-recently-used tab
+behavior.
 
 ### 3. Clipboard paste
 
@@ -90,11 +94,15 @@ and adapter boundary.
 
 The Claude adapter will:
 
-1. Open the immutable Markdown in a preview text editor.
-2. Capture the exact active tab created for that URI.
-3. Select the complete document range.
-4. Execute Claude's contributed at-mention command.
-5. Close the captured tab with preserved focus.
+1. Snapshot the active source editor.
+2. Snapshot pre-existing tabs for the exported URI.
+3. Open the immutable Markdown as a pinned text editor beside the source.
+4. Identify the newly created matching tab by comparing the before/after tab
+   sets.
+5. Select the complete document range.
+6. Execute Claude's contributed at-mention command.
+7. Close only the newly created matching tab.
+8. Explicitly restore the source editor.
 
 The adapter must never close an unrelated tab and must not submit the draft.
 
@@ -116,9 +124,10 @@ sequenceDiagram
     Learner->>Viewer: Select passage and choose Send to Claude Code
     Viewer->>Host: Selection context
     Host->>FS: Write immutable selection.md (+ optional selection.png)
-    Host->>Host: Open preview and select complete selection.md
+    Host->>Host: Snapshot source and pre-existing export tabs
+    Host->>Host: Open pinned selection.md beside source and select all
     Host->>Claude: Invoke supported insert-at-mention command
-    Host->>Host: Close exact temporary preview tab
+    Host->>Host: Close only new export tab and restore source
     Note over Viewer: Source editor remains active
     Note over Claude: Draft is updated but not submitted
 ```
@@ -128,12 +137,14 @@ sequenceDiagram
 - If Claude Code is unavailable, retain the existing provider warning.
 - If the exported Markdown cannot be opened or selected, report that
   Claude could not attach the selection.
-- If Claude's insertion command fails, close the captured preview in a `finally`
+- If Claude's insertion command fails, close the owned temporary tab in a `finally`
   block before reporting the handoff failure.
-- If the mention succeeds but the temporary preview cannot be closed, preserve
-  the successful draft and show a cleanup-specific warning.
-- Match the captured tab by URI before closing it; an unrelated active tab must
-  never be closed.
+- If the mention succeeds but the temporary tab cannot be closed or the source
+  cannot be restored, preserve the successful draft and show a cleanup-specific
+  warning.
+- If insertion itself fails, do not claim that Claude received the selection.
+- Match by URI and before/after tab identity; unrelated and pre-existing tabs
+  must never be closed.
 
 ## Testing
 
@@ -141,8 +152,12 @@ sequenceDiagram
 
 - The Claude handoff selects the full exported document.
 - The contributed insertion command runs exactly once.
-- The exact temporary exported tab closes with preserved focus.
-- An unrelated active tab is never closed.
+- A pinned temporary editor opens beside the source.
+- The exact newly created exported tab closes.
+- The source is explicitly restored in its original editor type and column.
+- A pre-existing export tab is never closed.
+- Combined insertion and cleanup failure does not produce a contradictory
+  delivery-success warning.
 - Codex, Cursor Agent, and CodeBuddy command behavior remains unchanged.
 
 Tests must first fail against the current implementation and then pass after

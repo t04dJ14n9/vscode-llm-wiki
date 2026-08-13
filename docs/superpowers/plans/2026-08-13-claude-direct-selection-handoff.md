@@ -2,90 +2,112 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Put Claude Code's full immutable `selection.md` at-mention into its sidebar draft without leaving the exported Markdown open or taking the learner away from the source.
+**Goal:** Put Claude Code's full immutable `selection.md` at-mention into its draft without leaving a new export tab open or taking the learner away from the source.
 
-**Architecture:** Keep `agentHandoff.ts` as the provider adapter boundary. Claude's public at-mention command requires an active native text-editor selection, so the adapter opens the immutable export as a preview, selects the full file, invokes Claude's command, and closes the exact captured preview tab with preserved focus. Existing Codex, Cursor Agent, and CodeBuddy adapters remain unchanged.
+**Architecture:** `agentHandoff.ts` remains the provider-adapter boundary. Claude's public at-mention command requires an active native text-editor selection, so the adapter snapshots the source tab, records pre-existing export tabs, opens the export as a pinned editor beside the source, selects the full file, invokes Claude, closes only a matching tab created by the handoff, and explicitly restores the source editor.
 
 **Tech Stack:** TypeScript, VS Code Extension API, Node.js built-in test runner, pnpm, Computer Use with `@oai/sky`.
 
 ## Global Constraints
 
-- Preserve the semantic full-file form `@.llm_wiki/agent/exports/<id>/selection.md#1-N`.
-- Leave no `selection.md` preview open after handoff.
-- Close only the exact temporary tab whose URI matches the immutable export.
+- Preserve Claude's semantic full-file form
+  `@.llm_wiki/agent/exports/<id>/selection.md#1-N`.
 - Never submit the Claude draft.
-- Do not use or modify the clipboard.
+- Never use or modify the clipboard.
+- Never close a pre-existing or unrelated tab.
+- Open the temporary export beside the source with `preview: false`, preventing
+  preview replacement.
+- Restore the source URI, editor type, view column, and preview state.
 - Keep Codex, Cursor Agent, and CodeBuddy behavior unchanged.
-- Keep the source PDF or Markdown editor selected after handoff.
 
 ---
 
-### Task 1: Add the failing Claude tab-cleanup regression
+### Task 1: Add failing tab-ownership and source-restoration regressions
 
 **Files:**
 - Modify: `packages/vscode-extension/test/agentHandoff.test.mjs`
 
 **Interfaces:**
-- Consumes: `handoffSelectionToAgent(contextUri, attachmentUris?)`
-- Produces: Regression expectations for Claude's full-document mention and exact temporary-tab cleanup.
+- Consumes:
+  - `handoffSelectionToAgent(contextUri, attachmentUris?)`
+  - `handoffSelectionToAgentId(agentId, contextUri, attachmentUris?)`
+- Produces: Regression expectations for the complete Claude handoff lifecycle.
 
-- [ ] **Step 1: Extend the Claude tests with source and temporary tabs**
+- [x] **Step 1: Model a preview source tab and a separate temporary editor**
 
-Model the source tab, temporary exported tab, full-document editor selection,
-and Tab Groups close behavior:
-
-```javascript
-const sourceTab = { input: { uri: sourceUri } };
-const temporaryTab = { input: { uri } };
-const tabGroup = { activeTab: sourceTab };
-const closedTabs = [];
-
-window: {
-  tabGroups: {
-    activeTabGroup: tabGroup,
-    all: [tabGroup],
-    close: async (tab, preserveFocus) => {
-      closedTabs.push([tab, preserveFocus]);
-      tabGroup.activeTab = sourceTab;
-      return true;
-    },
-  },
-  showTextDocument: async () => {
-    tabGroup.activeTab = temporaryTab;
-    return editor;
-  },
-}
-```
-
-Keep the complete editor-selection assertions and expect:
+The test must model:
 
 ```javascript
-assert.deepEqual(calls, [['claude-vscode.insertAtMention']]);
-assert.deepEqual(closedTabs, [[temporaryTab, true]]);
-assert.equal(tabGroup.activeTab, sourceTab);
-```
-
-Retain the assertion that no command name contains `submit` or `send`.
-
-- [ ] **Step 2: Add an unrelated-tab safety regression**
-
-Make the captured active tab point to:
-
-```javascript
-const unrelatedTab = {
+const sourceTab = {
   input: {
-    uri: {
-      scheme: 'file',
-      fsPath: '/vault/notes/unrelated.md',
-    },
+    uri: sourceUri,
+    viewType: 'llm-wiki.pdfViewer',
   },
+  isPreview: true,
+};
+
+const temporaryTab = {
+  input: { uri: selectionUri },
+  isPreview: false,
 };
 ```
 
-Assert that Claude's insertion command runs but `tabGroups.close()` is not
-called.
+`showTextDocument()` must receive:
 
-- [ ] **Step 3: Run the focused test and verify RED**
+```javascript
+{
+  preview: false,
+  viewColumn: vscode.ViewColumn.Beside,
+}
+```
+
+- [x] **Step 2: Assert explicit custom-editor source restoration**
+
+After the Claude insertion command, expect:
+
+```javascript
+[
+  'vscode.openWith',
+  sourceUri,
+  'llm-wiki.pdfViewer',
+  {
+    viewColumn: 1,
+    preserveFocus: false,
+    preview: true,
+  },
+]
+```
+
+The mocked close operation must only remove the temporary group; it must not
+restore the source on the production code's behalf.
+
+- [x] **Step 3: Assert standard text-editor source restoration**
+
+For a normal text source, expect:
+
+```javascript
+await vscode.window.showTextDocument(sourceUri, {
+  viewColumn: 1,
+  preserveFocus: false,
+  preview: false,
+});
+```
+
+- [x] **Step 4: Assert pre-existing export tabs are preserved**
+
+Record a `selection.md` tab before the handoff, reveal that same tab during the
+temporary editor operation, and assert that `tabGroups.close()` is not called.
+
+- [x] **Step 5: Assert failed insertion does not claim delivery**
+
+Make Claude's insertion command throw and `tabGroups.close()` return `false`.
+Assert that the explicit handoff returns `false` and emits only:
+
+```text
+Claude Code could not attach the selection.
+```
+
+- [x] **Step 6: Run focused tests and verify RED**
 
 Run:
 
@@ -93,230 +115,155 @@ Run:
 node --test packages/vscode-extension/test/agentHandoff.test.mjs
 ```
 
-Expected: FAIL because the current implementation does not close and restore
-the exact temporary preview tab.
+Expected: FAIL against the previous MRU-based cleanup implementation.
 
 ---
 
-### Task 2: Implement exact Claude preview cleanup
+### Task 2: Implement owned-tab cleanup and explicit source restoration
 
 **Files:**
 - Modify: `packages/vscode-extension/src/agentHandoff.ts`
 
 **Interfaces:**
-- Consumes:
-  - `vscode.workspace.openTextDocument(contextUri): Promise<TextDocument>`
-  - `vscode.window.showTextDocument(document, { preview: true })`
-  - `vscode.commands.executeCommand(command)`
-  - `vscode.window.tabGroups.close(tab, true)`
 - Produces:
-  - `closeTemporaryClaudeContextTab(tab, contextUri): Promise<void>`
-  - A Claude draft containing the full semantic reference with no lingering preview.
+  - `activeRestorableEditorTab(): RestorableEditorTab | undefined`
+  - `tabsForUri(uri): vscode.Tab[]`
+  - `tabMatchesUri(tab, uri): boolean`
+  - `closeTemporaryClaudeContextTab(tab, uri): Promise<boolean>`
+  - `restoreEditorTab(tab): Promise<boolean>`
 
-- [ ] **Step 1: Capture the temporary preview tab**
+- [x] **Step 1: Snapshot the active source**
 
-After opening the immutable Markdown, capture the active tab before invoking
-Claude:
-
-```typescript
-const editor = await vscode.window.showTextDocument(document, { preview: true });
-const temporaryTab = vscode.window.tabGroups.activeTabGroup.activeTab;
-```
-
-- [ ] **Step 2: Add URI-checked tab cleanup**
-
-Add:
+Capture:
 
 ```typescript
-async function closeTemporaryClaudeContextTab(
-  tab: vscode.Tab | undefined,
-  contextUri: vscode.Uri,
-): Promise<void> {
-  const input = tab?.input as { uri?: vscode.Uri } | undefined;
-  const uri = input?.uri;
-  if (
-    !tab
-    || !uri
-    || uri.scheme !== contextUri.scheme
-    || uri.fsPath !== contextUri.fsPath
-  ) {
-    return;
-  }
-  const closed = await vscode.window.tabGroups.close(tab, true);
-  if (!closed) {
-    vscode.window.showWarningMessage(
-      'Claude received selection.md, but LLM Wiki could not close the temporary preview.',
-    );
-  }
+interface RestorableEditorTab {
+  uri: vscode.Uri;
+  viewColumn: vscode.ViewColumn;
+  preview: boolean;
+  viewType?: string;
 }
 ```
 
-- [ ] **Step 3: Close the preview in a finally block**
+- [x] **Step 2: Snapshot pre-existing export tabs**
 
-Keep the existing complete-document selection, then wrap Claude's command:
+Before opening the immutable export:
 
 ```typescript
-try {
-  await vscode.commands.executeCommand(command);
-} finally {
-  await closeTemporaryClaudeContextTab(temporaryTab, contextUri);
-}
+const sourceTab = activeRestorableEditorTab();
+const existingContextTabs = new Set(tabsForUri(contextUri));
 ```
 
-If `tabGroups.close()` throws, preserve the already-inserted mention and show
-the same cleanup-specific warning. Do not change the other provider branches.
+- [x] **Step 3: Open the export without replacing previews**
 
-- [ ] **Step 4: Run the focused test and verify GREEN**
+```typescript
+const editor = await vscode.window.showTextDocument(document, {
+  preview: false,
+  viewColumn: vscode.ViewColumn.Beside,
+});
+```
 
-Run:
+Identify the owned tab by comparing the matching after-set against
+`existingContextTabs`.
+
+- [x] **Step 4: Preserve Claude's supported insertion command**
+
+Select the complete exported document and invoke the contributed
+`insertAtMention` command exactly once.
+
+- [x] **Step 5: Clean up and restore in a `finally` block**
+
+Close only the owned matching tab. Then:
+
+- Restore custom editors with `vscode.openWith`.
+- Restore text editors with `showTextDocument`.
+- Use `preserveFocus: false` so the source becomes active.
+- Preserve the source's original `preview` state.
+
+- [x] **Step 6: Separate delivery and cleanup warnings**
+
+Track whether the insertion command completed. Only claim that Claude received
+the selection when insertion succeeded. If insertion fails, let the normal
+provider failure warning report it without a contradictory success message.
+
+- [x] **Step 7: Run focused tests and type checking**
 
 ```bash
 node --test packages/vscode-extension/test/agentHandoff.test.mjs
+pnpm typecheck
 ```
 
 Expected: PASS.
 
-- [ ] **Step 5: Run type checking and the extension package tests**
-
-Run:
-
-```bash
-pnpm typecheck
-pnpm --filter llm-wiki-vscode test
-```
-
-Expected: both commands exit `0`.
-
-- [ ] **Step 6: Commit the tested adapter change**
-
-```bash
-git add packages/vscode-extension/src/agentHandoff.ts \
-  packages/vscode-extension/test/agentHandoff.test.mjs
-git commit -m "fix: restore source after Claude selection handoff"
-```
-
 ---
 
-### Task 3: Validate the actual Claude sidebar workflow
+### Task 3: Validate the actual Claude workflow
 
 **Files:**
 - Build output only: `packages/vscode-extension/dist/*`
 
-**Interfaces:**
-- Consumes: Running Extension Development Host and installed Claude Code extension.
-- Produces: Live evidence that the source PDF remains active and the draft receives the immutable reference.
-
-- [ ] **Step 1: Rebuild the extension**
-
-Run:
+- [x] **Step 1: Rebuild and reload**
 
 ```bash
 pnpm build:extension
 ```
 
-Expected: webpack reports successful builds for the extension and all webview
-bundles.
+Use Computer Use to run **Developer: Reload Window** in the Extension
+Development Host.
 
-- [ ] **Step 2: Reload the Extension Development Host**
+- [x] **Step 2: Select the DDIA fault-tolerance paragraph**
 
-Use Computer Use to run **Developer: Reload Window**, then open
-`demo-vault/raw/pdf/ddia.pdf`.
+Open `demo-vault/raw/pdf/ddia.pdf`, navigate to page 29, and select the paragraph
+beginning “Although we generally prefer tolerating faults...”.
 
-- [ ] **Step 3: Prepare the live reproduction**
+- [x] **Step 3: Trigger Claude handoff**
 
-Using Computer Use:
+Click **Send to Claude Code**.
 
-1. Navigate to PDF page 29.
-2. Select the fault-tolerance paragraph.
-3. Clear the Claude draft.
-4. Keep the Claude sidebar visible.
+- [x] **Step 4: Verify live postconditions**
 
-- [ ] **Step 4: Trigger the fixed handoff**
+Verify from a fresh screenshot and accessibility tree:
 
-Click **Send to Claude Code** in the PDF selection toolbar.
-
-- [ ] **Step 5: Verify live postconditions**
-
-Inspect a fresh accessibility tree and screenshot:
-
-- `ddia.pdf` remains the selected editor tab.
-- No `selection.md` editor tab remains open.
-- Claude's input contains an immutable
-  `@.llm_wiki/agent/exports/<id>/selection.md#1-N` reference.
-- The Claude input remains focused.
-- The draft has not been submitted.
+- `ddia.pdf` is the selected editor tab.
+- No newly created `selection.md` tab remains.
+- Claude contains an immutable `@.../selection.md#1-N` reference.
+- The draft remains unsent.
 
 ---
 
-### Task 4: Improve the README
+### Task 4: Improve the README and design records
 
 **Files:**
 - Modify: `README.md`
+- Modify: `docs/superpowers/specs/2026-08-13-claude-direct-selection-handoff-design.md`
+- Modify: `docs/superpowers/plans/2026-08-13-claude-direct-selection-handoff.md`
 
-**Interfaces:**
-- Consumes: Implemented provider behavior and filesystem-first architecture.
-- Produces: Current user-facing feature and design documentation.
+- [x] **Step 1: Document immutable selection exports**
 
-- [ ] **Step 1: Clarify the learning loop and selection actions**
+Describe latest aliases and immutable exports under
+`.llm_wiki/agent/exports/<id>/`.
 
-Document that:
+- [x] **Step 2: Document provider-specific handoff behavior**
 
-- **Add to Chat** chooses an appropriate available target.
-- Explicit PDF buttons route to Codex, Claude Code, or CodeBuddy.
-- Handoffs update a draft but never submit it.
+Clarify Codex, Claude Code, Cursor Agent, and CodeBuddy file/crop behavior and
+state that LLM Wiki never submits a draft.
 
-- [ ] **Step 2: Add an “Agent handoff design” section**
+- [x] **Step 3: Describe Claude's actual public API boundary**
 
-Describe:
+Document the full-file semantic at-mention, separate pinned temporary editor,
+owned-tab cleanup, explicit source restoration, and preservation of
+pre-existing export tabs.
 
-- Immutable exports under `.llm_wiki/agent/exports/<id>/`.
-- Latest aliases under `.llm_wiki/agent/selection.{md,json,png}`.
-- Provider-specific file and crop behavior.
-- Claude's full-file semantic `@selection.md#1-N` reference.
-- Claude's exact temporary-preview cleanup.
-- Provider discovery through installed VS Code command capabilities.
+- [x] **Step 4: Avoid overstating image ingestion**
 
-- [ ] **Step 3: Expand the filesystem tree**
+State that Claude can access the optional crop through the relative Markdown
+link; do not claim automatic image ingestion or a native image attachment.
 
-Include:
-
-```text
-.llm_wiki/
-├── agent/
-│   ├── selection.md
-│   ├── selection.json
-│   ├── selection.png
-│   └── exports/<id>/
-│       ├── selection.md
-│       ├── selection.json
-│       └── selection.png
-└── annotations/pdf/
-```
-
-- [ ] **Step 4: Explain the architecture boundary**
-
-State that webviews own rendering and selection interaction, while the
-extension host owns trusted filesystem writes, export validation, provider
-discovery, and agent handoff.
-
-- [ ] **Step 5: Verify documentation quality**
-
-Run:
+- [x] **Step 5: Verify documentation**
 
 ```bash
 git diff --check
 rg -n "Claude|immutable|selection\\.md|never submits|filesystem-first" README.md
-```
-
-Expected: no whitespace errors and the behavior is directly discoverable.
-
-- [ ] **Step 6: Commit the README and revised design records**
-
-```bash
-git add README.md \
-  docs/superpowers/specs/2026-08-13-claude-direct-selection-handoff-design.md \
-  docs/superpowers/plans/2026-08-13-claude-direct-selection-handoff.md
-git commit -m "docs: explain agent handoff behavior"
 ```
 
 ---
@@ -326,35 +273,24 @@ git commit -m "docs: explain agent handoff behavior"
 **Files:**
 - Verify all modified files and generated build artifacts.
 
-**Interfaces:**
-- Consumes: Completed implementation and documentation.
-- Produces: Evidence that the repository and live UI satisfy the approved behavior.
-
-- [ ] **Step 1: Run the complete repository checks**
-
-Run:
+- [x] **Step 1: Run the complete repository checks**
 
 ```bash
 pnpm check
 ```
 
-Expected: lint, type checking, and every package test pass.
+Expected: lint, type checking, 36 core tests, and all extension tests pass.
 
-- [ ] **Step 2: Verify the production bundle contains the cleanup path**
+- [x] **Step 2: Verify the production bundle**
 
-Run:
+Confirm the production bundle contains:
 
-```bash
-rg -n "temporary preview|tabGroups\\.close|could not attach the selection" \
-  packages/vscode-extension/dist/extension.js
-```
+- `claude-vscode.insertAtMention`
+- `vscode.openWith`
+- the cleanup-specific warning
+- the normal provider failure warning
 
-Expected: the cleanup warning and handoff warning exist in the production
-bundle.
-
-- [ ] **Step 3: Review the final diff**
-
-Run:
+- [x] **Step 3: Review the final diff**
 
 ```bash
 git status --short --branch
@@ -362,13 +298,7 @@ git diff main...HEAD --check
 git diff --stat main...HEAD
 ```
 
-Confirm that the diff is limited to:
-
-- The approved design and implementation plan.
-- `agentHandoff.ts` and its regression tests.
-- `README.md`.
-
-- [ ] **Step 4: Preserve the feature branch**
+- [x] **Step 4: Preserve the feature branch**
 
 Keep `codex/fix-claude-direct-handoff` available unless the user explicitly
 requests a merge, push, or discard.

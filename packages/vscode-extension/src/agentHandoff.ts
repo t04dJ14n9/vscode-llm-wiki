@@ -37,6 +37,13 @@ interface AgentTarget {
   surface: AgentSurface;
 }
 
+interface RestorableEditorTab {
+  uri: vscode.Uri;
+  viewColumn: vscode.ViewColumn;
+  preview: boolean;
+  viewType?: string;
+}
+
 const CURSOR_COMMAND = 'composer.addfilestocomposer';
 const CURSOR_COMPOSERS_COMMAND = 'composer.getOrderedSelectedComposerIds';
 const CURSOR_OPEN_COMMAND = 'workbench.action.chat.open';
@@ -482,15 +489,32 @@ async function executeAgentHandoff(
   attachmentUris: readonly vscode.Uri[],
 ): Promise<void> {
   if (agent.id === 'claude') {
+    const sourceTab = activeRestorableEditorTab();
+    const existingContextTabs = new Set(tabsForUri(contextUri));
     const document = await vscode.workspace.openTextDocument(contextUri);
-    const editor = await vscode.window.showTextDocument(document, { preview: true });
-    const temporaryTab = vscode.window.tabGroups.activeTabGroup.activeTab;
+    const editor = await vscode.window.showTextDocument(document, {
+      preview: false,
+      viewColumn: vscode.ViewColumn.Beside,
+    });
+    const temporaryTab = tabsForUri(contextUri)
+      .find(tab => !existingContextTabs.has(tab));
     const end = document.lineAt(Math.max(0, document.lineCount - 1)).range.end;
     editor.selection = new vscode.Selection(new vscode.Position(0, 0), end);
+    let mentionInserted = false;
     try {
       await vscode.commands.executeCommand(command);
+      mentionInserted = true;
     } finally {
-      await closeTemporaryClaudeContextTab(temporaryTab, contextUri);
+      const closed = await closeTemporaryClaudeContextTab(
+        temporaryTab,
+        contextUri,
+      );
+      const restored = await restoreEditorTab(sourceTab);
+      if (mentionInserted && (!closed || !restored)) {
+        vscode.window.showWarningMessage(
+          'Claude received selection.md, but LLM Wiki could not fully restore the source editor.',
+        );
+      }
     }
   } else if (agent.id === 'codex') {
     const attachments = uniqueLocalUris([contextUri, ...attachmentUris]);
@@ -515,26 +539,64 @@ async function executeAgentHandoff(
 async function closeTemporaryClaudeContextTab(
   tab: vscode.Tab | undefined,
   contextUri: vscode.Uri,
-): Promise<void> {
-  const input = tab?.input as { uri?: vscode.Uri } | undefined;
-  const uri = input?.uri;
-  if (
-    !tab
-    || !uri
-    || uri.scheme !== contextUri.scheme
-    || uri.fsPath !== contextUri.fsPath
-  ) {
-    return;
-  }
+): Promise<boolean> {
+  if (!tab || !tabMatchesUri(tab, contextUri)) return true;
   try {
-    const closed = await vscode.window.tabGroups.close(tab, true);
-    if (closed) return;
+    return await vscode.window.tabGroups.close(tab, true);
   } catch {
-    // The mention is already in Claude; report only the cleanup failure.
+    return false;
   }
-  vscode.window.showWarningMessage(
-    'Claude received selection.md, but LLM Wiki could not close the temporary preview.',
+}
+
+function activeRestorableEditorTab(): RestorableEditorTab | undefined {
+  const group = vscode.window.tabGroups.activeTabGroup;
+  const tab = group.activeTab;
+  const input = tab?.input as {
+    uri?: vscode.Uri;
+    viewType?: unknown;
+  } | undefined;
+  if (!tab || !input?.uri) return undefined;
+  return {
+    uri: input.uri,
+    viewColumn: group.viewColumn,
+    preview: tab.isPreview,
+    ...(typeof input.viewType === 'string' ? { viewType: input.viewType } : {}),
+  };
+}
+
+function tabsForUri(uri: vscode.Uri): vscode.Tab[] {
+  return vscode.window.tabGroups.all.flatMap(group =>
+    (group.tabs ?? []).filter(tab => tabMatchesUri(tab, uri))
   );
+}
+
+function tabMatchesUri(tab: vscode.Tab, uri: vscode.Uri): boolean {
+  const input = tab.input as { uri?: vscode.Uri } | undefined;
+  return input?.uri?.scheme === uri.scheme && input.uri.fsPath === uri.fsPath;
+}
+
+async function restoreEditorTab(tab: RestorableEditorTab | undefined): Promise<boolean> {
+  if (!tab) return true;
+  const options: vscode.TextDocumentShowOptions = {
+    viewColumn: tab.viewColumn,
+    preserveFocus: false,
+    preview: tab.preview,
+  };
+  try {
+    if (tab.viewType) {
+      await vscode.commands.executeCommand(
+        'vscode.openWith',
+        tab.uri,
+        tab.viewType,
+        options,
+      );
+    } else {
+      await vscode.window.showTextDocument(tab.uri, options);
+    }
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function uniqueLocalUris(uris: readonly vscode.Uri[]): vscode.Uri[] {
