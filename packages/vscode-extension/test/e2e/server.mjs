@@ -29,8 +29,8 @@ const server = createServer((_req, res) => {
     return;
   }
 
-  if (url.pathname === '/fixtures/ddia-local.pdf') {
-    serveFile(join(__dirname, '..', '..', '..', '..', 'demo-vault', 'raw', 'pdf', 'ddia.pdf'), 'application/pdf', res);
+  if (url.pathname === '/fixtures/large-search.pdf') {
+    serveBuffer(largeSearchPdfFixture(), 'application/pdf', res);
     return;
   }
 
@@ -153,6 +153,30 @@ function flashAttentionPdfFixture() {
     ].join('\n')),
     '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
   ];
+  return pdfFixture(objects);
+}
+
+function largeSearchPdfFixture() {
+  const pageCount = 613;
+  const fontObjectNumber = 3 + pageCount * 2;
+  const pageObjectNumbers = Array.from(
+    { length: pageCount },
+    (_, index) => 3 + index * 2,
+  );
+  const objects = [
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    `<< /Type /Pages /Kids [${pageObjectNumbers.map(number => `${number} 0 R`).join(' ')}] /Count ${pageCount} >>`,
+  ];
+
+  pageObjectNumbers.forEach((pageObjectNumber, index) => {
+    const contentObjectNumber = pageObjectNumber + 1;
+    objects.push(
+      `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 400] /Resources << /Font << /F1 ${fontObjectNumber} 0 R >> >> /Contents ${contentObjectNumber} 0 R >>`,
+      pdfStream(`BT /F1 18 Tf 72 300 Td (Searchable page ${index + 1}) Tj ET`),
+    );
+  });
+  objects.push('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>');
+
   return pdfFixture(objects);
 }
 

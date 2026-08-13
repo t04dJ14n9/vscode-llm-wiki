@@ -1129,7 +1129,7 @@ test('pdf viewer search bar finds text and uses compact VS Code find-widget layo
 });
 
 test('pdf search publishes a cached current-page match before indexing a large document', async ({ page }) => {
-  await page.goto('http://localhost:8979/pdf-viewer.html?fixture=ddia-local');
+  await page.goto('http://localhost:8979/pdf-viewer.html?fixture=large-search');
   await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 613/, { timeout: 15_000 });
 
   await page.keyboard.press(process.platform === 'darwin' ? 'Meta+F' : 'Control+F');
