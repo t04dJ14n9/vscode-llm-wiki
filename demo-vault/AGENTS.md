@@ -144,7 +144,8 @@ Build the extension from the parent repository:
 ```bash
 cd ..
 pnpm --filter llm-wiki-vscode build
-pnpm --filter llm-wiki-vscode test:vscode-e2e \
+LLM_WIKI_E2E_VAULT=../../demo-vault \
+  pnpm --filter llm-wiki-vscode test:vscode-e2e \
   --grep "demo vault reading"
 cd demo-vault
 ```
