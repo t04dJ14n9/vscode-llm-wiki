@@ -37,9 +37,17 @@ interface AgentTarget {
   surface: AgentSurface;
 }
 
+interface RestorableEditorTab {
+  uri: vscode.Uri;
+  viewColumn: vscode.ViewColumn;
+  preview: boolean;
+  viewType?: string;
+}
+
 const CURSOR_COMMAND = 'composer.addfilestocomposer';
 const CURSOR_COMPOSERS_COMMAND = 'composer.getOrderedSelectedComposerIds';
 const CURSOR_OPEN_COMMAND = 'workbench.action.chat.open';
+const CLAUDE_EDITOR_OPEN_COMMAND = 'claude-vscode.editor.open';
 const CLAUDE_HANDOFF_COMMANDS = [
   'claude-vscode.insertAtMention',
   'claude-code.insertAtMentioned',
@@ -102,16 +110,17 @@ export async function handoffSelectionToCursor(
 function computeAgentSurfaceCapabilities(
   registeredCommands: ReadonlySet<string>,
 ): AgentSurfaceCapabilities {
-  const appName = String(vscode.env?.appName ?? '').toLowerCase();
   return {
-    cursorAgent: appName.includes('cursor'),
+    cursorAgent: isCursorHost(),
     providers: EXTERNAL_AGENTS.flatMap(agent => {
       const extension = extensionForAgent(agent);
       if (!extension) return [];
       const contributedCommands = contributedCommandIds(extension);
-      return agent.commands.some(command =>
-        contributedCommands.has(command) || registeredCommands.has(command)
-      )
+      const availableCommands = new Set([
+        ...contributedCommands,
+        ...registeredCommands,
+      ]);
+      return availableAgentCommand(agent, availableCommands)
         ? [{ id: agent.id, label: agent.label }]
         : [];
     }),
@@ -429,7 +438,18 @@ function availableAgentCommand(
   agent: AgentChoice,
   commands: ReadonlySet<string>,
 ): string | undefined {
+  if (
+    agent.id === 'claude'
+    && isCursorHost()
+    && !commands.has(CLAUDE_EDITOR_OPEN_COMMAND)
+  ) {
+    return undefined;
+  }
   return agent.commands.find(command => commands.has(command));
+}
+
+function isCursorHost(): boolean {
+  return String(vscode.env?.appName ?? '').toLowerCase().includes('cursor');
 }
 
 function extensionForAgent(
@@ -482,11 +502,47 @@ async function executeAgentHandoff(
   attachmentUris: readonly vscode.Uri[],
 ): Promise<void> {
   if (agent.id === 'claude') {
+    if (isCursorHost()) {
+      const document = await vscode.workspace.openTextDocument(contextUri);
+      const reference = formatClaudeSelectionReference(
+        contextUri,
+        document.lineCount,
+      );
+      await vscode.commands.executeCommand(
+        CLAUDE_EDITOR_OPEN_COMMAND,
+        undefined,
+        reference,
+        vscode.ViewColumn.Beside,
+      );
+      return;
+    }
+    const sourceTab = activeRestorableEditorTab();
+    const existingContextTabs = new Set(tabsForUri(contextUri));
     const document = await vscode.workspace.openTextDocument(contextUri);
-    const editor = await vscode.window.showTextDocument(document, { preview: true });
+    const editor = await vscode.window.showTextDocument(document, {
+      preview: false,
+      viewColumn: vscode.ViewColumn.Beside,
+    });
+    const temporaryTab = tabsForUri(contextUri)
+      .find(tab => !existingContextTabs.has(tab));
     const end = document.lineAt(Math.max(0, document.lineCount - 1)).range.end;
     editor.selection = new vscode.Selection(new vscode.Position(0, 0), end);
-    await vscode.commands.executeCommand(command);
+    let mentionInserted = false;
+    try {
+      await vscode.commands.executeCommand(command);
+      mentionInserted = true;
+    } finally {
+      const closed = await closeTemporaryClaudeContextTab(
+        temporaryTab,
+        contextUri,
+      );
+      const restored = await restoreEditorTab(sourceTab);
+      if (mentionInserted && (!closed || !restored)) {
+        vscode.window.showWarningMessage(
+          'Claude received selection.md, but LLM Wiki could not fully restore the source editor.',
+        );
+      }
+    }
   } else if (agent.id === 'codex') {
     const attachments = uniqueLocalUris([contextUri, ...attachmentUris]);
     await vscode.commands.executeCommand(command, attachments[0]!);
@@ -504,6 +560,79 @@ async function executeAgentHandoff(
     await vscode.commands.executeCommand(command, contextUri, attachments);
   } else {
     await vscode.commands.executeCommand(command, contextUri);
+  }
+}
+
+function formatClaudeSelectionReference(
+  contextUri: vscode.Uri,
+  lineCount: number,
+): string {
+  const relativePath = vscode.workspace
+    .asRelativePath(contextUri)
+    .replaceAll('\\', '/');
+  return `@${relativePath}#1-${Math.max(1, lineCount)} `;
+}
+
+async function closeTemporaryClaudeContextTab(
+  tab: vscode.Tab | undefined,
+  contextUri: vscode.Uri,
+): Promise<boolean> {
+  if (!tab || !tabMatchesUri(tab, contextUri)) return true;
+  try {
+    return await vscode.window.tabGroups.close(tab, true);
+  } catch {
+    return false;
+  }
+}
+
+function activeRestorableEditorTab(): RestorableEditorTab | undefined {
+  const group = vscode.window.tabGroups.activeTabGroup;
+  const tab = group.activeTab;
+  const input = tab?.input as {
+    uri?: vscode.Uri;
+    viewType?: unknown;
+  } | undefined;
+  if (!tab || !input?.uri) return undefined;
+  return {
+    uri: input.uri,
+    viewColumn: group.viewColumn,
+    preview: tab.isPreview,
+    ...(typeof input.viewType === 'string' ? { viewType: input.viewType } : {}),
+  };
+}
+
+function tabsForUri(uri: vscode.Uri): vscode.Tab[] {
+  return vscode.window.tabGroups.all.flatMap(group =>
+    (group.tabs ?? []).filter(tab => tabMatchesUri(tab, uri))
+  );
+}
+
+function tabMatchesUri(tab: vscode.Tab, uri: vscode.Uri): boolean {
+  const input = tab.input as { uri?: vscode.Uri } | undefined;
+  return input?.uri?.scheme === uri.scheme && input.uri.fsPath === uri.fsPath;
+}
+
+async function restoreEditorTab(tab: RestorableEditorTab | undefined): Promise<boolean> {
+  if (!tab) return true;
+  const options: vscode.TextDocumentShowOptions = {
+    viewColumn: tab.viewColumn,
+    preserveFocus: false,
+    preview: tab.preview,
+  };
+  try {
+    if (tab.viewType) {
+      await vscode.commands.executeCommand(
+        'vscode.openWith',
+        tab.uri,
+        tab.viewType,
+        options,
+      );
+    } else {
+      await vscode.window.showTextDocument(tab.uri, options);
+    }
+    return true;
+  } catch {
+    return false;
   }
 }
 

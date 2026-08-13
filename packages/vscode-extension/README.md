@@ -14,6 +14,6 @@ workspace. Agent handoff attaches context to a draft and does not submit a
 message automatically.
 
 Source, documentation, development instructions, and issue tracking are in the
-[LLM Wiki repository](https://github.com/t04dJ14n9/llm-wiki).
+[LLM Wiki repository](https://github.com/t04dJ14n9/human-learning).
 
 Licensed under the MIT License.
