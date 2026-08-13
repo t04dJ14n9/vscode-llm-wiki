@@ -39,6 +39,9 @@ class OperatorDocumentationTests(unittest.TestCase):
             )
 
     def test_skill_passes_official_structural_validation(self) -> None:
+        if not SKILL_VALIDATOR.is_file():
+            self.skipTest("official Codex skill validator is not installed")
+
         result = subprocess.run(
             [
                 "uv",
