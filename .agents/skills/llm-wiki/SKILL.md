@@ -56,13 +56,13 @@ step explicit through generated indexes and links.
 
 ## Example
 
-From a bundle root whose producer tools live in the parent repository:
+From this repository-root bundle:
 
 ```bash
-python3 ../tools/demo-vault/ingest_arxiv.py --vault . --id 1508.07909v5
-python3 ../tools/demo-vault/rebuild_indexes.py --vault .
-python3 ../tools/demo-vault/rebuild_indexes.py --vault . --check
-python3 ../tools/demo-vault/validate_vault.py --vault .
+python3 tools/okf/ingest_arxiv.py --vault . --id 1508.07909v5
+python3 tools/okf/rebuild_indexes.py --vault .
+python3 tools/okf/rebuild_indexes.py --vault . --check
+python3 tools/okf/validate_vault.py --vault .
 ```
 
 ## Common Mistakes

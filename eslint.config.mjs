@@ -81,7 +81,6 @@ export default [
       '.pnpm-store/**',
       '.superpowers/**',
       'artifacts/**',
-      'demo-vault/**',
       'demos/**',
       'packages/vscode-extension/test-results/**',
       'packages/vscode-extension/playwright-report/**',

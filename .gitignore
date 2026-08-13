@@ -31,6 +31,9 @@ artifacts/
 .superpowers/
 .cursor/
 .omc/
+.llm_wiki/
+.ingest-*/
+.claude/settings.local.json
 .paperlink/
 .vscode/*
 !.vscode/launch.json
@@ -42,6 +45,7 @@ reference/
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal
+*.tmp
 
 # VS Code E2E runtime state and generated fixtures
 packages/vscode-extension/test/vscode-e2e/fixtures/test-vault/.llm_wiki/*

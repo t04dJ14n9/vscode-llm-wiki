@@ -7,18 +7,11 @@ import { findFreePort } from './debugPort.mjs';
 import { listProcesses, selectStaleE2eProcesses, stopProcesses } from './processCleanup.mjs';
 import { resolveVsCodeE2eTestDir } from './testDirectory.mjs';
 import { cleanupSandboxFixtures, prepareSandboxFixtures } from './sandboxFixtures.mjs';
-import {
-  isCustomVsCodeE2eWorkspace,
-  resolveVsCodeE2eWorkspace,
-} from './workspaceRoot.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const VSCODE_VERSION = 'stable';
-const DEFAULT_FIXTURES = resolve(__dirname, 'fixtures', 'test-vault');
-const WORKSPACE = resolveVsCodeE2eWorkspace({
-  defaultWorkspace: DEFAULT_FIXTURES,
-});
+const FIXTURES = resolve(__dirname, 'fixtures', 'test-vault');
 const EXTENSION_PATH = resolve(__dirname, '..', '..');
 const TEST_DIR = resolveVsCodeE2eTestDir();
 
@@ -42,13 +35,11 @@ export default async function globalSetup() {
     'editor.fontSize': 16,
     'editor.lineHeight': 24,
   }));
-  if (!isCustomVsCodeE2eWorkspace()) {
-    cleanupSandboxFixtures(DEFAULT_FIXTURES);
-    prepareSandboxFixtures(DEFAULT_FIXTURES);
-  }
+  cleanupSandboxFixtures(FIXTURES);
+  prepareSandboxFixtures(FIXTURES);
 
   // Use a file:// URI for the folder
-  const folderUri = `file://${WORKSPACE}`;
+  const folderUri = `file://${FIXTURES}`;
 
   const args = [
     '--disable-gpu',
@@ -69,7 +60,7 @@ export default async function globalSetup() {
   console.log('[global-setup] Launching VS Code...');
   console.log(`[global-setup] Executable: ${electronPath}`);
   console.log(`[global-setup] Extension path: ${EXTENSION_PATH}`);
-  console.log(`[global-setup] Workspace: ${WORKSPACE}`);
+  console.log(`[global-setup] Workspace: ${FIXTURES}`);
   console.log(`[global-setup] User data: ${userDataDir}`);
   console.log(`[global-setup] Debug port: ${debugPort}`);
 
