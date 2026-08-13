@@ -927,10 +927,23 @@ function calloutInlineLinkElement(match: InlineLinkMatch, classPrefix = 'cm-hybr
     event.stopPropagation();
     button.dispatchEvent(new CustomEvent('llm-wiki-open-uri', {
       bubbles: true,
-      detail: { uri: match.uri },
+      detail: {
+        uri: match.uri,
+        ...(match.kind === 'markdown-link'
+          && isDocumentRelativeUri(match.uri)
+          ? { relativeToDocument: true }
+          : {}),
+      },
     }));
   });
   return button;
+}
+
+function isDocumentRelativeUri(uri: string): boolean {
+  return Boolean(uri)
+    && !uri.startsWith('#')
+    && !uri.startsWith('/')
+    && !/^[a-z][a-z0-9+.-]*:/i.test(uri);
 }
 
 function calloutInlineMathElement(expression: string, classPrefix = 'cm-hybrid-callout'): HTMLElement {

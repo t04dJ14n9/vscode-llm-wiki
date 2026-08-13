@@ -39,5 +39,5 @@ without making raw token count the unit of comparison.
 - [Nanochat training pipeline](../summaries/nanochat-end-to-end-training-pipeline.md)
 - [Why Nanochat uses bits per byte](../queries/why-does-nanochat-use-bits-per-byte.md)
 
-[^bpe-paper]: Neural Machine Translation of Rare Words with Subword Units
+[^bpe-paper]: [Neural Machine Translation of Rare Words with Subword Units](../raw/neural-machine-translation-of-rare-words-with-subword-units.md)
 [^nanochat-tokenizer]: Nanochat tokenizer

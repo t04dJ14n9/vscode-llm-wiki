@@ -111,7 +111,7 @@ def _directory_record(vault_root: Path, directory: Path) -> IndexRecord:
     return IndexRecord(
         section="Subdirectories",
         title=directory.name,
-        link=f"{directory.name}/{INDEX_FILE}",
+        link=f"{directory.name}/",
         description=_directory_description(vault_root, directory),
     )
 

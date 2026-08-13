@@ -53,7 +53,7 @@ extension fields.
 Give every visible bundle-owned directory an `index.md`.
 
 - List only immediate children.
-- Link a child directory to `child/index.md`.
+- Link a child directory to `child/`; consumers open its local `index.md`.
 - Group concepts by exact `type`.
 - Include a concept's title and description.
 - List local binary or code resources in a resource section.
@@ -70,7 +70,13 @@ move them only in an explicit migration that updates references atomically.
 ## Links and provenance
 
 Use ordinary Markdown links. Relative and `/bundle-relative` paths are both
-valid. External URLs remain external.
+valid. A concept ID omits `.md`; consumers SHOULD accept both the ID and the
+explicit Markdown filename as navigation targets. External URLs remain
+external.
+
+Obsidian image embeds (`![[path/to/image.png|Alt text]]`) are a compatible body
+extension. Resolve their targets from the bundle root; resolve ordinary
+Markdown image paths from the containing document.
 
 Record each derivation source:
 

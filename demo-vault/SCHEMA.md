@@ -80,9 +80,9 @@ claim attribution.
 ## Hierarchical indexes
 
 Every visible bundle-owned directory has an `index.md`. Each index lists only
-immediate children, groups concepts by exact type, links subdirectories to
-their own indexes, and includes descriptions. Indexes are generated
-deterministically.
+immediate children, groups concepts by exact type, links subdirectories as
+`child/` so consumers can open the local `index.md`, and includes
+descriptions. Indexes are generated deterministically.
 
 Only the root index has frontmatter, containing exactly:
 
@@ -92,7 +92,15 @@ okf_version: "0.2"
 ---
 ```
 
-Paths are concept IDs. Directory size never triggers an automatic move.
+A concept ID is its bundle path with the `.md` suffix removed. The LLM Wiki
+consumer accepts that ID directly as a link target, including bundle-relative
+forms such as `/summaries/nanochat-end-to-end-training-pipeline`; explicit
+`.md` paths remain valid. Directory size never triggers an automatic move.
+
+Obsidian image embeds use vault-relative targets. For example,
+`![[projects/code/nanochat/dev/nanochat.png|Nanochat logo]]` resolves from the
+bundle root, while ordinary Markdown image paths resolve from their containing
+document.
 
 ## Raw paper contract
 

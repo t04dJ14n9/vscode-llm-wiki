@@ -62,6 +62,7 @@ class HlLinkWidget extends WidgetType {
     readonly label: string,
     readonly sourceFrom: number,
     readonly sourceTo: number,
+    readonly relativeToDocument = false,
   ) {
     super();
   }
@@ -86,7 +87,11 @@ class HlLinkWidget extends WidgetType {
     button.addEventListener('click', event => {
       event.preventDefault();
       event.stopPropagation();
-      vscode.postMessage({ type: 'openUri', uri: this.uri });
+      vscode.postMessage({
+        type: 'openUri',
+        uri: this.uri,
+        ...(this.relativeToDocument ? { relativeToDocument: true } : {}),
+      });
     });
     return button;
   }
@@ -95,7 +100,8 @@ class HlLinkWidget extends WidgetType {
     return this.uri === other.uri
       && this.label === other.label
       && this.sourceFrom === other.sourceFrom
-      && this.sourceTo === other.sourceTo;
+      && this.sourceTo === other.sourceTo
+      && this.relativeToDocument === other.relativeToDocument;
   }
 
   override ignoreEvent(): boolean {
@@ -1402,9 +1408,19 @@ function createView(text: string, title?: string): EditorView {
     }
   });
   editorView.dom.addEventListener('llm-wiki-open-uri', event => {
-    const uri = (event as CustomEvent<{ uri?: unknown }>).detail?.uri;
+    const detail = (event as CustomEvent<{
+      uri?: unknown;
+      relativeToDocument?: unknown;
+    }>).detail;
+    const uri = detail?.uri;
     if (typeof uri === 'string' && uri.length > 0) {
-      vscode.postMessage({ type: 'openUri', uri });
+      vscode.postMessage({
+        type: 'openUri',
+        uri,
+        ...(detail.relativeToDocument === true
+          ? { relativeToDocument: true }
+          : {}),
+      });
     }
   });
   editorView.dom.addEventListener('llm-wiki-copy-text', event => {
@@ -2437,7 +2453,11 @@ function followLinkAtPosition(editorView: EditorView, position: number): boolean
   const referenceDefinitions = markdownReferenceDefinitions(editorView.state.doc.toString());
   const target = findLinkTarget(line.text, offset, referenceDefinitions);
   if (!target) return false;
-  vscode.postMessage({ type: 'openUri', uri: target });
+  vscode.postMessage({
+    type: 'openUri',
+    uri: target.uri,
+    ...(target.relativeToDocument ? { relativeToDocument: true } : {}),
+  });
   return true;
 }
 
@@ -2462,29 +2482,36 @@ function findLinkTarget(
   text: string,
   offset: number,
   referenceDefinitions: ReturnType<typeof markdownReferenceDefinitions>,
-): string | null {
+): { uri: string; relativeToDocument: boolean } | null {
   for (const link of markdownLinkSourceSpans(0, text)) {
     if (link.image) continue;
     if (offset < link.from || offset > link.to) continue;
-    return parseMarkdownLinkDestination(link.destination);
+    const uri = parseMarkdownLinkDestination(link.destination);
+    return uri ? { uri, relativeToDocument: isDocumentRelativeUri(uri) } : null;
   }
 
   for (const link of markdownReferenceLinkSourceSpans(0, text, referenceDefinitions)) {
     if (link.image) continue;
     if (offset < link.from || offset > link.to) continue;
-    return link.definition.destination;
+    const uri = link.definition.destination;
+    return { uri, relativeToDocument: isDocumentRelativeUri(uri) };
   }
 
   for (const match of text.matchAll(/\[\[([^\]]+)\]\]/g)) {
     const from = match.index ?? 0;
     const to = from + match[0].length;
     if (offset < from || offset > to) continue;
-    return parseWikiLinkTarget(match[1] ?? '', currentNotePath, knownNotePaths)?.uri ?? null;
+    const uri = parseWikiLinkTarget(
+      match[1] ?? '',
+      currentNotePath,
+      knownNotePaths,
+    )?.uri;
+    return uri ? { uri, relativeToDocument: false } : null;
   }
 
   for (const match of autolinkMatches(text)) {
     if (offset < match.from || offset > match.to) continue;
-    return match.uri;
+    return { uri: match.uri, relativeToDocument: false };
   }
 
   return null;
@@ -2830,7 +2857,13 @@ function collectLineDecorations(
     const uri = parseMarkdownLinkDestination(link.destination);
     if (!uri) continue;
     decorations.push(Decoration.replace({
-      widget: new HlLinkWidget(uri, link.label, sourceFrom, sourceTo),
+      widget: new HlLinkWidget(
+        uri,
+        link.label,
+        sourceFrom,
+        sourceTo,
+        isDocumentRelativeUri(uri),
+      ),
     }).range(sourceFrom, sourceTo));
     occupied.push({ from: sourceFrom, to: sourceTo });
   }
@@ -2844,7 +2877,13 @@ function collectLineDecorations(
       continue;
     }
     decorations.push(Decoration.replace({
-      widget: new HlLinkWidget(link.definition.destination, link.label, sourceFrom, sourceTo),
+      widget: new HlLinkWidget(
+        link.definition.destination,
+        link.label,
+        sourceFrom,
+        sourceTo,
+        isDocumentRelativeUri(link.definition.destination),
+      ),
     }).range(sourceFrom, sourceTo));
     occupied.push({ from: sourceFrom, to: sourceTo });
   }
@@ -3301,4 +3340,11 @@ function selectionTouchesSource(
 
 function isExternalUri(uri: string): boolean {
   return /^[a-z][a-z0-9+.-]*:/i.test(uri) && !uri.startsWith('llm-wiki://');
+}
+
+function isDocumentRelativeUri(uri: string): boolean {
+  return Boolean(uri)
+    && !uri.startsWith('#')
+    && !uri.startsWith('/')
+    && !/^[a-z][a-z0-9+.-]*:/i.test(uri);
 }

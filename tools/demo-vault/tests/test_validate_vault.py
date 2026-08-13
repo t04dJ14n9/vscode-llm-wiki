@@ -580,6 +580,17 @@ Fixture paper text.
         )
         self.assertIn("link.missing", self.issue_codes())
 
+    def test_okf_concept_ids_and_directory_links_resolve(self) -> None:
+        self._rewrite_document(
+            "README.md",
+            body_change=lambda body: (
+                body
+                + "\n[Concept ID](/concepts/concept)\n"
+                + "[Raw index](raw/)\n"
+            ),
+        )
+        self.assertNotIn("link.missing", self.issue_codes())
+
     def test_links_inside_mechanically_extracted_paper_text_are_ignored(
         self,
     ) -> None:

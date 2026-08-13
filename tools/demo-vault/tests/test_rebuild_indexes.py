@@ -109,7 +109,7 @@ class RebuildIndexesTests(unittest.TestCase):
 
         root_index = outputs[self.root / "index.md"]
         self.assertIn(
-            "[raw](raw/index.md) - Immutable source evidence and local assets.",
+            "[raw](raw/) - Immutable source evidence and local assets.",
             root_index,
         )
         self.assertNotIn("fixture-paper.md", root_index)
@@ -121,7 +121,7 @@ class RebuildIndexesTests(unittest.TestCase):
             raw_index,
         )
         self.assertIn(
-            "[assets](assets/index.md) - Archived PDFs and source media.",
+            "[assets](assets/) - Archived PDFs and source media.",
             raw_index,
         )
 

@@ -493,6 +493,7 @@ function resolveMarkdownLink(input: {
     label: input.label,
     rawTarget: input.destination,
     candidatePath,
+    preferDirectoryIndex: decodedPath.endsWith('/'),
     rawHeading,
     documents: input.documents,
   });
@@ -507,8 +508,15 @@ function resolveWikiLink(input: {
 }): WikiLink {
   const [targetPart, alias] = splitOnce(input.inner, '|');
   const [rawPath, rawHeading] = splitOnce(targetPart.trim(), '#');
-  const candidatePath = rawPath.trim()
-    ? resolveWikiNotePath(input.sourcePath, safeDecodeURIComponent(rawPath.trim()), input.documents)
+  const decodedPath = safeDecodeURIComponent(rawPath.trim());
+  const preferDirectoryIndex = decodedPath.endsWith('/');
+  const candidatePath = decodedPath
+    ? resolveWikiNotePath(
+      input.sourcePath,
+      decodedPath,
+      input.documents,
+      preferDirectoryIndex,
+    )
     : input.sourcePath;
 
   return resolvedInternalLink({
@@ -519,6 +527,7 @@ function resolveWikiLink(input: {
     label: cleanInlineText(alias ?? ''),
     rawTarget: input.inner,
     candidatePath,
+    preferDirectoryIndex,
     rawHeading,
     documents: input.documents,
   });
@@ -532,10 +541,15 @@ function resolvedInternalLink(input: {
   label: string;
   rawTarget: string;
   candidatePath: string;
+  preferDirectoryIndex?: boolean;
   rawHeading?: string;
   documents: readonly WikiDocument[];
 }): WikiLink {
-  const targetPath = resolveKnownDocumentPath(input.candidatePath, input.documents)
+  const targetPath = resolveKnownDocumentPath(
+    input.candidatePath,
+    input.documents,
+    input.preferDirectoryIndex,
+  )
     ?? ensureMarkdownExtension(normalizeNotePath(input.candidatePath));
   const targetDocument = findDocument(input.documents, targetPath);
   const heading = input.rawHeading
@@ -722,6 +736,7 @@ function resolveWikiNotePath(
   sourcePath: string,
   rawPath: string,
   documents: readonly WikiDocument[],
+  preferDirectoryIndex = false,
 ): string {
   const sourceDirectory = dirnameNotePath(sourcePath);
   const normalizedRawPath = normalizeNotePath(rawPath);
@@ -732,7 +747,11 @@ function resolveWikiNotePath(
       : [joinNotePath(sourceDirectory, rawPath), normalizedRawPath];
 
   for (const candidate of candidates) {
-    const resolvedPath = resolveKnownDocumentPath(candidate, documents);
+    const resolvedPath = resolveKnownDocumentPath(
+      candidate,
+      documents,
+      preferDirectoryIndex,
+    );
     if (resolvedPath) return resolvedPath;
   }
 
@@ -758,13 +777,21 @@ function resolveRelativeNotePath(sourcePath: string, rawPath: string): string {
 function resolveKnownDocumentPath(
   candidate: string,
   documents: readonly WikiDocument[],
+  preferDirectoryIndex = false,
 ): string | undefined {
   const normalized = comparablePath(candidate);
   const withExtension = comparablePath(ensureMarkdownExtension(candidate));
-  return documents.find(document => {
-    const path = comparablePath(document.path);
-    return path === normalized || path === withExtension;
-  })?.path;
+  const directoryIndex = comparablePath(joinNotePath(candidate, 'index.md'));
+  const candidates = preferDirectoryIndex
+    ? [directoryIndex, normalized, withExtension]
+    : [normalized, withExtension, directoryIndex];
+
+  for (const path of candidates) {
+    const document = documents.find(item => comparablePath(item.path) === path);
+    if (document) return document.path;
+  }
+
+  return undefined;
 }
 
 function findDocument(

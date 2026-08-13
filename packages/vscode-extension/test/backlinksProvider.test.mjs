@@ -107,6 +107,49 @@ test('filesystem wiki resolves basename wikilinks to the closest note', () => {
   assert.equal(link.resolved, true);
 });
 
+test('filesystem wiki resolves OKF concept IDs and directory indexes', () => {
+  const wiki = filesystemWiki.createFilesystemWiki([
+    {
+      path: 'index.md',
+      text: [
+        '# Home',
+        '[Concepts](concepts/)',
+        '[Tokenization](/concepts/tokenization)',
+      ].join('\n'),
+    },
+    {
+      path: 'concepts/index.md',
+      text: '# Concepts',
+    },
+    {
+      path: 'concepts.md',
+      text: '# Concepts note',
+    },
+    {
+      path: 'concepts/tokenization.md',
+      text: '# Tokenization',
+    },
+  ]);
+
+  const forward = filesystemWiki.getForwardLinks(wiki, 'index.md');
+  const graph = filesystemWiki.getConceptGraph(wiki);
+
+  assert.deepEqual(
+    forward.map(link => [link.targetPath, link.resolved]),
+    [
+      ['concepts/index.md', true],
+      ['concepts/tokenization.md', true],
+    ],
+  );
+  assert.deepEqual(
+    graph.edges.map(edge => [edge.source, edge.target]),
+    [
+      ['index.md', 'concepts/index.md'],
+      ['index.md', 'concepts/tokenization.md'],
+    ],
+  );
+});
+
 test('filesystem scan recursively excludes generated and private directories', async () => {
   const root = mkdtempSync(join(tmpdir(), 'llm-wiki-wiki-'));
   try {

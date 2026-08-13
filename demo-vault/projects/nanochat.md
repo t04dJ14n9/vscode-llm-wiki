@@ -22,6 +22,8 @@ PyTorch repository that spans tokenizer training, base-model pretraining,
 evaluation, supervised chat finetuning, optional on-policy reinforcement
 learning, inference, and an interactive CLI.[^nanochat-repository]
 
+![[projects/code/nanochat/dev/nanochat.png|Nanochat logo]]
+
 ## Pinned revision
 
 This bundle indexes commit
@@ -72,9 +74,11 @@ or RL checkpoint for conversation.
 
 ## Wiki orientation
 
-Read the [end-to-end training summary](../summaries/nanochat-end-to-end-training-pipeline.md)
+Read the [end-to-end training summary](/summaries/nanochat-end-to-end-training-pipeline)
 for a narrative, then use [where the paper ideas appear in Nanochat](../queries/where-do-the-paper-ideas-appear-in-nanochat.md)
 to jump between research evidence and exact implementation files.
+The [code index](code/index.md) is the progressive-disclosure entry point into
+the pinned submodule.
 
 The project is a moving experimental baseline. This wiki describes only the
 pinned revision; later upstream behavior is not silently projected backward

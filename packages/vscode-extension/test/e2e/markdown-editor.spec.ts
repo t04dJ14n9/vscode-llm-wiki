@@ -10794,7 +10794,11 @@ test.describe('LLM Wiki — E2E Bidirectional Links', () => {
     expect(openMessages).toEqual([
       { type: 'openUri', uri: 'notes/Concepts/FlashAttention.md' },
       { type: 'openUri', uri: 'notes/Concepts/Online Softmax.md' },
-      { type: 'openUri', uri: 'raw/pdf/flash-attention.pdf#page=7' },
+      {
+        type: 'openUri',
+        uri: 'raw/pdf/flash-attention.pdf#page=7',
+        relativeToDocument: true,
+      },
     ]);
   });
 
@@ -10895,7 +10899,11 @@ test.describe('LLM Wiki — E2E Bidirectional Links', () => {
       window.postMessage({ type: 'executeCommand', command: 'editor:follow-link' }, '*');
     });
     const openMessages = await page.evaluate(() => window.__mockMessages.filter((m) => m.type === 'openUri'));
-    expect(openMessages).toEqual([{ type: 'openUri', uri: 'raw/paper.pdf#page=7' }]);
+    expect(openMessages).toEqual([{
+      type: 'openUri',
+      uri: 'raw/paper.pdf#page=7',
+      relativeToDocument: true,
+    }]);
   });
 
   test('Obsidian-like formatting commands unwrap the current formatted span when the cursor is inside it', async ({ page }) => {
@@ -11836,7 +11844,11 @@ test.describe('LLM Wiki — E2E Bidirectional Links', () => {
     await page.keyboard.press(process.platform === 'darwin' ? 'Meta+Enter' : 'Control+Enter');
 
     const openMessages = await page.evaluate(() => window.__mockMessages.filter((m) => m.type === 'openUri'));
-    expect(openMessages).toEqual([{ type: 'openUri', uri: 'raw/paper.pdf#page=7' }]);
+    expect(openMessages).toEqual([{
+      type: 'openUri',
+      uri: 'raw/paper.pdf#page=7',
+      relativeToDocument: true,
+    }]);
   });
 
   test('Cmd+Enter also follows regular markdown links in Vim mode', async ({ page }) => {

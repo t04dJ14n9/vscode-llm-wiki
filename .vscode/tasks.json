@@ -8,6 +8,11 @@
       "options": {
         "cwd": "${workspaceFolder}"
       },
+      "isBackground": false,
+      "presentation": {
+        "close": true,
+        "reveal": "silent"
+      },
       "group": "build",
       "problemMatcher": []
     },

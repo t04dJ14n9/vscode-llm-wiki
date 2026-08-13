@@ -403,9 +403,15 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
           break;
         case 'openUri':
           if (typeof message.uri === 'string') {
+            const target = message.relativeToDocument === true
+              ? resolveMarkdownEditorLink(
+                message.uri,
+                documentRelativePath(document.uri),
+              )
+              : message.uri;
             await vscode.commands.executeCommand(
               'llm-wiki.openLinkTarget',
-              resolveMarkdownEditorLink(message.uri, documentRelativePath(document.uri)),
+              target,
             );
           }
           break;
@@ -737,24 +743,30 @@ function documentRelativePath(documentUri: vscode.Uri): string | undefined {
 }
 
 /**
- * Generated notes use explicit ./ and ../ destinations relative to the note
- * that contains the link. Existing vault-root links remain unchanged.
+ * Standard Markdown destinations are relative to the note that contains the
+ * link. URI schemes, document fragments, and absolute paths remain unchanged.
  */
 export function resolveMarkdownEditorLink(
   target: string,
   currentNotePath: string | undefined,
 ): string {
-  if (!currentNotePath || (!target.startsWith('./') && !target.startsWith('../'))) {
+  if (
+    !currentNotePath
+    || target.startsWith('#')
+    || target.startsWith('/')
+    || /^[A-Za-z][A-Za-z0-9+.-]*:/.test(target)
+  ) {
     return target;
   }
-  const fragmentIndex = target.indexOf('#');
-  const linkPath = fragmentIndex < 0 ? target : target.slice(0, fragmentIndex);
-  const fragment = fragmentIndex < 0 ? '' : target.slice(fragmentIndex);
+  const suffixIndex = target.search(/[?#]/);
+  const linkPath = suffixIndex < 0 ? target : target.slice(0, suffixIndex);
+  const suffix = suffixIndex < 0 ? '' : target.slice(suffixIndex);
+  if (!linkPath) return target;
   const resolvedPath = path.posix.normalize(
     path.posix.join(path.posix.dirname(currentNotePath), linkPath),
   );
   if (resolvedPath === '..' || resolvedPath.startsWith('../')) return target;
-  return `${resolvedPath}${fragment}`;
+  return `${resolvedPath}${suffix}`;
 }
 
 async function markdownNotePaths(documentUri: vscode.Uri): Promise<string[]> {

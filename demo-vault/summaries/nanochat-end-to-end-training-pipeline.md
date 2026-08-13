@@ -8,6 +8,7 @@ generated: {"by": "codex/gpt-5.6", "at": "2026-08-13T00:00:00Z"}
 sources: [{"id": "speedrun", "resource": "../projects/code/nanochat/runs/speedrun.sh", "title": "Nanochat speedrun", "commit": "92d63d4e8bb4df75c3b71618f31ddde2378b2bcd"}, {"id": "tokenizer", "resource": "../projects/code/nanochat/nanochat/tokenizer.py", "title": "Nanochat tokenizer implementation", "commit": "92d63d4e8bb4df75c3b71618f31ddde2378b2bcd"}, {"id": "base-train", "resource": "../projects/code/nanochat/scripts/base_train.py", "title": "Nanochat base training script", "commit": "92d63d4e8bb4df75c3b71618f31ddde2378b2bcd"}, {"id": "chat-sft", "resource": "../projects/code/nanochat/scripts/chat_sft.py", "title": "Nanochat supervised finetuning script", "commit": "92d63d4e8bb4df75c3b71618f31ddde2378b2bcd"}]
 ---
 
+chat.md
 # Nanochat end-to-end training pipeline
 
 ## Scope
@@ -63,6 +64,7 @@ identifies a concrete implementation.
 ## Related pages
 
 - [How Nanochat turns text into a chat model](../queries/how-does-nanochat-turn-text-into-a-chat-model.md)
+- [Byte-pair encoding](../concepts/byte-pair-encoding.md)
 - [Pretraining data curation](../concepts/pretraining-data-curation.md)
 - [Gradient accumulation and distributed training](../concepts/gradient-accumulation-and-distributed-training.md)
 - [Language-model evaluation](../concepts/language-model-evaluation.md)

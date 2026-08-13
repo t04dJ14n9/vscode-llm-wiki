@@ -113,6 +113,70 @@ test('dispatchUri opens markdown note links with the LLM Wiki markdown editor', 
   assert.deepEqual(showTextDocumentCalls, []);
 });
 
+test('dispatchUri opens OKF concept IDs, bundle-relative paths, and directory indexes', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'llm-wiki-okf-links-'));
+  const executeCommandCalls = [];
+  const errorMessages = [];
+  try {
+    mkdirSync(join(root, 'concepts'), { recursive: true });
+    mkdirSync(join(root, 'summaries'), { recursive: true });
+    writeFileSync(join(root, 'concepts', 'tokenization.md'), '# Tokenization\n');
+    writeFileSync(join(root, 'summaries', 'index.md'), '# Summary\n');
+
+    const vscode = createVscodeMock({
+      executeCommandCalls,
+      openTextDocumentCalls: [],
+      showTextDocumentCalls: [],
+      document: undefined,
+      errorMessages,
+    });
+    const { dispatchUri } = loadTsModule('src/uriDispatcher.ts', {
+      vscode,
+      '@llm-wiki/core': {
+        classifyReferenceTarget: uri => {
+          const [targetPath, heading] = uri.split('#', 2);
+          return targetPath.endsWith('.md')
+            ? {
+                kind: 'note',
+                path: targetPath,
+                heading,
+              }
+            : {
+                kind: 'unknown',
+                path: targetPath,
+                heading,
+              };
+        },
+      },
+    });
+
+    await dispatchUri(root, 'concepts/tokenization');
+    await dispatchUri(root, '/concepts/tokenization.md');
+    await dispatchUri(root, 'summaries/');
+
+    assert.deepEqual(executeCommandCalls, [
+      [
+        'vscode.openWith',
+        { fsPath: join(root, 'concepts', 'tokenization.md') },
+        'llm-wiki.markdownEditor',
+      ],
+      [
+        'vscode.openWith',
+        { fsPath: join(root, 'concepts', 'tokenization.md') },
+        'llm-wiki.markdownEditor',
+      ],
+      [
+        'vscode.openWith',
+        { fsPath: join(root, 'summaries', 'index.md') },
+        'llm-wiki.markdownEditor',
+      ],
+    ]);
+    assert.deepEqual(errorMessages, []);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('dispatchUri refuses to create a note through a workspace symlink', async () => {
   const root = mkdtempSync(join(tmpdir(), 'llm-wiki-uri-root-'));
   const outside = mkdtempSync(join(tmpdir(), 'llm-wiki-uri-outside-'));

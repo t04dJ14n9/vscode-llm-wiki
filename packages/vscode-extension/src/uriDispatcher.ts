@@ -17,7 +17,8 @@ export async function dispatchUri(
   options: DispatchUriOptions = {},
 ): Promise<void> {
   const resolvedUri = llmWikiAnchorTargetFromString(uri) ?? uri;
-  const anchorFileUri = localAnchorFileUri(resolvedUri);
+  const navigableUri = resolveOkfLinkTarget(vaultRoot, resolvedUri);
+  const anchorFileUri = localAnchorFileUri(navigableUri);
   if (anchorFileUri) {
     await vscode.commands.executeCommand(
       'vscode.openWith',
@@ -26,14 +27,14 @@ export async function dispatchUri(
     );
     return;
   }
-  const target = classifyReferenceTarget(resolvedUri);
+  const target = classifyReferenceTarget(navigableUri);
   if (
     !vaultRoot
     && target.kind !== 'web'
     && !(target.kind === 'pdf' && Boolean(target.path && isAbsolute(target.path)))
   ) {
     vscode.window.showErrorMessage(
-      `Open a workspace folder before opening this relative link: ${resolvedUri}`,
+      `Open a workspace folder before opening this relative link: ${navigableUri}`,
     );
     return;
   }
@@ -136,16 +137,107 @@ export async function dispatchUri(
           return;
         }
       }
-      if (/^https?:\/\//i.test(resolvedUri)) {
-        await openWebTarget(workspaceRoot, resolvedUri, undefined, options);
+      if (/^https?:\/\//i.test(navigableUri)) {
+        await openWebTarget(workspaceRoot, navigableUri, undefined, options);
         return;
       }
-      vscode.window.showErrorMessage(`Cannot open link target: ${resolvedUri}`);
+      vscode.window.showErrorMessage(`Cannot open link target: ${navigableUri}`);
       return;
     }
   }
 
-  vscode.window.showErrorMessage(`Cannot open link target: ${resolvedUri}`);
+  vscode.window.showErrorMessage(`Cannot open link target: ${navigableUri}`);
+}
+
+/**
+ * OKF concept IDs omit `.md`, bundle-relative links begin with `/`, and
+ * hierarchical indexes may link to a directory. Resolve those portable forms
+ * to concrete bundle files before classifying the target.
+ */
+export function resolveOkfLinkTarget(
+  vaultRoot: string | undefined,
+  uri: string,
+): string {
+  if (
+    !vaultRoot
+    || !uri
+    || uri.startsWith('#')
+    || /^[A-Za-z][A-Za-z0-9+.-]*:/.test(uri)
+  ) {
+    return uri;
+  }
+
+  const suffixIndex = uri.search(/[?#]/);
+  const rawPath = suffixIndex < 0 ? uri : uri.slice(0, suffixIndex);
+  const suffix = suffixIndex < 0 ? '' : uri.slice(suffixIndex);
+  if (!rawPath) return uri;
+
+  let decodedPath: string;
+  try {
+    decodedPath = decodeURIComponent(rawPath);
+  } catch {
+    decodedPath = rawPath;
+  }
+  const bundlePath = decodedPath.replace(/^\/+/, '');
+  if (!bundlePath) return uri;
+
+  if (
+    decodedPath.toLowerCase().endsWith('.pdf')
+    && isAbsolute(decodedPath)
+    && isWorkspaceContainedPath(vaultRoot, decodedPath)
+  ) {
+    return uri;
+  }
+
+  const direct = workspaceFilePath(vaultRoot, bundlePath);
+  if (direct && existsSync(direct)) {
+    if (isDirectory(direct)) {
+      const indexPath = workspaceFilePath(
+        vaultRoot,
+        `${bundlePath.replace(/[\\/]+$/, '')}/index.md`,
+      );
+      if (indexPath && existsSync(indexPath)) {
+        return `${workspaceRelativePath(vaultRoot, indexPath)}${suffix}`;
+      }
+    }
+    return `${workspaceRelativePath(vaultRoot, direct)}${suffix}`;
+  }
+
+  if (!/\.[^/\\]+$/.test(bundlePath)) {
+    const concept = workspaceFilePath(vaultRoot, `${bundlePath}.md`);
+    if (concept && existsSync(concept)) {
+      return `${workspaceRelativePath(vaultRoot, concept)}${suffix}`;
+    }
+  }
+
+  // In OKF, a leading slash is bundle-relative rather than filesystem-root
+  // absolute. Preserve existing absolute PDFs so standalone PDF viewing keeps
+  // working when no bundle file matches.
+  if (
+    rawPath.startsWith('/')
+    && !(decodedPath.toLowerCase().endsWith('.pdf') && existsSync(decodedPath))
+  ) {
+    return `${bundlePath}${suffix}`;
+  }
+  return uri;
+}
+
+function workspaceRelativePath(workspaceRoot: string, filePath: string): string {
+  return relative(resolve(workspaceRoot), filePath).split(sep).join('/');
+}
+
+function isWorkspaceContainedPath(workspaceRoot: string, filePath: string): boolean {
+  const fromRoot = relative(resolve(workspaceRoot), resolve(filePath));
+  return fromRoot === ''
+    || (!fromRoot.startsWith(`..${sep}`) && fromRoot !== '..' && !isAbsolute(fromRoot));
+}
+
+function isDirectory(filePath: string): boolean {
+  try {
+    return statSync(filePath).isDirectory();
+  } catch {
+    return false;
+  }
 }
 
 function localAnchorFileUri(value: string): vscode.Uri | undefined {

@@ -154,8 +154,9 @@ Acceptance follows two paths:
 1. Root index → summary → concept → raw companion → local PDF.
 2. Root index → project card → code index → exact Nanochat file.
 
-Also verify Quick Open/search, outlines, backlinks, long raw Markdown, PDF
-rendering, and ignored runtime state in both VS Code and Cursor.
+Also verify `child/` index links, extensionless concept IDs, bundle-relative
+paths, Obsidian image embeds, Quick Open/search, outlines, backlinks, long raw
+Markdown, PDF rendering, and ignored runtime state in both VS Code and Cursor.
 
 ## Finish a material mutation
 

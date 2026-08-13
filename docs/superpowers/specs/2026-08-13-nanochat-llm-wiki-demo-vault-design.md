@@ -134,7 +134,8 @@ The only exceptions are:
 Indexes implement progressive disclosure:
 
 1. An index lists only immediate child concepts, resources, and directories.
-2. A directory entry links to that child's `index.md`.
+2. A directory entry links to `child/`; the consumer opens that child's
+   `index.md`.
 3. Concept entries are grouped under their exact `type`.
 4. Resource entries such as PDFs and the Nanochat gitlink have descriptive
    sections.
@@ -209,6 +210,10 @@ Specific externally sourced claims use Markdown footnotes whose labels match
 `sources[].id`. Links between bundle concepts remain ordinary Markdown links.
 Relative links are preferred in bodies for editor portability; all OKF
 path-valued fields may also contain external URLs or bundle-relative paths.
+A consumer accepts both explicit `path/to/concept.md` targets and OKF concept
+IDs with the suffix omitted, such as `/path/to/concept`. Obsidian image embeds
+resolve from the bundle root, while ordinary Markdown image paths resolve from
+the containing document.
 
 `generated` records authorship, not verification. `verified` is added only
 after an actual process or human has checked content against its sources.
@@ -496,6 +501,9 @@ or a copied sandbox of it. Tests prove:
 
 - root and nested index pages render;
 - relative Markdown links navigate correctly;
+- `child/`, `/bundle-relative`, and extensionless concept-ID targets navigate
+  to the intended Markdown document;
+- Obsidian-compatible image embeds resolve and render real bundle images;
 - headings and outline remain usable on long raw companions;
 - backlinks connect compiled and evidence pages;
 - search finds canonical paper titles and core concepts;

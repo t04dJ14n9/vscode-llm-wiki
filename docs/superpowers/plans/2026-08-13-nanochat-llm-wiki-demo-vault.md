@@ -108,7 +108,7 @@ assert root / "raw/index.md" in outputs
 assert root / "raw/assets/index.md" in outputs
 assert root / "projects/code/index.md" in outputs
 assert root / "projects/code/nanochat/index.md" not in outputs
-assert "[assets](assets/index.md)" in outputs[root / "raw/index.md"]
+assert "[assets](assets/)" in outputs[root / "raw/index.md"]
 assert "[Archived PDF](paper.pdf)" in outputs[root / "raw/assets/index.md"]
 ```
 
@@ -578,7 +578,7 @@ fixture, then asserts:
 
 ```typescript
 await openQuickFile(page, 'index.md');
-expect(await markdownSource('Nanochat LLM Wiki')).toContain('summaries/index.md');
+expect(await markdownSource('Nanochat LLM Wiki')).toContain('summaries/');
 await clickMarkdownLink('Nanochat end-to-end training pipeline');
 await clickMarkdownLink('Byte-pair encoding');
 await clickMarkdownLink('Neural Machine Translation of Rare Words');

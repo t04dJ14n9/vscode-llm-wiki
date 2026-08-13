@@ -822,6 +822,68 @@ test('markdown editor provider routes openUri messages through the host link tar
   ]);
 });
 
+test('markdown editor provider resolves ordinary relative links from nested index notes', async () => {
+  const messages = [];
+  const executeCommandCalls = [];
+  const vscode = createVscodeMock({
+    executeCommandCalls,
+    workspaceFolder: { uri: createUri('/vault') },
+  });
+  const { MarkdownEditorProvider } = loadTsModule('src/markdownEditorProvider.ts', { vscode });
+  const provider = new MarkdownEditorProvider({
+    extensionUri: { scheme: 'file', path: '/extension' },
+    workspaceState: createStorageMock(),
+  });
+  const panel = createPanelMock(messages);
+
+  await provider.resolveCustomTextEditor(
+    createDocumentMock({ uri: 'file:///vault/summaries/index.md' }),
+    panel,
+    {},
+  );
+  await panel.fireMessage({
+    type: 'openUri',
+    uri: 'nanochat-end-to-end-training-pipeline.md',
+    relativeToDocument: true,
+  });
+
+  assert.deepEqual(executeCommandCalls.at(-1), [
+    'llm-wiki.openLinkTarget',
+    'summaries/nanochat-end-to-end-training-pipeline.md',
+  ]);
+});
+
+test('markdown editor provider keeps resolved wikilinks vault-relative', async () => {
+  const messages = [];
+  const executeCommandCalls = [];
+  const vscode = createVscodeMock({
+    executeCommandCalls,
+    workspaceFolder: { uri: createUri('/vault') },
+  });
+  const { MarkdownEditorProvider } = loadTsModule('src/markdownEditorProvider.ts', { vscode });
+  const provider = new MarkdownEditorProvider({
+    extensionUri: { scheme: 'file', path: '/extension' },
+    workspaceState: createStorageMock(),
+  });
+  const panel = createPanelMock(messages);
+
+  await provider.resolveCustomTextEditor(
+    createDocumentMock({ uri: 'file:///vault/daily/2026-08-13.md' }),
+    panel,
+    {},
+  );
+  await panel.fireMessage({
+    type: 'openUri',
+    uri: 'concepts/byte-pair-encoding.md',
+    relativeToDocument: false,
+  });
+
+  assert.deepEqual(executeCommandCalls.at(-1), [
+    'llm-wiki.openLinkTarget',
+    'concepts/byte-pair-encoding.md',
+  ]);
+});
+
 test('markdown annotation clicks route note identity to the durable-note command', async () => {
   const messages = [];
   const executeCommandCalls = [];
@@ -871,6 +933,7 @@ test('markdown editor provider resolves generated daily and learning-note links 
   await dailyPanel.fireMessage({
     type: 'openUri',
     uri: '../learning/Memory%20Systems.md',
+    relativeToDocument: true,
   });
 
   const learningPanel = createPanelMock(messages);
@@ -882,10 +945,12 @@ test('markdown editor provider resolves generated daily and learning-note links 
   await learningPanel.fireMessage({
     type: 'openUri',
     uri: '../../notes/Concepts/Memory.md#L4-L5',
+    relativeToDocument: true,
   });
   await learningPanel.fireMessage({
     type: 'openUri',
-    uri: 'notes/Concepts/Root Link.md#Overview',
+    uri: '../../notes/Concepts/Root Link.md#Overview',
+    relativeToDocument: true,
   });
 
   assert.deepEqual(executeCommandCalls.slice(-3), [
