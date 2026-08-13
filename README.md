@@ -1,12 +1,13 @@
 # LLM Wiki
 
-LLM Wiki is a desktop learning workspace for VS Code and Cursor. Open a
-normal Git repository, read Markdown, PDFs, and selected web passages, attach
-source context to a supported agent draft, and keep durable PDF discussions
-connected to their source.
+LLM Wiki is a local-first learning and research workspace for VS Code and
+Cursor. Open a normal Git repository, study Markdown, PDFs, source code, and
+selected web passages, hand exact source context to an installed coding agent,
+and keep durable learning notes connected to the material that produced them.
 
 The combined VS Code extension is the product. It is local-first,
-filesystem-first, and intentionally has no web or mobile app.
+filesystem-first, and intentionally has no separate web service, account,
+database, or mobile app.
 
 For the complete design and integration guide, see
 [Architecture and VS Code Integration](docs/architecture-and-vscode-integration.md).
@@ -15,8 +16,9 @@ For the complete design and integration guide, see
 
 1. Open a Markdown file or PDF in VS Code or Cursor.
 2. Select the passage you want to understand.
-3. Use the selection prompt, context menu, or `Cmd+L` / `Ctrl+L` to add the
-   passage to the active supported agent draft without submitting it.
+3. Use **Add to Chat**, an explicit provider button, the context menu, or
+   `Cmd+L` / `Ctrl+L` to add the passage to a supported agent draft without
+   submitting it.
 4. For a PDF, optionally use the separate Ask PDF panel for a durable,
    multi-turn discussion.
 5. Reopen a source annotation later to review its Markdown learning note.
@@ -24,10 +26,11 @@ For the complete design and integration guide, see
 
 Codex powers the built-in Ask PDF flow and its durable note creation.
 **Send Selection to Agent…** exports exact Markdown text or the canonical PDF
-extracted quote and attaches it to an installed Codex, Claude Code, Cursor
-Agent, or CodeBuddy sidebar. Those
-external sidebars own their own conversation; LLM Wiki does not scrape
-their answers into a learning note.
+quote and hands the immutable snapshot to an installed Codex, Claude Code,
+Cursor Agent, or CodeBuddy draft. Explicit PDF actions can target Codex,
+Claude Code, or CodeBuddy directly. Those external agent surfaces own their
+conversation; LLM Wiki does not submit the draft or scrape its answer into a
+learning note.
 
 **Add to Chat** is the compact action in the Markdown and PDF selection UI;
 `Cmd+L` on macOS or `Ctrl+L` elsewhere invokes the same shared handoff. It
@@ -45,6 +48,44 @@ separate **Experimental Web Reader** safely fetches and sanitizes public pages
 and can attach a synthetic selection-context image; it does not support page
 scripts, authentication, cookies, forms, or remote media.
 
+## Agent handoff design
+
+Every handoff first writes an immutable, inspectable export:
+
+```text
+.llm_wiki/agent/
+├── selection.md                 # latest Markdown alias
+├── selection.json               # latest structured alias
+├── selection.png                # latest optional visual-evidence alias
+└── exports/<id>/
+    ├── selection.md             # immutable exact passage + source link
+    ├── selection.json           # immutable structured selection context
+    └── selection.png            # immutable optional PDF/web selection crop
+```
+
+The latest aliases are convenient for local workflows; agent drafts receive
+the immutable path so a later selection cannot change context that has already
+been referenced.
+
+Provider adapters use the capabilities exposed by installed extensions:
+
+| Target | Draft handoff | Optional image behavior |
+| --- | --- | --- |
+| Codex | Adds each immutable local file to the current thread draft | Adds `selection.png` separately when supported |
+| Claude Code | Inserts a full-file semantic reference such as `@.llm_wiki/agent/exports/<id>/selection.md#1-10` | Reads the relative `[selection.png](./selection.png)` link inside the Markdown; no native image-attachment API is claimed |
+| Cursor Agent | Adds the immutable files to the selected composer as exact resources | Adds the validated crop separately |
+| CodeBuddy | Adds `selection.md` as the primary context and sends one attachment batch | Includes the validated crop in that batch |
+
+Claude Code's public command currently derives an at-mention from an active
+native text-editor selection rather than accepting a file URI. LLM Wiki uses
+that supported command, then closes the exact temporary preview tab and
+returns the learner to the source PDF or Markdown editor. The resulting draft
+contains the complete immutable file reference without leaving
+`selection.md` open.
+
+Handoffs are deliberately draft-only. LLM Wiki never presses Send, and an
+optional crop failure does not discard the verified text context.
+
 ## Current desktop features
 
 - A CodeMirror-based Markdown editor with rendered headings, links, math,
@@ -56,8 +97,9 @@ scripts, authentication, cookies, forms, or remote media.
   extracted quotes through an
   automatic selection prompt, context menu, or `Cmd+L` / `Ctrl+L`; PDF also
   has a selection-toolbar action and optional crop attachment.
-- Selection context export to available Codex, Claude Code, Cursor Agent, and
-  CodeBuddy sidebars.
+- Explicit selection context export to available Codex, Claude Code, Cursor
+  Agent, and CodeBuddy drafts, with immutable snapshots and provider-specific
+  attachment behavior.
 - Durable learning notes containing a portable source link, selected quote,
   concise summary, full transcript, and fixed review dates.
 - Source annotations: Markdown displays a **✦ Note** link and PDF restores
@@ -88,6 +130,11 @@ my-learning-repo/
 │   ├── learning/                  # human-readable discussion records
 │   └── daily/                     # daily plans and review checklists
 ├── .llm_wiki/
+│   ├── agent/
+│   │   ├── selection.md           # latest exact-selection alias
+│   │   ├── selection.json         # latest structured-selection alias
+│   │   ├── selection.png          # latest optional crop alias
+│   │   └── exports/<id>/          # immutable agent context snapshots
 │   └── annotations/
 │       └── pdf/
 │           ├── <pdf-sha256>.json  # runtime discussion state
@@ -137,10 +184,12 @@ flowchart LR
     Host <--> Git
 ```
 
-Webviews render and collect interaction. The extension host owns filesystem,
-Git, VS Code API, and agent-process access. Codex threads are read-only; the
-extension performs the explicit, atomic learning-note write after an answer
-finishes.
+Webviews render documents and collect bounded user interaction. The trusted
+extension host owns path validation, atomic filesystem writes, Git, capability
+discovery, agent handoff, and local process access. Provider-specific adapters
+are isolated behind one host boundary instead of being implemented inside
+Markdown, PDF, or browser webviews. Codex threads are read-only; the extension
+performs the explicit, atomic learning-note write after an answer finishes.
 
 ## Focused product surface
 

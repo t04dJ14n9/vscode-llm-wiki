@@ -26,7 +26,7 @@ arbitrary file URI or a native file-attachment API.
   `@.llm_wiki/agent/exports/<id>/selection.md#1-N`.
 - Keep the source PDF or Markdown editor active.
 - Put the reference into the existing Claude Code draft without submitting it.
-- Avoid opening, revealing, or selecting the exported Markdown document.
+- Leave no exported Markdown preview open after the handoff completes.
 - Preserve the immutable export and its optional relative
   `[selection.png](./selection.png)` evidence link.
 - Keep Codex, Cursor Agent, and CodeBuddy handoff behavior unchanged.
@@ -37,6 +37,8 @@ arbitrary file URI or a native file-attachment API.
 
 - Creating a native Claude attachment chip. Claude Code does not expose a
   public attachment command for this integration.
+- Eliminating Claude's transient native-editor requirement. Its public
+  at-mention command reads only the active native text-editor selection.
 - Sending or submitting a Claude message.
 - Attaching the PNG separately to Claude. Claude reads it through the relative
   link in `selection.md`.
@@ -44,32 +46,34 @@ arbitrary file URI or a native file-attachment API.
 
 ## Considered approaches
 
-### 1. Direct semantic reference insertion — selected
+### 1. Direct semantic reference insertion — rejected after live validation
 
 Construct the same workspace-relative `@file#1-N` reference that Claude's
 active-editor command produces, focus the Claude draft, and insert the
 reference through VS Code's focused-input typing command.
 
-Advantages:
+The approach passed mocked command-order tests, but Computer Use validation in
+Claude Code 2.1.229 showed that VS Code's programmatic `type` command is
+ignored by the third-party webview even when its message input has focus.
+Keyboard input works, but extensions cannot synthesize user keystrokes as a
+production integration contract.
 
-- No temporary editor tab.
-- No source-editor focus loss.
-- The draft receives the same complete immutable Markdown snapshot.
-- The implementation is small and provider-specific.
+### 2. Open, invoke, close, and restore — selected
 
-Trade-off:
+Use Claude's supported `insertAtMention` command, which requires an active
+native editor:
 
-- It relies on Claude Code's public focus command plus VS Code's stable
-  focused-input `type` command rather than Claude accepting a URI argument.
+1. Open the immutable `selection.md` as a preview.
+2. Select its complete line range.
+3. Capture the exact temporary `vscode.Tab`.
+4. Invoke Claude's contributed insertion command.
+5. Close only that captured tab through `vscode.window.tabGroups.close(...,
+   true)`.
 
-### 2. Open, invoke, close, and restore
-
-Keep the current active-editor workaround, then close the preview and restore
-the source editor.
-
-This is compatible with Claude's current command contract, but it can visibly
-flash the exported document, mutates the editor layout, and treats the symptom
-rather than removing the side effect.
+Closing with preserved focus leaves Claude's draft focused while the previous
+source PDF or Markdown tab becomes selected again. The exported preview may be
+transiently activated because Claude's public API requires it, but it does not
+remain in the editor layout.
 
 ### 3. Clipboard paste
 
@@ -86,16 +90,13 @@ and adapter boundary.
 
 The Claude adapter will:
 
-1. Resolve the exported Markdown to a workspace-relative path.
-2. Read the text document without showing it, solely to determine the complete
-   line range.
-3. Format the semantic Claude reference as `@<relative-path>#1-N`.
-4. Execute Claude's contributed focus/open command so an existing sidebar draft
-   is targeted.
-5. Execute VS Code's `type` command with the reference and a trailing space.
+1. Open the immutable Markdown in a preview text editor.
+2. Capture the exact active tab created for that URI.
+3. Select the complete document range.
+4. Execute Claude's contributed at-mention command.
+5. Close the captured tab with preserved focus.
 
-The adapter must not call `vscode.window.showTextDocument`, change a native
-editor selection, or submit the draft.
+The adapter must never close an unrelated tab and must not submit the draft.
 
 The existing agent capability registry continues to use Claude's contributed
 commands to determine whether the provider is available. Direct insertion is
@@ -115,8 +116,9 @@ sequenceDiagram
     Learner->>Viewer: Select passage and choose Send to Claude Code
     Viewer->>Host: Selection context
     Host->>FS: Write immutable selection.md (+ optional selection.png)
-    Host->>Host: Build @selection.md#1-N reference
-    Host->>Claude: Focus draft and type semantic reference
+    Host->>Host: Open preview and select complete selection.md
+    Host->>Claude: Invoke supported insert-at-mention command
+    Host->>Host: Close exact temporary preview tab
     Note over Viewer: Source editor remains active
     Note over Claude: Draft is updated but not submitted
 ```
@@ -124,21 +126,23 @@ sequenceDiagram
 ## Error handling
 
 - If Claude Code is unavailable, retain the existing provider warning.
-- If the exported Markdown cannot be opened for line counting, report that
+- If the exported Markdown cannot be opened or selected, report that
   Claude could not attach the selection.
-- If Claude cannot focus or receive typed input, report the handoff failure and
-  leave the source editor untouched.
-- Do not fall back to opening `selection.md`; avoiding that editor side effect
-  is a requirement.
+- If Claude's insertion command fails, close the captured preview in a `finally`
+  block before reporting the handoff failure.
+- If the mention succeeds but the temporary preview cannot be closed, preserve
+  the successful draft and show a cleanup-specific warning.
+- Match the captured tab by URI before closing it; an unrelated active tab must
+  never be closed.
 
 ## Testing
 
 ### Automated regression coverage
 
-- The Claude reference formatter uses a workspace-relative path.
-- A full document is represented as `#1-N`.
-- The Claude handoff focuses Claude and types the semantic reference.
-- The Claude path never calls `showTextDocument`.
+- The Claude handoff selects the full exported document.
+- The contributed insertion command runs exactly once.
+- The exact temporary exported tab closes with preserved focus.
+- An unrelated active tab is never closed.
 - Codex, Cursor Agent, and CodeBuddy command behavior remains unchanged.
 
 Tests must first fail against the current implementation and then pass after
@@ -155,7 +159,8 @@ Using the running Extension Development Host and Computer Use:
 5. Verify the PDF remains the active editor.
 6. Verify the Claude input contains the new immutable
    `@.../selection.md#1-N` reference.
-7. Verify no message was submitted.
+7. Verify no `selection.md` preview remains open.
+8. Verify no message was submitted.
 
 ## README update
 
@@ -167,4 +172,3 @@ The README will describe:
 - Optional PDF crop evidence and provider-specific attachment limitations.
 - The design choice to keep webviews focused on interaction while the extension
   host owns filesystem and agent integration.
-
