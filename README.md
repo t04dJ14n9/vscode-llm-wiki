@@ -72,17 +72,22 @@ Provider adapters use the capabilities exposed by installed extensions:
 | Target | Draft handoff | Optional image behavior |
 | --- | --- | --- |
 | Codex | Adds each immutable local file to the current thread draft | Adds `selection.png` separately when supported |
-| Claude Code | Inserts a full-file semantic reference such as `@.llm_wiki/agent/exports/<id>/selection.md#1-10` | Makes the crop available through the relative `[selection.png](./selection.png)` link inside the Markdown; no native image-attachment API is claimed |
+| Claude Code | Inserts a full-file semantic reference such as `@.llm_wiki/agent/exports/<id>/selection.md#1-10`; VS Code targets the Claude sidebar, while Cursor opens the full Claude editor beside the source | Makes the crop available through the relative `[selection.png](./selection.png)` link inside the Markdown; no native image-attachment API is claimed |
 | Cursor Agent | Adds the immutable files to the selected composer as exact resources | Adds the validated crop separately |
 | CodeBuddy | Adds `selection.md` as the primary context and sends one attachment batch | Includes the validated crop in that batch |
 
-Claude Code's public command currently derives an at-mention from an active
-native text-editor selection rather than accepting a file URI. LLM Wiki opens
-the immutable export in a separate temporary editor group, uses that supported
-command, closes only the tab it created, and explicitly restores the source PDF
-or Markdown editor. A `selection.md` tab that was already open is left alone.
-The resulting draft contains the complete immutable file reference without
-leaving a new export tab behind.
+Claude's VS Code sidebar command derives an at-mention from an active native
+text-editor selection rather than accepting a file URI. In stock VS Code,
+LLM Wiki opens the immutable export in a separate temporary editor group, uses
+that supported command, closes only the tab it created, and explicitly restores
+the source PDF or Markdown editor. A `selection.md` tab that was already open is
+left alone.
+
+Cursor reserves its right-side **Agents Window** for native agents. The
+visible Claude Code tab there is Claude's session list, not its message
+composer. In Cursor, LLM Wiki therefore opens Claude's full editor composer
+beside the source and supplies the immutable reference as the initial draft.
+This path never opens `selection.md` as a temporary text editor.
 
 Handoffs are deliberately draft-only. LLM Wiki never presses Send, and an
 optional crop failure does not discard the verified text context.

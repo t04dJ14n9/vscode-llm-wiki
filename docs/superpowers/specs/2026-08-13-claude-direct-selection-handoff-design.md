@@ -20,6 +20,12 @@ Claude Code 2.1.229 still exposes only active-editor-based public commands for
 creating an at-mention. It does not expose a public command that accepts an
 arbitrary file URI or a native file-attachment API.
 
+Cursor 3.15.6 reserves its right-side Agents Window for native agent surfaces.
+Claude's tab in that window is `claudeVSCodeSessionsList`, which lists sessions
+but is not a message composer. Cursor does expose Claude's complete
+`claudeVSCodePanel` as an editor and Claude's `editor.open` command accepts an
+initial prompt.
+
 ## Goals
 
 - Preserve Claude's semantic full-file reference:
@@ -30,6 +36,8 @@ arbitrary file URI or a native file-attachment API.
 - Preserve the immutable export and its optional relative
   `[selection.png](./selection.png)` evidence link.
 - Keep Codex, Cursor Agent, and CodeBuddy handoff behavior unchanged.
+- Use the complete Claude composer appropriate to each host instead of treating
+  Cursor's session list as a draft surface.
 - Document the provider-specific handoff behavior and filesystem-first design
   in the README.
 
@@ -60,8 +68,8 @@ production integration contract.
 
 ### 2. Open, invoke, close, and restore — selected
 
-Use Claude's supported `insertAtMention` command, which requires an active
-native editor:
+In stock VS Code, use Claude's supported `insertAtMention` command, which
+requires an active native editor:
 
 1. Snapshot the active source tab's URI, custom-editor type, view column, and
    preview state.
@@ -79,7 +87,24 @@ An existing user-owned `selection.md` tab is never closed. Explicit source
 restoration avoids relying on preview replacement or most-recently-used tab
 behavior.
 
-### 3. Clipboard paste
+### 3. Cursor full editor with an initial reference — selected
+
+In Cursor, construct the same workspace-relative full-file reference and call:
+
+```typescript
+vscode.commands.executeCommand(
+  'claude-vscode.editor.open',
+  undefined,
+  reference,
+  vscode.ViewColumn.Beside,
+);
+```
+
+Claude opens its complete editor composer beside the source with the reference
+already present in the unsent draft. This avoids Cursor's session-list-only
+Agents Window and does not open `selection.md` as a text editor.
+
+### 4. Clipboard paste
 
 Focus Claude, replace the clipboard with the reference, paste, and restore the
 clipboard.
@@ -92,7 +117,7 @@ rejected.
 `packages/vscode-extension/src/agentHandoff.ts` remains the provider registry
 and adapter boundary.
 
-The Claude adapter will:
+The VS Code Claude adapter will:
 
 1. Snapshot the active source editor.
 2. Snapshot pre-existing tabs for the exported URI.
@@ -103,6 +128,14 @@ The Claude adapter will:
 6. Execute Claude's contributed at-mention command.
 7. Close only the newly created matching tab.
 8. Explicitly restore the source editor.
+
+The Cursor Claude adapter will:
+
+1. Read the immutable document without showing it to determine the complete
+   line count.
+2. Format `@<workspace-relative-path>#1-N`.
+3. Open Claude's complete editor composer beside the source with that reference
+   as the initial draft.
 
 The adapter must never close an unrelated tab and must not submit the draft.
 
@@ -124,10 +157,15 @@ sequenceDiagram
     Learner->>Viewer: Select passage and choose Send to Claude Code
     Viewer->>Host: Selection context
     Host->>FS: Write immutable selection.md (+ optional selection.png)
-    Host->>Host: Snapshot source and pre-existing export tabs
-    Host->>Host: Open pinned selection.md beside source and select all
-    Host->>Claude: Invoke supported insert-at-mention command
-    Host->>Host: Close only new export tab and restore source
+    alt Stock VS Code
+        Host->>Host: Snapshot source and pre-existing export tabs
+        Host->>Host: Open pinned selection.md beside source and select all
+        Host->>Claude: Invoke supported insert-at-mention command
+        Host->>Host: Close only new export tab and restore source
+    else Cursor
+        Host->>Host: Build workspace-relative @selection.md#1-N reference
+        Host->>Claude: Open full editor composer beside source with initial draft
+    end
     Note over Viewer: Source editor remains active
     Note over Claude: Draft is updated but not submitted
 ```
@@ -145,6 +183,8 @@ sequenceDiagram
 - If insertion itself fails, do not claim that Claude received the selection.
 - Match by URI and before/after tab identity; unrelated and pre-existing tabs
   must never be closed.
+- In Cursor, require both Claude's mention capability and
+  `claude-vscode.editor.open`; otherwise do not advertise the provider button.
 
 ## Testing
 
@@ -158,6 +198,10 @@ sequenceDiagram
 - A pre-existing export tab is never closed.
 - Combined insertion and cleanup failure does not produce a contradictory
   delivery-success warning.
+- Cursor opens the full Claude editor beside the source, normalizes path
+  separators, and seeds the complete immutable line range without showing
+  `selection.md`.
+- Cursor does not advertise Claude when the full editor command is unavailable.
 - Codex, Cursor Agent, and CodeBuddy command behavior remains unchanged.
 
 Tests must first fail against the current implementation and then pass after
@@ -168,14 +212,13 @@ the minimal adapter change.
 Using the running Extension Development Host and Computer Use:
 
 1. Keep a PDF passage selected.
-2. Close any existing `selection.md` preview.
-3. Clear the Claude draft.
-4. Choose **Send to Claude Code**.
-5. Verify the PDF remains the active editor.
-6. Verify the Claude input contains the new immutable
-   `@.../selection.md#1-N` reference.
-7. Verify no `selection.md` preview remains open.
-8. Verify no message was submitted.
+2. Clear the Claude draft.
+3. Choose **Send to Claude Code**.
+4. In VS Code, verify the sidebar receives the reference and the source returns.
+5. In Cursor, verify the full Claude editor opens beside the source with the
+   reference as its initial draft.
+6. Verify no new `selection.md` text-editor tab remains.
+7. Verify no message was submitted.
 
 ## README update
 

@@ -129,6 +129,41 @@ test('focus-only Claude does not produce a handoff capability', () => {
   assert.deepEqual(getImmediateAgentSurfaceCapabilities().providers, []);
 });
 
+test('Cursor advertises Claude only when its full editor command is available', () => {
+  const withoutEditor = {
+    env: { appName: 'Cursor' },
+    extensions: extensionRegistry(
+      installedExtension('anthropic.claude-code', [
+        'claude-vscode.insertAtMention',
+      ]),
+    ),
+  };
+  const withEditor = {
+    env: { appName: 'Cursor' },
+    extensions: extensionRegistry(
+      installedExtension('anthropic.claude-code', [
+        'claude-vscode.editor.open',
+        'claude-vscode.insertAtMention',
+      ]),
+    ),
+  };
+
+  assert.deepEqual(
+    loadAgentHandoff(withoutEditor).getImmediateAgentSurfaceCapabilities(),
+    {
+      cursorAgent: true,
+      providers: [],
+    },
+  );
+  assert.deepEqual(
+    loadAgentHandoff(withEditor).getImmediateAgentSurfaceCapabilities(),
+    {
+      cursorAgent: true,
+      providers: [{ id: 'claude', label: 'Claude Code' }],
+    },
+  );
+});
+
 test('cursor agent capability follows the host product name only', () => {
   const { getImmediateAgentSurfaceCapabilities } = loadAgentHandoff({
     env: { appName: 'Cursor' },
@@ -1428,6 +1463,69 @@ test('does not treat focus-only Claude as a handoff target', async () => {
   assert.deepEqual(warnings, [
     'Selection exported, but no supported agent sidebar is available.',
   ]);
+});
+
+test('Cursor opens the full Claude editor beside the source with the immutable reference', async () => {
+  const calls = [];
+  const uri = {
+    scheme: 'file',
+    fsPath: 'C:\\vault\\.llm_wiki\\agent\\exports\\export-id\\selection.md',
+  };
+  const document = {
+    lineCount: 3,
+  };
+  const vscode = {
+    ViewColumn: {
+      Beside: 2,
+    },
+    env: {
+      appName: 'Cursor',
+    },
+    commands: {
+      getCommands: async () => [
+        'claude-vscode.editor.open',
+        'claude-vscode.insertAtMention',
+      ],
+      executeCommand: async (...args) => calls.push(args),
+    },
+    extensions: extensionRegistry(installedExtension(
+      'anthropic.claude-code',
+      [
+        'claude-vscode.editor.open',
+        'claude-vscode.insertAtMention',
+      ],
+      { isActive: true },
+    )),
+    workspace: {
+      asRelativePath: value => {
+        assert.equal(value, uri);
+        return '.llm_wiki\\agent\\exports\\export-id\\selection.md';
+      },
+      openTextDocument: async value => {
+        assert.equal(value, uri);
+        return document;
+      },
+    },
+    window: {
+      showTextDocument: () => assert.fail(
+        'Cursor Claude handoff must not open selection.md in a text editor',
+      ),
+      showWarningMessage: () => undefined,
+    },
+  };
+  const { handoffSelectionToAgentId } = loadAgentHandoff(vscode);
+
+  assert.equal(await handoffSelectionToAgentId('claude', uri), true);
+  assert.deepEqual(calls, [[
+    'claude-vscode.editor.open',
+    undefined,
+    '@.llm_wiki/agent/exports/export-id/selection.md#1-3 ',
+    vscode.ViewColumn.Beside,
+  ]]);
+  assert.equal(
+    calls.some(([command]) => /submit|send/i.test(command)),
+    false,
+  );
 });
 
 test('Claude prefers insert-at-mention so its current draft receives the exact reference', async () => {

@@ -4,7 +4,7 @@
 
 **Goal:** Put Claude Code's full immutable `selection.md` at-mention into its draft without leaving a new export tab open or taking the learner away from the source.
 
-**Architecture:** `agentHandoff.ts` remains the provider-adapter boundary. Claude's public at-mention command requires an active native text-editor selection, so the adapter snapshots the source tab, records pre-existing export tabs, opens the export as a pinned editor beside the source, selects the full file, invokes Claude, closes only a matching tab created by the handoff, and explicitly restores the source editor.
+**Architecture:** `agentHandoff.ts` remains the provider-adapter boundary. In stock VS Code, Claude's public at-mention command requires an active native text-editor selection, so the adapter owns a temporary export tab and restores the source. In Cursor, the right Agents Window exposes Claude's session list rather than a composer, so the adapter opens Claude's full editor beside the source and supplies the immutable reference as the initial draft.
 
 **Tech Stack:** TypeScript, VS Code Extension API, Node.js built-in test runner, pnpm, Computer Use with `@oai/sky`.
 
@@ -18,6 +18,10 @@
 - Open the temporary export beside the source with `preview: false`, preventing
   preview replacement.
 - Restore the source URI, editor type, view column, and preview state.
+- In Cursor, never open `selection.md` as a text editor; use
+  `claude-vscode.editor.open` with an initial draft.
+- Do not advertise Claude in Cursor unless its full editor command is
+  available.
 - Keep Codex, Cursor Agent, and CodeBuddy behavior unchanged.
 
 ---
@@ -268,7 +272,52 @@ rg -n "Claude|immutable|selection\\.md|never submits|filesystem-first" README.md
 
 ---
 
-### Task 5: Final verification
+### Task 5: Add the Cursor full-editor path
+
+**Files:**
+- Modify: `packages/vscode-extension/src/agentHandoff.ts`
+- Modify: `packages/vscode-extension/test/agentHandoff.test.mjs`
+
+- [x] **Step 1: Add failing Cursor capability coverage**
+
+Assert that Cursor advertises Claude only when both its mention capability and
+`claude-vscode.editor.open` are available.
+
+- [x] **Step 2: Add failing Cursor handoff coverage**
+
+Assert that Cursor:
+
+- reads the immutable document only for its line count;
+- normalizes Windows separators;
+- does not show `selection.md`;
+- executes:
+
+```typescript
+vscode.commands.executeCommand(
+  'claude-vscode.editor.open',
+  undefined,
+  '@.llm_wiki/agent/exports/<id>/selection.md#1-N ',
+  vscode.ViewColumn.Beside,
+);
+```
+
+- [x] **Step 3: Implement host-aware Claude routing**
+
+Keep the existing VS Code path and add the direct Cursor editor branch.
+
+- [x] **Step 4: Validate in Cursor with Computer Use**
+
+Verify:
+
+- the DDIA PDF remains visible;
+- Claude's complete editor composer opens beside it;
+- the immutable full-file reference appears in the message input;
+- no new `.llm_wiki/.../selection.md` text-editor tab appears;
+- the message remains unsent.
+
+---
+
+### Task 6: Final verification
 
 **Files:**
 - Verify all modified files and generated build artifacts.
@@ -286,6 +335,7 @@ Expected: lint, type checking, 36 core tests, and all extension tests pass.
 Confirm the production bundle contains:
 
 - `claude-vscode.insertAtMention`
+- `claude-vscode.editor.open`
 - `vscode.openWith`
 - the cleanup-specific warning
 - the normal provider failure warning
