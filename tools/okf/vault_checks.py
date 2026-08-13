@@ -306,10 +306,6 @@ def _walk_paths(
                     required.startswith(f"{name}/")
                     for required in REQUIRED_DIRECTORIES
                 )
-                or (
-                    include_hidden
-                    and name in FORBIDDEN_STATE_DIRECTORIES
-                )
             ]
         if relative == "projects/code":
             directories[:] = [

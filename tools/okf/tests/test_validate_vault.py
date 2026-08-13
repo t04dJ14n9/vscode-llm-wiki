@@ -689,10 +689,16 @@ Fixture paper text.
         self.assertIn("project.gitlink", self.issue_codes(state))
 
     def test_runtime_database_state_is_forbidden(self) -> None:
-        path = self.root / ".llm_wiki/index.sqlite"
+        path = self.root / "concepts/.llm_wiki/index.sqlite"
         path.parent.mkdir()
         path.write_bytes(b"sqlite")
         self.assertIn("forbidden.runtime-state", self.issue_codes())
+
+    def test_repository_root_editor_state_is_outside_the_bundle_profile(self) -> None:
+        path = self.root / ".llm_wiki/index.sqlite"
+        path.parent.mkdir()
+        path.write_bytes(b"sqlite")
+        self.assertNotIn("forbidden.runtime-state", self.issue_codes())
 
 
 if __name__ == "__main__":
