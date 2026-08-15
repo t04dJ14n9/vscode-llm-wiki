@@ -52,6 +52,22 @@ test('formats exact Markdown agent references', () => {
   assert.equal(formatMarkdownAgentReference('notes\\a.md', 7, 9), '@notes/a.md#7-9');
 });
 
+test('rejects URI schemes and all Windows drive-prefixed Markdown paths', () => {
+  for (const relativePath of [
+    'file:///tmp/paper.md',
+    'https://example.com/paper.md',
+    'C:paper.md',
+    'C:/paper.md',
+    'C:\\paper.md',
+  ]) {
+    assert.throws(
+      () => formatMarkdownAgentReference(relativePath, 1, 1),
+      /workspace-relative/,
+      relativePath,
+    );
+  }
+});
+
 test('builds single- and multi-page PDF clipboard context', () => {
   const single = createPdfAgentClipboardContext({
     selectionKey: 'single-key',
@@ -108,6 +124,24 @@ test('rejects malformed clipboard inputs', () => {
   }), undefined);
 });
 
+test('rejects absolute, URI, and anchor-bridge PDF targets', () => {
+  for (const anchorUri of [
+    '/tmp/paper.pdf#page=3',
+    'C:/tmp/paper.pdf#page=3',
+    'file:///tmp/paper.pdf#page=3',
+    'raw/source.llm_wiki_anchor',
+  ]) {
+    assert.equal(createPdfAgentClipboardContext({
+      selectionKey: 'key',
+      relativePath: 'raw/paper.pdf',
+      startPage: 3,
+      endPage: 3,
+      selectedText: 'Exact passage',
+      anchorUri,
+    }), undefined, anchorUri);
+  }
+});
+
 test('uses a stable normalized JSON key for PDF selection geometry', () => {
   const first = pdfAgentClipboardSelectionKey({
     startPage: 2,
@@ -134,4 +168,18 @@ test('uses a stable normalized JSON key for PDF selection geometry', () => {
     pages: [],
     selectedText: 'Selected passage',
   }), undefined);
+});
+
+test('rejects rectangles that become non-finite or zero-area after normalization', () => {
+  for (const rect of [
+    [Number.MAX_VALUE / 2, 0, Number.MAX_VALUE, 1],
+    [0, 0, 0.0004, 1],
+  ]) {
+    assert.equal(pdfAgentClipboardSelectionKey({
+      startPage: 1,
+      endPage: 1,
+      pages: [{ page: 1, rects: [rect] }],
+      selectedText: 'Selected passage',
+    }), undefined, JSON.stringify(rect));
+  }
 });

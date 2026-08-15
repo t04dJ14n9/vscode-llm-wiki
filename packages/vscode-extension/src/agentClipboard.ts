@@ -161,13 +161,27 @@ export function pdfAgentClipboardSelectionKey(
 }
 
 function openAnchorHref(value: unknown): string | undefined {
-  if (typeof value !== 'string' || !value.trim()) return undefined;
+  const target = normalizeAnchorTarget(value);
+  if (!target) return undefined;
   try {
-    const href = llmWikiOpenAnchorUri(value);
+    const href = llmWikiOpenAnchorUri(target);
     return typeof href === 'string' && href.trim() ? href : undefined;
   } catch {
     return undefined;
   }
+}
+
+function normalizeAnchorTarget(value: unknown): string | undefined {
+  if (typeof value !== 'string' || !value || value.trim() !== value) return undefined;
+  const hashIndex = value.indexOf('#');
+  const rawPath = hashIndex < 0 ? value : value.slice(0, hashIndex);
+  const normalizedPath = normalizeWorkspaceRelativePath(rawPath);
+  if (!normalizedPath || normalizedPath.toLowerCase().endsWith('.llm_wiki_anchor')) {
+    return undefined;
+  }
+  return hashIndex < 0
+    ? normalizedPath
+    : `${normalizedPath}${value.slice(hashIndex)}`;
 }
 
 function normalizeWorkspaceRelativePath(value: unknown): string | undefined {
@@ -179,6 +193,7 @@ function normalizeWorkspaceRelativePath(value: unknown): string | undefined {
     || normalized.length > MAX_AGENT_CLIPBOARD_PATH_CHARACTERS
     || hasControlCharacters(normalized)
     || normalized.startsWith('/')
+    || /^[A-Za-z][A-Za-z0-9+.-]*:/.test(normalized)
     || /^[A-Za-z]:($|\/)/.test(normalized)
     || normalized.split('/').some(segment => segment === '..')
   ) return undefined;
@@ -201,12 +216,17 @@ function normalizePdfAgentClipboardRect(
     || value[3] <= value[1]
   ) return undefined;
   const [left, top, right, bottom] = value as [number, number, number, number];
-  return [
+  const normalized = [
     Math.round(left * 1_000) / 1_000,
     Math.round(top * 1_000) / 1_000,
     Math.round(right * 1_000) / 1_000,
     Math.round(bottom * 1_000) / 1_000,
-  ];
+  ] as const;
+  return normalized.every(coordinate => Number.isFinite(coordinate))
+    && normalized[2] > normalized[0]
+    && normalized[3] > normalized[1]
+    ? normalized
+    : undefined;
 }
 
 function comparePdfAgentClipboardRects(
