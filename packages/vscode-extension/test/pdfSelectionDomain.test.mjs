@@ -106,7 +106,7 @@ function glyph(left, top, width = 5, height = 10, offsetStart = 0) {
   };
 }
 
-function restoreClipboardSelectionAfterPageRender(
+function pendingClipboardViewer(
   pendingSelection,
   currentSelection,
   snapshot,
@@ -120,7 +120,21 @@ function restoreClipboardSelectionAfterPageRender(
   viewer.latestSelectionAnchor = null;
   viewer.applyNativeSelection = () => ({});
   viewer.drawSelectionOverlay = () => undefined;
+  viewer.drawSelectionOverlays = () => undefined;
   viewer.selectionAnchorFromState = () => snapshot;
+  return viewer;
+}
+
+function restoreClipboardSelectionAfterPageRender(
+  pendingSelection,
+  currentSelection,
+  snapshot,
+) {
+  const viewer = pendingClipboardViewer(
+    pendingSelection,
+    currentSelection,
+    snapshot,
+  );
   postedViewerMessages.length = 0;
 
   viewer.restoreSelectionForPage(3);
@@ -227,13 +241,13 @@ function assertDelayedMiddlePageRepublish(selection, changedSelection) {
   });
 
   assert.equal(
-    typeof pdfViewer.pdfAgentClipboardSelectionMessageAfterPageRender,
+    typeof pdfViewer.pdfAgentClipboardSelectionRetryMessage,
     'function',
   );
   const snapshot = selectionSnapshotWithMiddlePage(selection, true);
   assert.deepEqual(snapshot?.clipboardSelection, clipboardSelection);
   assert.deepEqual(
-    pdfViewer.pdfAgentClipboardSelectionMessageAfterPageRender(
+    pdfViewer.pdfAgentClipboardSelectionRetryMessage(
       selection,
       selection,
       snapshot,
@@ -245,7 +259,7 @@ function assertDelayedMiddlePageRepublish(selection, changedSelection) {
     },
   );
   assert.equal(
-    pdfViewer.pdfAgentClipboardSelectionMessageAfterPageRender(
+    pdfViewer.pdfAgentClipboardSelectionRetryMessage(
       selection,
       changedSelection,
       snapshot,
@@ -298,6 +312,114 @@ test('reverse multi-page clipboard waits for a delayed middle page before republ
       anchor: { ...selection.anchor, offset: 6 },
     },
   );
+});
+
+test('search-only PDF text extraction settlement republishes complete current clipboard context', async () => {
+  const selection = {
+    page: 2,
+    anchor: { page: 2, itemIndex: 4, offset: 2 },
+    focus: { page: 4, itemIndex: 1, offset: 5 },
+  };
+  const snapshot = selectionSnapshotWithMiddlePage(selection, true);
+  const viewer = pendingClipboardViewer(selection, selection, snapshot);
+  const pageState = {
+    pageNum: 3,
+    rendered: false,
+    renderGeneration: 1,
+    textExtractionReady: false,
+  };
+  const rects = [{ content: 'page three' }];
+  postedViewerMessages.length = 0;
+
+  assert.equal(typeof viewer.trackPdfTextExtraction, 'function');
+  assert.equal(
+    await viewer.trackPdfTextExtraction(pageState, Promise.resolve(rects)),
+    rects,
+  );
+  assert.equal(pageState.textExtractionReady, true);
+  assert.equal(pageState.rendered, false);
+  assert.deepEqual(postedViewerMessages, [{
+    type: 'selectionChanged',
+    anchor: snapshot.anchor,
+    clipboardSelection: snapshot.clipboardSelection,
+  }]);
+  viewer.refreshSelectionAfterRender();
+  assert.equal(postedViewerMessages.length, 1);
+
+  const staleViewer = pendingClipboardViewer(
+    selection,
+    {
+      ...selection,
+      focus: { ...selection.focus, offset: 6 },
+    },
+    snapshot,
+  );
+  postedViewerMessages.length = 0;
+  await staleViewer.trackPdfTextExtraction(
+    { ...pageState, textExtractionReady: false },
+    Promise.resolve(rects),
+  );
+  assert.deepEqual(postedViewerMessages, []);
+});
+
+test('generation-mismatched PDF render republishes when extraction settles before return', async () => {
+  const selection = {
+    page: 4,
+    anchor: { page: 4, itemIndex: 1, offset: 5 },
+    focus: { page: 2, itemIndex: 4, offset: 2 },
+  };
+  const snapshot = selectionSnapshotWithMiddlePage(selection, true);
+  const viewer = pendingClipboardViewer(selection, selection, snapshot);
+  const startedRenderGeneration = 1;
+  const pageState = {
+    pageNum: 3,
+    rendered: false,
+    renderGeneration: 2,
+    textExtractionReady: false,
+  };
+  postedViewerMessages.length = 0;
+
+  assert.equal(typeof viewer.trackPdfTextExtraction, 'function');
+  await viewer.trackPdfTextExtraction(
+    pageState,
+    Promise.resolve([{ content: 'page three' }]),
+  );
+  assert.notEqual(startedRenderGeneration, pageState.renderGeneration);
+  assert.deepEqual(postedViewerMessages, [{
+    type: 'selectionChanged',
+    anchor: snapshot.anchor,
+    clipboardSelection: snapshot.clipboardSelection,
+  }]);
+});
+
+test('PDF selection refresh retries current pending context but rejects stale carets', () => {
+  const selection = {
+    page: 2,
+    anchor: { page: 2, itemIndex: 4, offset: 2 },
+    focus: { page: 4, itemIndex: 1, offset: 5 },
+  };
+  const snapshot = selectionSnapshotWithMiddlePage(selection, true);
+  const viewer = pendingClipboardViewer(selection, selection, snapshot);
+  postedViewerMessages.length = 0;
+
+  viewer.refreshSelectionAfterRender();
+  assert.deepEqual(postedViewerMessages, [{
+    type: 'selectionChanged',
+    anchor: snapshot.anchor,
+    clipboardSelection: snapshot.clipboardSelection,
+  }]);
+
+  const staleViewer = pendingClipboardViewer(
+    selection,
+    {
+      ...selection,
+      anchor: { ...selection.anchor, offset: 3 },
+    },
+    snapshot,
+  );
+  postedViewerMessages.length = 0;
+  staleViewer.refreshSelectionAfterRender();
+  assert.deepEqual(postedViewerMessages, []);
 });
 
 test('stale PDF clipboard context is rejected before webview caching', () => {

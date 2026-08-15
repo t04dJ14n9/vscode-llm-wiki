@@ -206,7 +206,7 @@ export function pdfAgentClipboardSelectionForState(
     : undefined;
 }
 
-export function pdfAgentClipboardSelectionMessageAfterPageRender(
+export function pdfAgentClipboardSelectionRetryMessage(
   pendingSelection: PdfSelectionState,
   currentSelection: PdfSelectionState | null | undefined,
   snapshot: PdfSelectionSnapshot | undefined,
@@ -1296,20 +1296,26 @@ export class PdfViewer {
     if (!selection || !pdfSelectionContainsPage(selection, page)) return;
     this.applyNativeSelection(selection);
     this.drawSelectionOverlay(page);
+    this.retryPendingAgentClipboardSelection();
+  }
+
+  private retryPendingAgentClipboardSelection(current?: PdfSelectionSnapshot): boolean {
     const pendingSelection = this.pendingAgentClipboardSelection;
-    if (!pendingSelection) return;
-    const current = this.selectionAnchorFromState();
-    const message = pdfAgentClipboardSelectionMessageAfterPageRender(
+    const selection = this.selectionState;
+    if (!pendingSelection || !selection) return false;
+    const snapshot = current ?? this.selectionAnchorFromState();
+    const message = pdfAgentClipboardSelectionRetryMessage(
       pendingSelection,
       selection,
-      current,
+      snapshot,
     );
-    if (!message) return;
+    if (!message) return false;
     this.pendingAgentClipboardSelection = null;
     this.latestSelectionAnchor = message.anchor;
     this.agentClipboardSelection = message.clipboardSelection;
     this.agentClipboardContexts.clear();
     vscode.postMessage(message);
+    return true;
   }
 
   private drawSelectionOverlays(): void {
@@ -2303,7 +2309,7 @@ export class PdfViewer {
 
   private loadTextRects(state: PageState): Promise<any[]> {
     if (!state.textRectsPromise) {
-      state.textRectsPromise = (async () => {
+      const extraction = (async () => {
         if (typeof engine.getPageTextRuns === 'function') {
           try {
             const [pageTextRuns, pageGlyphs] = await Promise.all([
@@ -2331,12 +2337,23 @@ export class PdfViewer {
         state.selectionGlyphs = rects.map(item => Array.isArray(item.selectionGlyphs) ? item.selectionGlyphs : []);
         state.selectionLines = buildPdfSelectionLines(state.selectionGlyphs);
         return rects;
-      })().then(rects => {
-        state.textExtractionReady = true;
-        return rects;
-      });
+      })();
+      state.textRectsPromise = this.trackPdfTextExtraction(state, extraction);
     }
     return state.textRectsPromise;
+  }
+
+  private trackPdfTextExtraction(
+    state: PageState,
+    extraction: Promise<any[]>,
+  ): Promise<any[]> {
+    return extraction.then(rects => this.completePdfTextExtraction(state, rects));
+  }
+
+  private completePdfTextExtraction(state: PageState, rects: any[]): any[] {
+    state.textExtractionReady = true;
+    this.retryPendingAgentClipboardSelection();
+    return rects;
   }
 
   private async loadPdfRunSourceCharacters(
@@ -4343,6 +4360,7 @@ export class PdfViewer {
     this.drawSelectionOverlays();
     const current = this.selectionAnchorFromState();
     if (!current) return;
+    this.retryPendingAgentClipboardSelection(current);
     this.latestSelectionAnchor = current.anchor;
     if (!current.anchor.multiPage) {
       this.showSelectionToolbar(
