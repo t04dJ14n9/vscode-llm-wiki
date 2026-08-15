@@ -662,23 +662,51 @@ async function prepareMarkdownSelectionForAction(
   }
 
   const selectedUri = selection.uri;
+  let shouldRecapture = false;
+  if (
+    activeTabCustomViewType() === MarkdownEditorProvider.viewType
+    && typeof markdownEditorProvider?.flushActiveEditsBeforeSave === 'function'
+  ) {
+    shouldRecapture = true;
+    try {
+      if (!await markdownEditorProvider.flushActiveEditsBeforeSave(selectedUri)) {
+        vscode.window.showWarningMessage(messages.saveFailureMessage);
+        return undefined;
+      }
+    } catch {
+      vscode.window.showWarningMessage(messages.saveFailureMessage);
+      return undefined;
+    }
+  }
+
   const document = vscode.workspace.textDocuments?.find(candidate =>
     candidate.uri.scheme === selectedUri.scheme
       && candidate.uri.fsPath === selectedUri.fsPath,
   );
-  if (!document?.isDirty) return selection;
+  if (!document?.isDirty && !shouldRecapture) return selection;
 
-  try {
-    if (!await document.save()) {
+  if (document?.isDirty) {
+    shouldRecapture = true;
+    try {
+      if (!await document.save()) {
+        vscode.window.showWarningMessage(messages.saveFailureMessage);
+        return undefined;
+      }
+    } catch {
       vscode.window.showWarningMessage(messages.saveFailureMessage);
       return undefined;
     }
-  } catch {
-    vscode.window.showWarningMessage(messages.saveFailureMessage);
-    return undefined;
   }
 
-  const recaptured = await recaptureSavedMarkdownSelection(selection);
+  let recaptured: SelectionContext | undefined;
+  try {
+    recaptured = shouldRecapture
+      ? await recaptureSavedMarkdownSelection(selection)
+      : selection;
+  } catch {
+    vscode.window.showWarningMessage(messages.emptySelectionMessage);
+    return undefined;
+  }
   if (!recaptured?.text) {
     vscode.window.showWarningMessage(messages.emptySelectionMessage);
     return undefined;
@@ -703,11 +731,19 @@ export async function copyMarkdownSelectionForAgent(
   });
   if (!selection) return false;
 
-  const reference = formatMarkdownAgentReference(
-    vscode.workspace.asRelativePath(selection.uri),
-    selection.startLine,
-    selection.endLine,
-  );
+  let reference: string;
+  try {
+    reference = formatMarkdownAgentReference(
+      vscode.workspace.asRelativePath(selection.uri),
+      selection.startLine,
+      selection.endLine,
+    );
+  } catch {
+    vscode.window.showWarningMessage(
+      'Save the Markdown note inside the current workspace before copying for agent.',
+    );
+    return false;
+  }
   await vscode.env.clipboard.writeText(reference);
   vscode.window.showInformationMessage('Selection copied for agent.');
   return true;

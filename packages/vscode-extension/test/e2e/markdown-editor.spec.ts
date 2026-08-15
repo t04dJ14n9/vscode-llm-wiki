@@ -803,6 +803,7 @@ test.describe('LLM Wiki — E2E Bidirectional Links', () => {
     await waitForEditorBootstrap(page);
 
     await page.evaluate(() => {
+      window.postMessage({ type: 'agentHandoffCapabilities', cursorAgent: true, providers: [] }, '*');
       window.postMessage({ type: 'setText', text: 'alpha beta gamma' }, '*');
     });
     await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
@@ -836,16 +837,16 @@ test.describe('LLM Wiki — E2E Bidirectional Links', () => {
         viewportHeight: window.innerHeight,
       };
     });
-    expect(promptLayout.childTags).toEqual(['BUTTON']);
+    expect(promptLayout.childTags).toEqual(['BUTTON', 'BUTTON']);
     expect(promptLayout.shortcutLeft).toBeGreaterThanOrEqual(promptLayout.labelRight);
-    expect(promptLayout.width).toBeLessThanOrEqual(140);
+    expect(promptLayout.width).toBeLessThanOrEqual(230);
     expect(promptLayout.height).toBeLessThanOrEqual(36);
     expect(promptLayout.left).toBeGreaterThanOrEqual(7);
     expect(promptLayout.top).toBeGreaterThanOrEqual(7);
     expect(promptLayout.right).toBeLessThanOrEqual(promptLayout.viewportWidth - 7);
     expect(promptLayout.bottom).toBeLessThanOrEqual(promptLayout.viewportHeight - 7);
 
-    await prompt.click();
+    await prompt.getByRole('button', { name: /Add to Chat/ }).click();
     await expect.poll(() => page.evaluate(() =>
       window.__mockMessages?.filter((message) =>
         message.type === 'addSelectionToCursorChat'
@@ -858,14 +859,14 @@ test.describe('LLM Wiki — E2E Bidirectional Links', () => {
     )).toBe(1);
   });
 
-  test('selection actions expose available Claude handoff without submitting', async ({ page }) => {
+  test('selection actions expose Copy for Agent and gate Add to Chat on Cursor', async ({ page }) => {
     await page.goto('http://localhost:8979/test.html');
     await waitForEditorBootstrap(page);
 
     await page.evaluate(() => {
       window.postMessage({
         type: 'agentHandoffCapabilities',
-        cursorAgent: true,
+        cursorAgent: false,
         providers: [{ id: 'claude', label: 'Claude Code' }],
       }, '*');
       window.postMessage({ type: 'setText', text: 'alpha beta gamma' }, '*');
@@ -879,12 +880,23 @@ test.describe('LLM Wiki — E2E Bidirectional Links', () => {
     });
 
     const prompt = page.locator('.llm-wiki-cursor-selection-prompt');
-    await expect(prompt.getByRole('button', { name: 'Send to Claude Code' })).toHaveText('Claude');
-    await expect(prompt).toContainText('Add to Chat');
-    await prompt.getByRole('button', { name: 'Send to Claude Code' }).click();
+    await expect(prompt.getByRole('button', { name: 'Copy for Agent' })).toHaveText('Copy for Agent');
+    await expect(prompt.getByRole('button', { name: /Add to Chat/ })).toHaveCount(0);
+    await expect(prompt.getByRole('button', { name: /Claude/ })).toHaveCount(0);
+    await prompt.getByRole('button', { name: 'Copy for Agent' }).click();
     await expect.poll(() => page.evaluate(() =>
-      window.__mockMessages?.filter(message => message.type === 'sendToAgent').at(-1)
-    )).toEqual({ type: 'sendToAgent', agentId: 'claude' });
+      window.__mockMessages?.filter(message => message.type === 'copySelectionForAgent').at(-1)
+    )).toEqual({ type: 'copySelectionForAgent' });
+
+    await page.evaluate(() => {
+      window.postMessage({ type: 'agentHandoffCapabilities', cursorAgent: true, providers: [{ id: 'claude', label: 'Claude Code' }] }, '*');
+      const view = window.__cmView;
+      const from = view.state.doc.toString().indexOf('beta');
+      view.dispatch({ selection: { anchor: from, head: from + 'beta'.length } });
+    });
+    await expect(prompt.getByRole('button', { name: /Add to Chat/ })).toBeVisible();
+    await expect(prompt.getByRole('button', { name: 'Copy for Agent' })).toBeVisible();
+    await expect(prompt.getByRole('button', { name: /Claude/ })).toHaveCount(0);
 
     await page.evaluate(() => {
       const view = window.__cmView;
@@ -898,7 +910,8 @@ test.describe('LLM Wiki — E2E Bidirectional Links', () => {
         clientY: 40,
       }));
     });
-    await expect(page.getByRole('menu').getByRole('menuitem', { name: 'Add to Claude', exact: true })).toBeVisible();
+    await expect(page.getByRole('menu').getByRole('menuitem', { name: 'Copy for Agent', exact: true })).toBeVisible();
+    await expect(page.getByRole('menu').getByRole('menuitem', { name: 'Add to Claude', exact: true })).toHaveCount(0);
   });
 
   test('selection action prompt sits one editor line above a line selection', async ({ page }) => {
@@ -11938,7 +11951,7 @@ test.describe('LLM Wiki — E2E Bidirectional Links', () => {
     await expect(menu).toHaveCount(1);
     await expect(menu).toBeVisible();
     await expect(menu.getByRole('menuitem')).toHaveText([
-      /(?:⌘L|Ctrl\+L)  Add to Chat/,
+      'Copy for Agent',
       'Copy',
       'Bold',
       'Italic',
@@ -12048,7 +12061,7 @@ test.describe('LLM Wiki — E2E Bidirectional Links', () => {
     const menu = page.getByRole('menu');
     await expect(menu).toBeVisible();
     await expect(menu.getByRole('menuitem')).toHaveText([
-      /(?:⌘L|Ctrl\+L)  Add to Chat/,
+      'Copy for Agent',
       'Copy',
       'Bold',
       'Italic',

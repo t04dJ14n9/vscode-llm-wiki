@@ -489,6 +489,44 @@ test('markdown editor provider keeps associated untitled edits until explicit sa
   assert.deepEqual(saveCalls, ['# Draft\n']);
 });
 
+test('markdown editor provider flushes queued webview edits through the host save path', async () => {
+  const messages = [];
+  const pendingEdits = [];
+  let document;
+  const vscode = createVscodeMock({
+    applyEdit: edit => {
+      const replacement = edit.replacements.at(-1);
+      let resolveEdit;
+      const applied = new Promise(resolve => {
+        resolveEdit = resolve;
+      });
+      pendingEdits.push({
+        text: replacement.text,
+        complete: () => {
+          document.setText(replacement.text);
+          resolveEdit(true);
+        },
+      });
+      return applied;
+    },
+  });
+  const { MarkdownEditorProvider } = loadTsModule('src/markdownEditorProvider.ts', { vscode });
+  const provider = new MarkdownEditorProvider({ extensionUri: { scheme: 'file', path: '/extension' } });
+  document = createDocumentMock({ text: '# Note\n' });
+  const panel = createPanelMock(messages);
+
+  await provider.resolveCustomTextEditor(document, panel, {});
+  await panel.fireMessage({ type: 'edit', text: '# Queued update\n' });
+  await new Promise(resolve => setImmediate(resolve));
+  const flush = provider.flushActiveEditsBeforeSave(document.uri);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(pendingEdits.length, 1);
+  pendingEdits[0].complete();
+
+  assert.equal(await flush, true);
+  assert.equal(document.getText(), '# Queued update\n');
+});
+
 test('markdown editor provider does not replay stale text while webview edits are pending', async () => {
   const messages = [];
   const pendingEdits = [];

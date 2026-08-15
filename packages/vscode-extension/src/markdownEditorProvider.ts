@@ -14,6 +14,7 @@ interface ActiveMarkdownWebview {
   document: vscode.TextDocument;
   selection?: RevealSelection;
   postMessage: (message: unknown) => Thenable<boolean>;
+  flushBeforeSave: () => Promise<boolean>;
 }
 
 interface EditorPresentationSettings {
@@ -178,6 +179,16 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
     return this.getActiveSelectionContext();
   }
 
+  async flushActiveEditsBeforeSave(uri?: vscode.Uri): Promise<boolean> {
+    const active = uri
+      ? [...this.webviews.values()].find(candidate =>
+        candidate.document.uri.scheme === uri.scheme
+          && candidate.document.uri.fsPath === uri.fsPath,
+      )
+      : this.getActiveWebview();
+    return active?.flushBeforeSave() ?? true;
+  }
+
   async revealInEditor(uri: vscode.Uri, selection: RevealSelection): Promise<void> {
     const key = uri.toString();
     this.pendingReveals.set(key, selection);
@@ -208,10 +219,12 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
       ),
     };
     const key = document.uri.toString();
+    let flushBeforeSave: () => Promise<boolean> = async () => true;
     const activeWebview: ActiveMarkdownWebview = {
       panel: webviewPanel,
       document,
       postMessage: (message: unknown) => webviewPanel.webview.postMessage(message),
+      flushBeforeSave: () => flushBeforeSave(),
     };
     this.webviews.set(webviewPanel, activeWebview);
     if (webviewPanel.active) {
@@ -341,7 +354,7 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
 
     // Saving or closing with an unapplied edit would lose user input. Retry a
     // failed replacement once, then abort the operation and surface the error.
-    const flushBeforeSave = async (): Promise<boolean> => {
+    flushBeforeSave = async (): Promise<boolean> => {
       const attemptFlush = async (): Promise<boolean> => {
         try {
           await flushQueuedWebviewEdits();

@@ -1816,7 +1816,6 @@ function showMarkdownSelectionContextMenu(editorView: EditorView, clientX: numbe
         label: 'Copy for Agent',
         onSelect: () => {
           copySelectionForAgent(editorView);
-          editorView.focus();
         },
       },
       { type: 'separator' },
@@ -1923,7 +1922,6 @@ function updateCursorSelectionPrompt(editorView: EditorView): void {
       const current = cursorSelectionPrompt?.editorView;
       if (!current) return;
       copySelectionForAgent(current);
-      current.focus();
     });
     container.appendChild(copyButton);
     ensureCursorSelectionPromptStyles();

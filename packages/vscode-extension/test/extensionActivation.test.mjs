@@ -789,6 +789,162 @@ test('dirty Markdown copy saves and recaptures the source range before writing t
   assert.deepEqual(clipboardWrites, ['@notes/source.md#12-14']);
 });
 
+test('Markdown copy aborts with the select warning when post-save recapture rejects', async () => {
+  const clipboardWrites = ['existing clipboard'];
+  const warnings = [];
+  const uri = { scheme: 'file', fsPath: '/vault/notes/source.md' };
+  let dirty = true;
+  let captureCount = 0;
+  const selection = {
+    uri,
+    text: 'selected',
+    startLine: 2,
+    endLine: 2,
+    metadata: { kind: 'markdown' },
+  };
+  const vscode = createVscodeMock({
+    executeCommandCalls: [],
+    activeDocumentUri: undefined,
+    activeTabUri: uri,
+    activeTabViewType: 'llm-wiki.markdownEditor',
+    warningMessages: warnings,
+  });
+  vscode.workspace.textDocuments = [{
+    uri,
+    get isDirty() { return dirty; },
+    save: async () => {
+      dirty = false;
+      return true;
+    },
+  }];
+  vscode.env.clipboard = {
+    writeText: async text => clipboardWrites.push(text),
+  };
+  const mocks = createActivationMocks({ vscode });
+  mocks['./markdownEditorProvider'] = {
+    MarkdownEditorProvider: class {
+      static viewType = 'llm-wiki.markdownEditor';
+      async captureActiveSelectionContext() {
+        captureCount += 1;
+        if (captureCount === 1) return selection;
+        throw new Error('webview selection request failed');
+      }
+    },
+  };
+  const { activate } = loadTsModule('src/extension.ts', mocks);
+  activate({ subscriptions: [] });
+
+  assert.equal(await vscode.__registeredCommands['llm-wiki.copySelectionForAgent'](), false);
+  assert.equal(captureCount, 2);
+  assert.deepEqual(clipboardWrites, ['existing clipboard']);
+  assert.deepEqual(warnings, ['Select Markdown text before copying for agent.']);
+});
+
+test('dirty custom Markdown copy flushes queued webview edits before saving and recapturing', async () => {
+  const clipboardWrites = [];
+  const events = [];
+  const uri = { scheme: 'file', fsPath: '/vault/notes/source.md' };
+  let dirty = true;
+  let flushed = false;
+  const beforeFlush = {
+    uri,
+    text: 'selected before edit',
+    startLine: 2,
+    endLine: 2,
+    metadata: { kind: 'markdown' },
+  };
+  const afterFlush = {
+    ...beforeFlush,
+    text: 'selected after edit',
+    startLine: 12,
+    endLine: 14,
+  };
+  const document = {
+    uri,
+    get isDirty() { return dirty; },
+    save: async () => {
+      events.push('save');
+      dirty = false;
+      return true;
+    },
+  };
+  const vscode = createVscodeMock({
+    executeCommandCalls: [],
+    activeDocumentUri: undefined,
+    activeTabUri: uri,
+    activeTabViewType: 'llm-wiki.markdownEditor',
+  });
+  vscode.workspace.textDocuments = [document];
+  vscode.env.clipboard = {
+    writeText: async text => clipboardWrites.push(text),
+  };
+  const mocks = createActivationMocks({ vscode });
+  mocks['./markdownEditorProvider'] = {
+    MarkdownEditorProvider: class {
+      static viewType = 'llm-wiki.markdownEditor';
+      async flushActiveEditsBeforeSave(selectionUri) {
+        events.push(['flush', selectionUri]);
+        flushed = true;
+        return true;
+      }
+      async captureActiveSelectionContext() { return flushed ? afterFlush : beforeFlush; }
+    },
+  };
+  const { activate } = loadTsModule('src/extension.ts', mocks);
+  activate({ subscriptions: [] });
+
+  assert.equal(await vscode.__registeredCommands['llm-wiki.copySelectionForAgent'](), true);
+  assert.deepEqual(events, [['flush', uri], 'save']);
+  assert.deepEqual(clipboardWrites, ['@notes/source.md#12-14']);
+});
+
+test('Markdown copy rejects an out-of-workspace reference without changing the clipboard', async () => {
+  const clipboardWrites = ['existing clipboard'];
+  const warnings = [];
+  const uri = { scheme: 'file', fsPath: '/outside/source.md' };
+  const selection = {
+    uri,
+    text: 'selected',
+    startLine: 2,
+    endLine: 2,
+    metadata: { kind: 'markdown' },
+  };
+  const vscode = createVscodeMock({
+    executeCommandCalls: [],
+    activeDocumentUri: undefined,
+    activeTabUri: uri,
+    activeTabViewType: 'llm-wiki.markdownEditor',
+    warningMessages: warnings,
+  });
+  vscode.workspace.asRelativePath = () => '/outside/source.md';
+  vscode.env.clipboard = {
+    writeText: async text => clipboardWrites.push(text),
+  };
+  const mocks = createActivationMocks({ vscode });
+  mocks['./agentClipboard'] = {
+    formatMarkdownAgentReference: relativePath => {
+      if (relativePath.startsWith('/')) {
+        throw new TypeError('Markdown agent reference path must be workspace-relative.');
+      }
+      return '@notes/source.md#2';
+    },
+  };
+  mocks['./markdownEditorProvider'] = {
+    MarkdownEditorProvider: class {
+      static viewType = 'llm-wiki.markdownEditor';
+      async captureActiveSelectionContext() { return selection; }
+    },
+  };
+  const { activate } = loadTsModule('src/extension.ts', mocks);
+  activate({ subscriptions: [] });
+
+  assert.equal(await vscode.__registeredCommands['llm-wiki.copySelectionForAgent'](), false);
+  assert.deepEqual(clipboardWrites, ['existing clipboard']);
+  assert.deepEqual(warnings, [
+    'Save the Markdown note inside the current workspace before copying for agent.',
+  ]);
+});
+
 test('untitled Markdown copy leaves the clipboard unchanged and asks the user to save first', async () => {
   const clipboardWrites = ['existing clipboard'];
   const warnings = [];
