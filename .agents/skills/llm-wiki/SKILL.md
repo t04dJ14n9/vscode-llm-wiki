@@ -43,6 +43,25 @@ step explicit through generated indexes and links.
 - Use only `draft`, `stable`, or `deprecated` lifecycle values.
 - Record unresolved disagreement explicitly; do not manufacture consensus.
 
+## Citing a handed-over selection
+
+Persisted vault notes keep readable relative Markdown links and wikilinks.
+Chat navigation instead reuses the exact `open_uri` that LLM Wiki generated in
+`.llm_wiki/agent/selection.json`; `selection.md` renders the same value as its
+visible **Source** link:
+
+```text
+cursor://llm-wiki.llm-wiki-vscode/open-anchor?target=v1.<generated-payload>
+vscode://llm-wiki.llm-wiki-vscode/open-anchor?target=v1.<generated-payload>
+```
+
+Cursor emits the `cursor://` form and stock VS Code the `vscode://` form.
+Reuse whichever exact string the export contains; never construct the
+versioned base64url payload by hand. The sibling `chat_uri` resolves to an
+immutable `.llm_wiki_anchor` bridge file, which is an internal provider
+attachment and must never appear as a user-facing chat link. Web selections
+keep their direct `https://` source instead.
+
 ## Quick Reference
 
 | Situation | Action |

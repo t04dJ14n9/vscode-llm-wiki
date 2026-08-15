@@ -83,6 +83,32 @@ test('LLM Wiki anchor URIs use the current product scheme and round-trip the por
   );
 });
 
+test('LLM Wiki anchor URIs round-trip Markdown line ranges in both host schemes', () => {
+  const target = 'notes/Concepts/FlashAttention.md#L12-L18';
+
+  for (const uriScheme of ['cursor', 'vscode']) {
+    const { llmWikiAnchorTargetFromString, llmWikiOpenAnchorUri } = loadAnchorUris(uriScheme);
+    const actionUri = llmWikiOpenAnchorUri(target);
+
+    assert.equal(
+      actionUri,
+      `${uriScheme}://llm-wiki.llm-wiki-vscode/open-anchor?target=`
+        + `v1.${Buffer.from(target, 'utf8').toString('base64url')}`,
+    );
+    assert.equal(llmWikiAnchorTargetFromString(actionUri), target);
+  }
+});
+
+test('LLM Wiki anchor URIs round-trip Markdown targets containing spaces', () => {
+  const target = 'notes/Concepts/Online Softmax.md#L5-L7';
+  const { llmWikiAnchorTargetFromString, llmWikiOpenAnchorUri } = loadAnchorUris();
+  const actionUri = llmWikiOpenAnchorUri(target);
+
+  assert.ok(actionUri);
+  assert.doesNotMatch(actionUri, / /);
+  assert.equal(llmWikiAnchorTargetFromString(actionUri), target);
+});
+
 test('LLM Wiki anchor URIs preserve the exact DDIA text fragment after VS Code URI parsing', () => {
   const {
     llmWikiAnchorTargetFromString,

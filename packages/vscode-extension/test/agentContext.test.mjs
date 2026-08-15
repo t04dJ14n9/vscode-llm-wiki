@@ -122,7 +122,7 @@ test('addSelectionToContext exports a custom markdown editor selection when no n
     assert.deepEqual(JSON.parse(readFileSync(exported.jsonPath, 'utf8')), json);
     assert.match(
       markdown,
-      /\*\*Source\*\*: \[notes\/Concepts\/Online Softmax\.md \(lines 5–7\)\]\(<file:\/\//,
+      /\*\*Source\*\*: \[notes\/Concepts\/Online Softmax\.md \(lines 5–7\)\]\(<cursor:\/\/llm-wiki\.llm-wiki-vscode\/open-anchor\?target=v1\./,
     );
     assert.match(
       markdown,
@@ -137,7 +137,9 @@ test('addSelectionToContext exports a custom markdown editor selection when no n
     assert.equal(json.source, 'notes/Concepts/Online Softmax.md');
     assert.equal(json.anchor_uri, 'llm-wiki://note/notes/Concepts/Online%20Softmax.md#L5-L7');
     assert.equal(fileURLToPath(json.chat_uri), exported.anchorPath);
-    assert.equal(markdown.includes(`](<${json.chat_uri}>)`), true);
+    assert.equal(markdown.includes(`](<${json.open_uri}>)`), true);
+    assert.equal(markdown.includes(json.chat_uri), false);
+    assert.equal(markdown.includes('.llm_wiki_anchor'), false);
     assert.deepEqual(
       JSON.parse(readFileSync(exported.anchorPath, 'utf8')),
       { version: 1, target: json.anchor_uri },
@@ -222,7 +224,7 @@ test('addSelectionToContext preserves explicit source labels and anchors for PDF
     assert.deepEqual(JSON.parse(readFileSync(exported.jsonPath, 'utf8')), json);
     assert.match(
       markdown,
-      /\*\*Source\*\*: \[raw\/papers\/attention\.pdf \(page 2\)\]\(<file:\/\//,
+      /\*\*Source\*\*: \[raw\/papers\/attention\.pdf \(page 2\)\]\(<cursor:\/\/llm-wiki\.llm-wiki-vscode\/open-anchor\?target=v1\./,
     );
     assert.match(
       markdown,
@@ -240,7 +242,9 @@ test('addSelectionToContext preserves explicit source labels and anchors for PDF
       productAnchorUri(json.anchor_uri),
     );
     assert.equal(fileURLToPath(json.chat_uri), exported.anchorPath);
-    assert.equal(markdown.includes(`](<${json.chat_uri}>)`), true);
+    assert.equal(markdown.includes(`](<${json.open_uri}>)`), true);
+    assert.equal(markdown.includes(json.chat_uri), false);
+    assert.equal(markdown.includes('.llm_wiki_anchor'), false);
     assert.deepEqual(
       JSON.parse(readFileSync(exported.anchorPath, 'utf8')),
       { version: 1, target: json.anchor_uri },
@@ -286,6 +290,7 @@ test('web selections keep their directly clickable HTTPS source instead of an an
     assert.equal(json.chat_uri, anchorUri);
     assert.equal(markdown.includes(`](<${anchorUri}>)`), true);
     assert.equal(markdown.includes('.llm_wiki_anchor'), false);
+    assert.equal(markdown.includes('cursor://'), false);
   } finally {
     rmSync(vaultRoot, { recursive: true, force: true });
   }
@@ -310,7 +315,9 @@ test('native code selections export a clickable local code anchor bridge', async
     const json = JSON.parse(readFileSync(exported.jsonPath, 'utf8'));
     assert.equal(json.anchor_uri, 'raw/code/kernel.ts#L3-L4');
     assert.equal(fileURLToPath(json.chat_uri), exported.anchorPath);
-    assert.equal(markdown.includes(`](<${json.chat_uri}>)`), true);
+    assert.equal(json.open_uri, productAnchorUri(json.anchor_uri));
+    assert.equal(markdown.includes(`](<${json.open_uri}>)`), true);
+    assert.equal(markdown.includes(json.chat_uri), false);
     assert.deepEqual(JSON.parse(readFileSync(exported.anchorPath, 'utf8')), {
       version: 1,
       target: json.anchor_uri,

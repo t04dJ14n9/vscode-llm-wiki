@@ -34,10 +34,28 @@ test('Markdown source retains stable typography and selection contracts', () => 
   );
   assert.match(
     source,
-    /\.cm-lineNumbers \.cm-gutterElement': \{[\s\S]{0,500}cursor: 'default'/,
+    /\.cm-lineNumbers \.cm-gutterElement': \{[\s\S]{0,500}cursor: 'pointer'/,
   );
   assert.match(source, /\.cm-active-inline-code': \{[\s\S]{0,500}fontFamily: 'var\(--llm-wiki-editor-font-family/);
   assert.match(source, /\.cm-active-footnote-def-label': \{[\s\S]{0,300}fontSize: '0\.85em'/);
+});
+
+test('agent rules require reusing the generated host link instead of the anchor bridge', () => {
+  const repositoryRoot = resolve(extensionRoot, '..', '..');
+  for (const relativePath of [
+    'README.md',
+    '.agents/skills/llm-wiki/SKILL.md',
+  ]) {
+    const rules = readFileSync(join(repositoryRoot, relativePath), 'utf8');
+    assert.match(rules, /cursor:\/\/llm-wiki\.llm-wiki-vscode\/open-anchor/);
+    assert.match(rules, /vscode:\/\/llm-wiki\.llm-wiki-vscode\/open-anchor/);
+    assert.match(rules, /open_uri/);
+    assert.match(
+      rules,
+      /(?:never|do not)[\s\S]{0,120}\.llm_wiki_anchor|\.llm_wiki_anchor[\s\S]{0,120}(?:never|do not)/i,
+    );
+    assert.match(rules, /wikilink|relative Markdown link/i);
+  }
 });
 
 test('build emits all VS Code extension and webview runtime artifacts', () => {
@@ -161,21 +179,36 @@ test('webview webpack entries use VS Code webview size budgets', () => {
   }
 });
 
-test('manifest opens markdown notes in the LLM Wiki custom editor by default', () => {
+test('manifest leaves Markdown ownership optional so missing files become native untitled buffers first', () => {
   const markdownEditor = manifest.contributes.customEditors.find(
     editor => editor.viewType === 'llm-wiki.markdownEditor',
   );
   assert.ok(markdownEditor, 'missing markdown custom editor contribution');
   assert.equal(
     markdownEditor.priority,
-    'default',
-    'markdown custom editor should be the default editor for Obsidian-like note editing',
+    'option',
+    'Markdown must first receive VS Code\'s associated untitled text model',
   );
   assert.equal(
     manifest.contributes.configurationDefaults['workbench.editorAssociations']['*.md'],
-    'llm-wiki.markdownEditor',
-    'workspace defaults should route markdown files into the custom editor',
+    undefined,
+    'a default association claims missing paths before VS Code can make them untitled',
   );
+});
+
+test('manifest leaves the terminal Backquote shortcut to VS Code in Vim mode', () => {
+  const consumedShortcutBindings = (manifest.contributes.keybindings ?? [])
+    .filter(binding => binding.command === 'llm-wiki.consumeVimHostShortcut');
+
+  for (const binding of consumedShortcutBindings) {
+    for (const platformKey of ['key', 'mac', 'win', 'linux']) {
+      assert.doesNotMatch(
+        binding[platformKey] ?? '',
+        /(?:ctrl|cmd)\+`/i,
+        `${platformKey} must not reserve the terminal Backquote shortcut`,
+      );
+    }
+  }
 });
 
 test('manifest routes immutable LLM Wiki anchor bridge files to their dedicated editor', () => {
@@ -299,6 +332,24 @@ test('manifest exposes generic Add to Chat only on Cursor while selection-to-age
       item => item.id === 'llm-wiki.learningChat',
     ),
     false,
+  );
+});
+
+test('manifest contributes guarded focus restoration for an active Cursor handoff', () => {
+  const command = manifest.contributes.commands.find(
+    item => item.command === 'llm-wiki.focusMarkdownEditor',
+  );
+  assert.equal(command?.title, 'LLM Wiki: Focus Markdown Editor');
+
+  const escapeBinding = (manifest.contributes.keybindings ?? []).find(
+    item => item.command === 'llm-wiki.focusMarkdownEditor'
+      && item.key === 'escape',
+  );
+  assert.ok(escapeBinding, 'missing guarded Escape focus binding');
+  assert.match(escapeBinding.when, /llmWikiAgentHandoffActive/);
+  assert.match(
+    escapeBinding.when,
+    /activeCustomEditorId == 'llm-wiki\.markdownEditor'/,
   );
 });
 

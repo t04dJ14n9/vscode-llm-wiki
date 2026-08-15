@@ -49,9 +49,9 @@ let graphPanel: KnowledgeGraphPanel | undefined;
 let refreshTimer: NodeJS.Timeout | undefined;
 
 const STARTUP_CUSTOM_EDITOR_RETRY_DELAYS_MS = [0, 250, 1_000] as const;
-const STARTUP_CUSTOM_EDITOR_MONITOR_MS = 1_500;
 const WORKSPACE_REQUIRED_MESSAGE =
   'Open a folder to use LLM Wiki notes and repository features.';
+const AGENT_HANDOFF_ACTIVE_CONTEXT_KEY = 'llmWikiAgentHandoffActive';
 
 interface AddSelectionToChatInput {
   selection?: SelectionContext;
@@ -81,7 +81,10 @@ export function activate(context: vscode.ExtensionContext): void {
 
   const agentCapabilitySource = createAgentSurfaceCapabilitySource();
   context.subscriptions.push(agentCapabilitySource);
-  markdownEditorProvider = new MarkdownEditorProvider(context, learningNotes);
+  markdownEditorProvider = new MarkdownEditorProvider(context, learningNotes, {
+    agentCapabilities: () => agentCapabilitySource.read(),
+    onDidChangeAgentCapabilities: agentCapabilitySource.onDidChange,
+  });
   pdfEditorProvider = new PdfEditorProvider(context, {
     ...(workspaceRoot ? { vaultRoot: workspaceRoot, documentRoot: workspaceRoot } : {}),
     globalStoragePath: context.globalStorageUri?.fsPath
@@ -97,6 +100,7 @@ export function activate(context: vscode.ExtensionContext): void {
     'llmWikiHostIsCursor',
     agentCapabilitySource.read().cursorAgent,
   );
+  setAgentHandoffActive(false);
   markdownOutlineProvider = registerMarkdownOutlineTreeProvider(context, pdfEditorProvider);
   graphPanel = new KnowledgeGraphPanel();
 
@@ -120,7 +124,7 @@ export function activate(context: vscode.ExtensionContext): void {
           vscode.window.showWarningMessage('This LLM Wiki link is invalid.');
           return;
         }
-        await dispatchUri(workspaceRoot, target);
+        await dispatchUri(vaultRootForSource(activeSourceUri(), workspaceRoot), target);
       },
     }),
     graphPanel,
@@ -158,7 +162,7 @@ export function activate(context: vscode.ExtensionContext): void {
   });
   registerCommands(context, workspaceRoot, learningNotes);
   if (workspaceRoot) registerMarkdownWatcher(context);
-  monitorStartupCustomEditors(context);
+  registerCustomEditorRouter(context);
   refreshAllViews();
   vscode.window.showInformationMessage(
     workspaceRoot
@@ -183,6 +187,7 @@ function registerCommands(
         await pdfEditorProvider?.addSelectionToAgent(target.agentId);
       } else {
         await pdfEditorProvider?.addSelectionToCursorChat();
+        if (target.kind === 'cursor') setAgentHandoffActive(true);
       }
       return;
     }
@@ -190,13 +195,14 @@ function registerCommands(
       vscode.window.showWarningMessage('The selected passage could not be added to chat.');
       return;
     }
-    await exportSelectionAndHandoff(
+    const sent = await exportSelectionAndHandoff(
       root,
       input?.selection,
       input?.snapshotPng,
       'The selection crop could not be saved; the active agent will use text context only.',
       target,
     );
+    if (sent && target.kind === 'cursor') setAgentHandoffActive(true);
   };
 
   context.subscriptions.push(
@@ -204,10 +210,25 @@ function registerCommands(
       const target = uri ?? await vscode.window.showInputBox({
         prompt: 'Enter a note, PDF, code, web, or source link',
       });
-      if (target) await dispatchUri(workspaceRoot, target);
+      if (target) {
+        await dispatchUri(
+          vaultRootForSource(activeSourceUri(), workspaceRoot),
+          target,
+          { allowAbsoluteTargets: true },
+        );
+      }
     }),
-    vscode.commands.registerCommand('llm-wiki.openLinkTarget', async (uri?: string) => {
-      if (uri) await dispatchUri(workspaceRoot, uri);
+    vscode.commands.registerCommand('llm-wiki.openLinkTarget', async (
+      uri?: string,
+      sourceUri?: vscode.Uri,
+    ) => {
+      if (uri) {
+        await dispatchUri(
+          vaultRootForSource(sourceUri ?? activeSourceUri(), workspaceRoot),
+          uri,
+          { allowAbsoluteTargets: true },
+        );
+      }
     }),
     vscode.commands.registerCommand('llm-wiki.openPdfTarget', async (args?: {
       pdfPath?: string;
@@ -265,10 +286,13 @@ function registerCommands(
     vscode.commands.registerCommand('llm-wiki.addSelectionToContext', async () => {
       const root = requireWorkspaceRoot(workspaceRoot);
       if (!root) return;
-      const exported = await exportCurrentSelection(root);
-      if (exported) {
-        await handoffSelectionToAgent(vscode.Uri.file(exported.markdownPath));
-      }
+      await exportSelectionAndHandoff(
+        root,
+        undefined,
+        undefined,
+        'The selection crop could not be saved; the active agent will use text context only.',
+        { kind: 'picker' },
+      );
     }),
     vscode.commands.registerCommand(
       'llm-wiki.addSelectionToChat',
@@ -344,6 +368,13 @@ function registerCommands(
     }),
     vscode.commands.registerCommand('llm-wiki.consumeVimHostShortcut', async () => {
       await markdownEditorProvider?.consumeVimHostShortcut();
+    }),
+    vscode.commands.registerCommand('llm-wiki.focusMarkdownEditor', async () => {
+      try {
+        return await markdownEditorProvider?.focusActiveEditor() ?? false;
+      } finally {
+        setAgentHandoffActive(false);
+      }
     }),
     vscode.commands.registerCommand('llm-wiki.revealInMarkdownEditor', async (args?: {
       uri?: vscode.Uri;
@@ -494,6 +525,14 @@ export function deactivate(): void {
   graphPanel = undefined;
 }
 
+function setAgentHandoffActive(active: boolean): void {
+  void vscode.commands.executeCommand(
+    'setContext',
+    AGENT_HANDOFF_ACTIVE_CONTEXT_KEY,
+    active,
+  );
+}
+
 function getActiveMarkdownUri(): vscode.Uri | undefined {
   const activeEditorUri = vscode.window.activeTextEditor?.document.uri;
   if (isMarkdownUri(activeEditorUri)) return activeEditorUri;
@@ -516,7 +555,7 @@ async function exportCurrentSelection(
   const selection = suppliedSelection
     ?? await activeCustomSelection()
     ?? getNativeSelectionContext();
-  const workspaceRoot = selection
+  const workspaceRoot = selection && isSelectionContext(selection)
     ? vscode.workspace.getWorkspaceFolder?.(selection.uri)?.uri.fsPath
       ?? fallbackWorkspaceRoot
     : fallbackWorkspaceRoot;
@@ -533,7 +572,23 @@ async function exportSelectionAndHandoff(
   cropFailureMessage: string,
   target: SelectionHandoffTarget,
 ): Promise<boolean> {
-  const exported = await exportCurrentSelection(workspaceRoot, selection);
+  const resolvedSelection = selection
+    ?? await activeCustomSelection()
+    ?? getNativeSelectionContext();
+  if (!resolvedSelection && isMarkdownUri(activeTabUri())) {
+    vscode.window.showWarningMessage('Select Markdown text before adding it to chat.');
+    return false;
+  }
+  const markdownContext = await markdownRangeHandoffContext(resolvedSelection);
+  // Keep a Markdown handoff as a source range for providers that expose a
+  // selection-aware command. Their adapters can fall back to an immutable
+  // export when an older provider only supports file attachments.
+  if (markdownContext) {
+    return handoffMarkdownRange(markdownContext, target);
+  }
+  if (isMarkdownSelection(resolvedSelection)) return false;
+
+  const exported = await exportCurrentSelection(workspaceRoot, resolvedSelection);
   if (!exported) return false;
   let cropPath: string | undefined;
   try {
@@ -545,14 +600,105 @@ async function exportSelectionAndHandoff(
   } catch {
     vscode.window.showWarningMessage(cropFailureMessage);
   }
-  const markdownUri = vscode.Uri.file(exported.markdownPath);
+  const context = {
+    kind: 'selection-export' as const,
+    uri: vscode.Uri.file(exported.markdownPath),
+  };
   const attachments = cropPath ? [vscode.Uri.file(cropPath)] : [];
   const sent = target.kind === 'cursor'
-    ? await handoffSelectionToCursor(markdownUri, attachments)
+    ? await handoffSelectionToCursor(context, attachments)
     : target.kind === 'agent'
-      ? await handoffSelectionToAgentId(target.agentId, markdownUri, attachments)
-      : (await handoffSelectionToAgent(markdownUri, attachments)) !== undefined;
+      ? await handoffSelectionToAgentId(target.agentId, context, attachments)
+      : (await handoffSelectionToAgent(context, attachments)) !== undefined;
   return sent;
+}
+
+async function markdownRangeHandoffContext(
+  selection: SelectionContext | undefined,
+): Promise<{
+  kind: 'markdown-range';
+  uri: vscode.Uri;
+  range: { startLine: number; endLine: number };
+} | undefined> {
+  if (!isMarkdownSelection(selection)) return undefined;
+  if (!selection.text) {
+    vscode.window.showWarningMessage('Select Markdown text before adding it to chat.');
+    return undefined;
+  }
+  if (selection.uri.scheme !== 'file') {
+    vscode.window.showWarningMessage(
+      'Save this Markdown note before adding a source range to chat.',
+    );
+    return undefined;
+  }
+  const selectedUri = selection.uri;
+  const document = vscode.workspace.textDocuments?.find(candidate =>
+    candidate.uri.scheme === selectedUri.scheme
+      && candidate.uri.fsPath === selectedUri.fsPath
+  );
+  if (document?.isDirty) {
+    try {
+      if (!await document.save()) {
+        vscode.window.showWarningMessage(
+          'Save the Markdown note before adding it to chat.',
+        );
+        return undefined;
+      }
+    } catch {
+      vscode.window.showWarningMessage(
+        'Save the Markdown note before adding it to chat.',
+      );
+      return undefined;
+    }
+    selection = await recaptureSavedMarkdownSelection(selection);
+    if (!selection?.text) {
+      vscode.window.showWarningMessage('Select Markdown text before adding it to chat.');
+      return undefined;
+    }
+  }
+  return {
+    kind: 'markdown-range',
+    uri: selection.uri,
+    range: {
+      startLine: selection.startLine,
+      endLine: selection.endLine,
+    },
+  };
+}
+
+async function recaptureSavedMarkdownSelection(
+  selection: SelectionContext,
+): Promise<SelectionContext | undefined> {
+  const native = vscode.window.activeTextEditor;
+  if (
+    native
+    && native.document.uri.scheme === selection.uri.scheme
+    && native.document.uri.fsPath === selection.uri.fsPath
+    && isMarkdownDocument(native.document)
+  ) return getNativeSelectionContext();
+
+  const custom = await markdownEditorProvider?.captureActiveSelectionContext();
+  return custom
+    && custom.uri.scheme === selection.uri.scheme
+    && custom.uri.fsPath === selection.uri.fsPath
+    && isMarkdownSelection(custom)
+    ? custom
+    : selection;
+}
+
+async function handoffMarkdownRange(
+  context: {
+    kind: 'markdown-range';
+    uri: vscode.Uri;
+    range: { startLine: number; endLine: number };
+  },
+  target: SelectionHandoffTarget,
+): Promise<boolean> {
+  return target.kind === 'cursor'
+    ? handoffSelectionToCursor(context, [])
+    : target.kind === 'agent'
+      ? handoffSelectionToAgentId(target.agentId, context, [])
+      : (await handoffSelectionToAgent(context, [])) !== undefined;
 }
 
 async function activeCustomSelection(): Promise<SelectionContext | undefined> {
@@ -577,7 +723,14 @@ function getNativeSelectionContext(): SelectionContext | undefined {
     uri: editor.document.uri,
     text: selection.isEmpty ? '' : editor.document.getText(selection),
     startLine: selection.start.line + 1,
-    endLine: selection.end.line + 1,
+    endLine: Math.max(
+      selection.start.line + 1,
+      selection.end.line + 1
+        - (!selection.isEmpty && selection.end.character === 0 ? 1 : 0),
+    ),
+    ...(isMarkdownDocument(editor.document)
+      ? { metadata: { kind: 'markdown' } }
+      : {}),
   };
 }
 
@@ -596,8 +749,30 @@ function isSelectionContext(value: unknown): value is SelectionContext {
   );
 }
 
+function isMarkdownSelection(
+  selection: SelectionContext | undefined,
+): selection is SelectionContext & { metadata: { kind: 'markdown' } } {
+  return isSelectionContext(selection) && selection.metadata?.kind === 'markdown';
+}
+
 function isExternalAgentId(value: unknown): value is ExternalAgentId {
   return value === 'codex' || value === 'claude' || value === 'codebuddy';
+}
+
+/**
+ * In a multi-root workspace the link's own document decides which vault it
+ * belongs to; only fall back to the first folder when nothing owns it.
+ */
+function vaultRootForSource(
+  sourceUri: vscode.Uri | undefined,
+  fallbackRoot: string | undefined,
+): string | undefined {
+  if (!sourceUri) return fallbackRoot;
+  return vscode.workspace.getWorkspaceFolder?.(sourceUri)?.uri.fsPath ?? fallbackRoot;
+}
+
+function activeSourceUri(): vscode.Uri | undefined {
+  return vscode.window.activeTextEditor?.document.uri ?? activeTabUri();
 }
 
 function activeTabUri(): vscode.Uri | undefined {
@@ -617,35 +792,84 @@ function isMarkdownUri(uri: vscode.Uri | undefined): uri is vscode.Uri {
   return Boolean(uri?.scheme === 'file' && uri.fsPath.toLowerCase().endsWith('.md'));
 }
 
+function isMarkdownDocument(document: vscode.TextDocument): boolean {
+  return document.languageId === 'markdown' || isMarkdownUri(document.uri);
+}
+
 function isPdfUri(uri: vscode.Uri | undefined): uri is vscode.Uri {
   return Boolean(uri?.scheme === 'file' && uri.fsPath.toLowerCase().endsWith('.pdf'));
 }
 
-function monitorStartupCustomEditors(context: vscode.ExtensionContext): void {
-  const reopen = async (uri: vscode.Uri | undefined, languageId?: string): Promise<void> => {
-    if (!uri || uri.scheme !== 'file') return;
-    if (languageId === 'markdown' || isMarkdownUri(uri)) {
-      await vscode.commands.executeCommand('vscode.openWith', uri, MarkdownEditorProvider.viewType);
-    } else if (isPdfUri(uri)) {
-      await vscode.commands.executeCommand('vscode.openWith', uri, PdfEditorProvider.viewType);
+function isAssociatedUntitledMarkdownUri(uri: vscode.Uri | undefined): uri is vscode.Uri {
+  return Boolean(
+    uri?.scheme === 'untitled'
+      && typeof uri.fsPath === 'string'
+      && uri.fsPath.toLowerCase().endsWith('.md'),
+  );
+}
+
+/**
+ * Reopen persisted Markdown/PDF text editors in their custom providers while
+ * leaving generic untitled buffers alone. VS Code's CLI creates a file-like
+ * `untitled:` document for a missing path; that URI is the signal that the
+ * Markdown provider should own it, not its transient `languageId`.
+ */
+function registerCustomEditorRouter(context: vscode.ExtensionContext): void {
+  const opening = new Set<string>();
+  const routed = new Set<string>();
+  const reopen = async (uri: vscode.Uri | undefined): Promise<void> => {
+    if (!uri) return;
+    const viewType = isMarkdownUri(uri) || isAssociatedUntitledMarkdownUri(uri)
+      ? MarkdownEditorProvider.viewType
+      : isPdfUri(uri)
+        ? PdfEditorProvider.viewType
+        : undefined;
+    if (!viewType) return;
+
+    const key = `${viewType}:${uri.toString()}`;
+    const isMarkdown = viewType === MarkdownEditorProvider.viewType;
+    if (opening.has(key) || (isMarkdown && routed.has(key)) || hasCustomEditorTab(uri, viewType)) {
+      return;
+    }
+    opening.add(key);
+    try {
+      await vscode.commands.executeCommand('vscode.openWith', uri, viewType);
+      if (isMarkdown) routed.add(key);
+    } finally {
+      opening.delete(key);
     }
   };
-  const listener = vscode.window.onDidChangeActiveTextEditor(editor => {
-    void reopen(editor?.document.uri, editor?.document.languageId);
+
+  const activeEditorListener = vscode.window.onDidChangeActiveTextEditor(editor => {
+    void reopen(editor?.document.uri);
   });
+  const openDocumentListener = vscode.workspace.onDidOpenTextDocument(document => {
+    void reopen(document.uri);
+  });
+  // A transient guard prevents the open-document and active-editor events from
+  // reopening the same untitled URI. Forget it once that custom tab closes so a
+  // later CLI/open action can route the URI again.
+  const tabCloseListener = vscode.window.tabGroups.onDidChangeTabs(event => {
+    for (const tab of event?.closed ?? []) {
+      const input = tab?.input as { uri?: vscode.Uri; viewType?: unknown } | undefined;
+      if (!input?.uri || typeof input.viewType !== 'string') continue;
+      routed.delete(`${input.viewType}:${input.uri.toString()}`);
+    }
+  });
+
   const reopenVisibleEditors = () => {
     const reopened = new Set<string>();
-    const reopenOnce = (uri: vscode.Uri | undefined, languageId?: string) => {
+    const reopenOnce = (uri: vscode.Uri | undefined) => {
       if (!uri) return;
       const key = uri.fsPath || uri.toString();
       if (reopened.has(key)) return;
       reopened.add(key);
-      void reopen(uri, languageId);
+      void reopen(uri);
     };
     const active = vscode.window.activeTextEditor;
-    reopenOnce(active?.document.uri, active?.document.languageId);
+    reopenOnce(active?.document.uri);
     for (const editor of vscode.window.visibleTextEditors) {
-      reopenOnce(editor.document.uri, editor.document.languageId);
+      reopenOnce(editor.document.uri);
     }
     reopenOnce(activeTabUri());
   };
@@ -654,17 +878,22 @@ function monitorStartupCustomEditors(context: vscode.ExtensionContext): void {
     timer.unref?.();
     return timer;
   });
-  const stopMonitoring = setTimeout(() => {
-    listener.dispose();
-  }, STARTUP_CUSTOM_EDITOR_MONITOR_MS);
-  stopMonitoring.unref?.();
+
   context.subscriptions.push({
     dispose() {
-      listener.dispose();
+      activeEditorListener.dispose();
+      openDocumentListener.dispose();
+      tabCloseListener.dispose();
       for (const retry of retries) clearTimeout(retry);
-      clearTimeout(stopMonitoring);
     },
   });
+}
+
+function hasCustomEditorTab(uri: vscode.Uri, viewType: string): boolean {
+  return (vscode.window.tabGroups?.all ?? []).some(group => (group?.tabs ?? []).some(tab => {
+    const input = tab?.input as { uri?: vscode.Uri; viewType?: unknown } | undefined;
+    return input?.viewType === viewType && input.uri?.toString() === uri.toString();
+  }));
 }
 
 function errorMessage(error: unknown): string {

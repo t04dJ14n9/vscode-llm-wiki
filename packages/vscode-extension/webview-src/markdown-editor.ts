@@ -20,6 +20,7 @@ import { search, searchKeymap } from '@codemirror/search';
 import { vim, Vim } from '@replit/codemirror-vim';
 import type { CodeMirrorV, InputStateInterface, MotionArgs, Pos, vimState } from '@replit/codemirror-vim';
 import {
+  type BlockInfo,
   Decoration,
   type DecorationSet,
   EditorView,
@@ -51,6 +52,7 @@ import {
   markdownReferenceLinkSourceSpans,
   parseMarkdownLinkDestination,
 } from './markdownSpans';
+import type { InlineCodeSpan } from './markdownSpans';
 import { setextHeadingLevelForLines } from '../src/markdownHeadingSyntax';
 import { parseWikiLinkTarget } from '../src/wikiLinks';
 
@@ -76,7 +78,7 @@ class HlLinkWidget extends WidgetType {
     if (isExternalUri(this.uri)) {
       button.classList.add('cm-external-link');
     }
-    button.textContent = this.label || this.uri;
+    appendLinkLabel(button, this.label || this.uri);
     button.title = this.uri;
     const stopEditorSelection = (event: Event) => {
       event.preventDefault();
@@ -107,6 +109,30 @@ class HlLinkWidget extends WidgetType {
   override ignoreEvent(): boolean {
     return true;
   }
+}
+
+/**
+ * Render an inline-code label without leaking its Markdown delimiters. A source
+ * link such as [`runs/speedrun.sh`](x) is one clickable widget, while the label
+ * retains the editor's code styling.
+ */
+function appendLinkLabel(button: HTMLElement, label: string): void {
+  const codeSpans = inlineCodeSourceSpans(0, label);
+  if (codeSpans.length === 0) {
+    button.textContent = label;
+    return;
+  }
+
+  let cursor = 0;
+  for (const span of codeSpans) {
+    if (span.from > cursor) button.append(label.slice(cursor, span.from));
+    const code = document.createElement('code');
+    code.className = 'cm-llm-wiki-link-code';
+    code.textContent = label.slice(span.contentFrom, span.contentTo);
+    button.appendChild(code);
+    cursor = span.to;
+  }
+  if (cursor < label.length) button.append(label.slice(cursor));
 }
 
 interface LearningAnnotation {
@@ -536,6 +562,19 @@ let applyingHostUpdate = false;
 let vimModeEnabled = false;
 let currentNotePath: string | undefined;
 let knownNotePaths: string[] = [];
+type ExternalAgentId = 'codex' | 'claude' | 'codebuddy';
+interface AgentHandoffCapability {
+  id: ExternalAgentId;
+  label: string;
+}
+interface AgentSurfaceCapabilities {
+  cursorAgent: boolean;
+  providers: AgentHandoffCapability[];
+}
+let agentCapabilities: AgentSurfaceCapabilities = {
+  cursorAgent: false,
+  providers: [],
+};
 let llmWikiVimMotionsInstalled = false;
 let llmWikiVimExCommandsInstalled = false;
 let llmWikiVimMarkdownKeysInstalled = false;
@@ -819,6 +858,47 @@ function firstNonWhitespaceColumn(text: string): number {
   return match?.index ?? text.length;
 }
 
+function sourceLineBounds(doc: Text, position: number): { from: number; to: number } {
+  const line = doc.lineAt(position);
+  return {
+    from: line.from,
+    // Gutter selection represents the logical source line, excluding its
+    // terminating newline so copy/agent handoff do not absorb the next row.
+    to: line.to,
+  };
+}
+
+function extendGutterSelection(
+  doc: Text,
+  main: SelectionRange,
+  clicked: { from: number; to: number },
+): SelectionRange {
+  const anchorLine = sourceLineBounds(doc, main.anchor);
+  return clicked.from >= anchorLine.from
+    ? EditorSelection.range(anchorLine.from, clicked.to)
+    : EditorSelection.range(anchorLine.to, clicked.from);
+}
+
+function selectSourceLineFromGutter(view: EditorView, block: BlockInfo, event: Event): boolean {
+  if (!(event instanceof MouseEvent) || event.button !== 0) return false;
+  // Modified gutter clicks belong to the host/editor's native affordances.
+  if (event.altKey || event.ctrlKey || event.metaKey) return false;
+  const { doc } = view.state;
+  if (!Number.isInteger(block.from) || block.from < 0 || block.from > doc.length) return false;
+
+  const clicked = sourceLineBounds(doc, block.from);
+  const selection = event.shiftKey
+    ? extendGutterSelection(doc, view.state.selection.main, clicked)
+    : EditorSelection.range(clicked.from, clicked.to);
+  event.preventDefault();
+  view.dispatch({
+    selection: EditorSelection.create([selection]),
+    userEvent: 'select.gutter',
+  });
+  view.focus();
+  return true;
+}
+
 function createView(text: string, title?: string): EditorView {
   const initialBodyPosition = initialBodyPositionAfterFrontmatter(text);
   const editorCaret = 'var(--vscode-editorCursor-foreground, var(--vscode-editor-foreground))';
@@ -830,7 +910,7 @@ function createView(text: string, title?: string): EditorView {
         ? undefined
         : EditorSelection.cursor(initialBodyPosition),
       extensions: [
-        lineNumbers(),
+        lineNumbers({ domEventHandlers: { mousedown: selectSourceLineFromGutter } }),
         foldGutter({ openText: '⌄', closedText: '›' }),
         vimBacktickGuard,
         vimModeCompartment.of(vimModeEnabled ? [vim()] : []),
@@ -953,13 +1033,23 @@ function createView(text: string, title?: string): EditorView {
             },
             preventDefault: true,
           },
+          {
+            // The focused webview otherwise swallows the workbench close key.
+            // Ask the extension host to close this document's own tab so VS
+            // Code retains native dirty/untitled/Save As prompts.
+            key: 'Mod-w',
+            run: () => {
+              vscode.postMessage({ type: 'closeActiveEditor' });
+              return true;
+            },
+            preventDefault: true,
+          },
           { key: 'Mod-e', run: obsidianLikeCommands['markdown:toggle-preview']!, preventDefault: true },
           { key: 'Mod-o', run: consumeInVimMode, preventDefault: true },
           { key: 'Mod-b', run: runOutsideVimMode(obsidianLikeCommands['editor:toggle-bold']!), preventDefault: true },
           { key: 'Mod-i', run: runOutsideVimMode(obsidianLikeCommands['editor:toggle-italics']!), preventDefault: true },
           { key: 'Mod-Shift-x', run: runOutsideVimMode(obsidianLikeCommands['editor:toggle-strikethrough']!), preventDefault: true },
           { key: 'Mod-c', run: editorView => copySelectionToClipboard(editorView, postCopyTextToHost) },
-          { key: 'Mod-`', run: runOutsideVimMode(obsidianLikeCommands['editor:toggle-code']!), preventDefault: true },
           { key: 'Mod-k', run: runOutsideVimMode(obsidianLikeCommands['editor:insert-link']!), preventDefault: true },
           {
             key: 'Mod-l',
@@ -1062,7 +1152,10 @@ function createView(text: string, title?: string): EditorView {
             padding: '0',
             lineHeight: 'var(--llm-wiki-editor-line-height, 24px)',
             textAlign: 'right',
-            cursor: 'default',
+            cursor: 'pointer',
+          },
+          '.cm-lineNumbers .cm-gutterElement:hover': {
+            color: 'var(--vscode-editorLineNumber-activeForeground, var(--vscode-editor-foreground))',
           },
           '.cm-cursor, .cm-dropCursor': {
             borderLeftColor: editorCaret,
@@ -1292,6 +1385,17 @@ function createView(text: string, title?: string): EditorView {
             color: 'var(--vscode-textLink-activeForeground, var(--vscode-textLink-foreground))',
             backgroundColor: 'transparent',
           },
+          '.cm-llm-wiki-link-code': {
+            backgroundColor: 'var(--vscode-textCodeBlock-background, rgba(127,127,127,.18))',
+            borderRadius: '4px',
+            padding: '1px 5px',
+            // Keep inline-code labels readable without letting the link tint
+            // overpower the code token, while retaining a visible link cue.
+            color: 'color-mix(in srgb, var(--vscode-textLink-foreground) 78%, var(--vscode-editor-foreground) 22%)',
+            opacity: '0.88',
+            fontFamily: 'var(--llm-wiki-editor-font-family, var(--vscode-editor-font-family, ui-monospace, Menlo, monospace))',
+            fontSize: '1em',
+          },
           '.cm-llm-wiki-link:focus-visible, .cm-active-link-label:focus-visible': {
             outline: '1px solid var(--vscode-contrastBorder, var(--vscode-focusBorder, currentColor))',
             outlineOffset: '1px',
@@ -1353,7 +1457,8 @@ function createView(text: string, title?: string): EditorView {
             backgroundColor: 'var(--vscode-textCodeBlock-background, rgba(127,127,127,.18))',
             borderRadius: '4px',
             padding: '1px 5px',
-            color: 'var(--vscode-textPreformat-foreground, inherit)',
+            color: 'var(--vscode-editor-foreground, inherit)',
+            opacity: '0.88',
             fontFamily: 'var(--llm-wiki-editor-font-family, var(--vscode-editor-font-family, ui-monospace, Menlo, monospace))',
           },
           '.cm-active-math-delimiter': {
@@ -1687,6 +1792,16 @@ function showMarkdownSelectionContextMenu(editorView: EditorView, clientX: numbe
   const runCommand = (command: string) => {
     obsidianLikeCommands[command]?.(editorView);
   };
+  const providerItems = agentCapabilities.providers.flatMap(provider => [
+    {
+      id: `send-selection-to-${provider.id}`,
+      label: agentHandoffActionLabel(provider),
+      onSelect: () => {
+        vscode.postMessage({ type: 'sendToAgent', agentId: provider.id });
+        editorView.focus();
+      },
+    },
+  ]);
 
   showObsidianContextMenu({
     clientX,
@@ -1700,6 +1815,11 @@ function showMarkdownSelectionContextMenu(editorView: EditorView, clientX: numbe
           editorView.focus();
         },
       },
+      ...(
+        providerItems.length > 0
+          ? [{ type: 'separator' as const }, ...providerItems]
+          : []
+      ),
       { type: 'separator' },
       {
         label: 'Copy',
@@ -1730,21 +1850,35 @@ function addSelectionToCursorChat(editorView: EditorView): boolean {
 }
 
 let cursorSelectionPrompt:
-  | { button: HTMLButtonElement; editorView: EditorView }
+  | {
+    container: HTMLDivElement;
+    primaryButton: HTMLButtonElement;
+    editorView: EditorView;
+    providerKey: string;
+  }
   | undefined;
 
 function updateCursorSelectionPrompt(editorView: EditorView): void {
   const selection = editorView.state.selection.main;
   if (selection.empty || !editorView.dom.isConnected) {
-    cursorSelectionPrompt?.button.remove();
+    cursorSelectionPrompt?.container.remove();
     cursorSelectionPrompt = undefined;
     return;
   }
 
-  if (!cursorSelectionPrompt) {
+  const providerKey = agentCapabilities.providers
+    .map(provider => `${provider.id}:${provider.label}`)
+    .join('|');
+  if (!cursorSelectionPrompt || cursorSelectionPrompt.providerKey !== providerKey) {
+    cursorSelectionPrompt?.container.remove();
+    const container = document.createElement('div');
+    container.className = 'llm-wiki-cursor-selection-prompt';
+    container.setAttribute('role', 'toolbar');
+    container.setAttribute('aria-label', 'Selection actions');
+
     const button = document.createElement('button');
     button.type = 'button';
-    button.className = 'llm-wiki-cursor-selection-prompt';
+    button.className = 'llm-wiki-cursor-selection-primary';
     button.setAttribute('aria-label', `Add to Chat ${cursorSelectionShortcutLabel()}`);
     const label = document.createElement('span');
     label.className = 'add-to-chat-label';
@@ -1766,29 +1900,59 @@ function updateCursorSelectionPrompt(editorView: EditorView): void {
         current.focus();
       }
     });
+    container.appendChild(button);
+    for (const provider of agentCapabilities.providers) {
+      const providerButton = document.createElement('button');
+      providerButton.type = 'button';
+      providerButton.className = 'llm-wiki-cursor-selection-provider';
+      providerButton.setAttribute('aria-label', `Send to ${provider.label}`);
+      providerButton.textContent = providerDisplayLabel(provider);
+      providerButton.addEventListener('pointerdown', event => {
+        event.preventDefault();
+        event.stopPropagation();
+      });
+      providerButton.addEventListener('click', event => {
+        event.preventDefault();
+        event.stopPropagation();
+        const current = cursorSelectionPrompt?.editorView;
+        if (!current) return;
+        vscode.postMessage({ type: 'sendToAgent', agentId: provider.id });
+        current.focus();
+      });
+      container.appendChild(providerButton);
+    }
     ensureCursorSelectionPromptStyles();
-    document.body.appendChild(button);
-    cursorSelectionPrompt = { button, editorView };
+    document.body.appendChild(container);
+    cursorSelectionPrompt = { container, primaryButton: button, editorView, providerKey };
   } else {
     cursorSelectionPrompt.editorView = editorView;
   }
 
-  const button = cursorSelectionPrompt.button;
-  button.style.visibility = 'hidden';
+  const container = cursorSelectionPrompt.container;
+  container.style.visibility = 'hidden';
   const forward = selection.head >= selection.anchor;
   const coords = editorView.coordsAtPos(selection.head, forward ? -1 : 1);
   if (!coords) {
-    button.remove();
+    container.remove();
     cursorSelectionPrompt = undefined;
     return;
   }
-  const box = button.getBoundingClientRect();
+  const box = container.getBoundingClientRect();
   const left = Math.max(8, Math.min(window.innerWidth - box.width - 8, coords.left - box.width / 2));
-  const above = coords.top - box.height - 8;
+  const lineHeight = Math.max(20, editorView.defaultLineHeight || 24);
+  const above = coords.top - box.height - lineHeight - 4;
   const top = above >= 8 ? above : Math.min(window.innerHeight - box.height - 8, coords.bottom + 8);
-  button.style.left = `${left}px`;
-  button.style.top = `${Math.max(8, top)}px`;
-  button.style.visibility = 'visible';
+  container.style.left = `${left}px`;
+  container.style.top = `${Math.max(8, top)}px`;
+  container.style.visibility = 'visible';
+}
+
+function providerDisplayLabel(provider: AgentHandoffCapability): string {
+  return provider.id === 'claude' ? 'Claude' : provider.label.replace(/\s+(?:Code|Agent)$/u, '');
+}
+
+function agentHandoffActionLabel(provider: AgentHandoffCapability): string {
+  return `Add to ${providerDisplayLabel(provider)}`;
 }
 
 function cursorSelectionShortcutLabel(): string {
@@ -1816,14 +1980,33 @@ function ensureCursorSelectionPromptStyles(): void {
       box-shadow: 0 6px 18px var(--vscode-inlineChat-shadow, var(--vscode-widget-shadow, rgba(0, 0, 0, .3)));
       font: 12px var(--vscode-font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
       white-space: nowrap;
+    }
+    .llm-wiki-cursor-selection-prompt > button {
+      box-sizing: border-box;
+      min-height: 24px;
+      border: 0;
+      border-radius: 5px;
+      background: transparent;
+      color: inherit;
+      font: inherit;
       cursor: pointer;
     }
-    .llm-wiki-cursor-selection-prompt:hover {
+    .llm-wiki-cursor-selection-prompt > button:hover {
       background: var(--vscode-toolbar-hoverBackground, rgba(127, 127, 127, .16));
     }
-    .llm-wiki-cursor-selection-prompt:focus-visible {
+    .llm-wiki-cursor-selection-prompt > button:focus-visible {
       outline: 2px solid var(--vscode-focusBorder, #007fd4);
       outline-offset: 1px;
+    }
+    .llm-wiki-cursor-selection-prompt .llm-wiki-cursor-selection-primary {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 0 2px 0 3px;
+    }
+    .llm-wiki-cursor-selection-prompt .llm-wiki-cursor-selection-provider {
+      padding: 0 7px;
+      color: var(--vscode-descriptionForeground, inherit);
     }
     .llm-wiki-cursor-selection-prompt .add-to-chat-shortcut {
       display: inline-flex;
@@ -2544,12 +2727,18 @@ window.addEventListener('message', event => {
         return;
       }
       applyingHostUpdate = true;
+      const scrollPosition = {
+        left: view.scrollDOM.scrollLeft,
+        top: view.scrollDOM.scrollTop,
+      };
       const selection = preserveSelectionByLineAndColumn(view.state, message.text);
       view.dispatch({
         changes: { from: 0, to: current.length, insert: message.text },
         selection,
+        scrollIntoView: false,
         effects: documentTitle === undefined ? undefined : setDocumentTitle.of(documentTitle),
       });
+      restoreEditorScrollPosition(view, scrollPosition);
       applyingHostUpdate = false;
       break;
     }
@@ -2628,6 +2817,11 @@ window.addEventListener('message', event => {
       applyVimMode(view, message.enabled);
       break;
 
+    case 'agentHandoffCapabilities':
+      agentCapabilities = normalizeAgentSurfaceCapabilities(message);
+      if (view) updateCursorSelectionPrompt(view);
+      break;
+
     case 'revealPosition':
       if (!view) return;
       if (typeof message.anchor !== 'number' || typeof message.head !== 'number') return;
@@ -2685,6 +2879,34 @@ function normalizeLearningAnnotations(value: unknown): LearningAnnotation[] {
   });
 }
 
+function normalizeAgentSurfaceCapabilities(value: unknown): AgentSurfaceCapabilities {
+  if (!value || typeof value !== 'object') {
+    return { cursorAgent: false, providers: [] };
+  }
+  const raw = value as { cursorAgent?: unknown; providers?: unknown };
+  const seen = new Set<ExternalAgentId>();
+  const providers: AgentHandoffCapability[] = Array.isArray(raw.providers)
+    ? raw.providers.flatMap(candidate => {
+        if (!candidate || typeof candidate !== 'object') return [];
+        const provider = candidate as { id?: unknown; label?: unknown };
+        const id = provider.id;
+        if (
+          (id !== 'codex' && id !== 'claude' && id !== 'codebuddy')
+          || typeof provider.label !== 'string'
+          || !provider.label.trim()
+          || seen.has(id)
+        ) return [];
+        seen.add(id);
+        const normalized: AgentHandoffCapability = { id, label: provider.label.trim() };
+        return [normalized];
+      })
+    : [];
+  return {
+    cursorAgent: raw.cursorAgent === true,
+    providers,
+  };
+}
+
 function nonNegativeInteger(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
     ? value
@@ -2722,6 +2944,19 @@ function preserveSelectionByLineAndColumn(state: EditorState, nextText: string):
     head: documentPositionToLineColumn(state.doc, range.head),
   }));
   return restoreSelectionByLineAndColumn(nextText, ranges, state.selection.mainIndex);
+}
+
+function restoreEditorScrollPosition(
+  editorView: EditorView,
+  position: { left: number; top: number },
+): void {
+  const restore = () => {
+    if (!editorView.dom.isConnected) return;
+    editorView.scrollDOM.scrollLeft = position.left;
+    editorView.scrollDOM.scrollTop = position.top;
+  };
+  restore();
+  requestAnimationFrame(restore);
 }
 
 function documentPositionToLineColumn(doc: Text, position: number): LineColumn {
@@ -2844,12 +3079,16 @@ function collectLineDecorations(
   referenceDefinitions: ReturnType<typeof markdownReferenceDefinitions>,
   decorations: Range<Decoration>[],
 ): void {
-  const occupied: { from: number; to: number }[] = inlineCodeSourceSpans(lineFrom, text);
+  const inlineCodeSpans = inlineCodeSourceSpans(lineFrom, text);
+  const occupied: { from: number; to: number }[] = [...inlineCodeSpans];
   let match: RegExpExecArray | null;
   for (const link of markdownLinkSourceSpans(lineFrom, text)) {
     const sourceFrom = link.from;
     const sourceTo = link.to;
-    if (occupied.some(span => sourceFrom < span.to && sourceTo > span.from)) continue;
+    if (isLinkInsideInlineCode(link, inlineCodeSpans)) continue;
+    if (occupied.some(span => (
+      sourceFrom < span.to && sourceTo > span.from && !isSpanInsideLinkLabel(span, link)
+    ))) continue;
     if (link.image) {
       occupied.push({ from: sourceFrom, to: sourceTo });
       continue;
@@ -2871,7 +3110,10 @@ function collectLineDecorations(
   for (const link of markdownReferenceLinkSourceSpans(lineFrom, text, referenceDefinitions)) {
     const sourceFrom = link.from;
     const sourceTo = link.to;
-    if (occupied.some(span => sourceFrom < span.to && sourceTo > span.from)) continue;
+    if (isLinkInsideInlineCode(link, inlineCodeSpans)) continue;
+    if (occupied.some(span => (
+      sourceFrom < span.to && sourceTo > span.from && !isSpanInsideLinkLabel(span, link)
+    ))) continue;
     if (link.image) {
       occupied.push({ from: sourceFrom, to: sourceTo });
       continue;
@@ -2918,6 +3160,22 @@ function collectLineDecorations(
   }
 }
 
+/** True when the whole link is literal text inside an inline-code run. */
+function isLinkInsideInlineCode(
+  link: { from: number; to: number },
+  inlineCodeSpans: InlineCodeSpan[],
+): boolean {
+  return inlineCodeSpans.some(span => span.contentFrom <= link.from && span.contentTo >= link.to);
+}
+
+/** True when an inline-code reservation is the visible label of this link. */
+function isSpanInsideLinkLabel(
+  span: { from: number; to: number },
+  link: { labelFrom: number; labelTo: number },
+): boolean {
+  return span.from >= link.labelFrom && span.to <= link.labelTo;
+}
+
 function collectActiveLineDecorations(
   lineFrom: number,
   text: string,
@@ -2937,7 +3195,7 @@ function collectActiveLineDecorations(
     if (!uri) continue;
     const sourceFrom = link.from;
     const sourceTo = link.to;
-    if (inlineCodeSpans.some(span => sourceFrom < span.to && sourceTo > span.from)) continue;
+    if (isLinkInsideInlineCode(link, inlineCodeSpans)) continue;
     const from = link.labelFrom;
     const to = link.labelTo;
     decorations.push((isExternalUri(uri) ? activeExternalLinkLabelMark : activeLinkLabelMark).range(from, to));
@@ -2961,7 +3219,7 @@ function collectActiveLineDecorations(
     if (link.image) continue;
     const sourceFrom = link.from;
     const sourceTo = link.to;
-    if (inlineCodeSpans.some(span => sourceFrom < span.to && sourceTo > span.from)) continue;
+    if (isLinkInsideInlineCode(link, inlineCodeSpans)) continue;
     const from = link.labelFrom;
     const to = link.labelTo;
     decorations.push((isExternalUri(link.definition.destination) ? activeExternalLinkLabelMark : activeLinkLabelMark).range(from, to));

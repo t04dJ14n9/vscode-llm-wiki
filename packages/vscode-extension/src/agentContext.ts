@@ -68,22 +68,27 @@ export async function addSelectionToContext(
   const anchorUri = activeSelection.anchorUri
     ?? defaultSelectionAnchor(relPath, startLine, endLine);
   const openUri = llmWikiOpenAnchorUri(anchorUri);
-  const anchorFile = /^https?:\/\//i.test(anchorUri)
+  const isWebAnchor = /^https?:\/\//i.test(anchorUri);
+  const anchorFile = isWebAnchor
     ? undefined
     : safeEncodeAnchorFile(anchorUri, vaultRoot);
   const layout = secureExportLayout(vaultRoot);
   const exportPaths = createSelectionExportPaths(layout, anchorFile?.fileName);
-  const chatUri = /^https?:\/\//i.test(anchorUri)
+  const chatUri = isWebAnchor
     ? anchorUri
     : exportPaths.anchorPath
       ? pathToFileURL(exportPaths.anchorPath).toString()
       : undefined;
+  // Local anchor-bridge files are internal provider artifacts; chat navigation uses
+  // the host product link. External sources already navigate on their own URL. With
+  // no host link the label goes out unlinked rather than exposing the bridge file.
+  const navigationUri = isWebAnchor ? chatUri : openUri;
   const fence = markdownFenceFor(text);
   const sourceLabel = markdownLinkLabel(`${relPath} (${rangeLabel})`);
   const mdContent = `# Current Selection
 
-**Source**: ${chatUri ? `[${sourceLabel}](<${chatUri}>)` : sourceLabel}
-${chatUri
+**Source**: ${navigationUri ? `[${sourceLabel}](<${navigationUri}>)` : sourceLabel}
+${navigationUri
     ? '**Citation requirement**: In chat responses, reuse the exact Source link above. Do not construct a relative file or PDF link.\n'
     : ''}**Visual evidence**: [selection.png](./selection.png) when present
 

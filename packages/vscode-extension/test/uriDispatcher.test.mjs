@@ -11,7 +11,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
 
@@ -26,9 +26,10 @@ function loadTsModule(relativePath, mocks = {}) {
   const moduleMocks = {
     './anchorUris': {
       llmWikiAnchorTargetFromString: value => {
-        const prefix =
-          'cursor://llm-wiki.llm-wiki-vscode/open-anchor?target=';
-        if (!value.startsWith(prefix)) return undefined;
+        const prefix = ['cursor', 'vscode']
+          .map(scheme => `${scheme}://llm-wiki.llm-wiki-vscode/open-anchor?target=`)
+          .find(candidate => value.startsWith(candidate));
+        if (!prefix) return undefined;
         const encoded = value.slice(prefix.length);
         if (!encoded.startsWith('v1.')) return undefined;
         return Buffer.from(encoded.slice(3), 'base64url').toString('utf8');
@@ -36,19 +37,26 @@ function loadTsModule(relativePath, mocks = {}) {
     },
     ...mocks,
   };
-  const filename = join(packageRoot, relativePath);
-  const source = readFileSync(filename, 'utf8');
-  const { outputText } = ts.transpileModule(source, {
-    compilerOptions: {
-      module: ts.ModuleKind.CommonJS,
-      target: ts.ScriptTarget.ES2022,
-      esModuleInterop: true,
-    },
-    fileName: filename,
-  });
-  const mod = new Module(filename);
-  mod.filename = filename;
-  mod.paths = Module._nodeModulePaths(dirname(filename));
+  const compiled = new Map();
+  const compileTs = filename => {
+    const cached = compiled.get(filename);
+    if (cached) return cached.exports;
+    const source = readFileSync(filename, 'utf8');
+    const { outputText } = ts.transpileModule(source, {
+      compilerOptions: {
+        module: ts.ModuleKind.CommonJS,
+        target: ts.ScriptTarget.ES2022,
+        esModuleInterop: true,
+      },
+      fileName: filename,
+    });
+    const mod = new Module(filename);
+    mod.filename = filename;
+    mod.paths = Module._nodeModulePaths(dirname(filename));
+    compiled.set(filename, mod);
+    mod._compile(outputText, filename);
+    return mod.exports;
+  };
   const originalLoad = Module._load;
   Module._load = function patchedLoad(request, parent, isMain) {
     if (Object.prototype.hasOwnProperty.call(moduleMocks, request)) {
@@ -60,11 +68,16 @@ function loadTsModule(relativePath, mocks = {}) {
       }
       return moduleMocks[request];
     }
+    // Unmocked sibling sources compile for real so resolution logic is exercised
+    // rather than stubbed.
+    if (request.startsWith('.') && parent?.filename) {
+      const sibling = resolve(dirname(parent.filename), `${request}.ts`);
+      if (existsSync(sibling)) return compileTs(sibling);
+    }
     return originalLoad.call(this, request, parent, isMain);
   };
   try {
-    mod._compile(outputText, filename);
-    return mod.exports;
+    return compileTs(join(packageRoot, relativePath));
   } finally {
     Module._load = originalLoad;
   }
@@ -609,6 +622,312 @@ test('dispatchUri unwraps LLM Wiki product links before opening an anchored PDF'
       textFragment: { textStart: 'The Internet was done so well' },
     },
   ]]);
+});
+
+test('dispatchUri prefers an explicit absolute note when a root-looking link also exists in the vault', async () => {
+  const outside = mkdtempSync(join(tmpdir(), 'llm-wiki-conflict-'));
+  const root = mkdtempSync(join(tmpdir(), 'llm-wiki-conflict-vault-'));
+  const executeCommandCalls = [];
+  const errorMessages = [];
+  try {
+    // The link text below strips to this bundle-relative path, so both
+    // interpretations name a file that really exists.
+    const bundleRelative = relative('/', join(outside, 'guide.md'));
+    mkdirSync(dirname(join(root, bundleRelative)), { recursive: true });
+    writeFileSync(join(root, bundleRelative), '# Vault\n');
+    writeFileSync(join(outside, 'guide.md'), '# Outside\n');
+
+    const vscode = createVscodeMock({
+      executeCommandCalls,
+      openTextDocumentCalls: [],
+      showTextDocumentCalls: [],
+      document: undefined,
+      errorMessages,
+    });
+    const { dispatchUri } = loadTsModule('src/uriDispatcher.ts', {
+      vscode,
+      '@llm-wiki/core': {
+        classifyReferenceTarget: uri => ({ kind: 'note', path: uri }),
+      },
+    });
+
+    await dispatchUri(root, join(outside, 'guide.md'), { allowAbsoluteTargets: true });
+
+    assert.deepEqual(executeCommandCalls, [[
+      'vscode.openWith',
+      { fsPath: join(outside, 'guide.md') },
+      'llm-wiki.markdownEditor',
+    ]]);
+    assert.deepEqual(errorMessages, []);
+  } finally {
+    rmSync(outside, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('dispatchUri opens an existing absolute Markdown target when the vault has no match', async () => {
+  const outside = mkdtempSync(join(tmpdir(), 'llm-wiki-absolute-'));
+  const root = mkdtempSync(join(tmpdir(), 'llm-wiki-absolute-vault-'));
+  const executeCommandCalls = [];
+  const errorMessages = [];
+  try {
+    mkdirSync(join(outside, 'playbook'), { recursive: true });
+    mkdirSync(join(root, 'playbook'), { recursive: true });
+    writeFileSync(join(outside, 'playbook', 'guide.md'), '# Outside\n');
+    writeFileSync(join(root, 'playbook', 'guide.md'), '# Vault\n');
+
+    const vscode = createVscodeMock({
+      executeCommandCalls,
+      openTextDocumentCalls: [],
+      showTextDocumentCalls: [],
+      document: undefined,
+      errorMessages,
+    });
+    const { dispatchUri } = loadTsModule('src/uriDispatcher.ts', {
+      vscode,
+      '@llm-wiki/core': {
+        classifyReferenceTarget: uri => ({ kind: 'note', path: uri }),
+      },
+    });
+
+    await dispatchUri(
+      root,
+      join(outside, 'playbook', 'guide.md'),
+      { allowAbsoluteTargets: true },
+    );
+
+    assert.deepEqual(executeCommandCalls, [[
+      'vscode.openWith',
+      { fsPath: join(outside, 'playbook', 'guide.md') },
+      'llm-wiki.markdownEditor',
+    ]]);
+    assert.deepEqual(errorMessages, []);
+  } finally {
+    rmSync(outside, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('dispatchUri falls back to the vault when a root-looking target is absent on disk', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'llm-wiki-absolute-fallback-'));
+  const executeCommandCalls = [];
+  const errorMessages = [];
+  try {
+    mkdirSync(join(root, 'playbook'), { recursive: true });
+    writeFileSync(join(root, 'playbook', 'guide.md'), '# Vault\n');
+
+    const vscode = createVscodeMock({
+      executeCommandCalls,
+      openTextDocumentCalls: [],
+      showTextDocumentCalls: [],
+      document: undefined,
+      errorMessages,
+    });
+    const { dispatchUri } = loadTsModule('src/uriDispatcher.ts', {
+      vscode,
+      '@llm-wiki/core': {
+        classifyReferenceTarget: uri => ({ kind: 'note', path: uri }),
+      },
+    });
+
+    await dispatchUri(root, '/playbook/guide.md');
+
+    assert.deepEqual(executeCommandCalls, [[
+      'vscode.openWith',
+      { fsPath: join(root, 'playbook', 'guide.md') },
+      'llm-wiki.markdownEditor',
+    ]]);
+    assert.deepEqual(errorMessages, []);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('dispatchUri creates a missing root-looking note only inside the vault', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'llm-wiki-absolute-create-'));
+  const executeCommandCalls = [];
+  const errorMessages = [];
+  try {
+    const vscode = createVscodeMock({
+      executeCommandCalls,
+      openTextDocumentCalls: [],
+      showTextDocumentCalls: [],
+      document: undefined,
+      errorMessages,
+    });
+    const { dispatchUri } = loadTsModule('src/uriDispatcher.ts', {
+      vscode,
+      '@llm-wiki/core': {
+        classifyReferenceTarget: uri => ({ kind: 'note', path: uri }),
+      },
+    });
+
+    await dispatchUri(root, '/playbook/new-note.md');
+
+    assert.equal(existsSync(join(root, 'playbook', 'new-note.md')), true);
+    assert.deepEqual(executeCommandCalls, [[
+      'vscode.openWith',
+      { fsPath: join(root, 'playbook', 'new-note.md') },
+      'llm-wiki.markdownEditor',
+    ]]);
+    assert.deepEqual(errorMessages, []);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('dispatchUri refuses a root-looking target that escapes the vault', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'llm-wiki-absolute-escape-'));
+  const executeCommandCalls = [];
+  const errorMessages = [];
+  try {
+    const vscode = createVscodeMock({
+      executeCommandCalls,
+      openTextDocumentCalls: [],
+      showTextDocumentCalls: [],
+      document: undefined,
+      errorMessages,
+    });
+    const { dispatchUri } = loadTsModule('src/uriDispatcher.ts', {
+      vscode,
+      '@llm-wiki/core': {
+        classifyReferenceTarget: uri => ({ kind: 'note', path: uri }),
+      },
+    });
+
+    // Absolute targets are permitted here, so this exercises the absolute branch
+    // missing and proves the vault fallback still refuses to climb out.
+    await dispatchUri(root, '/../llm-wiki-escaped.md', { allowAbsoluteTargets: true });
+
+    assert.deepEqual(executeCommandCalls, []);
+    assert.equal(errorMessages.length, 1);
+    assert.match(errorMessages[0], /outside the workspace/i);
+    assert.equal(existsSync(resolve(root, '..', 'llm-wiki-escaped.md')), false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('dispatchUri leaves an absolute path alone when the caller has not opted in', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'llm-wiki-absolute-optout-'));
+  const outside = mkdtempSync(join(tmpdir(), 'llm-wiki-absolute-optout-outside-'));
+  const executeCommandCalls = [];
+  const errorMessages = [];
+  try {
+    const target = join(outside, 'guide.md');
+    writeFileSync(target, '# Outside\n');
+
+    const vscode = createVscodeMock({
+      executeCommandCalls,
+      openTextDocumentCalls: [],
+      showTextDocumentCalls: [],
+      document: undefined,
+      errorMessages,
+    });
+    const { dispatchUri } = loadTsModule('src/uriDispatcher.ts', {
+      vscode,
+      '@llm-wiki/core': {
+        classifyReferenceTarget: uri => ({ kind: 'note', path: uri }),
+      },
+    });
+
+    await dispatchUri(root, target);
+
+    assert.equal(
+      executeCommandCalls.some(([, opened]) => opened?.fsPath === target),
+      false,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
+  }
+});
+
+test('dispatchUri keeps product deep links from reaching absolute filesystem paths', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'llm-wiki-deep-link-vault-'));
+  const outside = mkdtempSync(join(tmpdir(), 'llm-wiki-deep-link-secret-'));
+  const executeCommandCalls = [];
+  const errorMessages = [];
+  try {
+    const secret = join(outside, 'id_rsa');
+    writeFileSync(secret, 'PRIVATE KEY\n');
+
+    const vscode = createVscodeMock({
+      executeCommandCalls,
+      openTextDocumentCalls: [],
+      showTextDocumentCalls: [],
+      document: undefined,
+      errorMessages,
+    });
+    const { dispatchUri } = loadTsModule('src/uriDispatcher.ts', {
+      vscode,
+      '@llm-wiki/core': {
+        classifyReferenceTarget: uri => ({ kind: 'unknown', path: uri, uri }),
+      },
+    });
+
+    // The default: no caller opt-in, which is how the externally triggerable
+    // product URI handler dispatches.
+    await dispatchUri(root, productAnchorUri(secret));
+
+    assert.equal(
+      executeCommandCalls.some(([, target]) => target?.fsPath === secret),
+      false,
+    );
+    assert.equal(errorMessages.length, 1);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
+  }
+});
+
+test('dispatchUri reveals an exact Markdown range from either host product link', async () => {
+  const text = 'one\nsecond\nthird\nfourth\nfifth\nsixth';
+  const lineStarts = [0, 4, 11, 17, 24, 30];
+
+  for (const scheme of ['cursor', 'vscode']) {
+    const executeCommandCalls = [];
+    const classifiedUris = [];
+    const portableUri = 'notes/Concepts/Memory.md#L4-L5';
+    const productUri = `${scheme}://llm-wiki.llm-wiki-vscode/open-anchor?target=`
+      + `v1.${Buffer.from(portableUri, 'utf8').toString('base64url')}`;
+    const vscode = createVscodeMock({
+      executeCommandCalls,
+      openTextDocumentCalls: [],
+      showTextDocumentCalls: [],
+      document: {
+        uri: { fsPath: '/vault/notes/Concepts/Memory.md' },
+        lineCount: lineStarts.length,
+        getText: () => text,
+        offsetAt: position => lineStarts[position.line] ?? text.length,
+      },
+    });
+    const { dispatchUri } = loadTsModule('src/uriDispatcher.ts', {
+      vscode,
+      '@llm-wiki/core': {
+        classifyReferenceTarget: uri => {
+          classifiedUris.push(uri);
+          return {
+            kind: 'note',
+            path: 'notes/Concepts/Memory.md',
+            lines: { start: 4, end: 5 },
+          };
+        },
+      },
+      fs: { existsSync: () => true },
+    });
+
+    await dispatchUri('/vault', productUri);
+
+    assert.deepEqual(classifiedUris, [portableUri]);
+    assert.deepEqual(executeCommandCalls.at(-1), [
+      'llm-wiki.revealInMarkdownEditor',
+      {
+        uri: { fsPath: '/vault/notes/Concepts/Memory.md' },
+        selection: { from: 17, to: 30 },
+      },
+    ]);
+  }
 });
 
 test('dispatchUri opens local anchor bridge file links with their dedicated editor', async () => {

@@ -2,16 +2,23 @@ import { undo } from '@codemirror/commands';
 import type { Text } from '@codemirror/state';
 import { WidgetType } from '@codemirror/view';
 import type { EditorView } from '@codemirror/view';
-import { isMap, isScalar, isSeq, parseDocument } from 'yaml';
+import { isMap, isScalar, isSeq, parse as parseYamlValue, parseDocument } from 'yaml';
 
 export interface FrontmatterProperty {
   name: string;
   value: string;
   rawValue: string;
   chips: string[];
+  table?: FrontmatterTable;
   yamlStyle: 'scalar' | 'inline-list' | 'block-list';
   lineFrom: number;
   lineTo: number;
+}
+
+export interface FrontmatterTable {
+  columns: string[];
+  rows: string[][];
+  paths: Array<Array<Array<string | number>>>;
 }
 
 export interface FrontmatterBlock {
@@ -64,7 +71,9 @@ export class FrontmatterPropertiesWidget extends WidgetType {
 
       const value = document.createElement('span');
       value.className = 'cm-hybrid-property-value';
-      if (property.chips.length > 0) {
+      if (property.table) {
+        value.appendChild(renderFrontmatterTable(property.table, view, property));
+      } else if (property.chips.length > 0) {
         const display = document.createElement('div');
         display.className = 'cm-hybrid-property-chip-display';
         display.ariaLabel = `${property.name} property display`;
@@ -561,6 +570,7 @@ function parseYamlFrontmatterProperties(
     const sourceRange = doc.sliceString(lineFrom, lineTo);
     const rawValue = sourceRange.slice(sourceRange.indexOf(':') + 1);
     const chips = yamlSequenceValues(value);
+    const table = yamlTableValue(value);
     const firstLineAfterColon = doc.line(lineFromNumber).text.slice(doc.line(lineFromNumber).text.indexOf(':') + 1).trim();
     const yamlStyle = chips.length > 0
       ? (firstLineAfterColon.length === 0 ? 'block-list' : 'inline-list')
@@ -568,9 +578,10 @@ function parseYamlFrontmatterProperties(
 
     properties.push({
       name,
-      value: chips.length > 0 ? chips.join(', ') : yamlScalarValue(value),
+      value: chips.length > 0 ? chips.join(', ') : table ? '' : yamlScalarValue(value),
       rawValue: yamlStyle === 'block-list' ? rawValue : rawValue.trimStart(),
       chips,
+      table,
       yamlStyle,
       lineFrom,
       lineTo,
@@ -728,9 +739,57 @@ function yamlSequenceValues(value: unknown): string[] {
     .filter(Boolean);
 }
 
+function yamlTableValue(value: unknown): FrontmatterTable | undefined {
+  if (isMap(value)) {
+    const entries = yamlMapEntries(value);
+    if (entries.length === 0 || !entries.every(entry => isScalar(entry.value))) return undefined;
+    return {
+      columns: entries.map(entry => entry.key),
+      rows: [entries.map(entry => yamlCellValue(entry.value))],
+      paths: [entries.map(entry => [entry.key])],
+    };
+  }
+
+  if (!isSeq(value) || value.items.length === 0 || !value.items.every(isMap)) return undefined;
+  const rows = value.items.map(item => yamlMapEntries(item));
+  const columns = [...new Set(rows.flatMap(row => row.map(entry => entry.key)))];
+  if (columns.length === 0) return undefined;
+  return {
+    columns,
+    rows: rows.map(row => {
+      const values = new Map(row.map(entry => [entry.key, yamlCellValue(entry.value)]));
+      return columns.map(column => values.get(column) ?? '');
+    }),
+    paths: rows.map((_row, rowIndex) =>
+      columns.map(column => [rowIndex, column]),
+    ),
+  };
+}
+
+function yamlMapEntries(value: unknown): Array<{ key: string; value: unknown }> {
+  if (!isMap(value)) return [];
+  return value.items.flatMap(pair => {
+    if (!isScalar(pair.key) || typeof pair.key.value !== 'string') return [];
+    return [{ key: pair.key.value, value: pair.value }];
+  });
+}
+
+function yamlCellValue(value: unknown): string {
+  if (isScalar(value)) return value.value == null ? '' : value.toString();
+  if (isSeq(value)) return value.items.map(yamlCellValue).filter(Boolean).join(', ');
+  if (isMap(value)) {
+    return yamlMapEntries(value)
+      .map(entry => `${entry.key}: ${yamlCellValue(entry.value)}`)
+      .join(', ');
+  }
+  return '';
+}
+
 function yamlScalarValue(value: unknown): string {
-  if (!value || !isScalar(value) || value.value == null) return '';
-  return value.toString();
+  if (!value || typeof value !== 'object') return '';
+  if (isScalar(value)) return value.value == null ? '' : value.toString();
+  if (isMap(value) || isSeq(value)) return value.toString();
+  return '';
 }
 
 function yamlNodeRange(value: unknown): [number, number, number] | undefined {
@@ -755,6 +814,154 @@ function parseInlineArray(value: string): string[] {
     .split(',')
     .map(item => unquotePropertyValue(item.trim()))
     .filter(Boolean);
+}
+
+function renderFrontmatterTable(
+  table: FrontmatterTable,
+  view: EditorView,
+  property: FrontmatterProperty,
+): HTMLElement {
+  const wrapper = document.createElement('div');
+  wrapper.className = 'cm-hybrid-property-structured-table-wrap';
+  const element = document.createElement('table');
+  element.className = 'cm-hybrid-property-structured-table';
+  element.ariaLabel = 'Structured property value';
+
+  const head = document.createElement('thead');
+  const headingRow = document.createElement('tr');
+  for (const column of table.columns) {
+    const cell = document.createElement('th');
+    cell.scope = 'col';
+    cell.textContent = column;
+    headingRow.appendChild(cell);
+  }
+  head.appendChild(headingRow);
+  element.appendChild(head);
+
+  const body = document.createElement('tbody');
+  for (const [rowIndex, row] of table.rows.entries()) {
+    const rowElement = document.createElement('tr');
+    for (const [columnIndex, cellValue] of row.entries()) {
+      const cell = document.createElement('td');
+      const path = table.paths[rowIndex]?.[columnIndex];
+      if (!path) {
+        cell.textContent = cellValue;
+        rowElement.appendChild(cell);
+        continue;
+      }
+      const display = document.createElement('button');
+      display.type = 'button';
+      display.className = 'cm-hybrid-property-structured-cell';
+      const cellLabel = structuredCellLabel(property.name, path);
+      display.ariaLabel = `Edit ${cellLabel}`;
+      display.textContent = cellValue;
+      display.addEventListener('mousedown', event => {
+        event.preventDefault();
+        event.stopPropagation();
+      });
+      display.addEventListener('click', event => {
+        event.preventDefault();
+        event.stopPropagation();
+        showStructuredCellInput(view, property, path, display);
+      });
+      cell.appendChild(display);
+      rowElement.appendChild(cell);
+    }
+    body.appendChild(rowElement);
+  }
+  element.appendChild(body);
+  wrapper.appendChild(element);
+  return wrapper;
+}
+
+function showStructuredCellInput(
+  view: EditorView,
+  property: FrontmatterProperty,
+  path: Array<string | number>,
+  display: HTMLButtonElement,
+): void {
+  const input = document.createElement('input');
+  input.className = 'cm-hybrid-property-structured-cell-input';
+  input.type = 'text';
+  input.value = display.textContent ?? '';
+  input.ariaLabel = structuredCellLabel(property.name, path);
+  input.spellcheck = false;
+  isolateFrontmatterInput(input);
+  display.hidden = true;
+  display.parentElement?.appendChild(input);
+  input.focus({ preventScroll: true });
+  input.select();
+
+  let committed = false;
+  const finish = (commit: boolean) => {
+    if (committed) return;
+    committed = true;
+    if (commit && input.value !== display.textContent) {
+      commitStructuredPropertyCell(view, property, path, input.value);
+      return;
+    }
+    input.remove();
+    display.hidden = false;
+    view.focus();
+  };
+  input.addEventListener('keydown', event => {
+    event.stopPropagation();
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      finish(true);
+    } else if (event.key === 'Escape') {
+      event.preventDefault();
+      finish(false);
+    }
+  });
+  input.addEventListener('blur', () => finish(true));
+}
+
+function commitStructuredPropertyCell(
+  view: EditorView,
+  property: FrontmatterProperty,
+  path: Array<string | number>,
+  nextValue: string,
+): void {
+  let parsed: unknown;
+  try {
+    parsed = parseYamlValue(property.rawValue.trim());
+  } catch {
+    return;
+  }
+  if (parsed === null || typeof parsed !== 'object') return;
+  let target: unknown = parsed;
+  for (let index = 0; index < path.length - 1; index++) {
+    const segment = path[index]!;
+    if (typeof target !== 'object' || target === null || !(segment in target)) return;
+    target = (target as Record<string | number, unknown>)[segment];
+  }
+  const finalSegment = path.at(-1);
+  if (finalSegment === undefined || typeof target !== 'object' || target === null) return;
+  (target as Record<string | number, unknown>)[finalSegment] = nextValue;
+
+  const serialized = serializeStructuredPropertyValue(property.name, parsed);
+  view.dispatch({
+    changes: { from: property.lineFrom, to: property.lineTo, insert: serialized },
+  });
+  scheduleFrontmatterInputFocus(() =>
+      view.dom.querySelector<HTMLInputElement>(
+      `.cm-hybrid-property-structured-cell-input[aria-label="${cssEscape(structuredCellLabel(property.name, path))}"]`,
+    ),
+  );
+}
+
+function structuredCellLabel(propertyName: string, path: Array<string | number>): string {
+  return `${propertyName}${typeof path[0] === 'number' ? `[${path[0]}]` : `.${String(path[0] ?? 'value')}`}${
+    typeof path[0] === 'number' && typeof path[1] === 'string' ? `.${path[1]}` : ''
+  }`;
+}
+
+function serializeStructuredPropertyValue(name: string, value: unknown): string {
+  // JSON is a valid YAML flow value and keeps a structured property as one
+  // atom, so the next parse can recover the same cell paths regardless of the
+  // original inline or block formatting.
+  return `${name}: ${JSON.stringify(value)}`;
 }
 
 function unquotePropertyValue(value: string): string {

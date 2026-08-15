@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import type { SourceLineRange } from './selectionContext';
 
 export type ExternalAgentId = 'codex' | 'claude' | 'codebuddy';
 
@@ -13,6 +14,12 @@ export interface AgentSurfaceCapabilities {
   cursorAgent: boolean;
   providers: AgentHandoffCapability[];
 }
+
+export type AgentHandoffContext =
+  | { kind: 'markdown-range'; uri: vscode.Uri; range: SourceLineRange }
+  | { kind: 'selection-export'; uri: vscode.Uri };
+
+type HandoffContextInput = AgentHandoffContext | vscode.Uri;
 
 export interface AgentSurfaceCapabilitySource extends vscode.Disposable {
   readonly onDidChange: vscode.Event<void>;
@@ -45,9 +52,14 @@ interface RestorableEditorTab {
 }
 
 const CURSOR_COMMAND = 'composer.addfilestocomposer';
+const CURSOR_SELECTION_COMMAND = 'composer.addsymbolstocomposer';
 const CURSOR_COMPOSERS_COMMAND = 'composer.getOrderedSelectedComposerIds';
 const CURSOR_OPEN_COMMAND = 'workbench.action.chat.open';
+const CODEX_ADD_TO_THREAD_COMMAND = 'chatgpt.addToThread';
+const CODEX_ADD_FILE_TO_THREAD_COMMAND = 'chatgpt.addFileToThread';
 const CLAUDE_EDITOR_OPEN_COMMAND = 'claude-vscode.editor.open';
+const CLAUDE_SIDEBAR_OPEN_COMMAND = 'claude-vscode.sidebar.open';
+const MARKDOWN_EDITOR_VIEW_TYPE = 'llm-wiki.markdownEditor';
 const CLAUDE_HANDOFF_COMMANDS = [
   'claude-vscode.insertAtMention',
   'claude-code.insertAtMentioned',
@@ -58,7 +70,7 @@ const AGENTS: readonly AgentChoice[] = [
     id: 'codex',
     label: 'Codex',
     description: 'OpenAI Codex sidebar',
-    commands: ['chatgpt.addFileToThread'],
+    commands: [CODEX_ADD_TO_THREAD_COMMAND, CODEX_ADD_FILE_TO_THREAD_COMMAND],
     extensionIds: ['openai.chatgpt'],
   },
   {
@@ -96,12 +108,12 @@ const EDITOR_CHAT_VIEW_TYPES: Readonly<Record<string, AgentId>> = {
 };
 
 export async function handoffSelectionToCursor(
-  contextUri: vscode.Uri,
+  input: HandoffContextInput,
   attachmentUris: readonly vscode.Uri[] = [],
 ): Promise<boolean> {
   const commands = new Set(await vscode.commands.getCommands(true));
   return handoffSelectionToCursorWithCommands(
-    contextUri,
+    normalizeHandoffContext(input),
     attachmentUris,
     commands,
   );
@@ -211,9 +223,10 @@ function sameAgentSurfaceCapabilities(
 
 export async function handoffSelectionToAgentId(
   agentId: ExternalAgentId,
-  contextUri: vscode.Uri,
+  input: HandoffContextInput,
   attachmentUris: readonly vscode.Uri[] = [],
 ): Promise<boolean> {
+  const context = normalizeHandoffContext(input);
   const agent = EXTERNAL_AGENTS.find(candidate => candidate.id === agentId);
   if (!agent) return false;
 
@@ -244,7 +257,7 @@ export async function handoffSelectionToAgentId(
     return false;
   }
   try {
-    await executeAgentHandoff(agent, command, contextUri, attachmentUris);
+    await executeAgentHandoff(agent, command, context, attachmentUris);
     return true;
   } catch {
     vscode.window.showWarningMessage(`${agent.label} could not attach the selection.`);
@@ -253,17 +266,21 @@ export async function handoffSelectionToAgentId(
 }
 
 async function handoffSelectionToCursorWithCommands(
-  contextUri: vscode.Uri,
+  context: AgentHandoffContext,
   attachmentUris: readonly vscode.Uri[],
   commands: ReadonlySet<string>,
   knownActiveComposer?: boolean,
 ): Promise<boolean> {
-  if (!commands.has(CURSOR_COMMAND)) {
+  if (!commands.has(CURSOR_COMMAND)
+    && !commands.has(CURSOR_SELECTION_COMMAND)) {
     vscode.window.showWarningMessage('Cursor chat is not available.');
     return false;
   }
 
-  const attachments = uniqueLocalUris([contextUri, ...attachmentUris]);
+  const attachments = uniqueLocalUris([
+    attachmentUriForContext(context),
+    ...attachmentUris,
+  ]);
   const hasActiveComposer = knownActiveComposer
     ?? await cursorHasActiveComposer(commands);
   if (hasActiveComposer === false) {
@@ -284,15 +301,27 @@ async function handoffSelectionToCursorWithCommands(
   }
 
   try {
-    await attachToCursor(attachments[0]!);
+    if (context.kind === 'markdown-range' && commands.has(CURSOR_SELECTION_COMMAND)) {
+      await attachSelectionToCursor(context);
+    } else {
+      await attachToCursor(attachments[0]!);
+    }
   } catch {
     vscode.window.showWarningMessage(
-      'Cursor could not attach selection.md. Open Cursor Chat and try again.',
+      context.kind === 'markdown-range'
+        ? 'Cursor could not attach the selected passage. Open Cursor Chat and try again.'
+        : 'Cursor could not attach selection.md. Open Cursor Chat and try again.',
     );
     return false;
   }
   for (const uri of attachments.slice(1)) {
     try {
+      // The Markdown source is already attached through Cursor's selection
+      // command above. Optional files (for example an image crop) still use
+      // the file attachment command.
+      if (context.kind === 'markdown-range' && uri.fsPath === context.uri.fsPath) {
+        continue;
+      }
       await attachToCursor(uri);
     } catch {
       vscode.window.showWarningMessage(
@@ -304,9 +333,10 @@ async function handoffSelectionToCursorWithCommands(
 }
 
 export async function handoffSelectionToAgent(
-  contextUri: vscode.Uri,
+  input: HandoffContextInput,
   attachmentUris: readonly vscode.Uri[] = [],
 ): Promise<AgentId | undefined> {
+  const context = normalizeHandoffContext(input);
   const commands = new Set(await vscode.commands.getCommands(true));
   const available = AGENTS
     .map(agent => availableAgent(agent, commands))
@@ -323,13 +353,13 @@ export async function handoffSelectionToAgent(
 
   if (agent.id === 'cursor') {
     if (!await handoffSelectionToCursorWithCommands(
-      contextUri,
+      context,
       attachmentUris,
       commands,
       target.surface === 'cursor-composer' ? true : undefined,
     )) return undefined;
   } else {
-    await executeAgentHandoff(agent, agent.command, contextUri, attachmentUris);
+    await executeAgentHandoff(agent, agent.command, context, attachmentUris);
   }
   return agent.id;
 }
@@ -438,13 +468,6 @@ function availableAgentCommand(
   agent: AgentChoice,
   commands: ReadonlySet<string>,
 ): string | undefined {
-  if (
-    agent.id === 'claude'
-    && isCursorHost()
-    && !commands.has(CLAUDE_EDITOR_OPEN_COMMAND)
-  ) {
-    return undefined;
-  }
   return agent.commands.find(command => commands.has(command));
 }
 
@@ -498,35 +521,56 @@ function isCommandContribution(item: unknown): item is { command: string } {
 async function executeAgentHandoff(
   agent: AgentChoice,
   command: string,
-  contextUri: vscode.Uri,
+  context: AgentHandoffContext,
   attachmentUris: readonly vscode.Uri[],
 ): Promise<void> {
+  const contextUri = attachmentUriForContext(context);
   if (agent.id === 'claude') {
     if (isCursorHost()) {
-      const document = await vscode.workspace.openTextDocument(contextUri);
-      const reference = formatClaudeSelectionReference(
-        contextUri,
-        document.lineCount,
-      );
-      await vscode.commands.executeCommand(
-        CLAUDE_EDITOR_OPEN_COMMAND,
-        undefined,
-        reference,
-        vscode.ViewColumn.Beside,
-      );
+      // The sidebar insertion command needs a real source document and an
+      // active range. Exported selection.md files intentionally keep the
+      // immutable-file editor fallback used by older Claude integrations.
+      const canDriveSidebar = context.kind === 'markdown-range'
+        && typeof vscode.window.showTextDocument === 'function';
+      if (canDriveSidebar
+        && (command === CLAUDE_HANDOFF_COMMANDS[0]
+          || command === CLAUDE_HANDOFF_COMMANDS[1])) {
+        await executeWithNativeSelection(context, command);
+      } else {
+        // Older Claude builds exposed only the editor command. Keep this as
+        // a compatibility fallback, but never prefer it when the sidebar
+        // insertion command is available because it opens a second editor.
+        const range = context.kind === 'markdown-range'
+          ? context.range
+          : { startLine: 1, endLine: (await vscode.workspace.openTextDocument(contextUri)).lineCount };
+        const reference = formatClaudeSelectionReference(contextUri, range);
+        await vscode.commands.executeCommand(
+          CLAUDE_EDITOR_OPEN_COMMAND,
+          undefined,
+          reference,
+          vscode.ViewColumn.Beside,
+        );
+      }
       return;
     }
     const sourceTab = activeRestorableEditorTab();
-    const existingContextTabs = new Set(tabsForUri(contextUri));
-    const document = await vscode.workspace.openTextDocument(contextUri);
+    const sourceUri = stripFragment(contextUri);
+    const existingContextTabs = new Set(tabsForUri(sourceUri));
+    const document = await vscode.workspace.openTextDocument(sourceUri);
     const editor = await vscode.window.showTextDocument(document, {
       preview: false,
       viewColumn: vscode.ViewColumn.Beside,
     });
-    const temporaryTab = tabsForUri(contextUri)
+    const temporaryTab = tabsForUri(sourceUri)
       .find(tab => !existingContextTabs.has(tab));
-    const end = document.lineAt(Math.max(0, document.lineCount - 1)).range.end;
-    editor.selection = new vscode.Selection(new vscode.Position(0, 0), end);
+    const range = context.kind === 'markdown-range'
+      ? context.range
+      : { startLine: 1, endLine: document.lineCount };
+    const end = document.lineAt(Math.max(0, range.endLine - 1)).range.end;
+    editor.selection = new vscode.Selection(
+      new vscode.Position(Math.max(0, range.startLine - 1), 0),
+      end,
+    );
     let mentionInserted = false;
     try {
       await vscode.commands.executeCommand(command);
@@ -534,7 +578,7 @@ async function executeAgentHandoff(
     } finally {
       const closed = await closeTemporaryClaudeContextTab(
         temporaryTab,
-        contextUri,
+        sourceUri,
       );
       const restored = await restoreEditorTab(sourceTab);
       if (mentionInserted && (!closed || !restored)) {
@@ -544,11 +588,21 @@ async function executeAgentHandoff(
       }
     }
   } else if (agent.id === 'codex') {
+    if (context.kind === 'markdown-range' && command === CODEX_ADD_TO_THREAD_COMMAND) {
+      await executeWithNativeSelection(context, command);
+      return;
+    }
     const attachments = uniqueLocalUris([contextUri, ...attachmentUris]);
-    await vscode.commands.executeCommand(command, attachments[0]!);
+    const fileCommand = command === CODEX_ADD_TO_THREAD_COMMAND
+      ? await registeredCommand(CODEX_ADD_FILE_TO_THREAD_COMMAND)
+      : command;
+    if (!fileCommand) {
+      throw new Error('Codex file attachment command is unavailable.');
+    }
+    await vscode.commands.executeCommand(fileCommand, attachments[0]!);
     for (const uri of attachments.slice(1)) {
       try {
-        await vscode.commands.executeCommand(command, uri);
+        await vscode.commands.executeCommand(fileCommand, uri);
       } catch {
         vscode.window.showWarningMessage(
           'Codex attached selection.md, but could not attach the optional image. Continue with text context or try again.',
@@ -565,12 +619,162 @@ async function executeAgentHandoff(
 
 function formatClaudeSelectionReference(
   contextUri: vscode.Uri,
-  lineCount: number,
+  range: SourceLineRange,
 ): string {
   const relativePath = vscode.workspace
     .asRelativePath(contextUri)
     .replaceAll('\\', '/');
-  return `@${relativePath}#1-${Math.max(1, lineCount)} `;
+  return `@${relativePath}#${range.startLine}-${range.endLine} `;
+}
+
+function normalizeHandoffContext(input: HandoffContextInput): AgentHandoffContext {
+  return 'kind' in input
+    ? input
+    : { kind: 'selection-export', uri: input };
+}
+
+function attachmentUriForContext(context: AgentHandoffContext): vscode.Uri {
+  if (context.kind !== 'markdown-range') return context.uri;
+  return context.uri.with({
+    fragment: `L${context.range.startLine}-L${context.range.endLine}`,
+  });
+}
+
+async function registeredCommand(command: string): Promise<string | undefined> {
+  try {
+    return (await vscode.commands.getCommands(true)).includes(command)
+      ? command
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function attachSelectionToCursor(
+  context: Extract<AgentHandoffContext, { kind: 'markdown-range' }>,
+): Promise<void> {
+  const sourceUri = stripFragment(context.uri);
+  const document = await vscode.workspace.openTextDocument(sourceUri);
+  const startLine = Math.max(1, Math.min(context.range.startLine, document.lineCount));
+  const endLine = Math.max(startLine, Math.min(context.range.endLine, document.lineCount));
+  const start = Math.max(0, startLine - 1);
+  const end = Math.max(0, endLine - 1);
+  const rawText = document.getText(
+    new vscode.Range(
+      new vscode.Position(start, 0),
+      document.lineAt(end).range.end,
+    ),
+  );
+  const language = String(sourceUri.path ?? sourceUri.fsPath ?? '')
+    .toLowerCase()
+    .endsWith('.md') ? 'markdown' : '';
+  await vscode.commands.executeCommand(CURSOR_SELECTION_COMMAND, {
+    codeSelections: [{
+      uri: sourceUri,
+      range: {
+        selectionStartLineNumber: startLine,
+        selectionStartColumn: 1,
+        positionLineNumber: endLine,
+        positionColumn: document.lineAt(end).range.end.character + 1,
+      },
+      rawText,
+      text: `\`\`\`${language}\n${rawText}\n\`\`\``,
+    }],
+  });
+}
+
+async function executeWithNativeSelection(
+  context: AgentHandoffContext,
+  command: string,
+): Promise<void> {
+  const contextUri = stripFragment(attachmentUriForContext(context));
+  if (
+    isCursorHost()
+    && (command === CLAUDE_HANDOFF_COMMANDS[0] || command === CLAUDE_HANDOFF_COMMANDS[1])
+  ) {
+    // Claude's insertion command opens a new editor when no visible chat
+    // surface can receive its mention. Reveal the existing sidebar first so
+    // the temporary native source editor below never triggers that fallback.
+    const sidebarCommand = await registeredCommand(CLAUDE_SIDEBAR_OPEN_COMMAND);
+    if (sidebarCommand) {
+      await vscode.commands.executeCommand(sidebarCommand);
+    }
+  }
+  const sourceTab = activeRestorableEditorTab();
+  const existingEditorColumns = new Set(
+    vscode.window.tabGroups?.all.map(group => group.viewColumn) ?? [],
+  );
+  const existingContextTabs = new Set(tabsForUri(contextUri));
+  const document = await vscode.workspace.openTextDocument(contextUri);
+  const editor = await vscode.window.showTextDocument(document, {
+    preview: false,
+    viewColumn: vscode.ViewColumn.Beside,
+  });
+  const temporaryTab = tabsForUri(contextUri)
+    .find(tab => !existingContextTabs.has(tab));
+  const range = context.kind === 'markdown-range'
+    ? context.range
+    : { startLine: 1, endLine: document.lineCount };
+  const startLine = Math.max(0, Math.min(range.startLine - 1, document.lineCount - 1));
+  const endLine = Math.max(startLine, Math.min(range.endLine - 1, document.lineCount - 1));
+  const end = document.lineAt(endLine).range.end;
+  editor.selection = new vscode.Selection(
+    new vscode.Position(startLine, 0),
+    end,
+  );
+  try {
+    await vscode.commands.executeCommand(command);
+  } finally {
+    const cursorMarkdownRange = isCursorHost() && context.kind === 'markdown-range';
+    const closedTemporaryTab = cursorMarkdownRange
+      ? true
+      : await closeTemporaryClaudeContextTab(temporaryTab, contextUri);
+    const needsNativeContextFallback = cursorMarkdownRange
+      || !temporaryTab
+      || !closedTemporaryTab;
+    // Cursor can create the native text tab asynchronously, so the tab
+    // snapshot taken immediately after showTextDocument may not contain it.
+    // In that case the active editor is still the short-lived context tab;
+    // close it by URI before restoring the custom Markdown editor.
+    let closedActiveContextTab = temporaryTab && closedTemporaryTab
+      ? true
+      : await closeActiveNativeContextTab(contextUri);
+    let nativeContextFallbackHandled = false;
+    if (needsNativeContextFallback) {
+      // Some Cursor hosts do not expose tabGroups through the extension API,
+      // and some expose it before the newly opened tab is observable. Focus
+      // the exact editor returned above, then close that active native tab.
+      nativeContextFallbackHandled = await focusAndCloseNativeContextEditor(
+        contextUri,
+        sourceTab?.viewColumn,
+        existingEditorColumns,
+      );
+      closedActiveContextTab = nativeContextFallbackHandled
+        && closedActiveContextTab;
+    }
+    if (needsNativeContextFallback && !nativeContextFallbackHandled) {
+      // The provider can move focus into its webview before the tabGroups
+      // surface observes the native editor. Closing the active editor here is
+      // safe because the original custom tab is restored immediately below.
+      try {
+        await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
+      } catch {
+        // The provider may already have closed or replaced the temporary tab.
+      }
+    }
+    if (!closedActiveContextTab) {
+      try {
+        await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
+      } catch {
+        // The provider may already have closed or replaced the temporary tab.
+      }
+    }
+    await restoreEditorTab(sourceTab);
+  }
+}
+
+function stripFragment(uri: vscode.Uri): vscode.Uri {
+  return uri.fragment ? uri.with({ fragment: '' }) : uri;
 }
 
 async function closeTemporaryClaudeContextTab(
@@ -585,8 +789,106 @@ async function closeTemporaryClaudeContextTab(
   }
 }
 
+async function closeActiveNativeContextTab(
+  contextUri: vscode.Uri,
+): Promise<boolean> {
+  const tabGroups = vscode.window.tabGroups;
+  const activeTab = tabGroups?.activeTabGroup?.activeTab;
+  if (!activeTab || !tabMatchesUri(activeTab, contextUri)) return true;
+  const input = activeTab.input as {
+    uri?: vscode.Uri;
+    viewType?: unknown;
+  } | undefined;
+  // A custom Markdown tab also carries the source URI. Only close a plain
+  // text input so an active custom editor is never removed during cleanup.
+  if (!input?.uri || typeof input.viewType === 'string') return true;
+  try {
+    return await tabGroups.close(activeTab, true);
+  } catch {
+    return false;
+  }
+}
+
+async function focusAndCloseNativeContextEditor(
+  contextUri: vscode.Uri,
+  sourceViewColumn: vscode.ViewColumn | undefined,
+  existingEditorColumns: ReadonlySet<vscode.ViewColumn>,
+): Promise<boolean> {
+  try {
+    const tabGroups = vscode.window.tabGroups;
+    const temporaryGroups = tabGroups?.all.filter(group =>
+      !existingEditorColumns.has(group.viewColumn)
+    ) ?? [];
+    if (tabGroups && temporaryGroups.length) {
+      let closed = true;
+      for (const group of temporaryGroups) {
+        try {
+          const tab = group.activeTab;
+          closed = tab
+            ? await tabGroups.close(tab, true) && closed
+            : closed;
+        } catch {
+          closed = false;
+        }
+      }
+      if (closed) return true;
+    }
+    // Cursor may reopen a Markdown source through our custom editor provider
+    // instead of a plain TabInputText. Every matching tab is therefore a
+    // short-lived context surface for this handoff; close it regardless of
+    // its input view type. The original tab is restored immediately after
+    // this cleanup, so duplicate split tabs cannot survive the handoff.
+    const activeGroup = tabGroups?.activeTabGroup;
+    if (
+      activeGroup
+      && activeGroup.activeTab
+      && tabGroups
+      && (sourceViewColumn === undefined || activeGroup.viewColumn !== sourceViewColumn)
+    ) {
+      try {
+        if (await tabGroups.close(activeGroup.activeTab, true)) return true;
+      } catch {
+        // Fall through to the URI-based pass below.
+      }
+    }
+    const contextTabs = tabGroups?.all.flatMap(group =>
+      group.tabs.filter(tab => tabMatchesUri(tab, contextUri))
+    ) ?? [];
+    if (contextTabs.length && tabGroups) {
+      let closed = true;
+      for (const tab of contextTabs) {
+        try {
+          closed = await tabGroups.close(tab, true) && closed;
+        } catch {
+          closed = false;
+        }
+      }
+      if (closed) return true;
+    }
+    // The TextEditor returned by showTextDocument can become invalid when
+    // Claude moves focus into its webview. Reopen the same document by URI so
+    // the cleanup does not pass a stale TextEditor back through the API.
+    const document = await vscode.workspace.openTextDocument(contextUri);
+    await vscode.window.showTextDocument(document, {
+      viewColumn: vscode.ViewColumn.Beside,
+      preserveFocus: false,
+      preview: false,
+    });
+    // Focusing the editor first is important: Claude moves focus into its
+    // webview while inserting the mention, so closeActiveEditor would
+    // otherwise target the chat surface instead of this temporary tab.
+    await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function activeRestorableEditorTab(): RestorableEditorTab | undefined {
-  const group = vscode.window.tabGroups.activeTabGroup;
+  const tabGroups = vscode.window.tabGroups;
+  if (!tabGroups) return undefined;
+  const group = tabGroups.activeTabGroup;
+  if (!group) return undefined;
   const tab = group.activeTab;
   const input = tab?.input as {
     uri?: vscode.Uri;
@@ -602,7 +904,9 @@ function activeRestorableEditorTab(): RestorableEditorTab | undefined {
 }
 
 function tabsForUri(uri: vscode.Uri): vscode.Tab[] {
-  return vscode.window.tabGroups.all.flatMap(group =>
+  const tabGroups = vscode.window.tabGroups;
+  if (!tabGroups) return [];
+  return tabGroups.all.flatMap(group =>
     (group.tabs ?? []).filter(tab => tabMatchesUri(tab, uri))
   );
 }
@@ -614,17 +918,22 @@ function tabMatchesUri(tab: vscode.Tab, uri: vscode.Uri): boolean {
 
 async function restoreEditorTab(tab: RestorableEditorTab | undefined): Promise<boolean> {
   if (!tab) return true;
+  const markdownViewType = isCursorHost()
+    && tab.uri.fsPath.toLowerCase().endsWith('.md')
+    ? MARKDOWN_EDITOR_VIEW_TYPE
+    : undefined;
+  const viewType = tab.viewType ?? markdownViewType;
   const options: vscode.TextDocumentShowOptions = {
     viewColumn: tab.viewColumn,
     preserveFocus: false,
     preview: tab.preview,
   };
   try {
-    if (tab.viewType) {
+    if (viewType) {
       await vscode.commands.executeCommand(
         'vscode.openWith',
         tab.uri,
-        tab.viewType,
+        viewType,
         options,
       );
     } else {

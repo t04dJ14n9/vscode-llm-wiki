@@ -129,7 +129,7 @@ test('focus-only Claude does not produce a handoff capability', () => {
   assert.deepEqual(getImmediateAgentSurfaceCapabilities().providers, []);
 });
 
-test('Cursor advertises Claude only when its full editor command is available', () => {
+test('Cursor advertises Claude when its sidebar insertion command is available', () => {
   const withoutEditor = {
     env: { appName: 'Cursor' },
     extensions: extensionRegistry(
@@ -142,7 +142,6 @@ test('Cursor advertises Claude only when its full editor command is available', 
     env: { appName: 'Cursor' },
     extensions: extensionRegistry(
       installedExtension('anthropic.claude-code', [
-        'claude-vscode.editor.open',
         'claude-vscode.insertAtMention',
       ]),
     ),
@@ -152,7 +151,7 @@ test('Cursor advertises Claude only when its full editor command is available', 
     loadAgentHandoff(withoutEditor).getImmediateAgentSurfaceCapabilities(),
     {
       cursorAgent: true,
-      providers: [],
+      providers: [{ id: 'claude', label: 'Claude Code' }],
     },
   );
   assert.deepEqual(
@@ -1933,5 +1932,419 @@ test('keeps the exported files when no supported agent is installed', async () =
   );
   assert.deepEqual(warnings, [
     'Selection exported, but no supported agent sidebar is available.',
+  ]);
+});
+
+test('passes the original Markdown URI and inclusive range to Codex, CodeBuddy, and Cursor', async () => {
+  const uri = {
+    scheme: 'file',
+    fsPath: '/vault/notes/Source.md',
+    fragment: '',
+    with(changes) {
+      return { ...this, ...changes, with: this.with };
+    },
+  };
+  const context = {
+    kind: 'markdown-range',
+    uri,
+    range: { startLine: 3, endLine: 7 },
+  };
+  const calls = [];
+  const vscode = {
+    env: { appName: 'Cursor' },
+    commands: {
+      getCommands: async () => [
+        'chatgpt.addFileToThread',
+        'tencentcloud.codingcopilot.addToChat',
+        'composer.addfilestocomposer',
+      ],
+      executeCommand: async (...args) => calls.push(args),
+    },
+    extensions: extensionRegistry(
+      installedExtension('openai.chatgpt', ['chatgpt.addFileToThread'], { isActive: true }),
+      installedExtension('tencent-cloud.coding-copilot', ['tencentcloud.codingcopilot.addToChat'], { isActive: true }),
+    ),
+    window: { showWarningMessage: () => undefined },
+  };
+  const {
+    handoffSelectionToAgentId,
+    handoffSelectionToCursor,
+  } = loadAgentHandoff(vscode);
+
+  assert.equal(await handoffSelectionToAgentId('codex', context), true);
+  assert.equal(await handoffSelectionToAgentId('codebuddy', context), true);
+  assert.equal(await handoffSelectionToCursor(context), true);
+  assert.deepEqual(calls, [
+    ['chatgpt.addFileToThread', { ...uri, fragment: 'L3-L7', with: uri.with }],
+    ['tencentcloud.codingcopilot.addToChat', { ...uri, fragment: 'L3-L7', with: uri.with }],
+    ['composer.addfilestocomposer', { ...uri, fragment: 'L3-L7', with: uri.with }, { useExactResource: true }],
+  ]);
+});
+
+test('Cursor uses its selection command so an exact Markdown range becomes a selection pill', async () => {
+  const uri = {
+    scheme: 'file',
+    fsPath: '/vault/notes/Source.md',
+    path: '/vault/notes/Source.md',
+    fragment: '',
+    with(changes) { return { ...this, ...changes, with: this.with }; },
+  };
+  const calls = [];
+  const document = {
+    lineCount: 8,
+    lineAt(line) {
+      return { range: { end: { line, character: line === 6 ? 12 : 8 } } };
+    },
+    getText() { return 'selected line 3\nselected line 4'; },
+  };
+  class Position {
+    constructor(line, character) { this.line = line; this.character = character; }
+  }
+  class Range {
+    constructor(start, end) { this.start = start; this.end = end; }
+  }
+  const vscode = {
+    Position,
+    Range,
+    env: { appName: 'Cursor' },
+    commands: {
+      getCommands: async () => [
+        'composer.addsymbolstocomposer',
+        'composer.getOrderedSelectedComposerIds',
+      ],
+      executeCommand: async (...args) => {
+        calls.push(args);
+        if (args[0] === 'composer.getOrderedSelectedComposerIds') return ['composer-1'];
+      },
+    },
+    workspace: {
+      openTextDocument: async value => {
+        assert.equal(value.fsPath, uri.fsPath);
+        return document;
+      },
+    },
+    window: { showWarningMessage: () => undefined },
+  };
+  const { handoffSelectionToCursor } = loadAgentHandoff(vscode);
+
+  assert.equal(await handoffSelectionToCursor({
+    kind: 'markdown-range',
+    uri,
+    range: { startLine: 3, endLine: 7 },
+  }), true);
+  assert.equal(calls[0][0], 'composer.getOrderedSelectedComposerIds');
+  assert.equal(calls[1][0], 'composer.addsymbolstocomposer');
+  assert.deepEqual(calls[1][1].codeSelections[0].uri, uri);
+  assert.deepEqual(calls[1][1].codeSelections[0].range, {
+    selectionStartLineNumber: 3,
+    selectionStartColumn: 1,
+    positionLineNumber: 7,
+    positionColumn: 13,
+  });
+  assert.match(calls[1][1].codeSelections[0].text, /selected line 3/);
+  assert.equal(calls.some(([command]) => command === 'composer.addfilestocomposer'), false);
+});
+
+test('Codex uses addToThread with a temporary native selection and restores the custom editor', async () => {
+  const calls = [];
+  const uri = {
+    scheme: 'file',
+    fsPath: '/vault/notes/Source.md',
+    fragment: '',
+    with(changes) { return { ...this, ...changes, with: this.with }; },
+  };
+  const sourceTab = {
+    input: { uri, viewType: 'llm-wiki.markdownEditor' },
+    isPreview: false,
+  };
+  const sourceGroup = { viewColumn: 1, activeTab: sourceTab, tabs: [sourceTab] };
+  const temporaryTab = { input: { uri }, isPreview: false };
+  const temporaryGroup = { viewColumn: 2, activeTab: temporaryTab, tabs: [temporaryTab] };
+  const groups = [sourceGroup];
+  let activeGroup = sourceGroup;
+  const document = {
+    lineCount: 10,
+    lineAt(line) { return { range: { end: { line, character: 8 } } }; },
+  };
+  const editor = {};
+  class Position {
+    constructor(line, character) { this.line = line; this.character = character; }
+  }
+  class Selection {
+    constructor(start, end) { this.start = start; this.end = end; }
+  }
+  const vscode = {
+    Position,
+    Selection,
+    ViewColumn: { Beside: 2 },
+    env: { appName: 'Cursor' },
+    commands: {
+      getCommands: async () => ['chatgpt.addToThread'],
+      executeCommand: async (...args) => {
+        calls.push(args);
+        if (args[0] === 'vscode.openWith') activeGroup = sourceGroup;
+      },
+    },
+    extensions: extensionRegistry(installedExtension(
+      'openai.chatgpt', ['chatgpt.addToThread'], { isActive: true },
+    )),
+    workspace: { openTextDocument: async () => document },
+    window: {
+      tabGroups: {
+        get activeTabGroup() { return activeGroup; },
+        get all() { return groups; },
+        close: async tab => {
+          groups.splice(groups.indexOf(temporaryGroup), 1);
+          activeGroup = sourceGroup;
+          assert.equal(tab, temporaryTab);
+          return true;
+        },
+      },
+      showTextDocument: async (value, options) => {
+        assert.equal(value, document);
+        assert.deepEqual(options, { preview: false, viewColumn: 2 });
+        groups.push(temporaryGroup);
+        activeGroup = temporaryGroup;
+        return editor;
+      },
+      showWarningMessage: () => undefined,
+    },
+  };
+  const { handoffSelectionToAgentId } = loadAgentHandoff(vscode);
+
+  assert.equal(await handoffSelectionToAgentId('codex', {
+    kind: 'markdown-range', uri, range: { startLine: 3, endLine: 7 },
+  }), true);
+  assert.equal(editor.selection.start.line, 2);
+  assert.equal(editor.selection.end.line, 6);
+  assert.equal(editor.selection.end.character, 8);
+  assert.deepEqual(calls, [
+    ['chatgpt.addToThread'],
+    ['vscode.openWith', uri, 'llm-wiki.markdownEditor', {
+      viewColumn: 1,
+      preserveFocus: false,
+      preview: false,
+    }],
+  ]);
+  assert.equal(activeGroup, sourceGroup);
+});
+
+test('Cursor Claude inserts the exact range into its existing sidebar without opening an editor tab', async () => {
+  const calls = [];
+  const uri = {
+    scheme: 'file',
+    fsPath: '/vault/notes/Source.md',
+    fragment: '',
+    with(changes) { return { ...this, ...changes, with: this.with }; },
+  };
+  const sourceTab = { input: { uri, viewType: 'llm-wiki.markdownEditor' }, isPreview: false };
+  const sourceGroup = { viewColumn: 1, activeTab: sourceTab, tabs: [sourceTab] };
+  const temporaryTab = { input: { uri }, isPreview: false };
+  const temporaryGroup = { viewColumn: 2, activeTab: temporaryTab, tabs: [temporaryTab] };
+  const groups = [sourceGroup];
+  let activeGroup = sourceGroup;
+  const document = {
+    lineCount: 10,
+    lineAt(line) { return { range: { end: { line, character: 6 } } }; },
+  };
+  const editor = {};
+  class Position {
+    constructor(line, character) { this.line = line; this.character = character; }
+  }
+  class Selection {
+    constructor(start, end) { this.start = start; this.end = end; }
+  }
+  const vscode = {
+    Position,
+    Selection,
+    ViewColumn: { Beside: 2 },
+    env: { appName: 'Cursor' },
+    commands: {
+      getCommands: async () => [
+        'claude-vscode.sidebar.open',
+        'claude-vscode.insertAtMention',
+      ],
+      executeCommand: async (...args) => {
+        calls.push(args);
+        if (args[0] === 'vscode.openWith') activeGroup = sourceGroup;
+      },
+    },
+    extensions: extensionRegistry(installedExtension(
+      'anthropic.claude-code', [
+        'claude-vscode.sidebar.open',
+        'claude-vscode.insertAtMention',
+      ], { isActive: true },
+    )),
+    workspace: { openTextDocument: async () => document },
+    window: {
+      tabGroups: {
+        get activeTabGroup() { return activeGroup; },
+        get all() { return groups; },
+        close: async tab => {
+          assert.equal(tab, temporaryTab);
+          groups.splice(groups.indexOf(temporaryGroup), 1);
+          activeGroup = sourceGroup;
+          return true;
+        },
+      },
+      showTextDocument: async (value, options) => {
+        assert.equal(value, document);
+        assert.deepEqual(options, { preview: false, viewColumn: 2 });
+        groups.push(temporaryGroup);
+        activeGroup = temporaryGroup;
+        return editor;
+      },
+      showWarningMessage: () => undefined,
+    },
+  };
+  const { handoffSelectionToAgentId } = loadAgentHandoff(vscode);
+
+  assert.equal(await handoffSelectionToAgentId('claude', {
+    kind: 'markdown-range', uri, range: { startLine: 3, endLine: 7 },
+  }), true);
+  assert.equal(editor.selection.start.line, 2);
+  assert.equal(editor.selection.end.line, 6);
+  assert.deepEqual(calls, [
+    ['claude-vscode.sidebar.open'],
+    ['claude-vscode.insertAtMention'],
+    ['vscode.openWith', uri, 'llm-wiki.markdownEditor', {
+      viewColumn: 1,
+      preserveFocus: false,
+      preview: false,
+    }],
+  ]);
+  assert.equal(calls.some(([command]) => command === 'claude-vscode.editor.open'), false);
+  assert.equal(activeGroup, sourceGroup);
+});
+
+test('Cursor Claude receives the original Markdown range mention', async () => {
+  const uri = {
+    scheme: 'file',
+    fsPath: '/vault/notes/Source.md',
+    fragment: '',
+    with(changes) { return { ...this, ...changes, with: this.with }; },
+  };
+  const calls = [];
+  const vscode = {
+    ViewColumn: { Beside: 2 },
+    env: { appName: 'Cursor' },
+    commands: {
+      getCommands: async () => [
+        'claude-vscode.editor.open',
+        'claude-vscode.insertAtMention',
+      ],
+      executeCommand: async (...args) => calls.push(args),
+    },
+    extensions: extensionRegistry(installedExtension(
+      'anthropic.claude-code',
+      ['claude-vscode.editor.open', 'claude-vscode.insertAtMention'],
+      { isActive: true },
+    )),
+    workspace: {
+      asRelativePath: value => {
+        assert.equal(value.fragment, 'L3-L7');
+        return 'notes/Source.md';
+      },
+    },
+    window: { showWarningMessage: () => undefined },
+  };
+  const { handoffSelectionToAgentId } = loadAgentHandoff(vscode);
+
+  assert.equal(await handoffSelectionToAgentId('claude', {
+    kind: 'markdown-range', uri, range: { startLine: 3, endLine: 7 },
+  }), true);
+  assert.deepEqual(calls, [[
+    'claude-vscode.editor.open',
+    undefined,
+    '@notes/Source.md#3-7 ',
+    vscode.ViewColumn.Beside,
+  ]]);
+});
+
+test('stock VS Code Claude opens a fragmentless Markdown source, selects its exact lines, then restores', async () => {
+  const calls = [];
+  const shown = [];
+  const closed = [];
+  const uri = {
+    scheme: 'file',
+    fsPath: '/vault/notes/Source.md',
+    fragment: '',
+    with(changes) { return { ...this, ...changes, with: this.with }; },
+  };
+  const sourceUri = { scheme: 'file', fsPath: '/vault/notes/Previous.md' };
+  const sourceTab = { input: { uri: sourceUri }, isPreview: false };
+  const sourceGroup = { viewColumn: 1, activeTab: sourceTab, tabs: [sourceTab] };
+  const temporaryUri = { ...uri, fragment: '' };
+  const temporaryTab = { input: { uri: temporaryUri }, isPreview: false };
+  const temporaryGroup = { viewColumn: 2, activeTab: temporaryTab, tabs: [temporaryTab] };
+  const groups = [sourceGroup];
+  let activeGroup = sourceGroup;
+  const document = {
+    lineCount: 10,
+    lineAt: line => ({ range: { end: { line, character: 8 } } }),
+  };
+  const editor = {};
+  class Position {
+    constructor(line, character) { this.line = line; this.character = character; }
+  }
+  class Selection {
+    constructor(start, end) { this.start = start; this.end = end; }
+  }
+  const vscode = {
+    Position,
+    Selection,
+    ViewColumn: { Beside: 2 },
+    env: { appName: 'Visual Studio Code' },
+    commands: {
+      getCommands: async () => ['claude-vscode.insertAtMention'],
+      executeCommand: async (...args) => calls.push(args),
+    },
+    extensions: extensionRegistry(installedExtension(
+      'anthropic.claude-code', ['claude-vscode.insertAtMention'], { isActive: true },
+    )),
+    workspace: {
+      openTextDocument: async value => {
+        assert.equal(value.fragment, '');
+        assert.equal(value.fsPath, uri.fsPath);
+        return document;
+      },
+    },
+    window: {
+      tabGroups: {
+        get activeTabGroup() { return activeGroup; },
+        get all() { return groups; },
+        close: async (tab, preserveFocus) => {
+          closed.push([tab, preserveFocus]);
+          groups.splice(groups.indexOf(temporaryGroup), 1);
+          activeGroup = sourceGroup;
+          return true;
+        },
+      },
+      showTextDocument: async (value, options) => {
+        shown.push([value, options]);
+        if (value === document) {
+          groups.push(temporaryGroup);
+          activeGroup = temporaryGroup;
+          return editor;
+        }
+        assert.equal(value, sourceUri);
+        activeGroup = sourceGroup;
+        return editor;
+      },
+      showWarningMessage: () => undefined,
+    },
+  };
+  const { handoffSelectionToAgentId } = loadAgentHandoff(vscode);
+
+  assert.equal(await handoffSelectionToAgentId('claude', {
+    kind: 'markdown-range', uri, range: { startLine: 3, endLine: 7 },
+  }), true);
+  assert.equal(editor.selection.start.line, 2);
+  assert.deepEqual(editor.selection.end, { line: 6, character: 8 });
+  assert.deepEqual(calls, [['claude-vscode.insertAtMention']]);
+  assert.deepEqual(closed, [[temporaryTab, true]]);
+  assert.deepEqual(shown, [
+    [document, { preview: false, viewColumn: vscode.ViewColumn.Beside }],
+    [sourceUri, { viewColumn: 1, preserveFocus: false, preview: false }],
   ]);
 });

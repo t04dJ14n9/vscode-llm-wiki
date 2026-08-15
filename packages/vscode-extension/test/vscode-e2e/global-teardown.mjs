@@ -11,6 +11,7 @@ const fixtures = resolve(__dirname, 'fixtures', 'test-vault');
 const testDir = resolveVsCodeE2eTestDir();
 const pidFile = resolve(testDir, 'pid');
 const userDataDir = resolve(testDir, 'user-data');
+const codeCliFile = resolve(testDir, 'code-cli');
 
 export default async function globalTeardown() {
   if (existsSync(pidFile)) {
@@ -26,6 +27,7 @@ export default async function globalTeardown() {
     }
     unlinkSync(pidFile);
   }
+  if (existsSync(codeCliFile)) unlinkSync(codeCliFile);
   await killRemainingTestProcesses();
   cleanupSandboxFixtures(fixtures);
 }

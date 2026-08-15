@@ -62,10 +62,12 @@ entry point for VS Code and Cursor. It registers:
 - a debounced Markdown watcher that refreshes file-derived views and source
   annotations.
 
-The implementation currently uses the first workspace folder as its repository
-root. Without an open folder, the Markdown and PDF viewers still register, but
-learning notes, graph, daily review, and Git commands display a workspace
-requirement instead of creating hidden state.
+Commands without a source document currently fall back to the first workspace
+folder as their repository root. Link navigation carries its source URI, so in
+a multi-root workspace the folder owning that document takes precedence. Without
+an open folder, the Markdown and PDF viewers still register, but learning notes,
+graph, daily review, and Git commands display a workspace requirement instead of
+creating hidden state.
 
 The same manifest and JavaScript bundle run in Cursor through its VS Code
 extension API. There is no Cursor-specific persistence layer or UI fork.
@@ -166,11 +168,22 @@ selection
 
 The automatic selection prompt, context menu, and `Cmd+L` / `Ctrl+L` shortcut
 all dispatch the provider-neutral `llm-wiki.addSelectionToChat` command.
+Saved Markdown selections are handed over as their original file plus a
+one-based, inclusive `#Lstart-Lend` range; they do not create a synthetic
+immutable export. Dirty notes are saved first, and the live selection is
+recaptured after a save that changes document layout. Unsaved or empty Markdown
+selections are rejected.
 The legacy `llm-wiki.addSelectionToCursorChat` ID remains an internal
 compatibility alias for older webview bundles. The shared `agentHandoff.ts`
 router prefers stable editor-tab evidence, uses feature-detected Cursor support
 only as a fallback, asks when ambiguous, never submits, and does not read the
 resulting external conversation.
+
+Local selection exports record both `open_uri` (the clickable host product link)
+and `chat_uri` (the internal immutable `.llm_wiki_anchor` attachment). The
+visible Source link and agent citations use `open_uri`; the bridge file is never
+presented as a user-facing link. Persisted vault notes retain relative Markdown
+links and wikilinks, while web selections keep their direct HTTPS source.
 
 ### Web selection capture
 
@@ -357,8 +370,13 @@ classifies ordinary destinations:
 | Unknown | Report an error |
 
 Relative destinations in generated learning notes resolve against the
-containing note. Workspace-root-style destinations remain supported. This
-keeps source links portable after clone or repository relocation.
+containing note. Workspace-root-style destinations remain supported. When a
+trusted caller explicitly opts in, an existing absolute file is tried first;
+if it does not exist, the target falls back to the vault-relative path. Without
+that opt-in, root-looking paths stay inside the vault. Product deep links are
+unwrapped to their portable target before local path resolution. This keeps
+source links portable after clone or repository relocation while preventing
+external deep links from probing arbitrary machine paths.
 
 ## 14. Security and reliability
 

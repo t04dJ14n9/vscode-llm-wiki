@@ -117,6 +117,40 @@ test('demo vault reading journey is smooth from indexes to evidence and code', a
   expect(image.resolvedSrc).toContain(
     '/projects/code/nanochat/dev/nanochat.png',
   );
+
+  const activeImage = await evaluateWebviews<{
+    alt: string;
+    resolvedSrc: string;
+    visible: boolean;
+  }>(`(async () => {
+    const hostFrame = document.getElementById('active-frame');
+    const doc = hostFrame?.contentDocument;
+    const view = hostFrame?.contentWindow?.__cmView;
+    const source = '![[projects/code/nanochat/dev/nanochat.png|Nanochat logo]]';
+    const from = view?.state.doc.toString().indexOf(source) ?? -1;
+    if (!view || from < 0) return { ok: false };
+    view.dispatch({ selection: { anchor: from + 4 } });
+    view.focus();
+    await new Promise(resolve => setTimeout(resolve, 100));
+    const image = Array.from(
+      doc?.querySelectorAll('.cm-hybrid-image-img') ?? [],
+    ).find(candidate => candidate.getAttribute('alt') === 'Nanochat logo');
+    if (!image) return { ok: false };
+    const rect = image.getBoundingClientRect();
+    return {
+      ok: true,
+      value: {
+        alt: image.getAttribute('alt') ?? '',
+        resolvedSrc: image.closest('.cm-hybrid-image')?.getAttribute('data-resolved-src') ?? '',
+        visible: rect.width > 0 && rect.height > 0,
+      },
+    };
+  })()`);
+  expect(activeImage.alt).toBe('Nanochat logo');
+  expect(activeImage.resolvedSrc).toContain(
+    '/projects/code/nanochat/dev/nanochat.png',
+  );
+  expect(activeImage.visible).toBe(true);
   await screenshot(page, '05-project-card-with-obsidian-image');
 
   await followMarkdownLink(
