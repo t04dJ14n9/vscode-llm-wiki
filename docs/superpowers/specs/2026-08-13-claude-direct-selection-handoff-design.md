@@ -1,7 +1,7 @@
 # Claude Direct Selection Handoff Design
 
 **Date:** 2026-08-13
-**Status:** Approved
+**Status:** Superseded by `2026-08-15-claude-sidebar-only-handoff-design.md`
 
 ## Problem
 
