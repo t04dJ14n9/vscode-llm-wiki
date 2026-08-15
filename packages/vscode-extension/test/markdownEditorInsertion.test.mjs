@@ -840,6 +840,25 @@ test('markdown editor provider routes Cursor selection intent through the shared
   ]);
 });
 
+test('markdown editor provider routes Copy for Agent intent through the shared host command', async () => {
+  const messages = [];
+  const executeCommandCalls = [];
+  const vscode = createVscodeMock({ executeCommandCalls });
+  const { MarkdownEditorProvider } = loadTsModule('src/markdownEditorProvider.ts', { vscode });
+  const provider = new MarkdownEditorProvider({
+    extensionUri: { scheme: 'file', path: '/extension' },
+    workspaceState: createStorageMock(),
+  });
+  const panel = createPanelMock(messages);
+
+  await provider.resolveCustomTextEditor(createDocumentMock(), panel, {});
+  await panel.fireMessage({ type: 'copySelectionForAgent' });
+
+  assert.deepEqual(executeCommandCalls.at(-1), [
+    'llm-wiki.copySelectionForAgent',
+  ]);
+});
+
 test('markdown editor provider anchors an empty custom markdown selection to the whole document range', async () => {
   const messages = [];
   const vscode = createVscodeMock();

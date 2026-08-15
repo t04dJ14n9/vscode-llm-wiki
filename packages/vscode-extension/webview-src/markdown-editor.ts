@@ -1792,34 +1792,33 @@ function showMarkdownSelectionContextMenu(editorView: EditorView, clientX: numbe
   const runCommand = (command: string) => {
     obsidianLikeCommands[command]?.(editorView);
   };
-  const providerItems = agentCapabilities.providers.flatMap(provider => [
-    {
-      id: `send-selection-to-${provider.id}`,
-      label: agentHandoffActionLabel(provider),
-      onSelect: () => {
-        vscode.postMessage({ type: 'sendToAgent', agentId: provider.id });
-        editorView.focus();
-      },
-    },
-  ]);
+  const cursorItems = agentCapabilities.cursorAgent
+    ? [
+        {
+          id: 'add-selection-to-cursor-chat',
+          label: `${cursorSelectionShortcutLabel()}  Add to Chat`,
+          onSelect: () => {
+            addSelectionToCursorChat(editorView);
+            editorView.focus();
+          },
+        },
+        { type: 'separator' as const },
+      ]
+    : [];
 
   showObsidianContextMenu({
     clientX,
     clientY,
     items: [
+      ...cursorItems,
       {
-        id: 'add-selection-to-cursor-chat',
-        label: `${cursorSelectionShortcutLabel()}  Add to Chat`,
+        id: 'copy-selection-for-agent',
+        label: 'Copy for Agent',
         onSelect: () => {
-          addSelectionToCursorChat(editorView);
+          copySelectionForAgent(editorView);
           editorView.focus();
         },
       },
-      ...(
-        providerItems.length > 0
-          ? [{ type: 'separator' as const }, ...providerItems]
-          : []
-      ),
       { type: 'separator' },
       {
         label: 'Copy',
@@ -1849,12 +1848,19 @@ function addSelectionToCursorChat(editorView: EditorView): boolean {
   return true;
 }
 
+function copySelectionForAgent(editorView: EditorView): boolean {
+  syncNativeSelectionToEditorSelection(editorView);
+  const selection = editorView.state.selection.main;
+  if (selection.empty) return false;
+  vscode.postMessage({ type: 'copySelectionForAgent' });
+  return true;
+}
+
 let cursorSelectionPrompt:
   | {
     container: HTMLDivElement;
-    primaryButton: HTMLButtonElement;
     editorView: EditorView;
-    providerKey: string;
+    capabilityKey: string;
   }
   | undefined;
 
@@ -1866,64 +1872,63 @@ function updateCursorSelectionPrompt(editorView: EditorView): void {
     return;
   }
 
-  const providerKey = agentCapabilities.providers
-    .map(provider => `${provider.id}:${provider.label}`)
-    .join('|');
-  if (!cursorSelectionPrompt || cursorSelectionPrompt.providerKey !== providerKey) {
+  const capabilityKey = String(agentCapabilities.cursorAgent);
+  if (!cursorSelectionPrompt || cursorSelectionPrompt.capabilityKey !== capabilityKey) {
     cursorSelectionPrompt?.container.remove();
     const container = document.createElement('div');
     container.className = 'llm-wiki-cursor-selection-prompt';
     container.setAttribute('role', 'toolbar');
     container.setAttribute('aria-label', 'Selection actions');
 
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = 'llm-wiki-cursor-selection-primary';
-    button.setAttribute('aria-label', `Add to Chat ${cursorSelectionShortcutLabel()}`);
-    const label = document.createElement('span');
-    label.className = 'add-to-chat-label';
-    label.textContent = 'Add to Chat';
-    const shortcut = document.createElement('span');
-    shortcut.className = 'add-to-chat-shortcut';
-    shortcut.textContent = cursorSelectionShortcutLabel();
-    button.append(label, shortcut);
-    button.addEventListener('pointerdown', event => {
-      event.preventDefault();
-      event.stopPropagation();
-    });
-    button.addEventListener('click', event => {
-      event.preventDefault();
-      event.stopPropagation();
-      const current = cursorSelectionPrompt?.editorView;
-      if (current) {
-        addSelectionToCursorChat(current);
-        current.focus();
-      }
-    });
-    container.appendChild(button);
-    for (const provider of agentCapabilities.providers) {
-      const providerButton = document.createElement('button');
-      providerButton.type = 'button';
-      providerButton.className = 'llm-wiki-cursor-selection-provider';
-      providerButton.setAttribute('aria-label', `Send to ${provider.label}`);
-      providerButton.textContent = providerDisplayLabel(provider);
-      providerButton.addEventListener('pointerdown', event => {
+    if (agentCapabilities.cursorAgent) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'llm-wiki-cursor-selection-primary';
+      button.setAttribute('aria-label', `Add to Chat ${cursorSelectionShortcutLabel()}`);
+      const label = document.createElement('span');
+      label.className = 'add-to-chat-label';
+      label.textContent = 'Add to Chat';
+      const shortcut = document.createElement('span');
+      shortcut.className = 'add-to-chat-shortcut';
+      shortcut.textContent = cursorSelectionShortcutLabel();
+      button.append(label, shortcut);
+      button.addEventListener('pointerdown', event => {
         event.preventDefault();
         event.stopPropagation();
       });
-      providerButton.addEventListener('click', event => {
+      button.addEventListener('click', event => {
         event.preventDefault();
         event.stopPropagation();
         const current = cursorSelectionPrompt?.editorView;
-        if (!current) return;
-        vscode.postMessage({ type: 'sendToAgent', agentId: provider.id });
-        current.focus();
+        if (current) {
+          addSelectionToCursorChat(current);
+          current.focus();
+        }
       });
-      container.appendChild(providerButton);
+      container.appendChild(button);
     }
+
+    const copyButton = document.createElement('button');
+    copyButton.type = 'button';
+    copyButton.className = 'llm-wiki-cursor-selection-copy';
+    copyButton.setAttribute('aria-label', 'Copy for Agent');
+    copyButton.textContent = 'Copy for Agent';
+    copyButton.addEventListener('pointerdown', event => {
+      event.preventDefault();
+      event.stopPropagation();
+    });
+    copyButton.addEventListener('click', event => {
+      event.preventDefault();
+      event.stopPropagation();
+      const current = cursorSelectionPrompt?.editorView;
+      if (!current) return;
+      copySelectionForAgent(current);
+      current.focus();
+    });
+    container.appendChild(copyButton);
     ensureCursorSelectionPromptStyles();
     document.body.appendChild(container);
-    cursorSelectionPrompt = { container, primaryButton: button, editorView, providerKey };
+    cursorSelectionPrompt = { container, editorView, capabilityKey };
   } else {
     cursorSelectionPrompt.editorView = editorView;
   }
@@ -1945,14 +1950,6 @@ function updateCursorSelectionPrompt(editorView: EditorView): void {
   container.style.left = `${left}px`;
   container.style.top = `${Math.max(8, top)}px`;
   container.style.visibility = 'visible';
-}
-
-function providerDisplayLabel(provider: AgentHandoffCapability): string {
-  return provider.id === 'claude' ? 'Claude' : provider.label.replace(/\s+(?:Code|Agent)$/u, '');
-}
-
-function agentHandoffActionLabel(provider: AgentHandoffCapability): string {
-  return `Add to ${providerDisplayLabel(provider)}`;
 }
 
 function cursorSelectionShortcutLabel(): string {
@@ -2004,7 +2001,7 @@ function ensureCursorSelectionPromptStyles(): void {
       gap: 6px;
       padding: 0 2px 0 3px;
     }
-    .llm-wiki-cursor-selection-prompt .llm-wiki-cursor-selection-provider {
+    .llm-wiki-cursor-selection-prompt .llm-wiki-cursor-selection-copy {
       padding: 0 7px;
       color: var(--vscode-descriptionForeground, inherit);
     }

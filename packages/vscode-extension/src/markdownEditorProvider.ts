@@ -535,6 +535,11 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
           this.updateSelectionContext();
           await vscode.commands.executeCommand('llm-wiki.addSelectionToCursorChat');
           break;
+        case 'copySelectionForAgent':
+          this.activePanel = webviewPanel;
+          this.updateSelectionContext();
+          await vscode.commands.executeCommand('llm-wiki.copySelectionForAgent');
+          break;
         case 'sendToAgent': {
           if (!isExternalAgentId(message.agentId)) return;
           this.activePanel = webviewPanel;

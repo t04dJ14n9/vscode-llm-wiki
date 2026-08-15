@@ -30,6 +30,7 @@ import { LearningNoteStore } from './learningNoteStore';
 import { registerLinkProvider } from './linkProvider';
 import { MarkdownEditorProvider } from './markdownEditorProvider';
 import { validateCursorCropPng } from './cursorCrop';
+import { formatMarkdownAgentReference } from './agentClipboard';
 import {
   type MarkdownOutlineTreeProvider,
   registerMarkdownOutlineProvider,
@@ -294,6 +295,10 @@ function registerCommands(
         { kind: 'picker' },
       );
     }),
+    vscode.commands.registerCommand(
+      'llm-wiki.copySelectionForAgent',
+      (selection?: SelectionContext) => copyMarkdownSelectionForAgent(selection),
+    ),
     vscode.commands.registerCommand(
       'llm-wiki.addSelectionToChat',
       (input?: AddSelectionToChatInput) => addSelectionToChat(input, { kind: 'cursor' }),
@@ -620,42 +625,12 @@ async function markdownRangeHandoffContext(
   uri: vscode.Uri;
   range: { startLine: number; endLine: number };
 } | undefined> {
-  if (!isMarkdownSelection(selection)) return undefined;
-  if (!selection.text) {
-    vscode.window.showWarningMessage('Select Markdown text before adding it to chat.');
-    return undefined;
-  }
-  if (selection.uri.scheme !== 'file') {
-    vscode.window.showWarningMessage(
-      'Save this Markdown note before adding a source range to chat.',
-    );
-    return undefined;
-  }
-  const selectedUri = selection.uri;
-  const document = vscode.workspace.textDocuments?.find(candidate =>
-    candidate.uri.scheme === selectedUri.scheme
-      && candidate.uri.fsPath === selectedUri.fsPath
-  );
-  if (document?.isDirty) {
-    try {
-      if (!await document.save()) {
-        vscode.window.showWarningMessage(
-          'Save the Markdown note before adding it to chat.',
-        );
-        return undefined;
-      }
-    } catch {
-      vscode.window.showWarningMessage(
-        'Save the Markdown note before adding it to chat.',
-      );
-      return undefined;
-    }
-    selection = await recaptureSavedMarkdownSelection(selection);
-    if (!selection?.text) {
-      vscode.window.showWarningMessage('Select Markdown text before adding it to chat.');
-      return undefined;
-    }
-  }
+  selection = await prepareMarkdownSelectionForAction(selection, {
+    emptySelectionMessage: 'Select Markdown text before adding it to chat.',
+    unsavedSelectionMessage: 'Save this Markdown note before adding a source range to chat.',
+    saveFailureMessage: 'Save the Markdown note before adding it to chat.',
+  });
+  if (!selection) return undefined;
   return {
     kind: 'markdown-range',
     uri: selection.uri,
@@ -666,12 +641,87 @@ async function markdownRangeHandoffContext(
   };
 }
 
+interface MarkdownSelectionActionMessages {
+  emptySelectionMessage: string;
+  unsavedSelectionMessage: string;
+  saveFailureMessage: string;
+}
+
+async function prepareMarkdownSelectionForAction(
+  selection: SelectionContext | undefined,
+  messages: MarkdownSelectionActionMessages,
+): Promise<SelectionContext | undefined> {
+  if (!isMarkdownSelection(selection)) return undefined;
+  if (!selection.text) {
+    vscode.window.showWarningMessage(messages.emptySelectionMessage);
+    return undefined;
+  }
+  if (selection.uri.scheme !== 'file') {
+    vscode.window.showWarningMessage(messages.unsavedSelectionMessage);
+    return undefined;
+  }
+
+  const selectedUri = selection.uri;
+  const document = vscode.workspace.textDocuments?.find(candidate =>
+    candidate.uri.scheme === selectedUri.scheme
+      && candidate.uri.fsPath === selectedUri.fsPath,
+  );
+  if (!document?.isDirty) return selection;
+
+  try {
+    if (!await document.save()) {
+      vscode.window.showWarningMessage(messages.saveFailureMessage);
+      return undefined;
+    }
+  } catch {
+    vscode.window.showWarningMessage(messages.saveFailureMessage);
+    return undefined;
+  }
+
+  const recaptured = await recaptureSavedMarkdownSelection(selection);
+  if (!recaptured?.text) {
+    vscode.window.showWarningMessage(messages.emptySelectionMessage);
+    return undefined;
+  }
+  return recaptured;
+}
+
+export async function copyMarkdownSelectionForAgent(
+  suppliedSelection?: SelectionContext,
+): Promise<boolean> {
+  const resolvedSelection = suppliedSelection
+    ?? await activeCustomSelection()
+    ?? getNativeSelectionContext();
+  if (!resolvedSelection && (isMarkdownUri(activeTabUri()) || isAssociatedUntitledMarkdownUri(activeTabUri()))) {
+    vscode.window.showWarningMessage('Select Markdown text before copying for agent.');
+    return false;
+  }
+  const selection = await prepareMarkdownSelectionForAction(resolvedSelection, {
+    emptySelectionMessage: 'Select Markdown text before copying for agent.',
+    unsavedSelectionMessage: 'Save this Markdown note before copying for agent.',
+    saveFailureMessage: 'Save the Markdown note before copying for agent.',
+  });
+  if (!selection) return false;
+
+  const reference = formatMarkdownAgentReference(
+    vscode.workspace.asRelativePath(selection.uri),
+    selection.startLine,
+    selection.endLine,
+  );
+  await vscode.env.clipboard.writeText(reference);
+  vscode.window.showInformationMessage('Selection copied for agent.');
+  return true;
+}
+
 async function recaptureSavedMarkdownSelection(
   selection: SelectionContext,
 ): Promise<SelectionContext | undefined> {
   const native = vscode.window.activeTextEditor;
+  const customEditorIsActive =
+    activeTabCustomViewType() === MarkdownEditorProvider.viewType;
   if (
-    native
+    !customEditorIsActive
+    && native
     && native.document.uri.scheme === selection.uri.scheme
     && native.document.uri.fsPath === selection.uri.fsPath
     && isMarkdownDocument(native.document)
@@ -683,7 +733,7 @@ async function recaptureSavedMarkdownSelection(
     && custom.uri.fsPath === selection.uri.fsPath
     && isMarkdownSelection(custom)
     ? custom
-    : selection;
+    : undefined;
 }
 
 async function handoffMarkdownRange(
@@ -706,7 +756,7 @@ async function activeCustomSelection(): Promise<SelectionContext | undefined> {
   if (isPdfUri(activeUri)) {
     return pdfEditorProvider?.getActiveSelectionContext();
   }
-  if (isMarkdownUri(activeUri)) {
+  if (isMarkdownUri(activeUri) || isAssociatedUntitledMarkdownUri(activeUri)) {
     return activeTabCustomViewType() === MarkdownEditorProvider.viewType
       ? markdownEditorProvider?.captureActiveSelectionContext()
       : undefined;
