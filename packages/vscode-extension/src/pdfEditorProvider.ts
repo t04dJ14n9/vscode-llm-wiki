@@ -28,6 +28,12 @@ import type {
 } from './pdfDiscussionProtocol';
 import type { LearningNoteResult, LearningNoteStore } from './learningNoteStore';
 import type { SelectionContext } from './selectionContext';
+import {
+  createPdfAgentClipboardContext,
+  pdfAgentClipboardSelectionKey,
+  type PdfAgentClipboardContext,
+  type PdfAgentClipboardSelection,
+} from './agentClipboard';
 
 interface PdfSelectionAnchor {
   id?: string;
@@ -77,6 +83,7 @@ interface ActivePdfWebview {
     agentId: ExternalAgentId;
     selectionKey: string;
   }>;
+  agentClipboardContext?: PdfAgentClipboardContext;
   selection?: PdfSelectionAnchor;
   outline?: PdfOutlineEntry[];
   postMessage(message: unknown): void;
@@ -438,7 +445,7 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
           break;
         }
         case 'selectionChanged':
-          await this.updateActiveSelection(key, message.anchor);
+          await this.updateActiveSelection(key, message.anchor, message.clipboardSelection);
           break;
         case 'pdfOutline':
           active.outline = normalizePdfOutlineEntries(message.items);
@@ -998,11 +1005,35 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
     }
   }
 
-  private async updateActiveSelection(key: string, anchor: unknown): Promise<void> {
+  private async updateActiveSelection(
+    key: string,
+    anchor: unknown,
+    clipboardSelection: unknown,
+  ): Promise<void> {
     const active = this.webviews.get(key);
     if (!active) return;
     active.pendingSelectionAgentRequests?.clear();
     active.selection = normalizePdfSelectionAnchor(anchor);
+    const normalizedClipboardSelection = normalizePdfAgentClipboardSelection(clipboardSelection);
+    let context: PdfAgentClipboardContext | undefined;
+    if (normalizedClipboardSelection) {
+      const relativePath = vscode.workspace.asRelativePath(active.pdfUri);
+      context = createPdfAgentClipboardContext({
+        selectionKey: normalizedClipboardSelection.selectionKey,
+        relativePath,
+        startPage: normalizedClipboardSelection.selection.startPage,
+        endPage: normalizedClipboardSelection.selection.endPage,
+        selectedText: normalizedClipboardSelection.selection.selectedText,
+        anchorUri: pdfHref(relativePath, {
+          page: normalizedClipboardSelection.selection.startPage,
+        }),
+      });
+    }
+    active.agentClipboardContext = context;
+    active.postMessage({
+      type: 'agentClipboardContext',
+      ...(context ? { context } : {}),
+    });
     if (this.activeKey === key) {
       await vscode.commands.executeCommand('setContext', 'llmWikiPdfHasSelection', Boolean(active.selection));
     }
@@ -1429,6 +1460,27 @@ function normalizePdfSelectionAnchor(anchor: unknown): PdfSelectionAnchor | unde
     prefix: normalizePdfMessageText(raw.prefix),
     suffix: normalizePdfMessageText(raw.suffix),
     snippet,
+  };
+}
+
+function normalizePdfAgentClipboardSelection(
+  input: unknown,
+): { selection: PdfAgentClipboardSelection; selectionKey: string } | undefined {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return undefined;
+  const raw = input as Record<string, unknown>;
+  const selectedText = normalizePdfMessageText(raw.selectedText);
+  if (!selectedText) return undefined;
+  const candidate = {
+    startPage: raw.startPage,
+    endPage: raw.endPage,
+    pages: raw.pages,
+    selectedText,
+  } as unknown as PdfAgentClipboardSelection;
+  const selectionKey = pdfAgentClipboardSelectionKey(candidate);
+  if (!selectionKey) return undefined;
+  return {
+    selection: JSON.parse(selectionKey) as PdfAgentClipboardSelection,
+    selectionKey,
   };
 }
 

@@ -138,6 +138,124 @@ interface PdfAnchor {
   textFragment?: PdfTextFragment;
 }
 
+interface PdfAgentClipboardPageSelection {
+  page: number;
+  rects: ReadonlyArray<readonly [number, number, number, number]>;
+}
+
+interface PdfAgentClipboardSelection {
+  startPage: number;
+  endPage: number;
+  pages: readonly PdfAgentClipboardPageSelection[];
+  selectedText: string;
+}
+
+interface PdfAgentClipboardContext {
+  selectionKey: string;
+  sourceLabel: string;
+  sourceHref: string;
+  selectedText: string;
+  plainText: string;
+}
+
+interface PdfSelectionSnapshot {
+  anchor: PdfAnchor;
+  range: Range;
+  clipboardSelection?: PdfAgentClipboardSelection;
+}
+
+export function pdfAgentClipboardSelectionForState(
+  selection: PdfSelectionState,
+  selectedText: string,
+  selectionRectsForPage: (page: number) => unknown,
+): PdfAgentClipboardSelection | undefined {
+  const [start, end] = orderedPdfCarets(selection.anchor, selection.focus);
+  const text = typeof selectedText === 'string'
+    ? selectedText.replace(/\s+/g, ' ').trim()
+    : '';
+  if (
+    !Number.isSafeInteger(start.page)
+    || start.page <= 0
+    || !Number.isSafeInteger(end.page)
+    || end.page < start.page
+    || !text
+  ) return undefined;
+
+  const pages: PdfAgentClipboardPageSelection[] = [];
+  for (let page = start.page; page <= end.page; page++) {
+    const rects = validPdfRects(selectionRectsForPage(page))
+      .map(rect => rect.map(roundPdfCoordinate) as PdfRect)
+      .filter(rect => rect[2] > rect[0] && rect[3] > rect[1])
+      .sort((left, right) => (
+        left[0] - right[0]
+        || left[1] - right[1]
+        || left[2] - right[2]
+        || left[3] - right[3]
+      ));
+    if (rects.length) pages.push({ page, rects });
+  }
+  return pages.length
+    ? {
+        startPage: start.page,
+        endPage: end.page,
+        pages,
+        selectedText: text,
+      }
+    : undefined;
+}
+
+export function correlatePdfAgentClipboardContext(
+  selection: PdfAgentClipboardSelection | null | undefined,
+  value: unknown,
+): PdfAgentClipboardContext | undefined {
+  if (!selection || !value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+  const context = value as Record<string, unknown>;
+  if (
+    typeof context.selectionKey !== 'string'
+    || typeof context.sourceLabel !== 'string'
+    || typeof context.sourceHref !== 'string'
+    || typeof context.selectedText !== 'string'
+    || context.selectedText !== selection.selectedText
+    || typeof context.plainText !== 'string'
+  ) return undefined;
+
+  let keyedSelection: Record<string, unknown>;
+  try {
+    keyedSelection = recordValue(JSON.parse(context.selectionKey));
+  } catch {
+    return undefined;
+  }
+  if (
+    keyedSelection.startPage !== selection.startPage
+    || keyedSelection.endPage !== selection.endPage
+    || keyedSelection.selectedText !== selection.selectedText
+    || !Array.isArray(keyedSelection.pages)
+    || keyedSelection.pages.length !== selection.pages.length
+  ) return undefined;
+
+  for (let pageIndex = 0; pageIndex < selection.pages.length; pageIndex++) {
+    const selectedPage = selection.pages[pageIndex]!;
+    const keyedPage = recordValue(keyedSelection.pages[pageIndex]);
+    if (
+      keyedPage.page !== selectedPage.page
+      || !Array.isArray(keyedPage.rects)
+      || keyedPage.rects.length !== selectedPage.rects.length
+    ) return undefined;
+    for (let rectIndex = 0; rectIndex < selectedPage.rects.length; rectIndex++) {
+      const selectedRect = selectedPage.rects[rectIndex]!;
+      const keyedRect = keyedPage.rects[rectIndex];
+      if (
+        !Array.isArray(keyedRect)
+        || keyedRect.length !== selectedRect.length
+        || keyedRect.some((coordinate, index) => coordinate !== selectedRect[index])
+      ) return undefined;
+    }
+  }
+  return value as PdfAgentClipboardContext;
+}
+
 interface PdfSearchMatch {
   page: number;
   segments: PdfSearchSegment[];
@@ -336,6 +454,8 @@ class PdfViewer {
   private selectionLastPointerDownPage = 0;
   private selectionAutoScrollFrame: number | undefined;
   private selectionToolbarPositionFrame: number | undefined;
+  private agentClipboardSelection: PdfAgentClipboardSelection | null = null;
+  private readonly agentClipboardContexts = new Map<string, PdfAgentClipboardContext>();
   private agentCapabilities: AgentSurfaceCapabilities = {
     cursorAgent: false,
     providers: [],
@@ -480,6 +600,15 @@ class PdfViewer {
         case 'agentHandoffCapabilities':
           this.updateAgentHandoffCapabilities(message);
           break;
+        case 'agentClipboardContext': {
+          this.agentClipboardContexts.clear();
+          const context = correlatePdfAgentClipboardContext(
+            this.agentClipboardSelection,
+            message.context,
+          );
+          if (context) this.agentClipboardContexts.set(context.selectionKey, context);
+          break;
+        }
         case 'loadPdf':
           void this.loadPdf(message.data);
           break;
@@ -2269,7 +2398,15 @@ class PdfViewer {
 
     const { anchor, range } = current;
     this.latestSelectionAnchor = anchor;
-    vscode.postMessage({ type: 'selectionChanged', anchor });
+    this.agentClipboardSelection = current.clipboardSelection ?? null;
+    this.agentClipboardContexts.clear();
+    vscode.postMessage({
+      type: 'selectionChanged',
+      anchor,
+      ...(current.clipboardSelection
+        ? { clipboardSelection: current.clipboardSelection }
+        : {}),
+    });
     if (anchor.multiPage) {
       document.getElementById('selection-toolbar')?.remove();
       return;
@@ -2277,7 +2414,7 @@ class PdfViewer {
     this.showSelectionToolbar(anchor, this.selectionViewportRect(anchor) ?? range.getBoundingClientRect());
   }
 
-  private selectionAnchorFromNativeRange(): { anchor: PdfAnchor; range: Range } | undefined {
+  private selectionAnchorFromNativeRange(): PdfSelectionSnapshot | undefined {
     const custom = this.selectionAnchorFromState();
     if (custom) return custom;
     const selection = window.getSelection();
@@ -2339,24 +2476,35 @@ class PdfViewer {
       text,
     );
     const { textStart: _textStart, ...selectionContext } = textFragment;
+    const anchor: PdfAnchor = {
+      page,
+      textItemIndex: firstTextItemIndex,
+      charOffset: firstCharOffset,
+      endTextItemIndex: lastTextItemIndex,
+      endCharOffset: lastCharOffset,
+      length: startIndex === endIndex ? Math.abs(endOffset - startOffset) : 0,
+      rects,
+      snippet: text,
+      ...selectionContext,
+      textFragment,
+    };
+    const clipboardSelection = pdfAgentClipboardSelectionForState(
+      {
+        page,
+        anchor: { page, itemIndex: firstTextItemIndex, offset: firstCharOffset },
+        focus: { page, itemIndex: lastTextItemIndex, offset: lastCharOffset },
+      },
+      text,
+      selectedPage => selectedPage === page ? rects : [],
+    );
     return {
       range,
-      anchor: {
-        page,
-        textItemIndex: firstTextItemIndex,
-        charOffset: firstCharOffset,
-        endTextItemIndex: lastTextItemIndex,
-        endCharOffset: lastCharOffset,
-        length: startIndex === endIndex ? Math.abs(endOffset - startOffset) : 0,
-        rects,
-        snippet: text,
-        ...selectionContext,
-        textFragment,
-      },
+      anchor,
+      ...(clipboardSelection ? { clipboardSelection } : {}),
     };
   }
 
-  private selectionAnchorFromState(): { anchor: PdfAnchor; range: Range } | undefined {
+  private selectionAnchorFromState(): PdfSelectionSnapshot | undefined {
     const selection = this.selectionState;
     if (!selection || samePdfCaret(selection.anchor, selection.focus)) return undefined;
     // Rendering replaces every text node. Rebuild the native Range from the
@@ -2368,6 +2516,11 @@ class PdfViewer {
     if (start.page !== end.page) {
       const text = this.selectionTextFromState(selection);
       if (!text) return undefined;
+      const clipboardSelection = pdfAgentClipboardSelectionForState(
+        selection,
+        text,
+        page => this.selectionRectsForState(selection, page),
+      );
       return {
         range,
         anchor: {
@@ -2376,6 +2529,7 @@ class PdfViewer {
           rects: this.selectionRectsForState(selection, start.page),
           snippet: text,
         },
+        ...(clipboardSelection ? { clipboardSelection } : {}),
       };
     }
     const textRects = this.pages.get(selection.page)?.textRects ?? [];
@@ -2397,20 +2551,27 @@ class PdfViewer {
       text,
     );
     const { textStart: _textStart, ...selectionContext } = textFragment;
+    const anchor: PdfAnchor = {
+      page: selection.page,
+      textItemIndex: start.itemIndex,
+      charOffset: start.offset,
+      endTextItemIndex: end.itemIndex,
+      endCharOffset: end.offset,
+      length: start.itemIndex === end.itemIndex ? Math.abs(end.offset - start.offset) : 0,
+      rects: this.selectionRectsForState(selection),
+      snippet: text,
+      ...selectionContext,
+      textFragment,
+    };
+    const clipboardSelection = pdfAgentClipboardSelectionForState(
+      selection,
+      text,
+      page => this.selectionRectsForState(selection, page),
+    );
     return {
       range,
-      anchor: {
-        page: selection.page,
-        textItemIndex: start.itemIndex,
-        charOffset: start.offset,
-        endTextItemIndex: end.itemIndex,
-        endCharOffset: end.offset,
-        length: start.itemIndex === end.itemIndex ? Math.abs(end.offset - start.offset) : 0,
-        rects: this.selectionRectsForState(selection),
-        snippet: text,
-        ...selectionContext,
-        textFragment,
-      },
+      anchor,
+      ...(clipboardSelection ? { clipboardSelection } : {}),
     };
   }
 
@@ -2478,6 +2639,8 @@ class PdfViewer {
       page.highlightLayer.querySelectorAll('.pdf-selection-rect').forEach(element => element.remove());
     }
     this.latestSelectionAnchor = null;
+    this.agentClipboardSelection = null;
+    this.agentClipboardContexts.clear();
     vscode.postMessage({ type: 'selectionChanged' });
   }
 
@@ -2498,7 +2661,15 @@ class PdfViewer {
       && this.contextMenuTargetsSelection(event, current.range)
     ) {
       if (!samePdfSelectionRange(this.latestSelectionAnchor, current.anchor)) {
-        vscode.postMessage({ type: 'selectionChanged', anchor: current.anchor });
+        this.agentClipboardSelection = current.clipboardSelection ?? null;
+        this.agentClipboardContexts.clear();
+        vscode.postMessage({
+          type: 'selectionChanged',
+          anchor: current.anchor,
+          ...(current.clipboardSelection
+            ? { clipboardSelection: current.clipboardSelection }
+            : {}),
+        });
       }
       this.latestSelectionAnchor = current.anchor;
       this.showSelectionContextMenu(event.clientX, event.clientY, current.anchor);

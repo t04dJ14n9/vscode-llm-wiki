@@ -19,6 +19,10 @@ const searchSource = join(
   packageRoot,
   '../pdf-editor/src/webview/domain/pdfSearch.ts',
 );
+const viewerSource = join(
+  packageRoot,
+  '../pdf-editor/src/webview/pdf-viewer.ts',
+);
 
 function compileTsModule(filename, mocks = {}) {
   const source = readFileSync(filename, 'utf8');
@@ -52,6 +56,34 @@ const pdfSelection = compileTsModule(selectionSource, {
   './pdfSearch': pdfSearch,
   './pdfTextExtraction': pdfTextExtraction,
 });
+const originalWindow = globalThis.window;
+const originalAcquireVsCodeApi = globalThis.acquireVsCodeApi;
+globalThis.window = {};
+globalThis.acquireVsCodeApi = () => ({
+  getState: () => undefined,
+  postMessage: () => undefined,
+  setState: () => undefined,
+});
+const pdfViewer = compileTsModule(viewerSource, {
+  '@embedpdf/engines/pdfium-direct-engine': {
+    createPdfiumEngine: () => new Promise(() => {}),
+  },
+  '@embedpdf/models': {},
+  './domain/pdfNavigation': {},
+  './domain/pdfSearch': pdfSearch,
+  './domain/pdfSelection': pdfSelection,
+  './domain/pdfTextExtraction': pdfTextExtraction,
+  './domain/pdfOutline': {},
+  './pdfLayout': {},
+  './pdfTextLayer': {},
+  './obsidianContextMenu': {},
+  './pdfAskPanel': {},
+  './pdfTextBands': {},
+});
+if (originalWindow === undefined) delete globalThis.window;
+else globalThis.window = originalWindow;
+if (originalAcquireVsCodeApi === undefined) delete globalThis.acquireVsCodeApi;
+else globalThis.acquireVsCodeApi = originalAcquireVsCodeApi;
 
 function textItem(content, left = 0, top = 0, width = 20, height = 10) {
   return {
@@ -72,6 +104,76 @@ function glyph(left, top, width = 5, height = 10, offsetStart = 0) {
     hitRect: [left, top, left + width, top + height],
   };
 }
+
+test('multi-page PDF clipboard selection includes every page and complete normalized text', () => {
+  assert.equal(typeof pdfViewer.pdfAgentClipboardSelectionForState, 'function');
+  const selection = {
+    page: 2,
+    anchor: { page: 2, itemIndex: 4, offset: 2 },
+    focus: { page: 4, itemIndex: 1, offset: 5 },
+  };
+  const rectsByPage = new Map([
+    [2, [[10, 20, 110, 36]]],
+    [3, [[12, 18, 140, 34], [12, 38, 120, 54]]],
+    [4, [[8, 16, 96, 32]]],
+  ]);
+
+  assert.deepEqual(
+    pdfViewer.pdfAgentClipboardSelectionForState(
+      selection,
+      ' complete \n normalized   text across all pages ',
+      page => rectsByPage.get(page) ?? [],
+    ),
+    {
+      startPage: 2,
+      endPage: 4,
+      pages: [
+        { page: 2, rects: [[10, 20, 110, 36]] },
+        { page: 3, rects: [[12, 18, 140, 34], [12, 38, 120, 54]] },
+        { page: 4, rects: [[8, 16, 96, 32]] },
+      ],
+      selectedText: 'complete normalized text across all pages',
+    },
+  );
+});
+
+test('stale PDF clipboard context is rejected before webview caching', () => {
+  assert.equal(typeof pdfViewer.correlatePdfAgentClipboardContext, 'function');
+  const currentSelection = {
+    startPage: 4,
+    endPage: 4,
+    pages: [{ page: 4, rects: [[30, 40, 130, 56]] }],
+    selectedText: 'same selected text',
+  };
+  const staleContext = {
+    selectionKey: JSON.stringify({
+      startPage: 4,
+      endPage: 4,
+      selectedText: currentSelection.selectedText,
+      pages: [{ page: 4, rects: [[10, 20, 110, 36]] }],
+    }),
+    sourceLabel: 'raw/pdf/paper.pdf (page 4)',
+    sourceHref: 'cursor://llm-wiki/open-anchor?target=raw%2Fpdf%2Fpaper.pdf%23page%3D4',
+    selectedText: currentSelection.selectedText,
+    plainText: 'old clipboard payload',
+  };
+
+  assert.equal(
+    pdfViewer.correlatePdfAgentClipboardContext(currentSelection, staleContext),
+    undefined,
+  );
+  const currentContext = {
+    ...staleContext,
+    selectionKey: JSON.stringify(currentSelection),
+    sourceLabel: 'raw/pdf/paper.pdf (page 4)',
+    selectedText: currentSelection.selectedText,
+    plainText: 'current clipboard payload',
+  };
+  assert.equal(
+    pdfViewer.correlatePdfAgentClipboardContext(currentSelection, currentContext),
+    currentContext,
+  );
+});
 
 test('PDF carets have stable page, item, and character ordering', () => {
   const first = { page: 1, itemIndex: 8, offset: 4 };

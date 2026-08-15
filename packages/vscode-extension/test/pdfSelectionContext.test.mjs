@@ -45,6 +45,7 @@ function loadTsModule(relativePath, mocks = {}) {
         },
       };
     }
+    if (request === './agentClipboard') return agentClipboard;
     if (request === './cursorCrop') return cursorCrop;
     return originalLoad.call(this, request, parent, isMain);
   };
@@ -60,6 +61,133 @@ const cursorCrop = loadTsModule('src/cursorCrop.ts', {
   './pdfDiscussionController': {
     PDF_DISCUSSION_MAX_PNG_BYTES: 5 * 1024 * 1024,
   },
+});
+
+const agentClipboard = loadTsModule('src/agentClipboard.ts', {
+  './anchorUris': {
+    llmWikiOpenAnchorUri: target =>
+      `cursor://llm-wiki/open-anchor?target=${encodeURIComponent(target)}`,
+  },
+});
+
+test('PDF provider correlates multi-page clipboard context to exact selection geometry', async () => {
+  const posted = [];
+  const clipboardWrites = [];
+  let receiveMessage;
+  const vscode = {
+    workspace: {
+      asRelativePath: uri => uri.fsPath.replace('/vault/', ''),
+    },
+    commands: {
+      executeCommand: async () => undefined,
+    },
+    env: {
+      clipboard: {
+        writeText: async text => { clipboardWrites.push(text); },
+      },
+    },
+    Uri: {
+      joinPath: (...parts) => ({ parts, toString: () => 'vscode-resource' }),
+    },
+  };
+  const { PdfEditorProvider } = loadTsModule('src/pdfEditorProvider.ts', {
+    vscode,
+    '@llm-wiki/core': { pdfHref: portablePdfHref },
+  });
+  const provider = new PdfEditorProvider(
+    { extensionUri: { fsPath: '/extension' }, subscriptions: [] },
+    '/vault',
+  );
+  const pdfUri = {
+    scheme: 'file',
+    fsPath: '/vault/raw/pdf/paper.pdf',
+    toString: () => 'file:///vault/raw/pdf/paper.pdf',
+  };
+  const webview = {
+    options: {},
+    cspSource: 'vscode-webview:',
+    asWebviewUri: uri => uri,
+    onDidReceiveMessage: listener => {
+      receiveMessage = listener;
+      return { dispose() {} };
+    },
+    postMessage: async message => {
+      posted.push(message);
+      return true;
+    },
+  };
+  await provider.resolveCustomEditor(
+    { uri: pdfUri },
+    {
+      active: true,
+      webview,
+      onDidChangeViewState: () => ({ dispose() {} }),
+      onDidDispose: () => ({ dispose() {} }),
+    },
+    {},
+  );
+  const firstSelection = {
+    startPage: 2,
+    endPage: 4,
+    pages: [
+      { page: 2, rects: [[10, 20, 110, 36]] },
+      { page: 3, rects: [[12, 18, 140, 34]] },
+      { page: 4, rects: [[8, 16, 96, 32]] },
+    ],
+    selectedText: 'complete normalized text across all pages',
+  };
+
+  await receiveMessage({
+    type: 'selectionChanged',
+    anchor: {
+      page: 2,
+      multiPage: true,
+      snippet: firstSelection.selectedText,
+      rects: firstSelection.pages[0].rects,
+    },
+    clipboardSelection: firstSelection,
+  });
+
+  const firstKey = agentClipboard.pdfAgentClipboardSelectionKey(firstSelection);
+  const clipboardMessages = posted.filter(message => message.type === 'agentClipboardContext');
+  assert.equal(clipboardMessages.length, 1);
+  assert.equal(clipboardMessages[0].context.selectionKey, firstKey);
+  assert.equal(clipboardMessages[0].context.sourceLabel, 'raw/pdf/paper.pdf (pages 2–4)');
+  assert.equal(
+    clipboardMessages[0].context.selectedText,
+    'complete normalized text across all pages',
+  );
+  assert.match(
+    clipboardMessages[0].context.sourceHref,
+    /raw%2Fpdf%2Fpaper\.pdf%23page%3D2/,
+  );
+
+  const nextSelection = {
+    ...firstSelection,
+    pages: [
+      firstSelection.pages[0],
+      firstSelection.pages[1],
+      { page: 4, rects: [[30, 40, 130, 56]] },
+    ],
+  };
+  await receiveMessage({
+    type: 'selectionChanged',
+    anchor: {
+      page: 2,
+      multiPage: true,
+      snippet: nextSelection.selectedText,
+      rects: nextSelection.pages[0].rects,
+    },
+    clipboardSelection: nextSelection,
+  });
+
+  const nextKey = agentClipboard.pdfAgentClipboardSelectionKey(nextSelection);
+  const updatedClipboardMessages = posted.filter(message => message.type === 'agentClipboardContext');
+  assert.equal(updatedClipboardMessages.length, 2);
+  assert.equal(updatedClipboardMessages[1].context.selectionKey, nextKey);
+  assert.equal(provider.webviews.get(pdfUri.toString()).agentClipboardContext.selectionKey, nextKey);
+  assert.notEqual(provider.webviews.get(pdfUri.toString()).agentClipboardContext.selectionKey, firstKey);
+  assert.deepEqual(clipboardWrites, []);
 });
 
 test('PDF editor provider exposes portable database-free agent context with normalized selection context', async () => {
