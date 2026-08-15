@@ -26,6 +26,7 @@ function loadTsModule(root, relativePath, mocks = {}) {
   const originalLoad = Module._load;
   Module._load = function patchedLoad(request, parent, isMain) {
     if (Object.prototype.hasOwnProperty.call(mocks, request)) return mocks[request];
+    if (request === './agentClipboard' && root === packageRoot) return agentClipboard;
     if (request === './cursorCrop' && root === packageRoot) return cursorCrop;
     return originalLoad.call(this, request, parent, isMain);
   };
@@ -40,6 +41,12 @@ function loadTsModule(root, relativePath, mocks = {}) {
 const cursorCrop = loadTsModule(packageRoot, 'src/cursorCrop.ts', {
   './pdfDiscussionController': {
     PDF_DISCUSSION_MAX_PNG_BYTES: 5 * 1024 * 1024,
+  },
+});
+const agentClipboard = loadTsModule(packageRoot, 'src/agentClipboard.ts', {
+  './anchorUris': {
+    llmWikiOpenAnchorUri: target =>
+      `cursor://llm-wiki/open-anchor?target=${encodeURIComponent(target)}`,
   },
 });
 

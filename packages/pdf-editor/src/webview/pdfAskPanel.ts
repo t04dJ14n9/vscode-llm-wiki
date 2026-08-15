@@ -10,7 +10,6 @@ import {
 import {
   annotationHasAnswer,
   annotationVisualStatus,
-  base64ByteLength,
   clampAskPdfPanelWidth as clampPanelWidth,
   isTransientAskPdfWindowKey as isTransientWindowKey,
   normalizeAskPdfDrafts,
@@ -29,15 +28,17 @@ import {
   type PdfDiscussionModelSnapshot,
   type PdfDiscussionTurnStatus,
 } from './domain/pdfAskState';
+import {
+  capturePdfSelectionSnapshot,
+  PDF_SELECTION_CROP_PADDING_POINTS,
+  type PdfPageSurface,
+} from './pdfAgentClipboard';
 import { installAskPdfPanelStyles } from './pdfAskPanelStyles';
 import { normalizePdfTextBands, type PdfRect } from './pdfTextBands';
 
 export type { PdfAskSelection } from './domain/pdfAskState';
+export { capturePdfSelectionCrop } from './pdfAgentClipboard';
 
-const ASK_PDF_ACCENT = '#4dabf7';
-const ASK_PDF_MAX_PNG_BYTES = 5 * 1024 * 1024;
-const ASK_PDF_MAX_CROP_EDGE = 1600;
-const ASK_PDF_CROP_PADDING_POINTS = 24;
 const ASK_PDF_MIN_WIDTH = 320;
 const ASK_PDF_MAX_WIDTH = 560;
 const ASK_PDF_MIN_HEIGHT = 260;
@@ -47,17 +48,6 @@ const ASK_PDF_VIEWPORT_INSET = 12;
 const ASK_PDF_ANCHOR_GAP = 16;
 const ASK_PDF_NARROW_BREAKPOINT = 620;
 const ASK_PDF_OVERVIEW_KEY = '__overview__';
-
-interface PdfAskPageSurface {
-  canvas: HTMLCanvasElement;
-  pageWidth: number;
-  pageHeight: number;
-}
-
-interface PdfSelectionCrop {
-  dataUrl: string;
-  cropRect: PdfRect;
-}
 
 interface VsCodeWebviewApi {
   postMessage(message: unknown): void;
@@ -69,7 +59,7 @@ export interface PdfAskPanelOptions {
   vscode: VsCodeWebviewApi;
   toolbar: HTMLElement;
   viewerShell: HTMLElement;
-  getPageSurface(page: number): PdfAskPageSurface | undefined;
+  getPageSurface(page: number): PdfPageSurface | undefined;
   getAnchorViewportRect(page: number, rects: PdfRect[]): { left: number; top: number; right: number; bottom: number } | undefined;
   navigateTo(page: number, rects: PdfRect[], annotationId?: string): void | Promise<void>;
   redrawMarkers(): void;
@@ -107,89 +97,6 @@ interface TransientActionError {
 
 export function createPdfAskPanel(options: PdfAskPanelOptions): PdfAskPanel {
   return new PdfAskPanelController(options);
-}
-
-export function capturePdfSelectionCrop(
-  surface: PdfAskPageSurface,
-  selection: PdfAskSelection,
-  options?: { throwOnCaptureError?: boolean },
-): string | undefined {
-  return capturePdfSelectionSnapshot(surface, selection, options)?.dataUrl;
-}
-
-function capturePdfSelectionSnapshot(
-  surface: PdfAskPageSurface,
-  selection: PdfAskSelection,
-  options?: { throwOnCaptureError?: boolean },
-): PdfSelectionCrop | undefined {
-  const rects = validRects(selection.rects);
-  if (!rects.length || surface.canvas.width < 1 || surface.canvas.height < 1) return undefined;
-  const union = rects.reduce((current, rect) => ({
-    left: Math.min(current.left, rect[0]),
-    top: Math.min(current.top, rect[1]),
-    right: Math.max(current.right, rect[2]),
-    bottom: Math.max(current.bottom, rect[3]),
-  }), { left: rects[0]![0], top: rects[0]![1], right: rects[0]![2], bottom: rects[0]![3] });
-  const left = clamp(union.left - ASK_PDF_CROP_PADDING_POINTS, 0, surface.pageWidth);
-  const top = clamp(union.top - ASK_PDF_CROP_PADDING_POINTS, 0, surface.pageHeight);
-  const right = clamp(union.right + ASK_PDF_CROP_PADDING_POINTS, left, surface.pageWidth);
-  const bottom = clamp(union.bottom + ASK_PDF_CROP_PADDING_POINTS, top, surface.pageHeight);
-  const widthPoints = right - left;
-  const heightPoints = bottom - top;
-  if (widthPoints <= 0 || heightPoints <= 0) return undefined;
-
-  const sourceScaleX = surface.canvas.width / surface.pageWidth;
-  const sourceScaleY = surface.canvas.height / surface.pageHeight;
-  let outputScale = Math.min(
-    sourceScaleX,
-    sourceScaleY,
-    ASK_PDF_MAX_CROP_EDGE / Math.max(widthPoints, heightPoints),
-  );
-  if (!Number.isFinite(outputScale) || outputScale <= 0) return undefined;
-
-  for (let attempt = 0; attempt < 8; attempt++) {
-    const output = document.createElement('canvas');
-    output.width = Math.max(1, Math.round(widthPoints * outputScale));
-    output.height = Math.max(1, Math.round(heightPoints * outputScale));
-    const context = output.getContext('2d');
-    if (!context) return undefined;
-    context.fillStyle = '#ffffff';
-    context.fillRect(0, 0, output.width, output.height);
-    context.drawImage(
-      surface.canvas,
-      left * sourceScaleX,
-      top * sourceScaleY,
-      widthPoints * sourceScaleX,
-      heightPoints * sourceScaleY,
-      0,
-      0,
-      output.width,
-      output.height,
-    );
-    context.strokeStyle = ASK_PDF_ACCENT;
-    context.lineWidth = Math.max(2, Math.min(4, outputScale * 1.35));
-    for (const rect of rects) {
-      const outlineLeft = (rect[0] - left) * outputScale;
-      const outlineTop = (rect[1] - top) * outputScale;
-      const outlineWidth = (rect[2] - rect[0]) * outputScale;
-      const outlineHeight = (rect[3] - rect[1]) * outputScale;
-      context.strokeRect(outlineLeft, outlineTop, outlineWidth, outlineHeight);
-    }
-    try {
-      const dataUrl = output.toDataURL('image/png');
-      if (base64ByteLength(dataUrl.split(',')[1] ?? '') <= ASK_PDF_MAX_PNG_BYTES) {
-        return {
-          dataUrl,
-          cropRect: [left, top, right, bottom],
-        };
-      }
-    } catch (cause) {
-      if (options?.throwOnCaptureError) throw cause;
-      return undefined;
-    }
-    outputScale *= 0.72;
-  }
-  return undefined;
 }
 
 class PdfAskPanelController implements PdfAskPanel {
@@ -927,7 +834,7 @@ class PdfAskPanelController implements PdfAskPanel {
       ...(base64 && this.currentCropRect
         ? {
             snapshotCropRect: this.currentCropRect,
-            snapshotPadding: ASK_PDF_CROP_PADDING_POINTS,
+            snapshotPadding: PDF_SELECTION_CROP_PADDING_POINTS,
           }
         : {}),
     });
