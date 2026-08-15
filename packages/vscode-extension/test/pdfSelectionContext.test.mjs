@@ -142,6 +142,19 @@ test('PDF provider correlates multi-page clipboard context to exact selection ge
     anchor: {
       page: 2,
       multiPage: true,
+      snippet: 'partial text without the delayed middle page',
+      rects: firstSelection.pages[0].rects,
+    },
+  });
+
+  assert.deepEqual(posted, [{ type: 'agentClipboardContext' }]);
+  assert.equal(provider.webviews.get(pdfUri.toString()).agentClipboardContext, undefined);
+
+  await receiveMessage({
+    type: 'selectionChanged',
+    anchor: {
+      page: 2,
+      multiPage: true,
       snippet: firstSelection.selectedText,
       rects: firstSelection.pages[0].rects,
     },
@@ -149,16 +162,16 @@ test('PDF provider correlates multi-page clipboard context to exact selection ge
   });
 
   const firstKey = agentClipboard.pdfAgentClipboardSelectionKey(firstSelection);
-  const clipboardMessages = posted.filter(message => message.type === 'agentClipboardContext');
-  assert.equal(clipboardMessages.length, 1);
-  assert.equal(clipboardMessages[0].context.selectionKey, firstKey);
-  assert.equal(clipboardMessages[0].context.sourceLabel, 'raw/pdf/paper.pdf (pages 2–4)');
+  const firstContextMessage = posted.at(-1);
+  assert.equal(firstContextMessage.type, 'agentClipboardContext');
+  assert.equal(firstContextMessage.context.selectionKey, firstKey);
+  assert.equal(firstContextMessage.context.sourceLabel, 'raw/pdf/paper.pdf (pages 2–4)');
   assert.equal(
-    clipboardMessages[0].context.selectedText,
+    firstContextMessage.context.selectedText,
     'complete normalized text across all pages',
   );
   assert.match(
-    clipboardMessages[0].context.sourceHref,
+    firstContextMessage.context.sourceHref,
     /raw%2Fpdf%2Fpaper\.pdf%23page%3D2/,
   );
 
@@ -183,8 +196,8 @@ test('PDF provider correlates multi-page clipboard context to exact selection ge
 
   const nextKey = agentClipboard.pdfAgentClipboardSelectionKey(nextSelection);
   const updatedClipboardMessages = posted.filter(message => message.type === 'agentClipboardContext');
-  assert.equal(updatedClipboardMessages.length, 2);
-  assert.equal(updatedClipboardMessages[1].context.selectionKey, nextKey);
+  assert.equal(updatedClipboardMessages.length, 3);
+  assert.equal(updatedClipboardMessages[2].context.selectionKey, nextKey);
   assert.equal(provider.webviews.get(pdfUri.toString()).agentClipboardContext.selectionKey, nextKey);
   assert.notEqual(provider.webviews.get(pdfUri.toString()).agentClipboardContext.selectionKey, firstKey);
   assert.deepEqual(clipboardWrites, []);

@@ -183,7 +183,9 @@ export function pdfAgentClipboardSelectionForState(
 
   const pages: PdfAgentClipboardPageSelection[] = [];
   for (let page = start.page; page <= end.page; page++) {
-    const rects = validPdfRects(selectionRectsForPage(page))
+    const pageRects = selectionRectsForPage(page);
+    if (pageRects === undefined) return undefined;
+    const rects = validPdfRects(pageRects)
       .map(rect => rect.map(roundPdfCoordinate) as PdfRect)
       .filter(rect => rect[2] > rect[0] && rect[3] > rect[1])
       .sort((left, right) => (
@@ -202,6 +204,28 @@ export function pdfAgentClipboardSelectionForState(
         selectedText: text,
       }
     : undefined;
+}
+
+export function pdfAgentClipboardSelectionMessageAfterPageRender(
+  pendingSelection: PdfSelectionState,
+  currentSelection: PdfSelectionState | null | undefined,
+  snapshot: PdfSelectionSnapshot | undefined,
+): {
+  type: 'selectionChanged';
+  anchor: PdfAnchor;
+  clipboardSelection: PdfAgentClipboardSelection;
+} | undefined {
+  if (
+    !currentSelection
+    || !snapshot?.clipboardSelection
+    || !samePdfCaret(pendingSelection.anchor, currentSelection.anchor)
+    || !samePdfCaret(pendingSelection.focus, currentSelection.focus)
+  ) return undefined;
+  return {
+    type: 'selectionChanged',
+    anchor: snapshot.anchor,
+    clipboardSelection: snapshot.clipboardSelection,
+  };
 }
 
 export function correlatePdfAgentClipboardContext(
@@ -307,6 +331,7 @@ interface PageState {
   highlightLayer: HTMLDivElement;
   textRects: any[];
   textRectsPromise?: Promise<any[]>;
+  textExtractionReady: boolean;
   selectionGlyphs: PdfSelectionGlyph[][];
   selectionLines: PdfSelectionLine[];
   renderGeneration: number;
@@ -349,7 +374,7 @@ interface PdfDestinationFocusState {
 let engine: any;
 let pdfDoc: any;
 
-class PdfViewer {
+export class PdfViewer {
   private readonly container = document.getElementById('viewer-container')!;
   private readonly pageContainer = document.getElementById('page-container')!;
   private readonly pageInfo = document.getElementById('page-info')!;
@@ -454,6 +479,7 @@ class PdfViewer {
   private selectionLastPointerDownPage = 0;
   private selectionAutoScrollFrame: number | undefined;
   private selectionToolbarPositionFrame: number | undefined;
+  private pendingAgentClipboardSelection: PdfSelectionState | null = null;
   private agentClipboardSelection: PdfAgentClipboardSelection | null = null;
   private readonly agentClipboardContexts = new Map<string, PdfAgentClipboardContext>();
   private agentCapabilities: AgentSurfaceCapabilities = {
@@ -1266,9 +1292,24 @@ class PdfViewer {
   }
 
   private restoreSelectionForPage(page: number): void {
-    if (!this.selectionState || !pdfSelectionContainsPage(this.selectionState, page)) return;
-    this.applyNativeSelection(this.selectionState);
+    const selection = this.selectionState;
+    if (!selection || !pdfSelectionContainsPage(selection, page)) return;
+    this.applyNativeSelection(selection);
     this.drawSelectionOverlay(page);
+    const pendingSelection = this.pendingAgentClipboardSelection;
+    if (!pendingSelection) return;
+    const current = this.selectionAnchorFromState();
+    const message = pdfAgentClipboardSelectionMessageAfterPageRender(
+      pendingSelection,
+      selection,
+      current,
+    );
+    if (!message) return;
+    this.pendingAgentClipboardSelection = null;
+    this.latestSelectionAnchor = message.anchor;
+    this.agentClipboardSelection = message.clipboardSelection;
+    this.agentClipboardContexts.clear();
+    vscode.postMessage(message);
   }
 
   private drawSelectionOverlays(): void {
@@ -1937,6 +1978,7 @@ class PdfViewer {
         textLayer,
         highlightLayer,
         textRects: [],
+        textExtractionReady: false,
         selectionGlyphs: [],
         selectionLines: [],
         renderGeneration: 0,
@@ -2289,7 +2331,10 @@ class PdfViewer {
         state.selectionGlyphs = rects.map(item => Array.isArray(item.selectionGlyphs) ? item.selectionGlyphs : []);
         state.selectionLines = buildPdfSelectionLines(state.selectionGlyphs);
         return rects;
-      })();
+      })().then(rects => {
+        state.textExtractionReady = true;
+        return rects;
+      });
     }
     return state.textRectsPromise;
   }
@@ -2398,6 +2443,13 @@ class PdfViewer {
 
     const { anchor, range } = current;
     this.latestSelectionAnchor = anchor;
+    this.pendingAgentClipboardSelection = this.selectionState && !current.clipboardSelection
+      ? {
+          page: this.selectionState.page,
+          anchor: { ...this.selectionState.anchor },
+          focus: { ...this.selectionState.focus },
+        }
+      : null;
     this.agentClipboardSelection = current.clipboardSelection ?? null;
     this.agentClipboardContexts.clear();
     vscode.postMessage({
@@ -2519,7 +2571,12 @@ class PdfViewer {
       const clipboardSelection = pdfAgentClipboardSelectionForState(
         selection,
         text,
-        page => this.selectionRectsForState(selection, page),
+        page => {
+          const state = this.pages.get(page);
+          return state?.textExtractionReady
+            ? this.selectionRectsForState(selection, page)
+            : undefined;
+        },
       );
       return {
         range,
@@ -2566,7 +2623,12 @@ class PdfViewer {
     const clipboardSelection = pdfAgentClipboardSelectionForState(
       selection,
       text,
-      page => this.selectionRectsForState(selection, page),
+      page => {
+        const state = this.pages.get(page);
+        return state?.textExtractionReady
+          ? this.selectionRectsForState(selection, page)
+          : undefined;
+      },
     );
     return {
       range,
@@ -2639,6 +2701,7 @@ class PdfViewer {
       page.highlightLayer.querySelectorAll('.pdf-selection-rect').forEach(element => element.remove());
     }
     this.latestSelectionAnchor = null;
+    this.pendingAgentClipboardSelection = null;
     this.agentClipboardSelection = null;
     this.agentClipboardContexts.clear();
     vscode.postMessage({ type: 'selectionChanged' });
@@ -2661,6 +2724,7 @@ class PdfViewer {
       && this.contextMenuTargetsSelection(event, current.range)
     ) {
       if (!samePdfSelectionRange(this.latestSelectionAnchor, current.anchor)) {
+        this.pendingAgentClipboardSelection = null;
         this.agentClipboardSelection = current.clipboardSelection ?? null;
         this.agentClipboardContexts.clear();
         vscode.postMessage({

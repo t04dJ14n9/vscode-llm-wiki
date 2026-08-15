@@ -58,10 +58,11 @@ const pdfSelection = compileTsModule(selectionSource, {
 });
 const originalWindow = globalThis.window;
 const originalAcquireVsCodeApi = globalThis.acquireVsCodeApi;
+const postedViewerMessages = [];
 globalThis.window = {};
 globalThis.acquireVsCodeApi = () => ({
   getState: () => undefined,
-  postMessage: () => undefined,
+  postMessage: message => { postedViewerMessages.push(message); },
   setState: () => undefined,
 });
 const pdfViewer = compileTsModule(viewerSource, {
@@ -105,6 +106,58 @@ function glyph(left, top, width = 5, height = 10, offsetStart = 0) {
   };
 }
 
+function restoreClipboardSelectionAfterPageRender(
+  pendingSelection,
+  currentSelection,
+  snapshot,
+) {
+  assert.equal(typeof pdfViewer.PdfViewer, 'function');
+  const viewer = Object.create(pdfViewer.PdfViewer.prototype);
+  viewer.selectionState = currentSelection;
+  viewer.pendingAgentClipboardSelection = pendingSelection;
+  viewer.agentClipboardSelection = null;
+  viewer.agentClipboardContexts = new Map();
+  viewer.latestSelectionAnchor = null;
+  viewer.applyNativeSelection = () => ({});
+  viewer.drawSelectionOverlay = () => undefined;
+  viewer.selectionAnchorFromState = () => snapshot;
+  postedViewerMessages.length = 0;
+
+  viewer.restoreSelectionForPage(3);
+
+  return [...postedViewerMessages];
+}
+
+function selectionSnapshotWithMiddlePage(selection, middlePageReady) {
+  assert.equal(typeof pdfViewer.PdfViewer, 'function');
+  const viewer = Object.create(pdfViewer.PdfViewer.prototype);
+  viewer.selectionState = selection;
+  viewer.pages = new Map([
+    [2, { textExtractionReady: true }],
+    [3, { textExtractionReady: middlePageReady }],
+    [4, { textExtractionReady: true }],
+  ]);
+  viewer.applyNativeSelection = () => ({});
+  viewer.selectionTextFromState = () => middlePageReady
+    ? 'page two page three page four'
+    : 'page two page four';
+  viewer.selectionRectsForState = (_selection, page) => new Map([
+    [2, [[10, 20, 110, 36]]],
+    [3, [[12, 18, 140, 34]]],
+    [4, [[8, 16, 96, 32]]],
+  ]).get(page) ?? [];
+  const previousWindow = globalThis.window;
+  globalThis.window = {
+    getSelection: () => ({ isCollapsed: false }),
+  };
+  try {
+    return viewer.selectionAnchorFromState();
+  } finally {
+    if (previousWindow === undefined) delete globalThis.window;
+    else globalThis.window = previousWindow;
+  }
+}
+
 test('multi-page PDF clipboard selection includes every page and complete normalized text', () => {
   assert.equal(typeof pdfViewer.pdfAgentClipboardSelectionForState, 'function');
   const selection = {
@@ -133,6 +186,116 @@ test('multi-page PDF clipboard selection includes every page and complete normal
         { page: 4, rects: [[8, 16, 96, 32]] },
       ],
       selectedText: 'complete normalized text across all pages',
+    },
+  );
+});
+
+function assertDelayedMiddlePageRepublish(selection, changedSelection) {
+  const rectsByPage = new Map([
+    [2, [[10, 20, 110, 36]]],
+    [4, [[8, 16, 96, 32]]],
+  ]);
+
+  assert.equal(
+    pdfViewer.pdfAgentClipboardSelectionForState(
+      selection,
+      'page two page four',
+      page => rectsByPage.get(page),
+    ),
+    undefined,
+  );
+  assert.equal(
+    selectionSnapshotWithMiddlePage(selection, false)?.clipboardSelection,
+    undefined,
+  );
+
+  rectsByPage.set(3, [[12, 18, 140, 34]]);
+  const clipboardSelection = pdfViewer.pdfAgentClipboardSelectionForState(
+    selection,
+    'page two page three page four',
+    page => rectsByPage.get(page),
+  );
+  assert.deepEqual(clipboardSelection, {
+    startPage: 2,
+    endPage: 4,
+    pages: [
+      { page: 2, rects: [[10, 20, 110, 36]] },
+      { page: 3, rects: [[12, 18, 140, 34]] },
+      { page: 4, rects: [[8, 16, 96, 32]] },
+    ],
+    selectedText: 'page two page three page four',
+  });
+
+  assert.equal(
+    typeof pdfViewer.pdfAgentClipboardSelectionMessageAfterPageRender,
+    'function',
+  );
+  const snapshot = selectionSnapshotWithMiddlePage(selection, true);
+  assert.deepEqual(snapshot?.clipboardSelection, clipboardSelection);
+  assert.deepEqual(
+    pdfViewer.pdfAgentClipboardSelectionMessageAfterPageRender(
+      selection,
+      selection,
+      snapshot,
+    ),
+    {
+      type: 'selectionChanged',
+      anchor: snapshot.anchor,
+      clipboardSelection,
+    },
+  );
+  assert.equal(
+    pdfViewer.pdfAgentClipboardSelectionMessageAfterPageRender(
+      selection,
+      changedSelection,
+      snapshot,
+    ),
+    undefined,
+  );
+  assert.deepEqual(
+    restoreClipboardSelectionAfterPageRender(selection, selection, snapshot),
+    [{
+      type: 'selectionChanged',
+      anchor: snapshot.anchor,
+      clipboardSelection,
+    }],
+  );
+  assert.deepEqual(
+    restoreClipboardSelectionAfterPageRender(
+      selection,
+      changedSelection,
+      snapshot,
+    ),
+    [],
+  );
+}
+
+test('forward multi-page clipboard waits for a delayed middle page before republishing', () => {
+  const selection = {
+    page: 2,
+    anchor: { page: 2, itemIndex: 4, offset: 2 },
+    focus: { page: 4, itemIndex: 1, offset: 5 },
+  };
+  assertDelayedMiddlePageRepublish(
+    selection,
+    {
+      ...selection,
+      focus: { ...selection.focus, offset: 6 },
+    },
+  );
+});
+
+test('reverse multi-page clipboard waits for a delayed middle page before republishing', () => {
+  const selection = {
+    page: 4,
+    anchor: { page: 4, itemIndex: 1, offset: 5 },
+    focus: { page: 2, itemIndex: 4, offset: 2 },
+  };
+  assertDelayedMiddlePageRepublish(
+    selection,
+    {
+      ...selection,
+      anchor: { ...selection.anchor, offset: 6 },
     },
   );
 });
