@@ -89,6 +89,54 @@ test('local Markdown and text previews stay bounded and resolve from the correct
   });
 });
 
+test('fragment-only targets resolve to the current workspace-contained Markdown file', async (t) => {
+  const workspaceRoot = createWorkspace();
+  t.after(() => rmSync(workspaceRoot, { recursive: true, force: true }));
+  writeFileSync(
+    join(workspaceRoot, 'notes', 'current.md'),
+    '# Current note\n\n## Evidence\n\nCurrent-document evidence.',
+  );
+
+  const fragment = await resolvePreview({
+    workspaceRoot,
+    documentPath: join(workspaceRoot, 'notes', 'current.md'),
+    target: '#Evidence',
+    relativeToDocument: true,
+  });
+
+  assert.deepEqual(fragment, {
+    kind: 'markdown',
+    target: '#Evidence',
+    title: 'Current note',
+    path: 'notes/current.md',
+    excerpt: 'Current note Evidence Current-document evidence.',
+  });
+});
+
+test('.markdown targets resolve as workspace-contained Markdown files', async (t) => {
+  const workspaceRoot = createWorkspace();
+  t.after(() => rmSync(workspaceRoot, { recursive: true, force: true }));
+  writeFileSync(
+    join(workspaceRoot, 'raw', 'source.markdown'),
+    '# Long-form source\n\nMarkdown extension evidence.',
+  );
+
+  const markdownExtension = await resolvePreview({
+    workspaceRoot,
+    documentPath: join(workspaceRoot, 'notes', 'current.md'),
+    target: 'raw/source.markdown',
+    relativeToDocument: false,
+  });
+
+  assert.deepEqual(markdownExtension, {
+    kind: 'markdown',
+    target: 'raw/source.markdown',
+    title: 'Long-form source',
+    path: 'raw/source.markdown',
+    excerpt: 'Long-form source Markdown extension evidence.',
+  });
+});
+
 test('workspace traversal and symlinks outside the workspace are never read', async (t) => {
   const workspaceRoot = createWorkspace();
   const outsideRoot = mkdtempSync(join(tmpdir(), 'llm-wiki-link-preview-outside-'));
@@ -167,6 +215,47 @@ test('PDF and external previews return labels without reading files or fetching 
     title: 'https://example.com/paper',
   });
   assert.deepEqual(reads, []);
+});
+
+test('host preview fields stay bounded for oversized URLs paths and headings', async (t) => {
+  const workspaceRoot = createWorkspace();
+  t.after(() => rmSync(workspaceRoot, { recursive: true, force: true }));
+  const oversizedUrl = `https://example.com/${'u'.repeat(5_000)}`;
+  const oversizedPath = `raw/${'p'.repeat(5_000)}.bin`;
+  const oversizedHeading = 'H'.repeat(5_000);
+  writeFileSync(
+    join(workspaceRoot, 'raw', 'oversized.md'),
+    `# ${oversizedHeading}\n\nBounded heading evidence.`,
+  );
+
+  const external = await resolvePreview({
+    workspaceRoot,
+    documentPath: join(workspaceRoot, 'notes', 'current.md'),
+    target: oversizedUrl,
+    relativeToDocument: false,
+  });
+  const unavailable = await resolvePreview({
+    workspaceRoot,
+    documentPath: join(workspaceRoot, 'notes', 'current.md'),
+    target: oversizedPath,
+    relativeToDocument: false,
+  });
+  const markdown = await resolvePreview({
+    workspaceRoot,
+    documentPath: join(workspaceRoot, 'notes', 'current.md'),
+    target: 'raw/oversized.md',
+    relativeToDocument: false,
+  });
+
+  assert.equal(external?.target.length, 2_048);
+  assert.equal(external?.title.length, 512);
+  assert.match(external?.target ?? '', /^https:\/\/example\.com\//);
+  assert.equal(unavailable?.target.length, 2_048);
+  assert.equal(unavailable?.title.length, 512);
+  assert.match(unavailable?.target ?? '', /^raw\//);
+  assert.equal(markdown?.title.length, 512);
+  assert.equal(markdown?.target, 'raw/oversized.md');
+  assert.ok((markdown?.excerpt?.length ?? 0) <= 480);
 });
 
 test('malformed preview targets are rejected before any filesystem access', async () => {

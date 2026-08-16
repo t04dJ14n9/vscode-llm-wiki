@@ -3,6 +3,9 @@ import * as path from 'path';
 
 const LINK_PREVIEW_EXCERPT_LIMIT = 480;
 const LINK_PREVIEW_READ_LIMIT = 32 * 1024;
+const LINK_PREVIEW_TARGET_LIMIT = 2_048;
+const LINK_PREVIEW_TITLE_LIMIT = 512;
+const LINK_PREVIEW_PATH_LIMIT = 1_024;
 
 export type LinkPreviewKind = 'markdown' | 'text' | 'pdf' | 'external' | 'unavailable';
 
@@ -55,16 +58,24 @@ export async function resolveLinkPreviewTarget(
   const scheme = target.match(/^([A-Za-z][A-Za-z0-9+.-]*):/)?.[1]?.toLowerCase();
   if (scheme) {
     return scheme === 'http' || scheme === 'https' || scheme === 'mailto'
-      ? { kind: 'external', target, title: target }
+      ? {
+        kind: 'external',
+        target: boundedPreviewValue(target, LINK_PREVIEW_TARGET_LIMIT),
+        title: boundedPreviewValue(target, LINK_PREVIEW_TITLE_LIMIT),
+      }
       : unavailablePreview(target);
   }
 
   const { rawPath, fragment } = splitTarget(target);
   let decodedPath: string;
-  try {
-    decodedPath = decodeURIComponent(rawPath);
-  } catch {
-    return null;
+  if (!rawPath && fragment.startsWith('#') && request.documentPath) {
+    decodedPath = request.documentPath;
+  } else {
+    try {
+      decodedPath = decodeURIComponent(rawPath);
+    } catch {
+      return null;
+    }
   }
   if (!decodedPath || decodedPath.includes('\0') || containsControlCharacter(decodedPath)) return null;
 
@@ -74,13 +85,21 @@ export async function resolveLinkPreviewTarget(
     const filename = path.basename(decodedPath);
     return {
       kind: 'pdf',
-      target,
-      title: page ? `${filename} — page ${page}` : filename,
-      path: normalizedDisplayPath(decodedPath),
+      target: boundedPreviewValue(target, LINK_PREVIEW_TARGET_LIMIT),
+      title: boundedPreviewValue(
+        page ? `${filename} — page ${page}` : filename,
+        LINK_PREVIEW_TITLE_LIMIT,
+      ),
+      path: boundedPreviewValue(normalizedDisplayPath(decodedPath), LINK_PREVIEW_PATH_LIMIT),
       ...(page ? { page } : {}),
     };
   }
-  if (extension !== '.md' && extension !== '.txt' && extension !== '.text') {
+  if (
+    extension !== '.md'
+    && extension !== '.markdown'
+    && extension !== '.txt'
+    && extension !== '.text'
+  ) {
     return unavailablePreview(target);
   }
 
@@ -115,12 +134,15 @@ export async function resolveLinkPreviewTarget(
   }
   const relativePath = path.relative(realRoot, realCandidate).split(path.sep).join('/');
   const excerpt = boundedExcerpt(content);
-  const kind = extension === '.md' ? 'markdown' : 'text';
+  const kind = extension === '.md' || extension === '.markdown' ? 'markdown' : 'text';
   return {
     kind,
-    target,
-    title: kind === 'markdown' ? markdownTitle(content, realCandidate) : path.basename(realCandidate),
-    path: relativePath,
+    target: boundedPreviewValue(target, LINK_PREVIEW_TARGET_LIMIT),
+    title: boundedPreviewValue(
+      kind === 'markdown' ? markdownTitle(content, realCandidate) : path.basename(realCandidate),
+      LINK_PREVIEW_TITLE_LIMIT,
+    ),
+    path: boundedPreviewValue(relativePath, LINK_PREVIEW_PATH_LIMIT),
     ...(excerpt ? { excerpt } : {}),
   };
 }
@@ -164,7 +186,16 @@ function isContainedPath(root: string, candidate: string): boolean {
 }
 
 function unavailablePreview(target: string): LinkPreview {
-  return { kind: 'unavailable', target, title: target };
+  return {
+    kind: 'unavailable',
+    target: boundedPreviewValue(target, LINK_PREVIEW_TARGET_LIMIT),
+    title: boundedPreviewValue(target, LINK_PREVIEW_TITLE_LIMIT),
+  };
+}
+
+function boundedPreviewValue(value: string, limit: number): string {
+  if (value.length <= limit) return value;
+  return `${value.slice(0, limit - 1)}…`;
 }
 
 function markdownTitle(content: string, filePath: string): string {

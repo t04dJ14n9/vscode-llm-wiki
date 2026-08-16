@@ -1,3 +1,5 @@
+import { isCodeFenceClosing, parseCodeFenceOpening } from './markdownFences';
+
 export interface SourceSpan {
   from: number;
   to: number;
@@ -35,6 +37,17 @@ export interface MarkdownReferenceLinkSpan extends SourceSpan {
   referenceFrom: number;
   referenceTo: number;
   definition: MarkdownReferenceDefinition;
+}
+
+export interface MarkdownFootnoteDefinition {
+  id: string;
+  position: number;
+  text: string;
+}
+
+export interface MarkdownFootnoteIndex {
+  definitions: Map<string, MarkdownFootnoteDefinition>;
+  references: Map<string, number[]>;
 }
 
 export function isEscapedAt(text: string, index: number): boolean {
@@ -76,6 +89,92 @@ export function inlineCodeSourceSpans(lineFrom: number, text: string): InlineCod
   }
 
   return spans;
+}
+
+export function markdownFootnoteIndex(text: string): MarkdownFootnoteIndex {
+  const definitions = new Map<string, MarkdownFootnoteDefinition>();
+  const references = new Map<string, number[]>();
+  const lines = markdownSourceLines(text);
+  const excluded = [
+    ...obsidianCommentSourceSpans(text),
+    ...htmlCommentSourceSpans(text),
+    ...fencedCodeSourceSpans(lines),
+  ];
+
+  lines.forEach((line, lineIndex) => {
+    const inlineCode = inlineCodeSourceSpans(line.from, line.text);
+    const definition = line.text.match(/^(\s*)\[\^([^\]\s]+)\]:\s*(.*)$/);
+    const definitionStart = definition ? line.from + definition[1]!.length : -1;
+    if (
+      definition
+      && !isEscapedAt(line.text, definition[1]!.length)
+      && !overlapsSpan(
+        { from: definitionStart, to: line.from + definition[0].length },
+        [...excluded, ...inlineCode],
+      )
+    ) {
+      const id = definition[2]!;
+      if (!definitions.has(id)) {
+        definitions.set(id, {
+          id,
+          position: definitionStart,
+          text: footnoteDefinitionText(lines, lineIndex, definition[3] ?? '', excluded),
+        });
+      }
+    }
+
+    for (const match of line.text.matchAll(/\[\^([^\]\s]+)\]/g)) {
+      const index = match.index ?? 0;
+      const from = line.from + index;
+      const to = from + match[0].length;
+      const id = match[1]!;
+      if (isEscapedAt(line.text, index)) continue;
+      if (overlapsSpan({ from, to }, [...excluded, ...inlineCode])) continue;
+      if (definition && id === definition[2] && from === definitionStart) continue;
+      references.set(id, [...(references.get(id) ?? []), from]);
+    }
+  });
+
+  return { definitions, references };
+}
+
+export function obsidianCommentSourceSpans(text: string): SourceSpan[] {
+  const ranges: SourceSpan[] = [];
+  let start: number | null = null;
+  let index = 0;
+
+  while (index < text.length - 1) {
+    if (text[index] !== '%' || text[index + 1] !== '%') {
+      index++;
+      continue;
+    }
+    if (start == null) {
+      start = index;
+    } else {
+      ranges.push({ from: start, to: index + 2 });
+      start = null;
+    }
+    index += 2;
+  }
+  if (start != null) ranges.push({ from: start, to: text.length });
+  return ranges;
+}
+
+export function htmlCommentSourceSpans(text: string): SourceSpan[] {
+  const ranges: SourceSpan[] = [];
+  let searchFrom = 0;
+  while (searchFrom < text.length) {
+    const start = text.indexOf('<!--', searchFrom);
+    if (start < 0) break;
+    const end = text.indexOf('-->', start + 4);
+    if (end < 0) {
+      ranges.push({ from: start, to: text.length });
+      break;
+    }
+    ranges.push({ from: start, to: end + 3 });
+    searchFrom = end + 3;
+  }
+  return ranges;
 }
 
 export function markdownLinkSourceSpans(lineFrom: number, text: string): MarkdownLinkSpan[] {
@@ -183,6 +282,41 @@ function markdownSourceLines(text: string): MarkdownSourceLine[] {
   }
 
   return lines;
+}
+
+function fencedCodeSourceSpans(lines: MarkdownSourceLine[]): SourceSpan[] {
+  const spans: SourceSpan[] = [];
+  let opening: { from: number; marker: string } | undefined;
+  for (const line of lines) {
+    if (!opening) {
+      const fence = parseCodeFenceOpening(line.text);
+      if (fence) opening = { from: line.from, marker: fence.marker };
+      continue;
+    }
+    if (!isCodeFenceClosing(line.text, opening.marker)) continue;
+    spans.push({ from: opening.from, to: line.to });
+    opening = undefined;
+  }
+  if (opening) {
+    spans.push({ from: opening.from, to: lines.at(-1)?.to ?? opening.from });
+  }
+  return spans;
+}
+
+function footnoteDefinitionText(
+  lines: MarkdownSourceLine[],
+  definitionLineIndex: number,
+  firstLine: string,
+  excluded: SourceSpan[],
+): string {
+  const text = [firstLine];
+  for (let index = definitionLineIndex + 1; index < lines.length; index++) {
+    const line = lines[index]!;
+    if (!/^(?: {2,}|\t)\S/.test(line.text)) break;
+    if (overlapsSpan({ from: line.from, to: line.to }, excluded)) continue;
+    text.push(line.text.trim());
+  }
+  return text.join(' ').replace(/\s+/gu, ' ').trim().slice(0, 480);
 }
 
 export function markdownReferenceDefinitionSourceSpan(

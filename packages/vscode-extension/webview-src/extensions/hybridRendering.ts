@@ -5,12 +5,14 @@ import type { EditorState, Range, Transaction } from '@codemirror/state';
 import DOMPurify from 'dompurify';
 import mermaid from 'mermaid';
 import {
+  htmlCommentSourceSpans,
   inlineCodeSourceSpans,
   isEscapedAt,
   markdownLinkSourceSpans,
   markdownReferenceDefinitions,
   markdownReferenceDefinitionSourceSpans,
   markdownReferenceLinkSourceSpans,
+  obsidianCommentSourceSpans,
   overlapsSpan,
   parseMarkdownLinkDestination,
 } from '../markdownSpans';
@@ -1256,16 +1258,17 @@ function buildHybridDecorations(state: EditorState): DecorationSet {
   const decorations: Range<Decoration>[] = [];
   const active = activeLinesFromState(state);
   const frontmatter = findFrontmatterBlock(state.doc);
+  const sourceText = state.doc.toString();
   // Obsidian comments are hidden in reading mode. HTML comments remain ordinary
   // Markdown source (generated-file banners commonly use them), so do not pass
   // them to the renderer that removes comment text.
-  const obsidianCommentRanges = findObsidianCommentRanges(state.doc);
+  const obsidianCommentRanges = obsidianCommentSourceSpans(sourceText);
   const commentRanges = [
     ...obsidianCommentRanges,
-    ...findHtmlCommentRanges(state.doc),
+    ...htmlCommentSourceSpans(sourceText),
   ];
-  const referenceDefinitions = markdownReferenceDefinitions(state.doc.toString());
-  const referenceDefinitionSpans = markdownReferenceDefinitionSourceSpans(state.doc.toString());
+  const referenceDefinitions = markdownReferenceDefinitions(sourceText);
+  const referenceDefinitionSpans = markdownReferenceDefinitionSourceSpans(sourceText);
 
   let lineNumber = 1;
   while (lineNumber <= state.doc.lines) {
@@ -2233,53 +2236,6 @@ function renderObsidianComments(
     const to = Math.min(lineTo, comment.to);
     addReplace(decorations, reserved, from, to);
   }
-}
-
-function findObsidianCommentRanges(doc: EditorView['state']['doc']): Span[] {
-  const text = doc.toString();
-  const ranges: Span[] = [];
-  let start: number | null = null;
-  let index = 0;
-
-  while (index < text.length - 1) {
-    if (text[index] !== '%' || text[index + 1] !== '%') {
-      index++;
-      continue;
-    }
-
-    if (start == null) {
-      start = index;
-    } else {
-      ranges.push({ from: start, to: index + 2 });
-      start = null;
-    }
-    index += 2;
-  }
-
-  if (start != null) {
-    ranges.push({ from: start, to: text.length });
-  }
-  return ranges;
-}
-
-function findHtmlCommentRanges(doc: EditorView['state']['doc']): Span[] {
-  const text = doc.toString();
-  const ranges: Span[] = [];
-  let searchFrom = 0;
-
-  while (searchFrom < text.length) {
-    const start = text.indexOf('<!--', searchFrom);
-    if (start < 0) break;
-    const end = text.indexOf('-->', start + 4);
-    if (end < 0) {
-      ranges.push({ from: start, to: text.length });
-      break;
-    }
-    ranges.push({ from: start, to: end + 3 });
-    searchFrom = end + 3;
-  }
-
-  return ranges;
 }
 
 function renderInlineMath(

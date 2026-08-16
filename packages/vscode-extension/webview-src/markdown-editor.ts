@@ -47,6 +47,7 @@ import { isCodeFenceClosing, parseCodeFenceOpening } from './markdownFences';
 import {
   inlineCodeSourceSpans,
   isEscapedAt,
+  markdownFootnoteIndex,
   markdownLinkSourceSpans,
   markdownReferenceDefinitions,
   markdownReferenceLinkSourceSpans,
@@ -1054,6 +1055,12 @@ function createView(text: string, title?: string): EditorView {
         }),
         EditorView.lineWrapping,
         EditorView.updateListener.of(update => {
+          if (
+            update.docChanged
+            || (activeLinkPreview && !activeLinkPreview.anchor.isConnected)
+          ) {
+            dismissLinkPreview();
+          }
           if (update.docChanged && !applyingHostUpdate) {
             vscode.postMessage({ type: 'edit', text: update.state.doc.toString() });
           }
@@ -2874,11 +2881,14 @@ function applyResolvedLinkPreview(message: unknown): void {
   if (!message || typeof message !== 'object') return;
   const raw = message as Record<string, unknown>;
   const active = activeLinkPreview;
+  if (!active) return;
+  if (!active.anchor.isConnected) {
+    dismissLinkPreview();
+    return;
+  }
   if (
-    !active
-    || typeof raw.requestId !== 'string'
+    typeof raw.requestId !== 'string'
     || raw.requestId !== active.requestId
-    || !active.anchor.isConnected
   ) return;
   const preview = normalizedLinkPreview(raw.preview);
   if (!preview) return;
@@ -2980,36 +2990,11 @@ function findFootnoteDefinition(
   doc: Text,
   id: string,
 ): { position: number; text: string } | undefined {
-  for (let lineNumber = 1; lineNumber <= doc.lines; lineNumber++) {
-    const line = doc.line(lineNumber);
-    const match = line.text.match(/^(\s*)\[\^([^\]\s]+)\]:\s*(.*)$/);
-    if (!match || match[2] !== id || isEscapedAt(line.text, match[1]!.length)) continue;
-    const text = [match[3] ?? ''];
-    for (let continuation = lineNumber + 1; continuation <= doc.lines; continuation++) {
-      const next = doc.line(continuation).text;
-      if (!/^(?: {2,}|\t)\S/.test(next)) break;
-      text.push(next.trim());
-    }
-    return {
-      position: line.from + match[1]!.length,
-      text: text.join(' ').replace(/\s+/gu, ' ').trim().slice(0, 480),
-    };
-  }
-  return undefined;
+  return markdownFootnoteIndex(doc.toString()).definitions.get(id);
 }
 
 function findFirstFootnoteReference(doc: Text, id: string): number | undefined {
-  for (let lineNumber = 1; lineNumber <= doc.lines; lineNumber++) {
-    const line = doc.line(lineNumber);
-    const definition = line.text.match(/^(\s*)\[\^([^\]\s]+)\]:/);
-    for (const match of line.text.matchAll(/\[\^([^\]\s]+)\]/g)) {
-      const index = match.index ?? 0;
-      if (match[1] !== id || isEscapedAt(line.text, index)) continue;
-      if (definition && definition[2] === id && index === definition[1]!.length) continue;
-      return line.from + index;
-    }
-  }
-  return undefined;
+  return markdownFootnoteIndex(doc.toString()).references.get(id)?.[0];
 }
 
 window.addEventListener('message', event => {

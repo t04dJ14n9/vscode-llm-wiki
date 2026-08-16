@@ -539,6 +539,70 @@ test.describe('LLM Wiki — E2E Bidirectional Links', () => {
     await expect(page.locator('.llm-wiki-link-preview')).toHaveCount(0);
   });
 
+  test('document replacement dismisses loading and settled link previews', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+    await waitForEditorBootstrap(page);
+    const doc = ['[Local](../raw/local.md)', '', 'Neutral line.'].join('\n');
+    const replaceDocument = async () => {
+      await page.evaluate(() => window.postMessage({
+        type: 'setText',
+        text: '# Replacement\n\nNeutral line.',
+      }, '*'));
+    };
+    const restoreDocument = async () => {
+      await page.evaluate(text => window.postMessage({ type: 'setText', text }, '*'), doc);
+      await page.evaluate(() => {
+        const view = window.__cmView;
+        view.dispatch({ selection: { anchor: view.state.doc.line(3).from } });
+      });
+    };
+
+    await restoreDocument();
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+    const preview = page.locator('.llm-wiki-link-preview');
+    const local = page.getByRole('button', { name: 'Local', exact: true });
+    await local.hover();
+    const loadingRequest = await page.evaluate(() =>
+      window.__mockMessages.filter(message => message.type === 'resolveLinkPreview').at(-1)
+    );
+    await expect(preview).toContainText('../raw/local.md');
+    await replaceDocument();
+    await expect(preview).toHaveCount(0);
+    await page.evaluate(requestId => window.postMessage({
+      type: 'linkPreview',
+      requestId,
+      preview: {
+        kind: 'markdown',
+        target: '../raw/local.md',
+        title: 'Late local result',
+        path: 'raw/local.md',
+        excerpt: 'A late response must not preserve a disconnected preview.',
+      },
+    }, '*'), loadingRequest.requestId);
+    await expect(preview).toHaveCount(0);
+
+    await page.mouse.move(1, 1);
+    await restoreDocument();
+    await page.getByRole('button', { name: 'Local', exact: true }).hover();
+    const settledRequest = await page.evaluate(() =>
+      window.__mockMessages.filter(message => message.type === 'resolveLinkPreview').at(-1)
+    );
+    await page.evaluate(requestId => window.postMessage({
+      type: 'linkPreview',
+      requestId,
+      preview: {
+        kind: 'markdown',
+        target: '../raw/local.md',
+        title: 'Local source',
+        path: 'raw/local.md',
+        excerpt: 'Settled preview evidence.',
+      },
+    }, '*'), settledRequest.requestId);
+    await expect(preview).toContainText('Settled preview evidence.');
+    await replaceDocument();
+    await expect(preview).toHaveCount(0);
+  });
+
   test('inline-code speedrun links render as one clickable label', async ({ page }) => {
     await page.goto('http://localhost:8979/test.html');
     await waitForEditorBootstrap(page);
@@ -7863,6 +7927,52 @@ test.describe('LLM Wiki — E2E Bidirectional Links', () => {
     await expect(page.locator('.llm-wiki-link-preview')).toBeVisible();
     await page.keyboard.press('Escape');
     await expect(page.locator('.llm-wiki-link-preview')).toHaveCount(0);
+  });
+
+  test('footnote navigation and previews ignore code and hidden-comment literals', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+    await waitForEditorBootstrap(page);
+    const doc = [
+      '`[^flash]`',
+      '%%',
+      '[^flash]: Hidden comment definition.',
+      '%%',
+      '```md',
+      '[^flash]: Fenced code definition.',
+      '```',
+      '',
+      'Real claim[^flash].',
+      '',
+      '[^flash]: Real rendered definition.',
+    ].join('\n');
+    await page.evaluate(text => window.postMessage({ type: 'setText', text }, '*'), doc);
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      view.dispatch({ selection: { anchor: view.state.doc.line(8).from } });
+    });
+
+    const reference = page.locator('.cm-hybrid-footnote-ref');
+    const definition = page.locator('.cm-hybrid-footnote-def-label');
+    await expect(reference).toHaveCount(1);
+    await expect(definition).toHaveCount(1);
+    await reference.focus();
+    const preview = page.locator('.llm-wiki-link-preview');
+    await expect(preview).toContainText('Real rendered definition.');
+    await expect(preview).not.toContainText('Hidden comment definition.');
+    await reference.press('Enter');
+    await expect.poll(() => page.evaluate(() =>
+      window.__cmView.state.doc.lineAt(window.__cmView.state.selection.main.head).number
+    )).toBe(11);
+
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      view.dispatch({ selection: { anchor: view.state.doc.line(8).from } });
+    });
+    await definition.click();
+    await expect.poll(() => page.evaluate(() =>
+      window.__cmView.state.doc.lineAt(window.__cmView.state.selection.main.head).number
+    )).toBe(9);
   });
 
   test('copying rendered Obsidian footnote refs preserves raw markdown delimiters', async ({ page }) => {
