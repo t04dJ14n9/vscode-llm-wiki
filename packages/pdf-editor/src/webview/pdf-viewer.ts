@@ -69,6 +69,20 @@ import {
   type PdfOutlineTextPage,
 } from './domain/pdfInferredOutline';
 import {
+  DEFAULT_PDF_TOOLBAR_PREFERENCE,
+  normalizePdfToolbarPreference,
+  pdfToolbarDockAtPoint,
+  togglePdfToolbarPreference,
+  type PdfToolbarDock,
+  type PdfToolbarPreference,
+} from './domain/pdfToolbarLayout';
+import {
+  ensurePdfReaderLayout,
+  ensurePdfToolbarDropTargets,
+  ensurePdfToolbarGrip,
+  ensurePdfToolbarMenuActions,
+} from './pdfToolbarDom';
+import {
   capturePdfAgentClipboardPng,
   writePdfAgentClipboard,
   type PdfAgentClipboardContext,
@@ -342,6 +356,12 @@ interface PdfPinchZoomAnchor {
   pdfY?: number;
 }
 
+interface PdfToolbarDrag {
+  pointerId: number;
+  origin: PdfToolbarDock;
+  candidate?: PdfToolbarDock;
+}
+
 interface PdfViewLocation {
   page: number;
   pdfX: number;
@@ -363,6 +383,10 @@ let engine: any;
 let pdfDoc: any;
 
 export class PdfViewer {
+  private readonly toolbar = document.getElementById('toolbar') as HTMLElement;
+  private readonly readerLayout = ensurePdfReaderLayout(this.toolbar);
+  private readonly toolbarGrip = ensurePdfToolbarGrip(this.toolbar);
+  private readonly toolbarDropTargets = ensurePdfToolbarDropTargets(this.readerLayout);
   private readonly container = document.getElementById('viewer-container')!;
   private readonly pageContainer = document.getElementById('page-container')!;
   private readonly pageInfo = document.getElementById('page-info')!;
@@ -396,6 +420,10 @@ export class PdfViewer {
   private pdfOutlineLoading = false;
   private pdfOutlineInferenceRunId = 0;
   private pdfOutlineRendered = false;
+  private pdfToolbarPreference: PdfToolbarPreference = {
+    ...DEFAULT_PDF_TOOLBAR_PREFERENCE,
+  };
+  private pdfToolbarDrag: PdfToolbarDrag | undefined;
   private readonly systemReduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
   private intersectionObserver: IntersectionObserver | null = null;
   private readonly pageVisibilityRatios = new Map<number, number>();
@@ -494,6 +522,8 @@ export class PdfViewer {
   constructor() {
     this.container.tabIndex = -1;
     this.restoreViewerState();
+    ensurePdfToolbarMenuActions(this.displayMenu);
+    this.applyPdfToolbarPreference(this.pdfToolbarPreference);
     document.body.classList.toggle('pdf-adapt-theme', this.adaptToTheme);
     this.applyReduceAnimationSetting();
     this.askPanel = askPdfEnabled ? createPdfAskPanel({
@@ -643,6 +673,9 @@ export class PdfViewer {
         }
         case 'loadPdf':
           void this.loadPdf(message.data);
+          break;
+        case 'pdfToolbarPreference':
+          this.applyPdfToolbarPreference(message.preference);
           break;
         case 'goToAnchor':
           void this.goToAnchor(message.anchor ?? {
@@ -821,6 +854,12 @@ export class PdfViewer {
       this.applyDisplayAction(button.dataset.displayAction ?? '');
       this.setDisplayMenuOpen(false);
     });
+    this.toolbarGrip.addEventListener('pointerdown', event => this.beginPdfToolbarDrag(event));
+    window.addEventListener('pointermove', event => this.updatePdfToolbarDrag(event));
+    window.addEventListener('pointerup', event => this.endPdfToolbarDrag(event));
+    window.addEventListener('pointercancel', event => {
+      if (this.pdfToolbarDrag?.pointerId === event.pointerId) this.cancelPdfToolbarDrag();
+    });
 
     const rectangleButton = document.getElementById('rectangle-selection') as HTMLButtonElement | null;
     rectangleButton?.addEventListener('click', () => {
@@ -836,6 +875,27 @@ export class PdfViewer {
       }
     });
     document.addEventListener('keydown', event => {
+      if (
+        event.key.toLowerCase() === 't'
+        && event.shiftKey
+        && !event.metaKey
+        && !event.ctrlKey
+        && !event.altKey
+        && !isEditableTarget(event.target)
+      ) {
+        event.preventDefault();
+        event.stopPropagation();
+        this.requestPdfToolbarPreference(
+          togglePdfToolbarPreference(this.pdfToolbarPreference),
+        );
+        return;
+      }
+      if (event.key === 'Escape' && this.pdfToolbarDrag) {
+        event.preventDefault();
+        this.cancelPdfToolbarDrag();
+        this.toolbarGrip.focus();
+        return;
+      }
       if (
         this.agentCapabilities.cursorAgent
         && (event.metaKey || event.ctrlKey)
@@ -1550,6 +1610,21 @@ export class PdfViewer {
   private setDisplayMenuOpen(open: boolean): void {
     this.displayMenu.classList.toggle('hidden', !open);
     document.getElementById('display-menu-button')?.setAttribute('aria-expanded', String(open));
+    if (!open) return;
+    const button = document.getElementById('display-menu-button');
+    if (!button) return;
+    const anchor = button.getBoundingClientRect();
+    const margin = 6;
+    const width = this.displayMenu.offsetWidth || 210;
+    const height = this.displayMenu.offsetHeight || 300;
+    const left = this.pdfToolbarPreference.dock === 'left'
+      ? Math.min(anchor.right + margin, window.innerWidth - width - margin)
+      : Math.min(anchor.left, window.innerWidth - width - margin);
+    const top = this.pdfToolbarPreference.dock === 'left'
+      ? Math.min(anchor.top, window.innerHeight - height - margin)
+      : anchor.bottom + margin;
+    this.displayMenu.style.left = `${Math.max(margin, Math.round(left))}px`;
+    this.displayMenu.style.top = `${Math.max(margin, Math.round(top))}px`;
   }
 
   private applyDisplayAction(action: string): void {
@@ -1570,6 +1645,16 @@ export class PdfViewer {
     else if (action === 'reduce-animation-on') this.setReduceAnimation('on');
     else if (action === 'reduce-animation-off') this.setReduceAnimation('off');
     else if (action === 'reduce-animation-system') this.setReduceAnimation('system');
+    else if (action === 'toolbar-top') {
+      this.requestPdfToolbarPreference({ dock: 'top', hidden: false });
+    } else if (action === 'toolbar-left') {
+      this.requestPdfToolbarPreference({ dock: 'left', hidden: false });
+    } else if (action === 'toolbar-hide') {
+      this.requestPdfToolbarPreference({
+        dock: this.pdfToolbarPreference.dock,
+        hidden: true,
+      });
+    }
     else if (action === 'adapt-theme') {
       this.adaptToTheme = !this.adaptToTheme;
       document.body.classList.toggle('pdf-adapt-theme', this.adaptToTheme);
@@ -5012,8 +5097,96 @@ export class PdfViewer {
     checkedActions.add(`presentation-${this.presentationMode()}`);
     if (this.adaptToTheme) checkedActions.add('adapt-theme');
     checkedActions.add(`reduce-animation-${this.reduceAnimation}`);
+    checkedActions.add(`toolbar-${this.pdfToolbarPreference.dock}`);
     for (const button of Array.from(this.displayMenu.querySelectorAll<HTMLButtonElement>('[data-display-action][aria-checked]'))) {
       button.setAttribute('aria-checked', String(checkedActions.has(button.dataset.displayAction ?? '')));
+    }
+  }
+
+  private applyPdfToolbarPreference(value: unknown): void {
+    const preference = normalizePdfToolbarPreference(value, this.pdfToolbarPreference);
+    this.pdfToolbarPreference = preference;
+    this.readerLayout.dataset.toolbarDock = preference.dock;
+    this.readerLayout.dataset.toolbarHidden = String(preference.hidden);
+    this.toolbar.hidden = preference.hidden;
+    this.toolbar.setAttribute(
+      'aria-orientation',
+      preference.dock === 'left' ? 'vertical' : 'horizontal',
+    );
+    this.cancelPdfToolbarDrag();
+    this.updateToolbarState();
+    if (this.fitMode !== 'custom' && this.loaded) {
+      requestAnimationFrame(() => void this.reapplyFitMode());
+    }
+  }
+
+  private requestPdfToolbarPreference(value: PdfToolbarPreference): void {
+    const preference = normalizePdfToolbarPreference(value, this.pdfToolbarPreference);
+    this.applyPdfToolbarPreference(preference);
+    vscode.postMessage({
+      type: 'pdfToolbarPreferenceChanged',
+      preference,
+    });
+  }
+
+  private beginPdfToolbarDrag(event: PointerEvent): void {
+    if (event.button !== 0 || this.pdfToolbarPreference.hidden) return;
+    event.preventDefault();
+    this.setDisplayMenuOpen(false);
+    this.pdfToolbarDrag = {
+      pointerId: event.pointerId,
+      origin: this.pdfToolbarPreference.dock,
+    };
+    this.readerLayout.dataset.toolbarDragging = 'true';
+    try {
+      this.toolbarGrip.setPointerCapture(event.pointerId);
+    } catch {
+      // Synthetic pointer events may not own a capturable pointer.
+    }
+  }
+
+  private updatePdfToolbarDrag(event: PointerEvent): void {
+    const drag = this.pdfToolbarDrag;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    event.preventDefault();
+    drag.candidate = pdfToolbarDockAtPoint(
+      { clientX: event.clientX, clientY: event.clientY },
+      { width: window.innerWidth, height: window.innerHeight },
+    );
+    this.updatePdfToolbarDropTargets(drag.candidate);
+  }
+
+  private endPdfToolbarDrag(event: PointerEvent): void {
+    const drag = this.pdfToolbarDrag;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    this.updatePdfToolbarDrag(event);
+    const candidate = drag.candidate;
+    this.cancelPdfToolbarDrag();
+    if (!candidate) return;
+    this.requestPdfToolbarPreference({
+      dock: candidate,
+      hidden: false,
+    });
+  }
+
+  private cancelPdfToolbarDrag(): void {
+    const drag = this.pdfToolbarDrag;
+    this.pdfToolbarDrag = undefined;
+    delete this.readerLayout.dataset.toolbarDragging;
+    this.updatePdfToolbarDropTargets(undefined);
+    if (!drag) return;
+    try {
+      if (this.toolbarGrip.hasPointerCapture(drag.pointerId)) {
+        this.toolbarGrip.releasePointerCapture(drag.pointerId);
+      }
+    } catch {
+      // Releasing an already-cancelled pointer is harmless.
+    }
+  }
+
+  private updatePdfToolbarDropTargets(candidate: PdfToolbarDock | undefined): void {
+    for (const [dock, target] of this.toolbarDropTargets) {
+      target.dataset.active = String(dock === candidate);
     }
   }
 

@@ -1189,10 +1189,16 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
   <title>LLM Wiki PDF</title>
   <style>
     html, body { height: 100%; margin: 0; padding: 0; background: var(--vscode-editor-background); color: var(--vscode-editor-foreground); overflow: hidden; }
-    #toolbar { box-sizing: border-box; height: 38px; display: flex; gap: 4px; align-items: center; padding: 0 6px; border-bottom: 1px solid var(--vscode-panel-border); background: var(--vscode-sideBar-background); font: 12px var(--vscode-font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif); }
+    #pdf-reader-layout { position: relative; box-sizing: border-box; display: grid; width: 100%; height: 100%; min-width: 0; min-height: 0; }
+    #pdf-reader-layout[data-toolbar-dock="top"] { grid-template: auto minmax(0, 1fr) / minmax(0, 1fr); }
+    #pdf-reader-layout[data-toolbar-dock="left"] { grid-template: minmax(0, 1fr) / auto minmax(0, 1fr); }
+    #toolbar { z-index: 2; box-sizing: border-box; height: 38px; display: flex; gap: 4px; align-items: center; padding: 0 6px; border-bottom: 1px solid var(--vscode-panel-border); background: var(--vscode-sideBar-background); font: 12px var(--vscode-font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif); }
+    #toolbar[hidden] { display: none; }
     #toolbar button { box-sizing: border-box; min-width: 26px; height: 26px; padding: 0 6px; border: 1px solid var(--vscode-button-border, transparent); background: transparent; color: var(--vscode-button-secondaryForeground); border-radius: 3px; cursor: pointer; }
     #toolbar button:hover { background: var(--vscode-toolbar-hoverBackground, rgba(90,93,94,.31)); }
     #toolbar button[aria-pressed="true"] { background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
+    #pdf-toolbar-grip { touch-action: none; cursor: grab; font-size: 15px; line-height: 1; }
+    #pdf-toolbar-grip:active { cursor: grabbing; }
     .toolbar-group { display: inline-flex; align-items: center; gap: 2px; }
     .toolbar-spacer { flex: 1 1 auto; }
     .toolbar-separator { width: 1px; height: 20px; margin: 0 3px; background: var(--vscode-panel-border); }
@@ -1234,6 +1240,34 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
     .pdf-search-settings-menu label:hover { background: var(--vscode-toolbar-hoverBackground, rgba(90,93,94,.31)); }
     .pdf-search .pdf-search-settings-menu input { width: 14px; min-width: 14px; height: 14px; margin: 0; padding: 0; border: 0; appearance: auto; accent-color: var(--vscode-focusBorder); }
     #viewer-shell { position: relative; display: flex; height: calc(100% - 38px); min-height: 0; }
+    #pdf-reader-layout > #viewer-shell { width: 100%; height: 100%; min-width: 0; min-height: 0; }
+    #pdf-reader-layout[data-toolbar-dock="top"] > #toolbar { grid-area: 1 / 1; width: 100%; }
+    #pdf-reader-layout[data-toolbar-dock="top"] > #viewer-shell { grid-area: 2 / 1; }
+    #pdf-reader-layout[data-toolbar-dock="left"] > #toolbar {
+      grid-area: 1 / 1;
+      width: 72px;
+      height: 100%;
+      min-height: 0;
+      flex-direction: column;
+      align-items: stretch;
+      overflow-x: hidden;
+      overflow-y: auto;
+      padding: 6px 5px;
+      border-right: 1px solid var(--vscode-panel-border);
+      border-bottom: 0;
+    }
+    #pdf-reader-layout[data-toolbar-dock="left"] > #viewer-shell { grid-area: 1 / 2; }
+    #pdf-reader-layout[data-toolbar-dock="left"] .toolbar-group { flex-direction: column; align-items: stretch; }
+    #pdf-reader-layout[data-toolbar-dock="left"] .toolbar-separator { width: auto; height: 1px; margin: 3px 0; }
+    #pdf-reader-layout[data-toolbar-dock="left"] .toolbar-number { box-sizing: border-box; width: 100%; height: auto; flex-direction: column; align-items: stretch; padding: 1px 0 2px; }
+    #pdf-reader-layout[data-toolbar-dock="left"] .toolbar-number input { width: 100%; text-align: center; }
+    #pdf-reader-layout[data-toolbar-dock="left"] .toolbar-number span { padding: 0 2px; text-align: center; }
+    #pdf-reader-layout[data-toolbar-dock="left"] #toolbar button { width: 100%; }
+    .pdf-toolbar-drop-target { position: absolute; z-index: 90; display: none; pointer-events: none; box-sizing: border-box; border: 2px solid transparent; background: transparent; }
+    #pdf-reader-layout[data-toolbar-dragging="true"] > .pdf-toolbar-drop-target { display: block; }
+    .pdf-toolbar-drop-target[data-dock="top"] { top: 0; right: 0; left: 0; height: 72px; }
+    .pdf-toolbar-drop-target[data-dock="left"] { top: 0; bottom: 0; left: 0; width: 72px; }
+    .pdf-toolbar-drop-target[data-active="true"] { border-color: var(--vscode-focusBorder, #007fd4); background: color-mix(in srgb, var(--vscode-focusBorder, #007fd4) 18%, transparent); }
     #pdf-sidebar { box-sizing: border-box; flex: 0 0 240px; width: 240px; border-right: 1px solid var(--vscode-panel-border); background: var(--vscode-sideBar-background); color: var(--vscode-editor-foreground); }
     #pdf-sidebar[hidden] { display: none; }
     .pdf-sidebar-header { box-sizing: border-box; display: flex; height: 38px; align-items: stretch; justify-content: space-between; gap: 4px; padding: 0 6px 0 8px; border-bottom: 1px solid var(--vscode-panel-border); }

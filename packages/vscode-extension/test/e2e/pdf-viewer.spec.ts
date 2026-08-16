@@ -526,6 +526,173 @@ test('pdf viewer display menu exposes Preview presentation and fit modes', async
   await expect(page.locator('#page-container')).toHaveAttribute('data-spread-parity', 'even');
 });
 
+test('PDF toolbar menu docks at top or left without covering navigation or content', async ({ page }) => {
+  await page.setViewportSize({ width: 1100, height: 760 });
+  await page.goto('http://localhost:8979/pdf-viewer.html?fixture=two-page');
+  await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 2/, { timeout: 10_000 });
+
+  const layout = page.locator('#pdf-reader-layout');
+  const toolbar = page.getByRole('toolbar', { name: 'PDF toolbar' });
+  await expect(layout).toHaveAttribute('data-toolbar-dock', 'top');
+  await expect(layout).toHaveAttribute('data-toolbar-hidden', 'false');
+
+  await page.getByRole('button', { name: 'Toggle sidebar' }).click();
+  await expect(page.getByRole('complementary', { name: 'PDF navigation' })).toBeVisible();
+  await page.getByRole('button', { name: 'Display options' }).click();
+  const menu = page.getByRole('menu', { name: 'Display options' });
+  await menu.getByRole('menuitemradio', { name: 'Move toolbar to left' }).click();
+  await expect(layout).toHaveAttribute('data-toolbar-dock', 'left');
+  await expect(toolbar.getByRole('button', { name: 'Zoom out' })).toBeVisible();
+  await expect(toolbar.getByRole('spinbutton', { name: 'Page' })).toBeVisible();
+
+  const leftGeometry = await page.evaluate(() => {
+    const toolbarRect = document.querySelector<HTMLElement>('#toolbar')!.getBoundingClientRect();
+    const shellRect = document.querySelector<HTMLElement>('#viewer-shell')!.getBoundingClientRect();
+    const sidebar = document.querySelector<HTMLElement>('#pdf-sidebar')!.getBoundingClientRect();
+    return {
+      toolbarRight: Math.round(toolbarRect.right),
+      shellLeft: Math.round(shellRect.left),
+      sidebarLeft: Math.round(sidebar.left),
+      sidebarRight: Math.round(sidebar.right),
+    };
+  });
+  expect(leftGeometry.toolbarRight).toBeLessThanOrEqual(leftGeometry.shellLeft);
+  expect(leftGeometry.sidebarLeft).toBeGreaterThanOrEqual(leftGeometry.toolbarRight);
+  expect(leftGeometry.sidebarRight).toBeGreaterThan(leftGeometry.sidebarLeft);
+
+  await page.getByRole('button', { name: 'Display options' }).click();
+  await menu.getByRole('menuitemradio', { name: 'Move toolbar to top' }).click();
+  await expect(layout).toHaveAttribute('data-toolbar-dock', 'top');
+  const topGeometry = await page.evaluate(() => {
+    const toolbarRect = document.querySelector<HTMLElement>('#toolbar')!.getBoundingClientRect();
+    const shellRect = document.querySelector<HTMLElement>('#viewer-shell')!.getBoundingClientRect();
+    return {
+      toolbarBottom: Math.round(toolbarRect.bottom),
+      shellTop: Math.round(shellRect.top),
+    };
+  });
+  expect(topGeometry.toolbarBottom).toBeLessThanOrEqual(topGeometry.shellTop);
+});
+
+test('PDF toolbar display menu stays inside a narrow viewport when docked left', async ({ page }) => {
+  await page.setViewportSize({ width: 260, height: 760 });
+  await page.goto('http://localhost:8979/pdf-viewer.html?fixture=two-page&toolbarDock=left');
+  await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 2/, { timeout: 10_000 });
+  await page.getByRole('button', { name: 'Display options' }).click();
+  const menu = page.getByRole('menu', { name: 'Display options' });
+  await expect(menu).toBeVisible();
+  const geometry = await menu.evaluate(element => {
+    const rect = element.getBoundingClientRect();
+    return {
+      left: Math.round(rect.left),
+      right: Math.round(rect.right),
+      viewportWidth: window.innerWidth,
+    };
+  });
+  expect(geometry.left).toBeGreaterThanOrEqual(0);
+  expect(geometry.right).toBeLessThanOrEqual(geometry.viewportWidth);
+});
+
+test('PDF toolbar grip commits only top and left drop targets', async ({ page }) => {
+  await page.setViewportSize({ width: 1100, height: 760 });
+  await page.goto('http://localhost:8979/pdf-viewer.html?fixture=two-page');
+  await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 2/, { timeout: 10_000 });
+  const layout = page.locator('#pdf-reader-layout');
+  const grip = page.getByRole('button', { name: 'Move PDF toolbar' });
+
+  let box = await grip.boundingBox();
+  expect(box).not.toBeNull();
+  await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(4, 400, { steps: 8 });
+  await expect(page.locator('.pdf-toolbar-drop-target[data-dock="left"]'))
+    .toHaveAttribute('data-active', 'true');
+  await page.mouse.up();
+  await expect(layout).toHaveAttribute('data-toolbar-dock', 'left');
+
+  box = await grip.boundingBox();
+  expect(box).not.toBeNull();
+  await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(500, 4, { steps: 8 });
+  await expect(page.locator('.pdf-toolbar-drop-target[data-dock="top"]'))
+    .toHaveAttribute('data-active', 'true');
+  await page.keyboard.press('Escape');
+  await page.mouse.up();
+  await expect(layout).toHaveAttribute('data-toolbar-dock', 'left');
+  await expect(layout).not.toHaveAttribute('data-toolbar-dragging', 'true');
+
+  box = await grip.boundingBox();
+  expect(box).not.toBeNull();
+  await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(500, 400, { steps: 8 });
+  await page.mouse.up();
+  await expect(layout).toHaveAttribute('data-toolbar-dock', 'left');
+
+  box = await grip.boundingBox();
+  expect(box).not.toBeNull();
+  await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(500, 4, { steps: 8 });
+  await page.mouse.up();
+  await expect(layout).toHaveAttribute('data-toolbar-dock', 'top');
+
+  const zoomOut = page.getByRole('button', { name: 'Zoom out' });
+  box = await zoomOut.boundingBox();
+  expect(box).not.toBeNull();
+  await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(4, 400, { steps: 8 });
+  await page.mouse.up();
+  await expect(layout).toHaveAttribute('data-toolbar-dock', 'top');
+});
+
+test('PDF toolbar hide and Shift-T restore preserve viewer state and ignore editable controls', async ({ page }) => {
+  await page.goto('http://localhost:8979/pdf-viewer.html?fixture=two-page');
+  await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 2/, { timeout: 10_000 });
+  const layout = page.locator('#pdf-reader-layout');
+  const toolbar = page.getByRole('toolbar', { name: 'PDF toolbar' });
+
+  await page.getByRole('button', { name: 'Next page' }).click();
+  await expect(page.locator('#page-info')).toHaveText(/Page 2 \/ 2/);
+  const zoom = page.getByRole('spinbutton', { name: 'Zoom' });
+  await zoom.fill('125');
+  await zoom.press('Enter');
+  await page.getByRole('button', { name: 'Toggle sidebar' }).click();
+
+  await page.getByRole('button', { name: 'Display options' }).click();
+  await page.getByRole('menu', { name: 'Display options' })
+    .getByRole('menuitem', { name: 'Hide toolbar' })
+    .click();
+  await expect(layout).toHaveAttribute('data-toolbar-hidden', 'true');
+  await expect(toolbar).toBeHidden();
+
+  await page.locator('#viewer-container').click({ position: { x: 10, y: 10 } });
+  await page.keyboard.press('Shift+T');
+  await expect(layout).toHaveAttribute('data-toolbar-hidden', 'false');
+  await expect(toolbar).toBeVisible();
+  await expect(page.locator('#page-info')).toHaveText(/Page 2 \/ 2/);
+  await expect(zoom).toHaveValue('125');
+  await expect(page.getByRole('complementary', { name: 'PDF navigation' })).toBeVisible();
+
+  await zoom.focus();
+  await page.keyboard.press('Shift+T');
+  await expect(layout).toHaveAttribute('data-toolbar-hidden', 'false');
+
+  await page.locator('#viewer-container').click({ position: { x: 10, y: 10 } });
+  await page.keyboard.press('Shift+T');
+  await expect(layout).toHaveAttribute('data-toolbar-hidden', 'true');
+  await page.evaluate(() => {
+    window.postMessage({
+      type: 'pdfToolbarPreference',
+      preference: { dock: 'left', hidden: false },
+    }, '*');
+  });
+  await expect(layout).toHaveAttribute('data-toolbar-hidden', 'false');
+  await expect(layout).toHaveAttribute('data-toolbar-dock', 'left');
+});
+
 test('pdf viewer lays out Preview book spreads with a centered cover', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.goto('http://localhost:8979/pdf-viewer.html?fixture=four-page');

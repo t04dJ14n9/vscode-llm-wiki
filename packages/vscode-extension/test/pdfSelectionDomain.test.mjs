@@ -19,6 +19,10 @@ const searchSource = join(
   packageRoot,
   '../pdf-editor/src/webview/domain/pdfSearch.ts',
 );
+const toolbarLayoutSource = join(
+  packageRoot,
+  '../pdf-editor/src/webview/domain/pdfToolbarLayout.ts',
+);
 const viewerSource = join(
   packageRoot,
   '../pdf-editor/src/webview/pdf-viewer.ts',
@@ -51,6 +55,7 @@ function compileTsModule(filename, mocks = {}) {
 }
 
 const pdfSearch = compileTsModule(searchSource);
+const pdfToolbarLayout = compileTsModule(toolbarLayoutSource);
 const pdfTextExtraction = compileTsModule(extractionSource);
 const pdfSelection = compileTsModule(selectionSource, {
   './pdfSearch': pdfSearch,
@@ -87,6 +92,8 @@ const pdfViewer = compileTsModule(viewerSource, {
   './domain/pdfTextExtraction': pdfTextExtraction,
   './domain/pdfOutline': {},
   './domain/pdfInferredOutline': {},
+  './domain/pdfToolbarLayout': pdfToolbarLayout,
+  './pdfToolbarDom': {},
   './pdfAgentClipboard': pdfAgentClipboardMock,
   './pdfLayout': {},
   './pdfTextLayer': {},
