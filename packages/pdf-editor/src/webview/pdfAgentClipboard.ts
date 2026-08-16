@@ -75,7 +75,7 @@ export function capturePdfSelectionSnapshot(
   let outputScale = pdfSelectionCropScale(geometry);
   if (!positiveFiniteNumber(outputScale)) return undefined;
   for (let attempt = 0; attempt < PDF_CROP_MAX_ATTEMPTS; attempt++) {
-    const crop = drawPdfSelectionCrop(source, geometry, outputScale);
+    const crop = drawPdfSelectionCrop(source, geometry, outputScale, options);
     if (!crop) return undefined;
     try {
       const dataUrl = crop.canvas.toDataURL('image/png');
@@ -115,6 +115,7 @@ function drawPdfSelectionCrop(
   source: PdfSelectionCropSource,
   geometry: PdfSelectionCropGeometry,
   outputScale: number,
+  options?: { throwOnCaptureError?: boolean },
 ): PdfSelectionCrop | undefined {
   const {
     cropRect: [left, top],
@@ -126,39 +127,44 @@ function drawPdfSelectionCrop(
   } = geometry;
   if (!Number.isFinite(outputScale) || outputScale <= 0) return undefined;
 
-  const output = document.createElement('canvas');
-  output.width = Math.max(1, Math.round(widthPoints * outputScale));
-  output.height = Math.max(1, Math.round(heightPoints * outputScale));
-  const context = output.getContext('2d');
-  if (!context) return undefined;
-  context.fillStyle = '#ffffff';
-  context.fillRect(0, 0, output.width, output.height);
-  context.drawImage(
-    source.canvas,
-    left * sourceScaleX,
-    top * sourceScaleY,
-    widthPoints * sourceScaleX,
-    heightPoints * sourceScaleY,
-    0,
-    0,
-    output.width,
-    output.height,
-  );
-  context.strokeStyle = PDF_SELECTION_OUTLINE_COLOR;
-  context.lineWidth = Math.max(2, Math.min(4, outputScale * 1.35));
-  for (const rect of rects) {
-    context.strokeRect(
-      (rect[0] - left) * outputScale,
-      (rect[1] - top) * outputScale,
-      (rect[2] - rect[0]) * outputScale,
-      (rect[3] - rect[1]) * outputScale,
+  try {
+    const output = document.createElement('canvas');
+    output.width = Math.max(1, Math.round(widthPoints * outputScale));
+    output.height = Math.max(1, Math.round(heightPoints * outputScale));
+    const context = output.getContext('2d');
+    if (!context) return undefined;
+    context.fillStyle = '#ffffff';
+    context.fillRect(0, 0, output.width, output.height);
+    context.drawImage(
+      source.canvas,
+      left * sourceScaleX,
+      top * sourceScaleY,
+      widthPoints * sourceScaleX,
+      heightPoints * sourceScaleY,
+      0,
+      0,
+      output.width,
+      output.height,
     );
+    context.strokeStyle = PDF_SELECTION_OUTLINE_COLOR;
+    context.lineWidth = Math.max(2, Math.min(4, outputScale * 1.35));
+    for (const rect of rects) {
+      context.strokeRect(
+        (rect[0] - left) * outputScale,
+        (rect[1] - top) * outputScale,
+        (rect[2] - rect[0]) * outputScale,
+        (rect[3] - rect[1]) * outputScale,
+      );
+    }
+    return {
+      page: source.page,
+      canvas: output,
+      cropRect: geometry.cropRect,
+    };
+  } catch (cause) {
+    if (options?.throwOnCaptureError) throw cause;
+    return undefined;
   }
-  return {
-    page: source.page,
-    canvas: output,
-    cropRect: geometry.cropRect,
-  };
 }
 
 export function stitchPdfSelectionCrops(
@@ -313,56 +319,69 @@ function stitchPdfSelectionCropsAtScale(
   const commonHeights = ordered.map(crop => (
     crop.canvas.height * commonWidth / crop.canvas.width
   ));
-  const combinedHeight = commonHeights.reduce((sum, height) => sum + height, 0)
-    + PDF_AGENT_CLIPBOARD_GUTTER_PX * (ordered.length - 1);
+  const combinedCropHeight = commonHeights.reduce(
+    (sum, height) => sum + height,
+    0,
+  );
+  const combinedGutterHeight = PDF_AGENT_CLIPBOARD_GUTTER_PX
+    * (ordered.length - 1);
   if (
     !positiveFiniteNumber(commonWidth)
-    || !positiveFiniteNumber(combinedHeight)
+    || !positiveFiniteNumber(combinedCropHeight)
+    || !Number.isFinite(combinedGutterHeight)
+    || combinedGutterHeight >= PDF_AGENT_CLIPBOARD_MAX_CROP_EDGE
     || commonHeights.some(height => !positiveFiniteNumber(height))
   ) return undefined;
   const edgeScale = Math.min(
     1,
     PDF_AGENT_CLIPBOARD_MAX_CROP_EDGE / commonWidth,
-    PDF_AGENT_CLIPBOARD_MAX_CROP_EDGE / combinedHeight,
+    (PDF_AGENT_CLIPBOARD_MAX_CROP_EDGE - combinedGutterHeight)
+      / combinedCropHeight,
   );
   const outputScale = edgeScale * scaleMultiplier;
   if (!positiveFiniteNumber(outputScale)) return undefined;
 
-  const output = document.createElement('canvas');
-  output.width = Math.max(
-    1,
-    Math.min(
-      PDF_AGENT_CLIPBOARD_MAX_CROP_EDGE,
-      Math.ceil(commonWidth * outputScale),
-    ),
-  );
-  output.height = Math.max(
-    1,
-    Math.min(
-      PDF_AGENT_CLIPBOARD_MAX_CROP_EDGE,
-      Math.ceil(combinedHeight * outputScale),
-    ),
-  );
-  const context = output.getContext('2d');
-  if (!context) return undefined;
-  context.fillStyle = '#ffffff';
-  context.fillRect(0, 0, output.width, output.height);
-  let top = 0;
-  ordered.forEach((crop, index) => {
-    const height = commonHeights[index]! * outputScale;
-    context.drawImage(
-      crop.canvas,
-      0,
-      top,
-      commonWidth * outputScale,
-      height,
+  try {
+    const output = document.createElement('canvas');
+    output.width = Math.max(
+      1,
+      Math.min(
+        PDF_AGENT_CLIPBOARD_MAX_CROP_EDGE,
+        Math.ceil(commonWidth * outputScale),
+      ),
     );
-    top += height;
-    if (index < ordered.length - 1) {
-      top += PDF_AGENT_CLIPBOARD_GUTTER_PX * outputScale;
-    }
-  });
-  return output;
+    output.height = Math.max(
+      1,
+      Math.min(
+        PDF_AGENT_CLIPBOARD_MAX_CROP_EDGE,
+        Math.ceil(
+          combinedCropHeight * outputScale + combinedGutterHeight,
+        ),
+      ),
+    );
+    const context = output.getContext('2d');
+    if (!context) return undefined;
+    context.fillStyle = '#ffffff';
+    context.fillRect(0, 0, output.width, output.height);
+    let top = 0;
+    ordered.forEach((crop, index) => {
+      const height = commonHeights[index]! * outputScale;
+      context.drawImage(
+        crop.canvas,
+        0,
+        top,
+        commonWidth * outputScale,
+        height,
+      );
+      top += height;
+      if (index < ordered.length - 1) {
+        top += PDF_AGENT_CLIPBOARD_GUTTER_PX;
+      }
+    });
+    return output;
+  } catch {
+    return undefined;
+  }
 }
 
 function canvasPngBlob(canvas: HTMLCanvasElement): Promise<Blob | undefined> {
@@ -376,8 +395,12 @@ function canvasPngBlob(canvas: HTMLCanvasElement): Promise<Blob | undefined> {
 }
 
 function validPdfRects(value: unknown): PdfRect[] {
-  if (!Array.isArray(value)) return [];
-  return value.filter(validPdfRect).map(rect => [...rect] as PdfRect);
+  if (
+    !Array.isArray(value)
+    || value.length === 0
+    || !value.every(validPdfRect)
+  ) return [];
+  return value.map(rect => [...rect] as PdfRect);
 }
 
 function validPdfRect(value: unknown): value is PdfRect {
