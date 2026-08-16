@@ -136,6 +136,27 @@ test.describe('LLM Wiki Markdown expanded Vim command fuzzing', () => {
     }, 'multi-key replacement remains anchored while list rendering updates');
   });
 
+  test('non-Vim text input replaces only the selected source inside rendered inline math', async ({ page }) => {
+    await openHarness(page);
+    await prepareEditor(page, {
+      text: 'o`$x$ beta``$x beta$x$````[]\ta$a',
+      cursor: 1,
+      vimMode: false,
+    });
+
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      view.dispatch({ selection: { anchor: 1, head: 27 } });
+      view.focus();
+    });
+    await page.keyboard.insertText('\t');
+
+    await expectEditorState(page, {
+      text: 'o\t]\ta$a',
+      cursor: 2,
+    }, 'input replacement retains source after an endpoint inside rendered inline math');
+  });
+
   test('Vim j and k move by document lines from a clean cursor column', async ({ page }) => {
     await openHarness(page);
     const text = 'alpha beta\ngamma delta\nlast line';

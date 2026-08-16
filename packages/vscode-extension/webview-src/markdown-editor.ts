@@ -683,6 +683,43 @@ function handleVimNormalModeBeforeInput(event: InputEvent, editorView: EditorVie
   return true;
 }
 
+function handleRenderedSelectionBeforeInput(event: InputEvent, editorView: EditorView): boolean {
+  if (
+    vimModeEnabled
+    || event.inputType !== 'insertText'
+    || typeof event.data !== 'string'
+  ) {
+    return false;
+  }
+
+  const selection = editorView.state.selection.main;
+  if (selection.empty || editorView.state.selection.ranges.length !== 1) return false;
+
+  const domSelection = window.getSelection();
+  if (!domSelection?.anchorNode || !domSelection.focusNode) return false;
+
+  let domAnchor: number;
+  let domHead: number;
+  try {
+    domAnchor = editorView.posAtDOM(domSelection.anchorNode, domSelection.anchorOffset);
+    domHead = editorView.posAtDOM(domSelection.focusNode, domSelection.focusOffset);
+  } catch {
+    return false;
+  }
+  if (domAnchor === selection.anchor && domHead === selection.head) return false;
+
+  event.preventDefault();
+  event.stopPropagation();
+  event.stopImmediatePropagation();
+  editorView.dispatch({
+    changes: { from: selection.from, to: selection.to, insert: event.data },
+    selection: { anchor: selection.from + event.data.length },
+    scrollIntoView: true,
+    userEvent: 'input.type',
+  });
+  return true;
+}
+
 function isPlainBacktickKeydown(event: KeyboardEvent): boolean {
   if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return false;
   return event.key === '`' || event.code === 'Backquote';
@@ -713,7 +750,9 @@ const vimBacktickGuard = ViewPlugin.define((editorView: EditorView) => {
   };
   const beforeinput = (event: Event) => {
     if (event instanceof InputEvent) {
-      handleVimNormalModeBeforeInput(event, editorView);
+      if (!handleRenderedSelectionBeforeInput(event, editorView)) {
+        handleVimNormalModeBeforeInput(event, editorView);
+      }
     }
   };
   editorView.dom.addEventListener('keydown', keydown, true);
