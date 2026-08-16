@@ -897,6 +897,26 @@ test('markdown editor provider routes Copy for Agent intent through the shared h
   ]);
 });
 
+test('markdown editor provider leaves provider-specific selection routing absent', async () => {
+  const messages = [];
+  const executeCommandCalls = [];
+  const vscode = createVscodeMock({ executeCommandCalls });
+  const { MarkdownEditorProvider } = loadTsModule('src/markdownEditorProvider.ts', { vscode });
+  const provider = new MarkdownEditorProvider({
+    extensionUri: { scheme: 'file', path: '/extension' },
+    workspaceState: createStorageMock(),
+  });
+  const panel = createPanelMock(messages);
+
+  await provider.resolveCustomTextEditor(createDocumentMock(), panel, {});
+  await panel.fireMessage({ type: 'sendToAgent', agentId: 'codex' });
+
+  assert.equal(
+    executeCommandCalls.some(([command]) => command === 'llm-wiki.addSelectionToAgent'),
+    false,
+  );
+});
+
 test('markdown editor provider anchors an empty custom markdown selection to the whole document range', async () => {
   const messages = [];
   const vscode = createVscodeMock();

@@ -553,16 +553,6 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
           this.updateSelectionContext();
           await vscode.commands.executeCommand('llm-wiki.copySelectionForAgent');
           break;
-        case 'sendToAgent': {
-          if (!isExternalAgentId(message.agentId)) return;
-          this.activePanel = webviewPanel;
-          this.updateSelectionContext();
-          await vscode.commands.executeCommand('llm-wiki.addSelectionToAgent', {
-            agentId: message.agentId,
-            selection: this.getActiveSelectionContext(),
-          });
-          break;
-        }
         case 'renameTitle': {
           if (document.isUntitled) return;
           if (typeof message.title !== 'string') return;

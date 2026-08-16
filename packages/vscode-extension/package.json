@@ -79,9 +79,9 @@
         "title": "LLM Wiki: Open In Markdown Editor"
       },
       {
-        "command": "llm-wiki.addSelectionToContext",
-        "title": "LLM Wiki: Send Selection to Agent…",
-        "icon": "$(selection)"
+        "command": "llm-wiki.copySelectionForAgent",
+        "title": "LLM Wiki: Copy for Agent",
+        "icon": "$(copy)"
       },
       {
         "command": "llm-wiki.addSelectionToChat",
@@ -272,13 +272,13 @@
     "menus": {
       "editor/title": [
         {
-          "command": "llm-wiki.addSelectionToContext",
-          "when": "activeCustomEditorId == 'llm-wiki.markdownEditor'",
+          "command": "llm-wiki.copySelectionForAgent",
+          "when": "activeCustomEditorId == 'llm-wiki.markdownEditor' && llmWikiMarkdownHasSelection",
           "group": "navigation@1"
         },
         {
           "command": "llm-wiki.addSelectionToChat",
-          "when": "llmWikiHostIsCursor && activeCustomEditorId == 'llm-wiki.markdownEditor'",
+          "when": "llmWikiHostIsCursor && activeCustomEditorId == 'llm-wiki.markdownEditor' && llmWikiMarkdownHasSelection",
           "group": "navigation@2"
         },
         {
@@ -322,7 +322,7 @@
           "group": "navigation@8"
         },
         {
-          "command": "llm-wiki.addSelectionToContext",
+          "command": "llm-wiki.copySelectionForAgent",
           "when": "llmWikiPdfOpen && llmWikiPdfHasSelection",
           "group": "navigation@9"
         },
@@ -334,7 +334,7 @@
       ],
       "editor/context": [
         {
-          "command": "llm-wiki.addSelectionToContext",
+          "command": "llm-wiki.copySelectionForAgent",
           "when": "editorLangId == markdown && editorHasSelection",
           "group": "navigation@9"
         },

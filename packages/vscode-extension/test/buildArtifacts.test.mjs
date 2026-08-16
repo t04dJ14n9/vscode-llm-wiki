@@ -154,17 +154,23 @@ test('combined PDF artifacts retain dormant Ask protocol but omit removed select
   }
 });
 
-test('production PDF bundle contains provider dispatch contract and no static Cursor flag', () => {
-  const bundle = readFileSync(join(dist, 'pdf-viewer.js'), 'utf8');
-  for (const value of [
-    'agentHandoffCapabilities',
-    'sendToAgent',
-    'Send to ',
-    'Codex',
-    'Claude Code',
-    'CodeBuddy',
-  ]) assert.equal(bundle.includes(value), true);
-  assert.equal(bundle.includes('__llmWikiAddToCursorChat'), false);
+test('provider-specific selection controls are absent from production Markdown and PDF bundles', () => {
+  for (const file of ['markdown-editor.js', 'pdf-viewer.js']) {
+    const bundle = readFileSync(join(dist, file), 'utf8');
+    assert.equal(bundle.includes('Copy for Agent'), true, `${file} must expose Copy for Agent`);
+    assert.equal(bundle.includes('Add to Chat'), true, `${file} must retain the Cursor action`);
+    assert.equal(bundle.includes('cursorAgent'), true, `${file} must gate Add to Chat on Cursor`);
+    for (const removed of [
+      'sendToAgent',
+      'Send to ',
+      'Send to Codex',
+      'Send to Claude Code',
+      'Send to CodeBuddy',
+      'provider-action',
+    ]) assert.equal(bundle.includes(removed), false, `${file} still exposes ${removed}`);
+  }
+  const pdfBundle = readFileSync(join(dist, 'pdf-viewer.js'), 'utf8');
+  assert.equal(pdfBundle.includes('__llmWikiAddToCursorChat'), false);
 });
 
 test('webview webpack entries use VS Code webview size budgets', () => {
@@ -267,13 +273,14 @@ test('manifest contributes context-aware Markdown and PDF outlines to the main E
   );
 });
 
-test('manifest exposes selection export command while omitting Agent Context and Problems UI', () => {
+test('manifest exposes Copy for Agent while omitting the selection export command, Agent Context, and Problems UI', () => {
   const viewIds = (manifest.contributes.views['llm-wiki'] ?? []).map(view => view.id);
   const commandIds = (manifest.contributes.commands ?? []).map(command => command.command);
 
   assert.equal(viewIds.includes('llm-wiki-agent-context'), false);
   assert.equal(viewIds.includes('llm-wiki-problems'), false);
-  assert.equal(commandIds.includes('llm-wiki.addSelectionToContext'), true);
+  assert.equal(commandIds.includes('llm-wiki.copySelectionForAgent'), true);
+  assert.equal(commandIds.includes('llm-wiki.addSelectionToContext'), false);
   assert.equal(commandIds.includes('llm-wiki.addSelectionToChat'), true);
   assert.equal(commandIds.includes('llm-wiki.addCursorBrowserSelectionToChat'), true);
   assert.equal(commandIds.includes('llm-wiki.experimentalBrowser.open'), true);
@@ -296,32 +303,44 @@ test('manifest exposes selection export command while omitting Agent Context and
   );
 });
 
-test('manifest exposes generic Add to Chat only on Cursor while selection-to-agent remains product neutral', () => {
-  const command = manifest.contributes.commands.find(
+test('manifest exposes Copy for Agent in both hosts while Add to Chat stays Cursor-only', () => {
+  const addToChat = manifest.contributes.commands.find(
     item => item.command === 'llm-wiki.addSelectionToChat',
   );
-  assert.equal(command?.title, 'LLM Wiki: Add to Chat');
-  assert.equal(command?.enablement, 'llmWikiHostIsCursor');
+  assert.equal(addToChat?.title, 'LLM Wiki: Add to Chat');
+  assert.equal(addToChat?.enablement, 'llmWikiHostIsCursor');
 
-  const genericContributions = [
+  const addToChatContributions = [
     ...Object.values(manifest.contributes.menus ?? {}).flat(),
     ...(manifest.contributes.keybindings ?? []),
-  ].filter(item => item.command === command.command);
-  assert.ok(genericContributions.length > 0);
-  assert.ok(genericContributions.every(
+  ].filter(item => item.command === addToChat.command);
+  assert.ok(addToChatContributions.length > 0);
+  assert.ok(addToChatContributions.every(
     item => item.when.includes('llmWikiHostIsCursor'),
   ));
 
-  const selectionCommand = manifest.contributes.commands.find(
-    item => item.command === 'llm-wiki.addSelectionToContext',
+  const copyForAgent = manifest.contributes.commands.find(
+    item => item.command === 'llm-wiki.copySelectionForAgent',
   );
-  assert.equal(selectionCommand?.enablement, undefined);
-  const selectionContributions = Object.values(manifest.contributes.menus ?? {})
+  assert.equal(copyForAgent?.title, 'LLM Wiki: Copy for Agent');
+  assert.equal(copyForAgent?.icon, '$(copy)');
+  assert.equal(copyForAgent?.enablement, undefined);
+  const copyForAgentContributions = Object.values(manifest.contributes.menus ?? {})
     .flat()
-    .filter(item => item.command === selectionCommand.command);
-  assert.ok(selectionContributions.length > 0);
-  assert.ok(selectionContributions.every(
+    .filter(item => item.command === copyForAgent.command);
+  assert.ok(copyForAgentContributions.length > 0);
+  assert.ok(copyForAgentContributions.every(
     item => !item.when.includes('llmWikiHostIsCursor'),
+  ));
+  assert.ok(copyForAgentContributions.some(
+    item => item.when.includes("activeCustomEditorId == 'llm-wiki.markdownEditor'")
+      && item.when.includes('llmWikiMarkdownHasSelection'),
+  ));
+  assert.ok(copyForAgentContributions.some(
+    item => item.when.includes('llmWikiPdfOpen') && item.when.includes('llmWikiPdfHasSelection'),
+  ));
+  assert.ok(copyForAgentContributions.some(
+    item => item.when.includes('editorLangId == markdown') && item.when.includes('editorHasSelection'),
   ));
   assert.equal(
     (manifest.activationEvents ?? []).includes('onView:llm-wiki.learningChat'),

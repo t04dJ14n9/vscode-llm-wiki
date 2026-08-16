@@ -562,18 +562,11 @@ let applyingHostUpdate = false;
 let vimModeEnabled = false;
 let currentNotePath: string | undefined;
 let knownNotePaths: string[] = [];
-type ExternalAgentId = 'codex' | 'claude' | 'codebuddy';
-interface AgentHandoffCapability {
-  id: ExternalAgentId;
-  label: string;
-}
 interface AgentSurfaceCapabilities {
   cursorAgent: boolean;
-  providers: AgentHandoffCapability[];
 }
 let agentCapabilities: AgentSurfaceCapabilities = {
   cursorAgent: false,
-  providers: [],
 };
 let llmWikiVimMotionsInstalled = false;
 let llmWikiVimExCommandsInstalled = false;
@@ -2876,29 +2869,11 @@ function normalizeLearningAnnotations(value: unknown): LearningAnnotation[] {
 
 function normalizeAgentSurfaceCapabilities(value: unknown): AgentSurfaceCapabilities {
   if (!value || typeof value !== 'object') {
-    return { cursorAgent: false, providers: [] };
+    return { cursorAgent: false };
   }
-  const raw = value as { cursorAgent?: unknown; providers?: unknown };
-  const seen = new Set<ExternalAgentId>();
-  const providers: AgentHandoffCapability[] = Array.isArray(raw.providers)
-    ? raw.providers.flatMap(candidate => {
-        if (!candidate || typeof candidate !== 'object') return [];
-        const provider = candidate as { id?: unknown; label?: unknown };
-        const id = provider.id;
-        if (
-          (id !== 'codex' && id !== 'claude' && id !== 'codebuddy')
-          || typeof provider.label !== 'string'
-          || !provider.label.trim()
-          || seen.has(id)
-        ) return [];
-        seen.add(id);
-        const normalized: AgentHandoffCapability = { id, label: provider.label.trim() };
-        return [normalized];
-      })
-    : [];
+  const raw = value as { cursorAgent?: unknown };
   return {
     cursorAgent: raw.cursorAgent === true,
-    providers,
   };
 }
 

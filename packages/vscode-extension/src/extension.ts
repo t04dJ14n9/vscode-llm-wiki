@@ -11,9 +11,7 @@ import { llmWikiAnchorTarget } from './anchorUris';
 import {
   createAgentSurfaceCapabilitySource,
   handoffSelectionToAgent,
-  handoffSelectionToAgentId,
   handoffSelectionToCursor,
-  type ExternalAgentId,
 } from './agentHandoff';
 import { BacklinksProvider } from './backlinksProvider';
 import {
@@ -59,17 +57,9 @@ interface AddSelectionToChatInput {
   snapshotPng?: Uint8Array;
 }
 
-interface AddSelectionToAgentInput extends AddSelectionToChatInput {
-  agentId: ExternalAgentId;
-}
-
-export const ADD_SELECTION_TO_AGENT_COMMAND =
-  'llm-wiki.addSelectionToAgent';
-
 type SelectionHandoffTarget =
   | { kind: 'picker' }
-  | { kind: 'cursor' }
-  | { kind: 'agent'; agentId: ExternalAgentId };
+  | { kind: 'cursor' };
 
 export function activate(context: vscode.ExtensionContext): void {
   const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
@@ -179,17 +169,12 @@ function registerCommands(
 ): void {
   const addSelectionToChat = async (
     input: AddSelectionToChatInput | undefined,
-    target: SelectionHandoffTarget,
   ): Promise<void> => {
     const root = requireWorkspaceRoot(workspaceRoot);
     if (!root) return;
     if (!input?.selection && isPdfUri(activeTabUri())) {
-      if (target.kind === 'agent') {
-        await pdfEditorProvider?.addSelectionToAgent(target.agentId);
-      } else {
-        await pdfEditorProvider?.addSelectionToCursorChat();
-        if (target.kind === 'cursor') setAgentHandoffActive(true);
-      }
+      await pdfEditorProvider?.addSelectionToCursorChat();
+      setAgentHandoffActive(true);
       return;
     }
     if (input?.selection && !isSelectionContext(input.selection)) {
@@ -201,9 +186,9 @@ function registerCommands(
       input?.selection,
       input?.snapshotPng,
       'The selection crop could not be saved; the active agent will use text context only.',
-      target,
+      { kind: 'cursor' },
     );
-    if (sent && target.kind === 'cursor') setAgentHandoffActive(true);
+    if (sent) setAgentHandoffActive(true);
   };
 
   context.subscriptions.push(
@@ -284,35 +269,21 @@ function registerCommands(
         MarkdownEditorProvider.viewType,
       );
     }),
-    vscode.commands.registerCommand('llm-wiki.addSelectionToContext', async () => {
-      const root = requireWorkspaceRoot(workspaceRoot);
-      if (!root) return;
-      await exportSelectionAndHandoff(
-        root,
-        undefined,
-        undefined,
-        'The selection crop could not be saved; the active agent will use text context only.',
-        { kind: 'picker' },
-      );
-    }),
     vscode.commands.registerCommand(
       'llm-wiki.copySelectionForAgent',
-      (selection?: SelectionContext) => copyMarkdownSelectionForAgent(selection),
+      (selection?: SelectionContext) => (
+        isPdfUri(activeTabUri())
+          ? pdfEditorProvider?.copySelectionForAgent() ?? false
+          : copyMarkdownSelectionForAgent(selection)
+      ),
     ),
     vscode.commands.registerCommand(
       'llm-wiki.addSelectionToChat',
-      (input?: AddSelectionToChatInput) => addSelectionToChat(input, { kind: 'cursor' }),
+      (input?: AddSelectionToChatInput) => addSelectionToChat(input),
     ),
     vscode.commands.registerCommand(
       'llm-wiki.addSelectionToCursorChat',
-      (input?: AddSelectionToChatInput) => addSelectionToChat(input, { kind: 'cursor' }),
-    ),
-    vscode.commands.registerCommand(
-      ADD_SELECTION_TO_AGENT_COMMAND,
-      (input?: AddSelectionToAgentInput) => {
-        if (!isExternalAgentId(input?.agentId)) return;
-        return addSelectionToChat(input, { kind: 'agent', agentId: input.agentId });
-      },
+      (input?: AddSelectionToChatInput) => addSelectionToChat(input),
     ),
     vscode.commands.registerCommand(
       'llm-wiki.addCursorBrowserSelectionToChat',
@@ -612,9 +583,7 @@ async function exportSelectionAndHandoff(
   const attachments = cropPath ? [vscode.Uri.file(cropPath)] : [];
   const sent = target.kind === 'cursor'
     ? await handoffSelectionToCursor(context, attachments)
-    : target.kind === 'agent'
-      ? await handoffSelectionToAgentId(target.agentId, context, attachments)
-      : (await handoffSelectionToAgent(context, attachments)) !== undefined;
+    : (await handoffSelectionToAgent(context, attachments)) !== undefined;
   return sent;
 }
 
@@ -782,9 +751,7 @@ async function handoffMarkdownRange(
 ): Promise<boolean> {
   return target.kind === 'cursor'
     ? handoffSelectionToCursor(context, [])
-    : target.kind === 'agent'
-      ? handoffSelectionToAgentId(target.agentId, context, [])
-      : (await handoffSelectionToAgent(context, [])) !== undefined;
+    : (await handoffSelectionToAgent(context, [])) !== undefined;
 }
 
 async function activeCustomSelection(): Promise<SelectionContext | undefined> {
@@ -839,10 +806,6 @@ function isMarkdownSelection(
   selection: SelectionContext | undefined,
 ): selection is SelectionContext & { metadata: { kind: 'markdown' } } {
   return isSelectionContext(selection) && selection.metadata?.kind === 'markdown';
-}
-
-function isExternalAgentId(value: unknown): value is ExternalAgentId {
-  return value === 'codex' || value === 'claude' || value === 'codebuddy';
 }
 
 /**
