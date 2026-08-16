@@ -78,11 +78,34 @@ test('PDF navigation sidebar renders nested bookmarks and jumps to their exact d
   await expect(section).toBeVisible();
   await expect(section.locator('.pdf-outline-page')).toHaveText('3');
 
+  const viewer = page.locator('#viewer-container');
+  const sourceLocation = await viewer.evaluate((element: HTMLElement) => {
+    element.scrollTop = 90;
+    element.scrollLeft = Math.min(24, element.scrollWidth - element.clientWidth);
+    return {
+      scrollTop: element.scrollTop,
+      scrollLeft: element.scrollLeft,
+    };
+  });
   await section.click();
 
   await expectCurrentPage(page, 3, 3);
   await expectDestinationNearViewerTop(page, 3, 'Section 12.2 target');
-  await expect(page.locator('#pdf-history-back')).toBeVisible();
+  const zoom = page.getByRole('spinbutton', { name: 'Zoom' });
+  await expect(zoom).toHaveValue('180');
+
+  const backButton = page.locator('#pdf-history-back');
+  await expect(backButton).toBeVisible();
+
+  await zoom.fill('125');
+  await zoom.press('Enter');
+  await expect(zoom).toHaveValue('125');
+
+  await backButton.click();
+  await expectCurrentPage(page, 1, 3);
+  await expect(zoom).toHaveValue('180');
+  await expectScrollLocation(viewer, sourceLocation);
+  await expect(backButton).toBeHidden();
 });
 
 test('PDF history back button stays legible over white pages in light and dark themes', async ({ page }) => {

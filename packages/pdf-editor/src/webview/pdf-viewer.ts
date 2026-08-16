@@ -364,6 +364,8 @@ interface PdfToolbarDrag {
 
 interface PdfViewLocation {
   page: number;
+  scale: number;
+  fitMode: 'custom' | 'width' | 'height' | 'page';
   pdfX: number;
   pdfY: number;
   viewportX: number;
@@ -4117,6 +4119,7 @@ export class PdfViewer {
     } else if (!sourceLocation || !await this.goToPage(targetPage, {
         scrollCurrentView: false,
         behavior: 'auto',
+        preserveScale: true,
       })) {
         clearPendingOrigin();
         return;
@@ -4162,6 +4165,8 @@ export class PdfViewer {
     );
     return {
       page,
+      scale: this.scale,
+      fitMode: this.fitMode,
       pdfX: (clientX - bounds.left) / Math.max(0.0001, this.scale),
       pdfY: (clientY - bounds.top) / Math.max(0.0001, this.scale),
       viewportX: clientX - viewport.left,
@@ -4494,15 +4499,32 @@ export class PdfViewer {
     if (!location) return;
     this.historyBackButton.disabled = true;
     try {
-      if (!await this.goToPage(location.page, {
-        scrollCurrentView: false,
-        behavior: 'auto',
-      })) {
+      this.cancelPinchZoom();
+      const navigationRunId = ++this.pageNavigationRunId;
+      this.currentPage = location.page;
+      this.fitMode = 'custom';
+      this.scale = location.scale;
+      const viewport = this.container.getBoundingClientRect();
+      const restore = this.rerender({
+        clientX: viewport.left + location.viewportX,
+        clientY: viewport.top + location.viewportY,
+        contentX: location.fallbackScrollLeft + location.viewportX,
+        contentY: location.fallbackScrollTop + location.viewportY,
+        scale: location.scale,
+        page: location.page,
+        pdfX: location.pdfX,
+        pdfY: location.pdfY,
+      });
+      const rerenderRunId = this.rerenderRunId;
+      await restore;
+      if (
+        navigationRunId !== this.pageNavigationRunId
+        || rerenderRunId !== this.rerenderRunId
+        || this.currentPage !== location.page
+      ) {
         return;
       }
-      await nextAnimationFrame();
       const trackingToken = this.beginCurrentPageTrackingLock();
-      const viewport = this.container.getBoundingClientRect();
       const wrapper = this.pages.get(location.page)?.wrapper;
       if (wrapper && wrapper.style.display !== 'none') {
         const bounds = wrapper.getBoundingClientRect();
@@ -4528,6 +4550,7 @@ export class PdfViewer {
           behavior: 'auto',
         });
       }
+      this.fitMode = location.fitMode;
       this.currentPage = location.page;
       this.pdfNavigationHistory.pop();
       this.updatePdfHistoryButton();
@@ -4554,7 +4577,11 @@ export class PdfViewer {
 
   private async goToPage(
     page: number,
-    options: { scrollCurrentView?: boolean; behavior?: ScrollBehavior } = {},
+    options: {
+      scrollCurrentView?: boolean;
+      behavior?: ScrollBehavior;
+      preserveScale?: boolean;
+    } = {},
   ): Promise<boolean> {
     if (!pdfDoc) return false;
     const runId = ++this.pageNavigationRunId;
@@ -4624,7 +4651,7 @@ export class PdfViewer {
     this.applyViewMode();
     this.updatePageInfo();
     const behavior = options.behavior ?? this.navigationScrollBehavior();
-    if (this.fitMode !== 'custom') {
+    if (this.fitMode !== 'custom' && !options.preserveScale) {
       await this.reapplyFitMode({ reuseRenderedPagesWhenScaleUnchanged: true });
     } else {
       if (options.scrollCurrentView !== false) {

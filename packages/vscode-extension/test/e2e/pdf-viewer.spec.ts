@@ -550,12 +550,14 @@ test('PDF toolbar menu docks at top or left without covering navigation or conte
     const shellRect = document.querySelector<HTMLElement>('#viewer-shell')!.getBoundingClientRect();
     const sidebar = document.querySelector<HTMLElement>('#pdf-sidebar')!.getBoundingClientRect();
     return {
+      toolbarWidth: Math.round(toolbarRect.width),
       toolbarRight: Math.round(toolbarRect.right),
       shellLeft: Math.round(shellRect.left),
       sidebarLeft: Math.round(sidebar.left),
       sidebarRight: Math.round(sidebar.right),
     };
   });
+  expect(leftGeometry.toolbarWidth).toBeLessThanOrEqual(52);
   expect(leftGeometry.toolbarRight).toBeLessThanOrEqual(leftGeometry.shellLeft);
   expect(leftGeometry.sidebarLeft).toBeGreaterThanOrEqual(leftGeometry.toolbarRight);
   expect(leftGeometry.sidebarRight).toBeGreaterThan(leftGeometry.sidebarLeft);

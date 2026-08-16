@@ -1245,14 +1245,14 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
     #pdf-reader-layout[data-toolbar-dock="top"] > #viewer-shell { grid-area: 2 / 1; }
     #pdf-reader-layout[data-toolbar-dock="left"] > #toolbar {
       grid-area: 1 / 1;
-      width: 72px;
+      width: 48px;
       height: 100%;
       min-height: 0;
       flex-direction: column;
       align-items: stretch;
       overflow-x: hidden;
       overflow-y: auto;
-      padding: 6px 5px;
+      padding: 6px 3px;
       border-right: 1px solid var(--vscode-panel-border);
       border-bottom: 0;
     }
