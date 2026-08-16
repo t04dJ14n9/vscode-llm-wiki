@@ -33,8 +33,8 @@ and producer tools outside the bundle.
 ## Orientation
 
 1. Read [the schema](SCHEMA.md).
-2. Read the [root index](index.md), [project index](projects/index.md), and
-   [raw index](raw/index.md).
+2. Read the [root index](_index.md), [project index](projects/_index.md), and
+   [raw index](raw/_index.md).
 3. Read the newest date group in [the log](log.md).
 4. Search existing titles, aliases, tags, and bodies before creating a page.
 5. Run `git submodule update --init --recursive` before relying on code.

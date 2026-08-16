@@ -19,7 +19,7 @@ repository.
 
 ## Markdown contract
 
-`index.md` and `log.md` are reserved at every level. Every other `.md` file is
+`_index.md` and `log.md` are reserved at every level. Every other `.md` file is
 an OKF concept and begins with YAML frontmatter containing a nonempty `type`.
 
 The interoperable minimum is:
@@ -50,10 +50,10 @@ extension fields.
 
 ## Hierarchical indexes
 
-Give every visible bundle-owned directory an `index.md`.
+Give every visible bundle-owned directory an `_index.md`.
 
 - List only immediate children.
-- Link a child directory to `child/`; consumers open its local `index.md`.
+- Link a child directory to `child/`; consumers open its local `_index.md`.
 - Group concepts by exact `type`.
 - Include a concept's title and description.
 - List local binary or code resources in a resource section.
@@ -103,7 +103,7 @@ human review.
 
 Keep title-derived source companions in `raw/` and matching binaries under
 `raw/assets/`. Route binary extensions—not `raw/assets/**`—through Git LFS so
-`raw/assets/index.md` remains ordinary Git text.
+`raw/assets/_index.md` remains ordinary Git text.
 
 Exclude databases, embeddings, caches, temporary extraction files, editor
 state, and copied project repositories.

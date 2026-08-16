@@ -213,7 +213,7 @@ appropriate.
 - Add an index freshness indicator and an explicit rebuild/check command for
   large vaults.
 - Keep generated indexes deterministic and add a CI check that rejects stale
-  indexes or missing immediate-child `index.md` files.
+  indexes or missing immediate-child `_index.md` files.
 
 ## Testing, CI, and observability
 

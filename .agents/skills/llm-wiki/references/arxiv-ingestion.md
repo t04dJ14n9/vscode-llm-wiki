@@ -49,5 +49,5 @@ Compile durable interpretation into `summaries/`, `entities/`, `concepts/`,
 ## Finish
 
 Rebuild indexes, validate hashes and links, confirm the PDF is tracked by Git
-LFS while `raw/assets/index.md` is not, inspect the diff, and record a
+LFS while `raw/assets/_index.md` is not, inspect the diff, and record a
 newest-first ingest entry in `log.md`.

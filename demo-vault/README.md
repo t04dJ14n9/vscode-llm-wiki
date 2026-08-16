@@ -17,11 +17,11 @@ the collection inspectable by tools and agents.
 
 ## Start reading
 
-- Open the [bundle index](index.md) for one-level navigation.
-- Follow a narrative through [summaries](summaries/index.md).
-- Start from a concrete question in [queries](queries/index.md).
-- Inspect the pinned [Nanochat project](projects/index.md).
-- Trace a claim into [raw research evidence](raw/index.md) and its local PDF.
+- Open the [bundle index](_index.md) for one-level navigation.
+- Follow a narrative through [summaries](summaries/_index.md).
+- Start from a concrete question in [queries](queries/_index.md).
+- Inspect the pinned [Nanochat project](projects/_index.md).
+- Trace a claim into [raw research evidence](raw/_index.md) and its local PDF.
 
 The best first page is the end-to-end Nanochat training summary. From there,
 follow focused concepts only when you need mechanism-level detail.
