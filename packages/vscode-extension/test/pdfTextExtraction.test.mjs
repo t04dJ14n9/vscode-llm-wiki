@@ -531,6 +531,38 @@ test('column detection reconnects a body lane after vertically overlapping margi
   ]);
 });
 
+test('figure regions stay ahead of a caption and split body lane despite source-order interleaving', () => {
+  const normalized = extraction.normalizeBasicPdfTextRects([
+    { content: 'chart left 1', rect: rect(140, 0, 10, 8) },
+    { content: 'chart left 2', rect: rect(140, 10, 10, 8) },
+    { content: 'body continuation 2', rect: rect(0, 100, 10, 8) },
+    { content: 'body continuation 3', rect: rect(0, 110, 10, 8) },
+    { content: 'chart middle 1', rect: rect(180, 0, 10, 8) },
+    { content: 'chart middle 2', rect: rect(180, 10, 10, 8) },
+    { content: 'Figure 1: chart caption', rect: rect(20, 40, 100, 8) },
+    { content: 'caption continuation', rect: rect(20, 50, 100, 8) },
+    { content: '1 Introduction', rect: rect(20, 70, 100, 8) },
+    { content: 'body opening 1', rect: rect(20, 90, 100, 8) },
+    { content: 'chart right 1', rect: rect(220, 0, 10, 8) },
+    { content: 'chart right 2', rect: rect(220, 10, 10, 8) },
+  ]);
+
+  assert.deepEqual(normalized.map(item => item.content), [
+    'chart left 1',
+    'chart left 2',
+    'chart middle 1',
+    'chart middle 2',
+    'chart right 1',
+    'chart right 2',
+    'Figure 1: chart caption',
+    'caption continuation',
+    '1 Introduction',
+    'body opening 1',
+    'body continuation 2',
+    'body continuation 3',
+  ]);
+});
+
 test('a full-width heading does not bridge otherwise separate PDF text lanes', () => {
   const normalized = extraction.normalizeBasicPdfTextRects([
     { content: 'full-width heading', rect: rect(0, 0, 120, 8) },
