@@ -95,10 +95,11 @@ export function markdownFootnoteIndex(text: string): MarkdownFootnoteIndex {
   const definitions = new Map<string, MarkdownFootnoteDefinition>();
   const references = new Map<string, number[]>();
   const lines = markdownSourceLines(text);
+  const fencedCode = fencedCodeSourceSpans(lines);
   const excluded = [
-    ...obsidianCommentSourceSpans(text),
+    ...fencedCode,
+    ...obsidianCommentSourceSpansOutside(text, fencedCode),
     ...htmlCommentSourceSpans(text),
-    ...fencedCodeSourceSpans(lines),
   ];
 
   lines.forEach((line, lineIndex) => {
@@ -139,6 +140,16 @@ export function markdownFootnoteIndex(text: string): MarkdownFootnoteIndex {
 }
 
 export function obsidianCommentSourceSpans(text: string): SourceSpan[] {
+  return obsidianCommentSourceSpansOutside(
+    text,
+    fencedCodeSourceSpans(markdownSourceLines(text)),
+  );
+}
+
+function obsidianCommentSourceSpansOutside(
+  text: string,
+  fencedCode: SourceSpan[],
+): SourceSpan[] {
   const ranges: SourceSpan[] = [];
   let start: number | null = null;
   let index = 0;
@@ -146,6 +157,10 @@ export function obsidianCommentSourceSpans(text: string): SourceSpan[] {
   while (index < text.length - 1) {
     if (text[index] !== '%' || text[index + 1] !== '%') {
       index++;
+      continue;
+    }
+    if (overlapsSpan({ from: index, to: index + 2 }, fencedCode)) {
+      index += 2;
       continue;
     }
     if (start == null) {

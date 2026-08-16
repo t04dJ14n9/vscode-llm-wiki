@@ -7975,6 +7975,35 @@ test.describe('LLM Wiki — E2E Bidirectional Links', () => {
     )).toBe(9);
   });
 
+  test('an unpaired Obsidian comment marker inside a fence cannot hide later footnotes', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+    await waitForEditorBootstrap(page);
+    const doc = [
+      '```text',
+      'literal %%',
+      '```',
+      '',
+      'Real claim[^live].',
+      '',
+      '[^live]: Real definition after fenced literal.',
+    ].join('\n');
+    await page.evaluate(text => window.postMessage({ type: 'setText', text }, '*'), doc);
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      view.dispatch({ selection: { anchor: view.state.doc.line(4).from } });
+    });
+
+    const reference = page.locator('.cm-hybrid-footnote-ref');
+    const definition = page.locator('.cm-hybrid-footnote-def-label');
+    await expect(reference).toHaveCount(1);
+    await expect(definition).toHaveCount(1);
+    await reference.focus();
+    await expect(page.locator('.llm-wiki-link-preview')).toContainText(
+      'Real definition after fenced literal.',
+    );
+  });
+
   test('copying rendered Obsidian footnote refs preserves raw markdown delimiters', async ({ page }) => {
     await page.goto('http://localhost:8979/test.html');
 
