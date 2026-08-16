@@ -83,6 +83,8 @@ interface ActivePdfWebview {
   agentClipboardContext?: PdfAgentClipboardContext;
   selection?: PdfSelectionAnchor;
   outline?: PdfOutlineEntry[];
+  outlineInferred?: boolean;
+  outlineLoading?: boolean;
   postMessage(message: unknown): void;
 }
 
@@ -229,7 +231,15 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
   }
 
   getPdfOutline(uri: vscode.Uri): readonly PdfOutlineEntry[] | undefined {
-    return this.webviews.get(uri.toString())?.outline;
+    const active = this.webviews.get(uri.toString());
+    return active?.outlineLoading ? undefined : active?.outline;
+  }
+
+  isPdfOutlineInferred(uri: vscode.Uri): boolean {
+    const active = this.webviews.get(uri.toString());
+    return active?.outlineLoading !== true
+      && active?.outlineInferred === true
+      && Boolean(active.outline?.length);
   }
 
   async revealPdfOutlineDestination(
@@ -454,7 +464,13 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
           await this.updateActiveSelection(key, message.anchor, message.clipboardSelection);
           break;
         case 'pdfOutline':
-          active.outline = normalizePdfOutlineEntries(message.items);
+          active.outlineLoading = message.loading === true;
+          active.outline = active.outlineLoading
+            ? undefined
+            : normalizePdfOutlineEntries(message.items);
+          active.outlineInferred = !active.outlineLoading
+            && message.inferred === true
+            && Boolean(active.outline?.length);
           this.firePdfOutlineChanged(pdfUri);
           break;
         case 'pageChanged':
@@ -1173,6 +1189,7 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
     #thumbnail-list { padding: 10px 8px; }
     #outline-list { padding: 6px 4px 14px; font: 12px var(--vscode-font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif); }
     .pdf-outline-empty { margin: 10px 8px; color: var(--vscode-descriptionForeground); }
+    .pdf-outline-kind { margin: 8px; color: var(--vscode-descriptionForeground); font-size: 11px; font-weight: 600; }
     .pdf-outline-tree { margin: 0; padding: 0; list-style: none; }
     .pdf-outline-tree .pdf-outline-tree { padding-left: 12px; }
     .pdf-outline-row { box-sizing: border-box; display: flex; width: 100%; min-height: 26px; align-items: center; gap: 8px; border: 0; border-radius: 3px; padding: 4px 7px; background: transparent; color: var(--vscode-editor-foreground); font: inherit; text-align: left; cursor: pointer; }

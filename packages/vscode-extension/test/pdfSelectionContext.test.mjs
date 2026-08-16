@@ -1508,6 +1508,12 @@ test('PDF outline payloads are bounded, normalized, and reveal the exact destina
     false,
   );
   assert.equal(provider.getPdfOutline(uri), entries);
+  const active = provider.webviews.get(uri.toString());
+  active.outlineInferred = true;
+  assert.equal(provider.isPdfOutlineInferred(uri), true);
+  active.outlineLoading = true;
+  assert.equal(provider.getPdfOutline(uri), undefined);
+  assert.equal(provider.isPdfOutlineInferred(uri), false);
 });
 
 function portablePdfHref(sourcePath, { page, textFragment } = {}) {

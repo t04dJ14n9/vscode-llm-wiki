@@ -450,6 +450,55 @@ test('pdf viewer sidebar renders page thumbnails and navigates like PDF++', asyn
   await expect(page.getByRole('button', { name: 'Page 2 thumbnail' })).toHaveAttribute('aria-current', 'page');
 });
 
+test('pdf viewer infers a labelled nested outline only when embedded bookmarks are absent', async ({ page }) => {
+  await page.goto('http://localhost:8979/pdf-viewer.html?fixture=inferred-outline');
+  await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 2/, { timeout: 10_000 });
+
+  await page.getByRole('button', { name: 'Toggle sidebar' }).click();
+  const navigation = page.getByRole('complementary', { name: 'PDF navigation' });
+  await navigation.getByRole('tab', { name: 'Outline' }).click();
+
+  await expect(navigation.locator('.pdf-outline-kind')).toHaveText('Inferred outline');
+  await expect(navigation.locator('.pdf-outline-row')).toHaveText([
+    /1 Introduction/,
+    /1.1 Motivation/,
+    /2 Method/,
+  ]);
+  const nested = navigation.locator('.pdf-outline-tree .pdf-outline-tree');
+  await expect(nested).toHaveCount(1);
+  await expect(nested.locator('.pdf-outline-row')).toContainText('1.1 Motivation');
+
+  await navigation.locator('.pdf-outline-row').filter({ hasText: '2 Method' }).click();
+  await expect(page.locator('#page-info')).toHaveText(/Page 2 \/ 2/);
+
+  const messages = await page.evaluate(() => (window as any).__mockMessages);
+  expect(messages).toContainEqual({
+    type: 'pdfOutline',
+    items: expect.any(Array),
+    inferred: true,
+    loading: false,
+  });
+});
+
+test('pdf viewer keeps embedded outline surfaces authored rather than inferred', async ({ page }) => {
+  await page.goto('http://localhost:8979/pdf-viewer.html?fixture=internal-destinations');
+  await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 3/, { timeout: 10_000 });
+
+  await page.getByRole('button', { name: 'Toggle sidebar' }).click();
+  const navigation = page.getByRole('complementary', { name: 'PDF navigation' });
+  await navigation.getByRole('tab', { name: 'Outline' }).click();
+
+  await expect(navigation.locator('.pdf-outline-row')).not.toHaveCount(0);
+  await expect(navigation.locator('.pdf-outline-kind')).toHaveCount(0);
+  const messages = await page.evaluate(() => (window as any).__mockMessages);
+  expect(messages).toContainEqual({
+    type: 'pdfOutline',
+    items: expect.any(Array),
+    inferred: false,
+    loading: false,
+  });
+});
+
 test('pdf viewer display menu exposes Preview presentation and fit modes', async ({ page }) => {
   await page.goto('http://localhost:8979/pdf-viewer.html?fixture=two-page');
   await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 2/, { timeout: 10_000 });

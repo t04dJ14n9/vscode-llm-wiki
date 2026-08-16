@@ -65,6 +65,10 @@ import {
   type PdfOutlineEntry,
 } from './domain/pdfOutline';
 import {
+  inferPdfOutline,
+  type PdfOutlineTextPage,
+} from './domain/pdfInferredOutline';
+import {
   capturePdfAgentClipboardPng,
   writePdfAgentClipboard,
   type PdfAgentClipboardContext,
@@ -388,6 +392,9 @@ export class PdfViewer {
   private reduceAnimation: PdfReduceAnimationSetting = 'system';
   private sidebarMode: 'thumbnails' | 'outline' = 'thumbnails';
   private pdfOutline: PdfOutlineEntry[] = [];
+  private pdfOutlineInferred = false;
+  private pdfOutlineLoading = false;
+  private pdfOutlineInferenceRunId = 0;
   private pdfOutlineRendered = false;
   private readonly systemReduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
   private intersectionObserver: IntersectionObserver | null = null;
@@ -1834,8 +1841,14 @@ export class PdfViewer {
         .openDocumentBuffer({ id: `doc-${Date.now()}`, content: bytes.buffer })
         .toPromise();
 
-      await this.loadPdfOutline();
+      const hasEmbeddedOutline = await this.loadEmbeddedPdfOutline();
       await this.layoutPages();
+      if (!hasEmbeddedOutline) {
+        const runId = ++this.pdfOutlineInferenceRunId;
+        this.pdfOutlineLoading = true;
+        this.publishPdfOutline();
+        void this.loadInferredPdfOutline(runId, pdfDoc);
+      }
       this.currentPage = clamp(Math.round(this.currentPage), 1, Math.max(1, pdfDoc.pageCount));
       if (this.fitMode === 'custom') {
         await this.renderVisiblePages();
@@ -1859,8 +1872,11 @@ export class PdfViewer {
     }
   }
 
-  private async loadPdfOutline(): Promise<void> {
+  private async loadEmbeddedPdfOutline(): Promise<boolean> {
+    this.pdfOutlineInferenceRunId++;
     this.pdfOutline = [];
+    this.pdfOutlineInferred = false;
+    this.pdfOutlineLoading = false;
     this.pdfOutlineRendered = false;
     try {
       if (pdfDoc && typeof engine.getBookmarks === 'function') {
@@ -1872,13 +1888,77 @@ export class PdfViewer {
     } catch {
       this.pdfOutline = [];
     }
+    if (this.pdfOutline.length > 0) this.publishPdfOutline();
+    return this.pdfOutline.length > 0;
+  }
+
+  private async loadInferredPdfOutline(
+    runId: number,
+    sourceDocument: any,
+  ): Promise<void> {
+    const states = [...this.pages.values()].sort((left, right) => left.pageNum - right.pageNum);
+    const pages = new Array<PdfOutlineTextPage>(states.length);
+    let cursor = 0;
+    try {
+      const workers = Array.from(
+        { length: Math.min(4, Math.max(1, states.length)) },
+        async () => {
+          while (cursor < states.length) {
+            const index = cursor++;
+            const state = states[index]!;
+            const items = await this.loadTextRects(state);
+            const width = Number(state.pageObj?.size?.width);
+            const height = Number(state.pageObj?.size?.height);
+            if (!Number.isFinite(width) || width <= 0 || !Number.isFinite(height) || height <= 0) {
+              throw new Error(`Invalid PDF page geometry for page ${state.pageNum}`);
+            }
+            pages[index] = {
+              pageIndex: state.pageNum - 1,
+              width,
+              height,
+              items,
+            };
+          }
+        },
+      );
+      await Promise.all(workers);
+      if (runId !== this.pdfOutlineInferenceRunId || pdfDoc !== sourceDocument) return;
+      const result = inferPdfOutline(pages);
+      this.pdfOutline = result.entries;
+      this.pdfOutlineInferred = result.entries.length > 0;
+    } catch (error) {
+      if (runId !== this.pdfOutlineInferenceRunId || pdfDoc !== sourceDocument) return;
+      console.warn('Could not infer PDF outline', error);
+      this.pdfOutline = [];
+      this.pdfOutlineInferred = false;
+    }
+    this.pdfOutlineLoading = false;
+    this.publishPdfOutline();
+  }
+
+  private publishPdfOutline(): void {
+    this.pdfOutlineRendered = false;
     if (this.sidebarMode === 'outline') this.renderPdfOutline();
-    vscode.postMessage({ type: 'pdfOutline', items: this.pdfOutline });
+    vscode.postMessage({
+      type: 'pdfOutline',
+      items: this.pdfOutline,
+      inferred: this.pdfOutlineInferred,
+      loading: this.pdfOutlineLoading,
+    });
   }
 
   private renderPdfOutline(): void {
     this.pdfOutlineRendered = true;
     this.outlineList.replaceChildren();
+    if (this.pdfOutlineLoading || this.pdfOutlineInferred) {
+      const kind = document.createElement('p');
+      kind.className = 'pdf-outline-kind';
+      kind.textContent = this.pdfOutlineLoading
+        ? 'Preparing inferred outline…'
+        : 'Inferred outline';
+      this.outlineList.appendChild(kind);
+    }
+    if (this.pdfOutlineLoading) return;
     if (this.pdfOutline.length === 0) {
       const empty = document.createElement('p');
       empty.className = 'pdf-outline-empty';

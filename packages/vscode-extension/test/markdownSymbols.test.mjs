@@ -342,6 +342,49 @@ test('outline tree provider reads nested PDF bookmarks from the active custom PD
   ]]);
 });
 
+test('outline tree provider labels inferred PDF entries without changing their hierarchy', async () => {
+  const uri = {
+    scheme: 'file',
+    fsPath: '/vault/books/inferred.pdf',
+    toString: () => 'file:///vault/books/inferred.pdf',
+  };
+  const vscode = createVscodeMock({ activeTabUri: uri });
+  const { MarkdownOutlineTreeProvider } = loadTsModule('src/markdownSymbols.ts', { vscode });
+  const pdfOutlineSource = {
+    getPdfOutline: () => [{
+      title: '1 Introduction',
+      destination: {
+        pageIndex: 0,
+        zoom: { mode: 1, params: { x: 72, y: 700, zoom: 0 } },
+        view: [],
+      },
+      children: [{
+        title: '1.1 Motivation',
+        destination: {
+          pageIndex: 0,
+          zoom: { mode: 1, params: { x: 72, y: 580, zoom: 0 } },
+          view: [],
+        },
+        children: [],
+      }],
+    }],
+    isPdfOutlineInferred: requestedUri => {
+      assert.equal(requestedUri, uri);
+      return true;
+    },
+    onDidChangePdfOutline: () => ({ dispose() {} }),
+  };
+  const provider = new MarkdownOutlineTreeProvider(pdfOutlineSource);
+
+  const roots = await provider.getChildren();
+
+  assert.equal(roots.length, 2);
+  assert.equal(roots[0].label, 'Inferred outline');
+  assert.equal(roots[0].command, undefined);
+  assert.equal(roots[1].label, '1 Introduction');
+  assert.equal(roots[1].children[0].label, '1.1 Motivation');
+});
+
 test('outline tree provider falls back to the active PDF source when the custom tab input omits its URI', async () => {
   const uri = {
     scheme: 'file',
