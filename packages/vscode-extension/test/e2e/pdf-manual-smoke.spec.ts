@@ -14,6 +14,39 @@ const smokePdfPath = process.env.LLM_WIKI_PDF_SMOKE_PATH;
 
 test.skip(!smokePdfPath, 'Set LLM_WIKI_PDF_SMOKE_PATH to run the real-PDF selection smoke test');
 
+test('real Sennrich PDF receives a conservative inferred outline without captions', async ({ page }) => {
+  test.setTimeout(180_000);
+  test.skip(
+    !smokePdfPath?.includes('neural-machine-translation-of-rare-words-with-subword-units'),
+    'Set LLM_WIKI_PDF_SMOKE_PATH to the Sennrich subword-units PDF',
+  );
+  if (!smokePdfPath) throw new Error('LLM_WIKI_PDF_SMOKE_PATH is required');
+  await page.route('**/fixtures/manual-smoke.pdf', async route => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/pdf',
+      body: readFileSync(smokePdfPath),
+    });
+  });
+
+  await page.goto('http://localhost:8979/pdf-viewer.html?fixture=manual-smoke');
+  await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 11/, { timeout: 30_000 });
+  await page.getByRole('button', { name: 'Toggle sidebar' }).click();
+  const navigation = page.getByRole('complementary', { name: 'PDF navigation' });
+  await navigation.getByRole('tab', { name: 'Outline' }).click();
+  await expect(navigation.locator('.pdf-outline-kind')).toHaveText(
+    'Inferred outline',
+    { timeout: 120_000 },
+  );
+
+  const titles = await navigation.locator('.pdf-outline-row .pdf-outline-label').allTextContents();
+  expect(titles).toContain('2 Neural Machine Translation');
+  expect(titles).toContain('4 Evaluation');
+  expect(titles.some(title => /^Algorithm\s+1\b/u.test(title))).toBe(false);
+  expect(titles.some(title => /^Figure\s+1\b/u.test(title))).toBe(false);
+  expect(titles.some(title => /Rico Sennrich|Barry Haddow|Alexandra Birch/u.test(title))).toBe(false);
+});
+
 test('real PDF page 18 selects only the opening rendering paragraph and preserves zoom', async ({ page }) => {
   test.setTimeout(180_000);
   if (!smokePdfPath) throw new Error('LLM_WIKI_PDF_SMOKE_PATH is required');

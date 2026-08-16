@@ -86,6 +86,7 @@ const pdfViewer = compileTsModule(viewerSource, {
   './domain/pdfSelection': pdfSelection,
   './domain/pdfTextExtraction': pdfTextExtraction,
   './domain/pdfOutline': {},
+  './domain/pdfInferredOutline': {},
   './pdfAgentClipboard': pdfAgentClipboardMock,
   './pdfLayout': {},
   './pdfTextLayer': {},
