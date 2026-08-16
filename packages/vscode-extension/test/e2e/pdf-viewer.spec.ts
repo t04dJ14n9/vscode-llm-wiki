@@ -586,6 +586,7 @@ test('pdf viewer production surface exposes only live selection actions and keep
   await expect(page.locator('#selection-toolbar button')).toHaveText([
     'Copy Link',
     /Add to Chat/,
+    'Copy for Agent',
   ]);
   for (const label of [
     'Ask about selection…',
@@ -628,401 +629,99 @@ test('pdf viewer production surface exposes only live selection actions and keep
   expect(await menu.getByRole('menuitem').allTextContents()).toEqual([
     'Look up ...',
     expect.stringMatching(/Add to Chat/),
+    'Copy for Agent',
     'Copy link to selection',
     'Copy selected text',
   ]);
 });
 
-const providerActionCases = [
-  { id: 'codex', label: 'Send to Codex', visualLabel: 'Codex' },
-  { id: 'claude', label: 'Send to Claude Code', visualLabel: 'Claude' },
-  { id: 'codebuddy', label: 'Send to CodeBuddy', visualLabel: 'CodeBuddy' },
-] as const;
-
-const providerCapabilitySubsets = Array.from({ length: 8 }, (_, mask) =>
-  providerActionCases.filter((_, index) => (mask & (1 << index)) !== 0)
-);
-
-test.describe('PDF provider action capability matrix', () => {
-  for (const host of ['vscode', 'cursor'] as const) {
-    for (const providers of providerCapabilitySubsets) {
-      const providerIds = providers.map(provider => provider.id);
-      const caseLabel = providerIds.length ? providerIds.join('+') : 'none';
-
-      test(`${host} with ${caseLabel}`, async ({ page }) => {
-        await page.goto(`http://localhost:8979/pdf-viewer.html?host=${host}&agents=${providerIds.join(',')}`);
-        await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 1/, { timeout: 10_000 });
-
-        await selectPdfTextRange(page, 0, 26);
-        const expectedToolbarLabels = [
-          'Copy Link',
-          ...(host === 'cursor' ? ['Add to Chat'] : []),
-          ...providers.map(provider => provider.visualLabel),
-        ];
-        expect(
-          await visibleSelectionToolbarLabels(page),
-          `${host}/${caseLabel} toolbar actions`,
-        ).toEqual(expectedToolbarLabels);
-
-        const toolbar = page.locator('#selection-toolbar');
-        for (const provider of providers) {
-          const action = toolbar.getByRole('button', { name: provider.label, exact: true });
-          await expect(action).toHaveText(provider.visualLabel);
-          await expect(action).toHaveAccessibleName(provider.label);
-        }
-        await expect(toolbar.locator('.selection-toolbar-separator'))
-          .toHaveCount(host === 'cursor' || providers.length > 0 ? 1 : 0);
-
-        await openPdfSelectionContextMenu(page);
-        const expectedMenuLabels = [
-          'Look up ...',
-          ...(host === 'cursor' ? ['Add to Chat'] : []),
-          ...providers.map(provider => provider.label),
-          'Copy link to selection',
-          'Copy selected text',
-        ];
-        expect(
-          await visibleSelectionContextMenuLabels(page),
-          `${host}/${caseLabel} context-menu actions`,
-        ).toEqual(expectedMenuLabels);
-
-        const menu = page.getByRole('menu');
-        for (const provider of providers) {
-          const action = menu.getByRole('menuitem', { name: provider.label, exact: true });
-          await expect(action).toHaveText(provider.label);
-          await expect(action).toHaveAccessibleName(provider.label);
-        }
-      });
-    }
-  }
-});
-
-test('expanded provider actions follow theme colors and keyboard focus order', async ({ page }) => {
-  await page.goto('http://localhost:8979/pdf-viewer.html?host=cursor&agents=codex,claude,codebuddy');
+test('stock VS Code exposes only Copy for Agent as a selection handoff action', async ({ page }) => {
+  await page.goto('http://localhost:8979/pdf-viewer.html?host=vscode');
   await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 1/, { timeout: 10_000 });
 
   await selectPdfTextRange(page, 0, 26);
-  await expect(page.locator('#selection-toolbar')).toBeVisible();
-  const expectedFocusOrder = [
+  expect(await visibleSelectionToolbarLabels(page)).toEqual([
     'Copy Link',
-    'Add to Chat',
-    'Send to Codex',
-    'Send to Claude Code',
-    'Send to CodeBuddy',
-  ];
-  await page.getByRole('button', { name: 'Toggle sidebar' }).focus();
-  const focusedToolbarActions: string[] = [];
-  for (let attempt = 0; attempt < 40 && focusedToolbarActions.length < expectedFocusOrder.length; attempt++) {
-    await page.keyboard.press('Tab');
-    const focusedLabel = await page.evaluate(() => {
-      const active = document.activeElement;
-      if (!(active instanceof HTMLButtonElement) || !active.closest('#selection-toolbar')) return null;
-      return active.querySelector<HTMLElement>('.add-to-chat-label')?.textContent?.trim()
-        ?? active.getAttribute('aria-label')
-        ?? active.textContent?.trim()
-        ?? null;
-    });
-    if (focusedLabel) focusedToolbarActions.push(focusedLabel);
-  }
-  expect(focusedToolbarActions).toEqual(expectedFocusOrder);
-
-  const themeStyles = await page.evaluate(() => {
-    const toolbar = document.querySelector<HTMLElement>('#selection-toolbar')!;
-    const buttons = Array.from(toolbar.querySelectorAll<HTMLButtonElement>('button'));
-    const focused = document.activeElement as HTMLElement;
-    const resolveColor = (value: string) => {
-      const probe = document.createElement('span');
-      probe.style.color = value;
-      document.body.appendChild(probe);
-      const color = getComputedStyle(probe).color;
-      probe.remove();
-      return color;
-    };
-    return {
-      toolbar: {
-        background: getComputedStyle(toolbar).backgroundColor,
-        expectedBackground: resolveColor('var(--vscode-editorWidget-background)'),
-        border: getComputedStyle(toolbar).borderTopColor,
-        expectedBorder: resolveColor('var(--vscode-panel-border)'),
-      },
-      addedActions: buttons.slice(1).map(button => ({
-        background: getComputedStyle(button).backgroundColor,
-        foreground: getComputedStyle(button).color,
-      })),
-      expectedActionBackground: 'rgba(0, 0, 0, 0)',
-      expectedActionForeground: resolveColor(
-        'var(--vscode-editorWidget-foreground, var(--vscode-foreground, var(--vscode-editor-foreground)))',
-      ),
-      focusedAction: {
-        outlineColor: getComputedStyle(focused).outlineColor,
-        outlineStyle: getComputedStyle(focused).outlineStyle,
-        outlineWidth: getComputedStyle(focused).outlineWidth,
-      },
-      expectedFocusColor: resolveColor('var(--vscode-focusBorder)'),
-      geometry: {
-        height: toolbar.getBoundingClientRect().height,
-        buttonRows: new Set(buttons.map(button => Math.round(button.getBoundingClientRect().top))).size,
-        scrollWidth: toolbar.scrollWidth,
-        clientWidth: toolbar.clientWidth,
-      },
-    };
-  });
-
-  expect(themeStyles.toolbar.background).toBe(themeStyles.toolbar.expectedBackground);
-  expect(themeStyles.toolbar.border).toBe(themeStyles.toolbar.expectedBorder);
-  for (const action of themeStyles.addedActions) {
-    expect(action.background).toBe(themeStyles.expectedActionBackground);
-    expect(action.foreground).toBe(themeStyles.expectedActionForeground);
-  }
-  expect(themeStyles.focusedAction.outlineColor).toBe(themeStyles.expectedFocusColor);
-  expect(themeStyles.focusedAction.outlineStyle).toBe('solid');
-  expect(Number.parseFloat(themeStyles.focusedAction.outlineWidth)).toBeGreaterThan(0);
-  expect(themeStyles.geometry.buttonRows).toBe(1);
-  expect(themeStyles.geometry.height).toBeLessThanOrEqual(36);
-  expect(themeStyles.geometry.scrollWidth).toBeLessThanOrEqual(themeStyles.geometry.clientWidth);
-  await expect(page.locator('#selection-toolbar .selection-toolbar-separator')).toHaveCount(1);
-  for (const provider of providerActionCases) {
-    const action = page.locator('#selection-toolbar')
-      .getByRole('button', { name: provider.label, exact: true });
-    await expect(action).toHaveText(provider.visualLabel);
-    await expect(action).toHaveAccessibleName(provider.label);
-  }
-});
-
-test('explicit provider action posts its ID and crop', async ({ page }) => {
-  await page.goto('http://localhost:8979/pdf-viewer.html?host=vscode&agents=codex');
-  await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 1/, { timeout: 10_000 });
-
-  await selectPdfTextRange(page, 0, 26);
-  await page.getByRole('button', { name: 'Send to Codex', exact: true }).click();
-  expect(await waitForSelectionAction(page, 'sendToAgent')).toMatchObject({
-    action: 'sendToAgent',
-    agentId: 'codex',
-    snapshotPngBase64: expect.any(String),
-  });
-});
-
-test('provider action reports a crop capture exception and stays text-only', async ({ page }) => {
-  await page.goto('http://localhost:8979/pdf-viewer.html?host=vscode&agents=codex');
-  await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 1/, { timeout: 10_000 });
-
-  await selectPdfTextRange(page, 0, 26);
-  await page.evaluate(() => {
-    HTMLCanvasElement.prototype.toDataURL = () => {
-      throw new DOMException('Canvas export unavailable');
-    };
-  });
-
-  await page.getByRole('button', { name: 'Send to Codex', exact: true }).click();
-  const providerAction = await waitForSelectionAction(page, 'sendToAgent');
-  expect(providerAction).toMatchObject({
-    action: 'sendToAgent',
-    agentId: 'codex',
-    cropCaptureFailed: true,
-  });
-  expect(providerAction).not.toHaveProperty('requestId');
-  expect(providerAction).not.toHaveProperty('snapshotPngBase64');
-
-  await page.evaluate(() => {
-    window.__mockMessages = [];
-    window.postMessage({
-      type: 'captureSelectionForAgent',
-      requestId: 'provider-capture-failed-1',
-    }, '*');
-  });
-  const correlatedAction = await waitForSelectionAction(page, 'addToCursorChat');
-  expect(correlatedAction).toMatchObject({
-    action: 'addToCursorChat',
-    requestId: 'provider-capture-failed-1',
-    cropCaptureFailed: true,
-  });
-  expect(correlatedAction).not.toHaveProperty('agentId');
-  expect(correlatedAction).not.toHaveProperty('snapshotPngBase64');
-});
-
-test('provider action reports crop failure when a valid selection cannot get a 2d context', async ({ page }) => {
-  await page.goto('http://localhost:8979/pdf-viewer.html?host=vscode&agents=codex');
-  await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 1/, { timeout: 10_000 });
-
-  await selectPdfTextRange(page, 0, 26);
-  await page.evaluate(() => {
-    HTMLCanvasElement.prototype.getContext = () => null;
-  });
-
-  await page.getByRole('button', { name: 'Send to Codex', exact: true }).click();
-  const action = await waitForSelectionAction(page, 'sendToAgent');
-  expect(action).toMatchObject({
-    action: 'sendToAgent',
-    agentId: 'codex',
-    cropCaptureFailed: true,
-  });
-  expect(action).not.toHaveProperty('snapshotPngBase64');
-});
-
-test('provider action omits crop failure when selection geometry is unavailable', async ({ page }) => {
-  await page.goto('http://localhost:8979/pdf-viewer.html?host=vscode&agents=codex');
-  await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 1/, { timeout: 10_000 });
-
-  await page.evaluate(() => {
-    Range.prototype.getClientRects = () => [] as unknown as DOMRectList;
-    HTMLCanvasElement.prototype.toDataURL = () => {
-      throw new DOMException('Canvas export should not be attempted');
-    };
-  });
-  await selectPdfTextRange(page, 0, 26);
-
-  await page.getByRole('button', { name: 'Send to Codex', exact: true }).click();
-  const action = await waitForSelectionAction(page, 'sendToAgent');
-  expect(action).toMatchObject({
-    action: 'sendToAgent',
-    agentId: 'codex',
-  });
-  expect(action).not.toHaveProperty('snapshotPngBase64');
-  expect(action).not.toHaveProperty('cropCaptureFailed');
-});
-
-test('stock VS Code honors provider capture requests but ignores direct Cursor requests', async ({ page }) => {
-  await page.goto('http://localhost:8979/pdf-viewer.html?host=vscode&agents=codex');
-  await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 1/, { timeout: 10_000 });
-
-  await selectPdfTextRange(page, 0, 26);
-  await page.evaluate(() => {
-    window.__mockMessages = [];
-    window.postMessage({
-      type: 'captureSelectionForAgent',
-      requestId: 'provider-capture-1',
-    }, '*');
-  });
-  expect(await waitForSelectionAction(page, 'addToCursorChat')).toMatchObject({
-    action: 'addToCursorChat',
-    requestId: 'provider-capture-1',
-    snapshotPngBase64: expect.any(String),
-  });
-
-  await page.evaluate(() => window.postMessage({ type: 'addSelectionToCursorChat' }, '*'));
-  await page.waitForTimeout(50);
-  await expect.poll(() => page.evaluate(() =>
-    window.__mockMessages?.filter(message =>
-      message.type === 'selectionAction' && message.action === 'addToCursorChat'
-    ).length
-  )).toBe(1);
-});
-
-test('capability message validates and updates provider actions in an open viewer', async ({ page }) => {
-  await page.goto('http://localhost:8979/pdf-viewer.html?host=vscode&agents=claude');
-  await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 1/, { timeout: 10_000 });
-
-  await selectPdfTextRange(page, 0, 26);
-  await expect(page.locator('#selection-toolbar button')).toHaveText([
-    'Copy Link',
-    'Claude',
+    'Copy for Agent',
   ]);
   await expect(page.locator('#selection-toolbar')
-    .getByRole('button', { name: 'Send to Claude Code', exact: true }))
-    .toHaveText('Claude');
+    .getByRole('button', { name: /^Add to Chat/ }))
+    .toHaveCount(0);
+  await expectNoProviderSendControls(page);
+
+  await openPdfSelectionContextMenu(page);
+  expect(await visibleSelectionContextMenuLabels(page)).toEqual([
+    'Look up ...',
+    'Copy for Agent',
+    'Copy link to selection',
+    'Copy selected text',
+  ]);
+  await expectNoProviderSendControls(page);
+});
+
+test('Cursor exposes Add to Chat alongside Copy for Agent', async ({ page }) => {
+  await page.goto('http://localhost:8979/pdf-viewer.html?host=cursor');
+  await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 1/, { timeout: 10_000 });
+
+  await selectPdfTextRange(page, 0, 26);
+  expect(await visibleSelectionToolbarLabels(page)).toEqual([
+    'Copy Link',
+    'Add to Chat',
+    'Copy for Agent',
+  ]);
+  await expect(page.locator('#selection-toolbar')
+    .getByRole('button', { name: /^Add to Chat/ }))
+    .toBeVisible();
+  await expect(page.locator('#selection-toolbar')
+    .getByRole('button', { name: 'Copy for Agent', exact: true }))
+    .toBeVisible();
+
+  await openPdfSelectionContextMenu(page);
+  expect(await visibleSelectionContextMenuLabels(page)).toEqual([
+    'Look up ...',
+    'Add to Chat',
+    'Copy for Agent',
+    'Copy link to selection',
+    'Copy selected text',
+  ]);
+});
+
+test('provider arrays never add Send controls', async ({ page }) => {
+  await page.goto('http://localhost:8979/pdf-viewer.html?host=vscode&agents=codex,claude,codebuddy');
+  await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 1/, { timeout: 10_000 });
+
+  await selectPdfTextRange(page, 0, 26);
+  expect(await visibleSelectionToolbarLabels(page)).toEqual([
+    'Copy Link',
+    'Copy for Agent',
+  ]);
+  await expectNoProviderSendControls(page);
 
   await page.evaluate(() => window.postMessage({
     type: 'agentHandoffCapabilities',
     cursorAgent: true,
     providers: [
-      { id: 'codebuddy', label: 'Spoofed CodeBuddy' },
-      { id: 'codex', label: 'Spoofed Codex' },
-      { id: 'codex', label: 'Duplicate Codex' },
-      { id: 'unknown', label: 'Unknown' },
-      { id: 'claude', label: '' },
+      { id: 'codex', label: 'Codex' },
+      { id: 'claude', label: 'Claude Code' },
+      { id: 'codebuddy', label: 'CodeBuddy' },
     ],
   }, '*'));
-  await expect(page.locator('#selection-toolbar button')).toHaveText([
+  expect(await visibleSelectionToolbarLabels(page)).toEqual([
     'Copy Link',
-    /Add to Chat/,
-    'Codex',
-    'CodeBuddy',
+    'Add to Chat',
+    'Copy for Agent',
   ]);
+  await expectNoProviderSendControls(page);
 
   await openPdfSelectionContextMenu(page);
-  await expect(page.getByRole('menu').getByRole('menuitem')).toHaveText([
+  expect(await visibleSelectionContextMenuLabels(page)).toEqual([
     'Look up ...',
-    /Add to Chat/,
-    'Send to Codex',
-    'Send to CodeBuddy',
+    'Add to Chat',
+    'Copy for Agent',
     'Copy link to selection',
     'Copy selected text',
   ]);
-});
-
-test('expanded provider toolbar stays contained in a narrow pane', async ({ page }) => {
-  await page.setViewportSize({ width: 320, height: 720 });
-  await page.goto('http://localhost:8979/pdf-viewer.html?host=cursor&agents=codex,claude,codebuddy');
-  await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 1/, { timeout: 10_000 });
-
-  await selectPdfTextRange(page, 0, 26);
-  const toolbar = page.locator('#selection-toolbar');
-  await expect(toolbar).toBeVisible();
-  await expect.poll(() => toolbar.evaluate(element => Boolean(element.style.left && element.style.top))).toBe(true);
-
-  const geometry = await page.evaluate(() => {
-    const toolbar = document.querySelector<HTMLElement>('#selection-toolbar')!;
-    const toolbarRect = toolbar.getBoundingClientRect();
-    const selection = window.getSelection();
-    const nativeSelectionRects = selection?.rangeCount
-      ? Array.from(selection.getRangeAt(0).getClientRects())
-      : [];
-    const overlayRects = Array.from(document.querySelectorAll<HTMLElement>('.pdf-selection-rect'))
-      .map(element => element.getBoundingClientRect());
-    const rect = (value: DOMRect) => ({
-      left: value.left,
-      top: value.top,
-      right: value.right,
-      bottom: value.bottom,
-      width: value.width,
-      height: value.height,
-    });
-    return {
-      viewport: { width: window.innerWidth, height: window.innerHeight },
-      toolbar: rect(toolbarRect),
-      selectionRects: [...nativeSelectionRects, ...overlayRects]
-        .filter(value => value.width > 0 && value.height > 0)
-        .map(rect),
-      buttons: Array.from(toolbar.querySelectorAll<HTMLButtonElement>('button')).map(button => ({
-        label: button.querySelector<HTMLElement>('.add-to-chat-label')?.textContent?.trim()
-          ?? button.textContent?.trim()
-          ?? '',
-        rect: rect(button.getBoundingClientRect()),
-      })),
-      responsive: {
-        clientWidth: toolbar.clientWidth,
-        scrollWidth: toolbar.scrollWidth,
-        clientHeight: toolbar.clientHeight,
-        buttonRows: new Set(
-          Array.from(toolbar.querySelectorAll('button'))
-            .map(button => Math.round(button.getBoundingClientRect().top)),
-        ).size,
-      },
-    };
-  });
-
-  expect(geometry.toolbar.left).toBeGreaterThanOrEqual(12);
-  expect(geometry.toolbar.right).toBeLessThanOrEqual(geometry.viewport.width - 12);
-  expect(geometry.toolbar.top).toBeGreaterThanOrEqual(0);
-  expect(geometry.toolbar.bottom).toBeLessThanOrEqual(geometry.viewport.height);
-  expect(geometry.selectionRects.length).toBeGreaterThan(0);
-  for (const selectionRect of geometry.selectionRects) {
-    expect(rectanglesOverlap(geometry.toolbar, selectionRect)).toBe(false);
-  }
-  expect(geometry.buttons.map(button => button.label)).toEqual([
-    'Copy Link',
-    'Add to Chat',
-    'Codex',
-    'Claude',
-    'CodeBuddy',
-  ]);
-  expect(geometry.responsive.buttonRows).toBe(1);
-  expect(geometry.responsive.clientHeight).toBeLessThanOrEqual(36);
-  expect(geometry.responsive.scrollWidth).toBeGreaterThan(geometry.responsive.clientWidth);
-
-  const codeBuddy = toolbar.getByRole('button', { name: 'Send to CodeBuddy', exact: true });
-  await codeBuddy.scrollIntoViewIfNeeded();
-  await expect(codeBuddy).toBeInViewport();
+  await expectNoProviderSendControls(page);
 });
 
 test('pdf viewer rectangular selection copies PDF++ coordinates in a one-shot drag', async ({ page }) => {
@@ -2157,6 +1856,7 @@ test('pdf viewer exposes a PDF++-style context menu for selections and pages', a
   await expect(page.getByRole('menu').getByRole('menuitem')).toHaveText([
     'Look up ...',
     /(?:⌘L|Ctrl\+L)  Add to Chat/,
+    'Copy for Agent',
     'Copy link to selection',
     'Copy selected text',
   ]);
@@ -2821,12 +2521,9 @@ async function visibleSelectionContextMenuLabels(page) {
   );
 }
 
-function rectanglesOverlap(
-  first: { left: number; top: number; right: number; bottom: number },
-  second: { left: number; top: number; right: number; bottom: number },
-) {
-  return Math.max(first.left, second.left) < Math.min(first.right, second.right)
-    && Math.max(first.top, second.top) < Math.min(first.bottom, second.bottom);
+async function expectNoProviderSendControls(page) {
+  await expect(page.getByRole('button', { name: /^Send to / })).toHaveCount(0);
+  await expect(page.getByRole('menuitem', { name: /^Send to / })).toHaveCount(0);
 }
 
 async function waitForSelectionAction(page, action: string) {
