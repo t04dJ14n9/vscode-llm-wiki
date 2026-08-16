@@ -1046,6 +1046,12 @@ test.describe('LLM Wiki — E2E Bidirectional Links', () => {
 
   test('selected Markdown can be added to Cursor Chat without submitting', async ({ page }) => {
     await page.setViewportSize({ width: 240, height: 320 });
+    await page.addInitScript(() => {
+      Object.defineProperty(navigator, 'platform', {
+        configurable: true,
+        value: 'Linux x86_64',
+      });
+    });
     await page.goto('http://localhost:8979/test.html');
     await waitForEditorBootstrap(page);
 

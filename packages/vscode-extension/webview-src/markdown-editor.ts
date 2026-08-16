@@ -2051,8 +2051,11 @@ function ensureCursorSelectionPromptStyles(): void {
       z-index: 1000;
       box-sizing: border-box;
       display: inline-flex;
+      max-width: calc(100vw - 16px);
       align-items: center;
       gap: 6px;
+      overflow-x: auto;
+      overflow-y: hidden;
       height: 28px;
       padding: 2px 6px 2px 8px;
       border: 1px solid var(--vscode-commandCenter-inactiveBorder, var(--vscode-widget-border, rgba(127, 127, 127, .35)));
@@ -2061,10 +2064,15 @@ function ensureCursorSelectionPromptStyles(): void {
       color: var(--vscode-editorWidget-foreground, var(--vscode-editorHoverWidget-foreground));
       box-shadow: 0 6px 18px var(--vscode-inlineChat-shadow, var(--vscode-widget-shadow, rgba(0, 0, 0, .3)));
       font: 12px var(--vscode-font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
+      scrollbar-width: none;
       white-space: nowrap;
+    }
+    .llm-wiki-cursor-selection-prompt::-webkit-scrollbar {
+      display: none;
     }
     .llm-wiki-cursor-selection-prompt > button {
       box-sizing: border-box;
+      flex: 0 0 auto;
       min-height: 24px;
       border: 0;
       border-radius: 5px;
