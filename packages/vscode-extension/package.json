@@ -323,7 +323,7 @@
         },
         {
           "command": "llm-wiki.copySelectionForAgent",
-          "when": "llmWikiPdfOpen && llmWikiPdfHasSelection",
+          "when": "llmWikiPdfOpen && llmWikiPdfHasAgentClipboardSelection",
           "group": "navigation@9"
         },
         {

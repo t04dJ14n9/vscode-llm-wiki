@@ -73,13 +73,14 @@ const agentClipboard = loadTsModule('src/agentClipboard.ts', {
 test('PDF provider correlates multi-page clipboard context to exact selection geometry', async () => {
   const posted = [];
   const clipboardWrites = [];
+  const contextCommands = [];
   let receiveMessage;
   const vscode = {
     workspace: {
       asRelativePath: uri => uri.fsPath.replace('/vault/', ''),
     },
     commands: {
-      executeCommand: async () => undefined,
+      executeCommand: async (...args) => { contextCommands.push(args); },
     },
     env: {
       clipboard: {
@@ -174,6 +175,10 @@ test('PDF provider correlates multi-page clipboard context to exact selection ge
     firstContextMessage.context.sourceHref,
     /raw%2Fpdf%2Fpaper\.pdf%23page%3D2/,
   );
+  assert.deepEqual(contextCommands.slice(-2), [
+    ['setContext', 'llmWikiPdfHasSelection', false],
+    ['setContext', 'llmWikiPdfHasAgentClipboardSelection', true],
+  ]);
 
   const nextSelection = {
     ...firstSelection,
@@ -598,6 +603,7 @@ test('combined PDF context keys clear on deactivation and restore with its selec
   assert.deepEqual(commands, [
     ['setContext', 'llmWikiPdfOpen', false],
     ['setContext', 'llmWikiPdfHasSelection', false],
+    ['setContext', 'llmWikiPdfHasAgentClipboardSelection', false],
   ]);
 
   commands.length = 0;
@@ -608,6 +614,7 @@ test('combined PDF context keys clear on deactivation and restore with its selec
   assert.deepEqual(commands, [
     ['setContext', 'llmWikiPdfOpen', true],
     ['setContext', 'llmWikiPdfHasSelection', true],
+    ['setContext', 'llmWikiPdfHasAgentClipboardSelection', false],
   ]);
 });
 

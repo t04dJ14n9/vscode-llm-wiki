@@ -337,8 +337,14 @@ test('manifest exposes Copy for Agent in both hosts while Add to Chat stays Curs
       && item.when.includes('llmWikiMarkdownHasSelection'),
   ));
   assert.ok(copyForAgentContributions.some(
-    item => item.when.includes('llmWikiPdfOpen') && item.when.includes('llmWikiPdfHasSelection'),
+    item => item.when.includes('llmWikiPdfOpen')
+      && item.when.includes('llmWikiPdfHasAgentClipboardSelection'),
   ));
+  const pdfAddToChat = addToChatContributions.find(
+    item => item.when.includes('llmWikiPdfOpen'),
+  );
+  assert.match(pdfAddToChat?.when ?? '', /llmWikiPdfHasSelection/);
+  assert.doesNotMatch(pdfAddToChat?.when ?? '', /llmWikiPdfHasAgentClipboardSelection/);
   assert.ok(copyForAgentContributions.some(
     item => item.when.includes('editorLangId == markdown') && item.when.includes('editorHasSelection'),
   ));

@@ -97,6 +97,29 @@ test('builds single- and multi-page PDF clipboard context', () => {
   assert.match(multiple.plainText, /^Source: \[raw\/paper\.pdf \(pages 3–5\)\]/);
 });
 
+test('escapes PDF workspace filenames only in the plain-text Markdown link label', () => {
+  const context = createPdfAgentClipboardContext({
+    selectionKey: 'metacharacter-key',
+    relativePath: 'raw/[draft]*paper*_v1&2.pdf',
+    startPage: 3,
+    endPage: 3,
+    selectedText: 'Exact passage',
+    anchorUri: 'raw/[draft]*paper*_v1&2.pdf#page=3',
+  });
+
+  assert.equal(context.sourceLabel, 'raw/[draft]*paper*_v1&2.pdf (page 3)');
+  assert.equal(
+    context.plainText,
+    'Source: [raw/\\[draft\\]\\*paper\\*\\_v1\\&2.pdf (page 3)]'
+      + '(<cursor://llm-wiki/open-anchor?target=raw%2F%5Bdraft%5D*paper*_v1%262.pdf%23page%3D3>)\n\n'
+      + 'Selected text:\nExact passage',
+  );
+  assert.equal(
+    context.sourceHref,
+    'cursor://llm-wiki/open-anchor?target=raw%2F%5Bdraft%5D*paper*_v1%262.pdf%23page%3D3',
+  );
+});
+
 test('rejects malformed clipboard inputs', () => {
   assert.equal(createPdfAgentClipboardContext({
     selectionKey: '',

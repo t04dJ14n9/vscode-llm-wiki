@@ -86,8 +86,9 @@ export function createPdfAgentClipboardContext(
   const sourceLabel = input.startPage === input.endPage
     ? `${relativePath} (page ${input.startPage})`
     : `${relativePath} (pages ${input.startPage}–${input.endPage})`;
+  const plainTextSourceLabel = escapeMarkdownLinkLabel(sourceLabel);
   const plainText = [
-    `Source: [${sourceLabel}](<${sourceHref}>)`,
+    `Source: [${plainTextSourceLabel}](<${sourceHref}>)`,
     '',
     'Selected text:',
     selectedText,
@@ -100,6 +101,10 @@ export function createPdfAgentClipboardContext(
     selectedText,
     plainText,
   };
+}
+
+function escapeMarkdownLinkLabel(value: string): string {
+  return value.replace(/[\\[\]`*_{}<>&|~]/gu, '\\$&');
 }
 
 export function pdfAgentClipboardSelectionKey(

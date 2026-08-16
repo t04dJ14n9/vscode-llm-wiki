@@ -360,6 +360,11 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
       this.activeKey = key;
       await vscode.commands.executeCommand('setContext', 'llmWikiPdfOpen', true);
       await vscode.commands.executeCommand('setContext', 'llmWikiPdfHasSelection', false);
+      await vscode.commands.executeCommand(
+        'setContext',
+        'llmWikiPdfHasAgentClipboardSelection',
+        false,
+      );
     }
 
     webview.onDidReceiveMessage(async (message: any) => {
@@ -449,12 +454,22 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
           this.activeKey = undefined;
           await vscode.commands.executeCommand('setContext', 'llmWikiPdfOpen', false);
           await vscode.commands.executeCommand('setContext', 'llmWikiPdfHasSelection', false);
+          await vscode.commands.executeCommand(
+            'setContext',
+            'llmWikiPdfHasAgentClipboardSelection',
+            false,
+          );
         }
         return;
       }
       this.activeKey = key;
       await vscode.commands.executeCommand('setContext', 'llmWikiPdfOpen', true);
       await vscode.commands.executeCommand('setContext', 'llmWikiPdfHasSelection', Boolean(active.selection));
+      await vscode.commands.executeCommand(
+        'setContext',
+        'llmWikiPdfHasAgentClipboardSelection',
+        Boolean(active.agentClipboardContext),
+      );
       await this.sendPdfDiscussionState(webview, pdfUri);
       this.firePdfOutlineChanged(pdfUri);
     });
@@ -466,6 +481,11 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
         this.activeKey = undefined;
         await vscode.commands.executeCommand('setContext', 'llmWikiPdfOpen', false);
         await vscode.commands.executeCommand('setContext', 'llmWikiPdfHasSelection', false);
+        await vscode.commands.executeCommand(
+          'setContext',
+          'llmWikiPdfHasAgentClipboardSelection',
+          false,
+        );
       }
     });
 
@@ -1012,6 +1032,11 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
     });
     if (this.activeKey === key) {
       await vscode.commands.executeCommand('setContext', 'llmWikiPdfHasSelection', Boolean(active.selection));
+      await vscode.commands.executeCommand(
+        'setContext',
+        'llmWikiPdfHasAgentClipboardSelection',
+        Boolean(active.agentClipboardContext),
+      );
     }
   }
 

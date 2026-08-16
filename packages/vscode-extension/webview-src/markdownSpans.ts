@@ -96,14 +96,15 @@ export function markdownFootnoteIndex(text: string): MarkdownFootnoteIndex {
   const references = new Map<string, number[]>();
   const lines = markdownSourceLines(text);
   const fencedCode = fencedCodeSourceSpans(lines);
+  const inlineCode = lines.flatMap(line => inlineCodeSourceSpans(line.from, line.text));
   const excluded = [
     ...fencedCode,
-    ...obsidianCommentSourceSpansOutside(text, fencedCode),
+    ...obsidianCommentSourceSpansOutside(text, [...fencedCode, ...inlineCode]),
     ...htmlCommentSourceSpans(text),
   ];
 
   lines.forEach((line, lineIndex) => {
-    const inlineCode = inlineCodeSourceSpans(line.from, line.text);
+    const lineInlineCode = inlineCodeSourceSpans(line.from, line.text);
     const definition = line.text.match(/^(\s*)\[\^([^\]\s]+)\]:\s*(.*)$/);
     const definitionStart = definition ? line.from + definition[1]!.length : -1;
     if (
@@ -111,7 +112,7 @@ export function markdownFootnoteIndex(text: string): MarkdownFootnoteIndex {
       && !isEscapedAt(line.text, definition[1]!.length)
       && !overlapsSpan(
         { from: definitionStart, to: line.from + definition[0].length },
-        [...excluded, ...inlineCode],
+        [...excluded, ...lineInlineCode],
       )
     ) {
       const id = definition[2]!;
@@ -130,7 +131,7 @@ export function markdownFootnoteIndex(text: string): MarkdownFootnoteIndex {
       const to = from + match[0].length;
       const id = match[1]!;
       if (isEscapedAt(line.text, index)) continue;
-      if (overlapsSpan({ from, to }, [...excluded, ...inlineCode])) continue;
+      if (overlapsSpan({ from, to }, [...excluded, ...lineInlineCode])) continue;
       if (definition && id === definition[2] && from === definitionStart) continue;
       references.set(id, [...(references.get(id) ?? []), from]);
     }
@@ -140,15 +141,18 @@ export function markdownFootnoteIndex(text: string): MarkdownFootnoteIndex {
 }
 
 export function obsidianCommentSourceSpans(text: string): SourceSpan[] {
+  const lines = markdownSourceLines(text);
+  const fencedCode = fencedCodeSourceSpans(lines);
+  const inlineCode = lines.flatMap(line => inlineCodeSourceSpans(line.from, line.text));
   return obsidianCommentSourceSpansOutside(
     text,
-    fencedCodeSourceSpans(markdownSourceLines(text)),
+    [...fencedCode, ...inlineCode],
   );
 }
 
 function obsidianCommentSourceSpansOutside(
   text: string,
-  fencedCode: SourceSpan[],
+  excludedCode: SourceSpan[],
 ): SourceSpan[] {
   const ranges: SourceSpan[] = [];
   let start: number | null = null;
@@ -159,7 +163,7 @@ function obsidianCommentSourceSpansOutside(
       index++;
       continue;
     }
-    if (overlapsSpan({ from: index, to: index + 2 }, fencedCode)) {
+    if (overlapsSpan({ from: index, to: index + 2 }, excludedCode)) {
       index += 2;
       continue;
     }
