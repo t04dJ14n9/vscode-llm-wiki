@@ -64,6 +64,7 @@ import {
   pdfBookmarksToOutlineEntries,
   type PdfOutlineEntry,
 } from './domain/pdfOutline';
+import type { PdfAgentClipboardContext } from './pdfAgentClipboard';
 import { createPdfPageLayout, formatCssPx, type PdfPageLayout } from './pdfLayout';
 import {
   closestPdfTextSpan,
@@ -148,14 +149,6 @@ interface PdfAgentClipboardSelection {
   endPage: number;
   pages: readonly PdfAgentClipboardPageSelection[];
   selectedText: string;
-}
-
-interface PdfAgentClipboardContext {
-  selectionKey: string;
-  sourceLabel: string;
-  sourceHref: string;
-  selectedText: string;
-  plainText: string;
 }
 
 interface PdfSelectionSnapshot {
@@ -633,6 +626,7 @@ export class PdfViewer {
             message.context,
           );
           if (context) this.agentClipboardContexts.set(context.selectionKey, context);
+          this.updateAgentClipboardCopyControl();
           break;
         }
         case 'loadPdf':
@@ -2477,7 +2471,10 @@ export class PdfViewer {
         : {}),
     });
     if (anchor.multiPage) {
-      document.getElementById('selection-toolbar')?.remove();
+      this.showSelectionToolbar(
+        anchor,
+        this.selectionViewportRect(anchor) ?? range.getBoundingClientRect(),
+      );
       return;
     }
     this.showSelectionToolbar(anchor, this.selectionViewportRect(anchor) ?? range.getBoundingClientRect());
@@ -2736,8 +2733,6 @@ export class PdfViewer {
     const current = this.selectionAnchorFromNativeRange();
     if (
       current
-      && !current.anchor.multiPage
-      && current.anchor.page === page
       && this.contextMenuTargetsSelection(event, current.range)
     ) {
       if (!samePdfSelectionRange(this.latestSelectionAnchor, current.anchor)) {
@@ -2844,7 +2839,87 @@ export class PdfViewer {
     return Number.isSafeInteger(page) && page > 0 && this.pages.has(page) ? page : undefined;
   }
 
+  private currentAgentClipboardContext(): PdfAgentClipboardContext | undefined {
+    const selection = this.agentClipboardSelection;
+    const context = this.agentClipboardContexts.values().next().value;
+    return correlatePdfAgentClipboardContext(selection, context);
+  }
+
+  private updateAgentClipboardCopyControl(): void {
+    const button = document.querySelector<HTMLButtonElement>(
+      '#selection-toolbar [data-pdf-action="copy-for-agent"]',
+    );
+    if (!button) return;
+    const disabled = !this.currentAgentClipboardContext();
+    button.disabled = disabled;
+    if (disabled) button.setAttribute('aria-disabled', 'true');
+    else button.removeAttribute('aria-disabled');
+  }
+
+  private postAgentClipboardTextFallback(context: PdfAgentClipboardContext): void {
+    vscode.postMessage({
+      type: 'agentClipboardResult',
+      status: 'text-fallback',
+      selectionKey: context.selectionKey,
+      plainText: context.plainText,
+    });
+  }
+
+  private async copySelectionForAgent(): Promise<void> {
+    const selection = this.agentClipboardSelection;
+    const context = this.currentAgentClipboardContext();
+    if (!selection || !context) return;
+
+    try {
+      const {
+        capturePdfAgentClipboardPng,
+        writePdfAgentClipboard,
+      } = await import('./pdfAgentClipboard');
+      const pages = [];
+      for (const selectedPage of selection.pages) {
+        const page = this.pages.get(selectedPage.page);
+        if (!page) {
+          this.postAgentClipboardTextFallback(context);
+          return;
+        }
+        pages.push({
+          page: selectedPage.page,
+          canvas: page.canvas,
+          pageWidth: Number(page.pageObj.size.width),
+          pageHeight: Number(page.pageObj.size.height),
+          rects: selectedPage.rects,
+        });
+      }
+      const pngBlob = await capturePdfAgentClipboardPng({ pages });
+      if (!pngBlob) {
+        this.postAgentClipboardTextFallback(context);
+        return;
+      }
+      await writePdfAgentClipboard({ context, pngBlob, host: vscode });
+    } catch {
+      this.postAgentClipboardTextFallback(context);
+    }
+  }
+
   private showSelectionContextMenu(clientX: number, clientY: number, anchor: PdfAnchor): void {
+    const copyForAgent = {
+      id: 'copy-for-agent',
+      label: 'Copy for Agent',
+      disabled: !this.currentAgentClipboardContext(),
+      onSelect: () => { void this.copySelectionForAgent(); },
+    };
+    if (anchor.multiPage) {
+      showObsidianContextMenu({
+        clientX,
+        clientY,
+        items: [
+          copyForAgent,
+          { type: 'separator' },
+          { label: 'Copy selected text', onSelect: () => vscode.postMessage({ type: 'copyText', text: anchor.snippet }) },
+        ],
+      });
+      return;
+    }
     const agentItems = this.agentCapabilities.providers.map(provider => ({
       label: `Send to ${provider.label}`,
       onSelect: () => this.postTextSelectionAction('sendToAgent', anchor, provider.id),
@@ -2864,6 +2939,7 @@ export class PdfViewer {
             }]
           : []),
         ...agentItems,
+        copyForAgent,
         { type: 'separator' },
         { label: 'Copy link to selection', onSelect: () => this.postTextSelectionAction('copyLink', anchor) },
         { label: 'Copy selected text', onSelect: () => vscode.postMessage({ type: 'copyText', text: anchor.snippet }) },
@@ -2972,14 +3048,38 @@ export class PdfViewer {
       return button;
     };
 
-    addButton('Copy Link', 'copyLink');
-    if (this.agentCapabilities.cursorAgent || this.agentCapabilities.providers.length > 0) {
-      const separator = document.createElement('span');
-      separator.className = 'selection-toolbar-separator';
-      separator.setAttribute('role', 'separator');
-      separator.setAttribute('aria-orientation', 'vertical');
-      toolbar.appendChild(separator);
+    const addCopyForAgentButton = () => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.textContent = 'Copy for Agent';
+      button.className = 'secondary copy-for-agent-action';
+      button.dataset.pdfAction = 'copy-for-agent';
+      button.setAttribute('aria-label', 'Copy for Agent');
+      button.disabled = !this.currentAgentClipboardContext();
+      if (button.disabled) button.setAttribute('aria-disabled', 'true');
+      button.addEventListener('click', event => {
+        event.preventDefault();
+        event.stopPropagation();
+        void this.copySelectionForAgent();
+        toolbar.remove();
+      });
+      toolbar.appendChild(button);
+      return button;
+    };
+
+    if (anchor.multiPage) {
+      addCopyForAgentButton();
+      document.body.appendChild(toolbar);
+      requestAnimationFrame(() => this.positionSelectionToolbar(toolbar, rect));
+      return;
     }
+
+    addButton('Copy Link', 'copyLink');
+    const separator = document.createElement('span');
+    separator.className = 'selection-toolbar-separator';
+    separator.setAttribute('role', 'separator');
+    separator.setAttribute('aria-orientation', 'vertical');
+    toolbar.appendChild(separator);
     if (this.agentCapabilities.cursorAgent) {
       const button = addButton('', 'addToCursorChat', 'secondary cursor-chat-action');
       button.setAttribute('aria-label', `Add to Chat ${cursorSelectionShortcutLabel()}`);
@@ -3000,6 +3100,7 @@ export class PdfViewer {
         `Send to ${provider.label}`,
       );
     }
+    addCopyForAgentButton();
 
     document.body.appendChild(toolbar);
     requestAnimationFrame(() => this.positionSelectionToolbar(toolbar, rect));
@@ -3012,11 +3113,6 @@ export class PdfViewer {
       const toolbar = document.getElementById('selection-toolbar');
       const selection = this.selectionState;
       if (!toolbar || !selection) return;
-      const [start, end] = orderedPdfCarets(selection.anchor, selection.focus);
-      if (start.page !== end.page) {
-        toolbar.remove();
-        return;
-      }
       const current = this.selectionAnchorFromState();
       const rect = current && this.selectionViewportRect(current.anchor);
       if (!rect) {

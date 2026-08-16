@@ -120,6 +120,19 @@ class FakeCanvas {
   }
 }
 
+class FakeClipboardItem {
+  constructor(items) {
+    this.items = items;
+    this.types = Object.keys(items);
+  }
+
+  async getType(type) {
+    const value = this.items[type];
+    if (!value) throw new TypeError(`Clipboard item does not contain ${type}`);
+    return value;
+  }
+}
+
 function resetCanvasState(overrides = {}) {
   canvasState = {
     blobBytesPerPixel: 0.01,
@@ -152,6 +165,7 @@ function singlePageCropInput(canvas = sourceCanvas(2)) {
 }
 
 const originalDocument = globalThis.document;
+const originalClipboardItem = globalThis.ClipboardItem;
 globalThis.document = {
   createElement: tagName => {
     assert.equal(tagName, 'canvas');
@@ -166,10 +180,123 @@ const pdfAgentClipboard = compileTsModule(clipboardSource);
 test.after(() => {
   if (originalDocument === undefined) delete globalThis.document;
   else globalThis.document = originalDocument;
+  if (originalClipboardItem === undefined) delete globalThis.ClipboardItem;
+  else globalThis.ClipboardItem = originalClipboardItem;
 });
 
 test.beforeEach(() => {
   resetCanvasState();
+  globalThis.ClipboardItem = FakeClipboardItem;
+});
+
+test('rich PDF clipboard writes one item with PNG, plain text, and HTML', async () => {
+  const expectedPlainText = [
+    'Source: [raw/pdf/paper.pdf (page 2)](<cursor://llm-wiki/open-anchor?target=raw%2Fpdf%2Fpaper.pdf%23page%3D2>)',
+    '',
+    'Selected text:',
+    'Exact selected passage',
+  ].join('\n');
+  const writes = [];
+  const posted = [];
+  const events = [];
+  const pngBlob = new Blob(['png'], { type: 'image/png' });
+  const result = await pdfAgentClipboard.writePdfAgentClipboard({
+    context: {
+      selectionKey: 'current-selection-key',
+      sourceLabel: 'raw/pdf/paper.pdf (page 2)',
+      sourceHref: 'cursor://llm-wiki/open-anchor?target=raw%2Fpdf%2Fpaper.pdf%23page%3D2',
+      selectedText: 'Exact selected passage',
+      plainText: expectedPlainText,
+    },
+    pngBlob,
+    host: {
+      postMessage: message => {
+        events.push('host');
+        posted.push(message);
+      },
+    },
+  }, {
+    write: async items => {
+      events.push('clipboard');
+      writes.push(items);
+    },
+  });
+
+  assert.equal(result, 'rich');
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0].length, 1);
+  const [item] = writes[0];
+  assert.deepEqual(item.types.sort(), ['image/png', 'text/html', 'text/plain']);
+  assert.equal(await item.getType('image/png'), pngBlob);
+  assert.equal(await (await item.getType('text/plain')).text(), expectedPlainText);
+  assert.match(await (await item.getType('text/html')).text(), /<a href="cursor:/);
+  assert.deepEqual(events, ['clipboard', 'host']);
+  assert.deepEqual(posted, [{
+    type: 'agentClipboardResult',
+    status: 'rich',
+    selectionKey: 'current-selection-key',
+  }]);
+});
+
+test('sanitizes clipboard HTML while preserving the cursor source link', async () => {
+  const writes = [];
+  await pdfAgentClipboard.writePdfAgentClipboard({
+    context: {
+      selectionKey: 'sanitization-key',
+      sourceLabel: 'paper.pdf </a><script>alert(1)</script>',
+      sourceHref: 'cursor://llm-wiki/open-anchor?target=paper.pdf&label=" onerror="alert(1)',
+      selectedText: 'Selected </blockquote><img src=x onerror=alert(1)>',
+      plainText: 'precomputed plain text',
+    },
+    pngBlob: new Blob(['png'], { type: 'image/png' }),
+    host: { postMessage: () => undefined },
+  }, {
+    write: async items => { writes.push(items); },
+  });
+
+  const html = await (await writes[0][0].getType('text/html')).text();
+  assert.match(html, /<a href="cursor:/);
+  assert.match(html, /<img src="data:image\/png;base64,/);
+  assert.doesNotMatch(html, /<script|onerror=/i);
+});
+
+test('clipboard text fallback posts only validated text after rich write rejection', async () => {
+  const expectedPlainText = 'host-precomputed plain text';
+  const posted = [];
+  const events = [];
+  const result = await pdfAgentClipboard.writePdfAgentClipboard({
+    context: {
+      selectionKey: 'current-selection-key',
+      sourceLabel: 'raw/pdf/paper.pdf (page 2)',
+      sourceHref: 'cursor://llm-wiki/open-anchor?target=paper.pdf',
+      selectedText: 'Exact selected passage',
+      plainText: expectedPlainText,
+    },
+    pngBlob: new Blob(['secret png bytes'], { type: 'image/png' }),
+    host: {
+      postMessage: message => {
+        events.push('host');
+        posted.push(message);
+      },
+    },
+  }, {
+    write: async () => {
+      events.push('clipboard');
+      throw new Error('clipboard permission denied');
+    },
+  });
+
+  assert.equal(result, 'text-fallback');
+  assert.deepEqual(events, ['clipboard', 'host']);
+  assert.deepEqual(posted, [{
+    type: 'agentClipboardResult',
+    status: 'text-fallback',
+    selectionKey: 'current-selection-key',
+    plainText: expectedPlainText,
+  }]);
+  assert.equal(JSON.stringify(posted).includes('secret png bytes'), false);
+  assert.equal(Object.hasOwn(posted[0], 'html'), false);
+  assert.equal(Object.hasOwn(posted[0], 'pngBlob'), false);
 });
 
 test('single-page crop preserves Ask PDF bounds, background, and selection outline', () => {

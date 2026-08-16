@@ -25,6 +25,37 @@ export interface PdfAgentClipboardCropInput {
   pages: readonly PdfSelectionCropSource[];
 }
 
+export interface PdfAgentClipboardContext {
+  selectionKey: string;
+  sourceLabel: string;
+  sourceHref: string;
+  selectedText: string;
+  plainText: string;
+}
+
+export type PdfAgentClipboardResultMessage =
+  | {
+      type: 'agentClipboardResult';
+      status: 'rich';
+      selectionKey: string;
+    }
+  | {
+      type: 'agentClipboardResult';
+      status: 'text-fallback';
+      selectionKey: string;
+      plainText: string;
+    };
+
+export interface PdfAgentClipboardHost {
+  postMessage(message: PdfAgentClipboardResultMessage): void;
+}
+
+export interface PdfAgentClipboardWriteInput {
+  context: PdfAgentClipboardContext;
+  pngBlob: Blob;
+  host: PdfAgentClipboardHost;
+}
+
 export interface PdfSelectionCrop {
   page: number;
   canvas: HTMLCanvasElement;
@@ -48,6 +79,38 @@ interface PdfSelectionCropGeometry {
   sourceScaleX: number;
   sourceScaleY: number;
   widthPoints: number;
+}
+
+export async function writePdfAgentClipboard(
+  input: PdfAgentClipboardWriteInput,
+  clipboard: Clipboard = navigator.clipboard,
+): Promise<'rich' | 'text-fallback'> {
+  const { context, host, pngBlob } = input;
+  try {
+    const html = await pdfAgentClipboardHtml(context, pngBlob);
+    await clipboard.write([
+      new ClipboardItem({
+        'image/png': pngBlob,
+        'text/plain': new Blob([context.plainText], { type: 'text/plain' }),
+        'text/html': new Blob([html], { type: 'text/html' }),
+      }),
+    ]);
+  } catch {
+    host.postMessage({
+      type: 'agentClipboardResult',
+      status: 'text-fallback',
+      selectionKey: context.selectionKey,
+      plainText: context.plainText,
+    });
+    return 'text-fallback';
+  }
+
+  host.postMessage({
+    type: 'agentClipboardResult',
+    status: 'rich',
+    selectionKey: context.selectionKey,
+  });
+  return 'rich';
 }
 
 export function capturePdfSelectionCrop(
@@ -392,6 +455,40 @@ function canvasPngBlob(canvas: HTMLCanvasElement): Promise<Blob | undefined> {
       resolve(undefined);
     }
   });
+}
+
+async function pdfAgentClipboardHtml(
+  context: PdfAgentClipboardContext,
+  pngBlob: Blob,
+): Promise<string> {
+  const pngBase64 = bytesToBase64(new Uint8Array(await pngBlob.arrayBuffer()));
+  return [
+    `<p><strong>Source:</strong> <a href="${escapeClipboardHtml(context.sourceHref)}">${escapeClipboardHtml(context.sourceLabel)}</a></p>`,
+    '<p><strong>Selected text:</strong></p>',
+    `<blockquote>${escapeClipboardHtml(context.selectedText)}</blockquote>`,
+    `<img src="data:image/png;base64,${pngBase64}" alt="Selected PDF region">`,
+  ].join('\n');
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = '';
+  const chunkSize = 0x8000;
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
+  }
+  return btoa(binary);
+}
+
+function escapeClipboardHtml(value: string): string {
+  const escaped: Record<string, string> = {
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;',
+    '=': '&#61;',
+  };
+  return value.replace(/[&<>"'=]/g, character => escaped[character]!);
 }
 
 function validPdfRects(value: unknown): PdfRect[] {

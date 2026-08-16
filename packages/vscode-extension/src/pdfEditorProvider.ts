@@ -433,6 +433,32 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
           if (text) await vscode.env.clipboard.writeText(text);
           break;
         }
+        case 'agentClipboardResult': {
+          const context = active.agentClipboardContext;
+          if (
+            !context
+            || typeof message.selectionKey !== 'string'
+            || message.selectionKey !== context.selectionKey
+          ) break;
+          if (message.status === 'rich') {
+            vscode.window.showInformationMessage('Selection copied for agent.');
+            break;
+          }
+          if (
+            message.status !== 'text-fallback'
+            || typeof message.plainText !== 'string'
+            || message.plainText !== context.plainText
+          ) break;
+          try {
+            await vscode.env.clipboard.writeText(context.plainText);
+            vscode.window.showWarningMessage(
+              'Selection text copied, but the image could not be copied.',
+            );
+          } catch {
+            vscode.window.showErrorMessage('The selection could not be copied.');
+          }
+          break;
+        }
         case 'lookupSelection':
           await this.lookupSelection(message.text);
           break;

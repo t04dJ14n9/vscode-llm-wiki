@@ -203,6 +203,141 @@ test('PDF provider correlates multi-page clipboard context to exact selection ge
   assert.deepEqual(clipboardWrites, []);
 });
 
+test('clipboard text fallback accepts only the current key and exact precomputed plain text', async () => {
+  const posted = [];
+  const clipboardWrites = [];
+  const informationMessages = [];
+  const warningMessages = [];
+  let receiveMessage;
+  const vscode = {
+    workspace: {
+      asRelativePath: uri => uri.fsPath.replace('/vault/', ''),
+    },
+    commands: {
+      executeCommand: async () => undefined,
+    },
+    env: {
+      clipboard: {
+        writeText: async text => { clipboardWrites.push(text); },
+      },
+    },
+    window: {
+      showInformationMessage: message => { informationMessages.push(message); },
+      showWarningMessage: message => { warningMessages.push(message); },
+    },
+    Uri: {
+      joinPath: (...parts) => ({ parts, toString: () => 'vscode-resource' }),
+    },
+  };
+  const { PdfEditorProvider } = loadTsModule('src/pdfEditorProvider.ts', {
+    vscode,
+    '@llm-wiki/core': { pdfHref: portablePdfHref },
+  });
+  const provider = new PdfEditorProvider(
+    { extensionUri: { fsPath: '/extension' }, subscriptions: [] },
+    '/vault',
+  );
+  const pdfUri = {
+    scheme: 'file',
+    fsPath: '/vault/raw/pdf/paper.pdf',
+    toString: () => 'file:///vault/raw/pdf/paper.pdf',
+  };
+  const webview = {
+    options: {},
+    cspSource: 'vscode-webview:',
+    asWebviewUri: uri => uri,
+    onDidReceiveMessage: listener => {
+      receiveMessage = listener;
+      return { dispose() {} };
+    },
+    postMessage: async message => {
+      posted.push(message);
+      return true;
+    },
+  };
+  await provider.resolveCustomEditor(
+    { uri: pdfUri },
+    {
+      active: true,
+      webview,
+      onDidChangeViewState: () => ({ dispose() {} }),
+      onDidDispose: () => ({ dispose() {} }),
+    },
+    {},
+  );
+
+  const firstSelection = {
+    startPage: 2,
+    endPage: 2,
+    pages: [{ page: 2, rects: [[10, 20, 110, 36]] }],
+    selectedText: 'first selected passage',
+  };
+  await receiveMessage({
+    type: 'selectionChanged',
+    anchor: {
+      page: 2,
+      snippet: firstSelection.selectedText,
+      rects: firstSelection.pages[0].rects,
+    },
+    clipboardSelection: firstSelection,
+  });
+  const firstContext = posted.at(-1).context;
+
+  const currentSelection = {
+    startPage: 2,
+    endPage: 2,
+    pages: [{ page: 2, rects: [[30, 40, 130, 56]] }],
+    selectedText: 'current selected passage',
+  };
+  await receiveMessage({
+    type: 'selectionChanged',
+    anchor: {
+      page: 2,
+      snippet: currentSelection.selectedText,
+      rects: currentSelection.pages[0].rects,
+    },
+    clipboardSelection: currentSelection,
+  });
+  const currentContext = posted.at(-1).context;
+
+  await receiveMessage({
+    type: 'agentClipboardResult',
+    status: 'text-fallback',
+    selectionKey: firstContext.selectionKey,
+    plainText: firstContext.plainText,
+  });
+  await receiveMessage({
+    type: 'agentClipboardResult',
+    status: 'text-fallback',
+    selectionKey: currentContext.selectionKey,
+    plainText: `${currentContext.plainText}\nattacker-controlled suffix`,
+  });
+
+  assert.deepEqual(clipboardWrites, []);
+  assert.deepEqual(warningMessages, []);
+
+  await receiveMessage({
+    type: 'agentClipboardResult',
+    status: 'text-fallback',
+    selectionKey: currentContext.selectionKey,
+    plainText: currentContext.plainText,
+    html: '<img src=x onerror=alert(1)>',
+    pngBytes: [1, 2, 3],
+  });
+
+  assert.deepEqual(clipboardWrites, [currentContext.plainText]);
+  assert.deepEqual(warningMessages, [
+    'Selection text copied, but the image could not be copied.',
+  ]);
+
+  await receiveMessage({
+    type: 'agentClipboardResult',
+    status: 'rich',
+    selectionKey: currentContext.selectionKey,
+  });
+  assert.deepEqual(informationMessages, ['Selection copied for agent.']);
+});
+
 test('PDF editor provider exposes portable database-free agent context with normalized selection context', async () => {
   const pdfHrefCalls = [];
   const vscode = {
