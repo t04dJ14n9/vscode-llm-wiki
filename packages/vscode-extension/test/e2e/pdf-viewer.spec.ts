@@ -614,6 +614,12 @@ test('PDF toolbar grip commits only top and left drop targets', async ({ page })
   expect(box).not.toBeNull();
   await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
   await page.mouse.down();
+  await page.evaluate(() => {
+    window.postMessage({
+      type: 'pdfToolbarPreference',
+      preference: { dock: 'left', hidden: false },
+    }, '*');
+  });
   await page.mouse.move(500, 4, { steps: 8 });
   await expect(page.locator('.pdf-toolbar-drop-target[data-dock="top"]'))
     .toHaveAttribute('data-active', 'true');

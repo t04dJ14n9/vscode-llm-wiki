@@ -5105,6 +5105,8 @@ export class PdfViewer {
 
   private applyPdfToolbarPreference(value: unknown): void {
     const preference = normalizePdfToolbarPreference(value, this.pdfToolbarPreference);
+    const changed = preference.dock !== this.pdfToolbarPreference.dock
+      || preference.hidden !== this.pdfToolbarPreference.hidden;
     this.pdfToolbarPreference = preference;
     this.readerLayout.dataset.toolbarDock = preference.dock;
     this.readerLayout.dataset.toolbarHidden = String(preference.hidden);
@@ -5113,9 +5115,9 @@ export class PdfViewer {
       'aria-orientation',
       preference.dock === 'left' ? 'vertical' : 'horizontal',
     );
-    this.cancelPdfToolbarDrag();
+    if (changed) this.cancelPdfToolbarDrag();
     this.updateToolbarState();
-    if (this.fitMode !== 'custom' && this.loaded) {
+    if (changed && this.fitMode !== 'custom' && this.loaded) {
       requestAnimationFrame(() => void this.reapplyFitMode());
     }
   }
