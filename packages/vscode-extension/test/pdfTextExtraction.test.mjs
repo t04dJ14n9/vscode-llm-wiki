@@ -507,6 +507,58 @@ test('column detection keeps each PDF reading lane contiguous', () => {
   ]);
 });
 
+test('section gaps keep short indented blocks in each two-column lane contiguous', () => {
+  const normalized = extraction.normalizeBasicPdfTextRects([
+    { content: 'left upper 1', rect: rect(0, 0, 50, 8) },
+    { content: 'left upper 2', rect: rect(0, 10, 50, 8) },
+    { content: 'left indented lower', rect: rect(8, 50, 32, 8) },
+    { content: 'right upper 1', rect: rect(70, 0, 50, 8) },
+    { content: 'right upper 2', rect: rect(70, 10, 50, 8) },
+    { content: 'right indented lower', rect: rect(78, 50, 32, 8) },
+  ]);
+
+  assert.deepEqual(normalized.map(item => item.content), [
+    'left upper 1',
+    'left upper 2',
+    'left indented lower',
+    'right upper 1',
+    'right upper 2',
+    'right indented lower',
+  ]);
+});
+
+test('section gaps preserve lane-major order across three PDF columns', () => {
+  const normalized = extraction.normalizeBasicPdfTextRects([
+    { content: 'left upper 1', rect: rect(0, 0, 30, 8) },
+    { content: 'left upper 2', rect: rect(0, 10, 30, 8) },
+    { content: 'left lower 1', rect: rect(0, 40, 30, 8) },
+    { content: 'left lower 2', rect: rect(0, 50, 30, 8) },
+    { content: 'middle upper 1', rect: rect(50, 0, 30, 8) },
+    { content: 'middle upper 2', rect: rect(50, 10, 30, 8) },
+    { content: 'middle lower 1', rect: rect(50, 40, 30, 8) },
+    { content: 'middle lower 2', rect: rect(50, 50, 30, 8) },
+    { content: 'right upper 1', rect: rect(100, 0, 30, 8) },
+    { content: 'right upper 2', rect: rect(100, 10, 30, 8) },
+    { content: 'right lower 1', rect: rect(100, 40, 30, 8) },
+    { content: 'right lower 2', rect: rect(100, 50, 30, 8) },
+  ]);
+
+  assert.deepEqual(normalized.map(item => item.content), [
+    'left upper 1',
+    'left upper 2',
+    'left lower 1',
+    'left lower 2',
+    'middle upper 1',
+    'middle upper 2',
+    'middle lower 1',
+    'middle lower 2',
+    'right upper 1',
+    'right upper 2',
+    'right lower 1',
+    'right lower 2',
+  ]);
+});
+
 test('column detection reconnects a body lane after vertically overlapping margin captions', () => {
   const normalized = extraction.normalizeBasicPdfTextRects([
     { content: 'body intro', rect: rect(0, 0, 60, 8) },

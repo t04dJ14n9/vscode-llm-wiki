@@ -315,13 +315,41 @@ function orderPdfTextItems(items: OrderedPdfTextItem[]): any[] {
 
   const singleRowMerged = mergeSingleRowPdfTextLanes(lanes, typicalHeight, laneGap);
   const segmented = singleRowMerged.flatMap(lane => (
-    splitPdfTextLaneAtVerticalGaps(lane, typicalHeight, laneGap)
+    pdfTextLaneHasDisjointPeer(lane, singleRowMerged, typicalHeight, laneGap)
+      ? [lane]
+      : splitPdfTextLaneAtVerticalGaps(lane, typicalHeight, laneGap)
   ));
   return orderPdfTextLaneRegions(
     mergeAdjacentPdfTextLanes(segmented, typicalHeight, laneGap, leftAlignmentTolerance),
   )
     .flatMap(lane => orderSinglePdfTextFlow(lane.items))
     .map(candidate => candidate.item);
+}
+
+function pdfTextLaneHasDisjointPeer(
+  lane: OrderedPdfTextLane,
+  lanes: OrderedPdfTextLane[],
+  typicalHeight: number,
+  laneGap: number,
+): boolean {
+  if (pdfTextVisualRowCount(lane.items, typicalHeight) < 2) return false;
+  const bounds = pdfTextLaneBounds(lane);
+  return lanes.some(peer => {
+    if (
+      peer === lane
+      || pdfTextVisualRowCount(peer.items, typicalHeight) < 2
+    ) {
+      return false;
+    }
+    const peerBounds = pdfTextLaneBounds(peer);
+    const verticalOverlap = Math.min(bounds.bottom, peerBounds.bottom)
+      - Math.max(bounds.top, peerBounds.top);
+    const horizontalGap = Math.max(
+      peerBounds.left - bounds.right,
+      bounds.left - peerBounds.right,
+    );
+    return verticalOverlap >= typicalHeight && horizontalGap > laneGap;
+  });
 }
 
 function splitPdfTextLaneAtVerticalGaps(
