@@ -79,23 +79,38 @@ const imagePreviewStyles = {
 
 const structuredPropertyStyles = {
   '.cm-hybrid-property-structured-table-wrap': {
+    width: '100%',
     maxWidth: '100%',
     overflowX: 'auto',
     padding: '2px 0',
   },
   '.cm-hybrid-property-structured-table': {
-    width: 'max-content',
-    maxWidth: '100%',
+    width: '100%',
+    minWidth: '38rem',
     borderCollapse: 'collapse',
     fontSize: '0.92em',
     lineHeight: '1.35',
+    tableLayout: 'fixed',
   },
   '.cm-hybrid-property-structured-table th, .cm-hybrid-property-structured-table td': {
     border: '1px solid var(--vscode-panel-border, color-mix(in srgb, var(--vscode-editor-foreground) 22%, transparent))',
     padding: '3px 8px',
     textAlign: 'left',
     verticalAlign: 'top',
-    whiteSpace: 'pre-wrap',
+    overflowWrap: 'anywhere',
+    whiteSpace: 'normal',
+  },
+  '.cm-hybrid-property-structured-table [data-column="id"]': {
+    width: '12%',
+  },
+  '.cm-hybrid-property-structured-table [data-column="resource"]': {
+    width: '42%',
+  },
+  '.cm-hybrid-property-structured-table [data-column="title"]': {
+    width: '20%',
+  },
+  '.cm-hybrid-property-structured-table [data-column="commit"]': {
+    width: '26%',
   },
   '.cm-hybrid-property-structured-table th': {
     color: 'var(--vscode-editor-foreground)',
@@ -517,7 +532,8 @@ export function hybridStyles() {
     '.cm-hybrid-properties-rows': {
       display: 'grid',
       gap: '0.15em',
-      maxWidth: '36rem',
+      width: '100%',
+      maxWidth: 'none',
     },
     '.cm-hybrid-property-row': {
       display: 'grid',
@@ -525,6 +541,16 @@ export function hybridStyles() {
       gap: '1rem',
       alignItems: 'start',
       minHeight: '1.65em',
+    },
+    '.cm-hybrid-property-row-structured': {
+      gridTemplateColumns: 'minmax(0, 1fr)',
+      gap: '0.35em',
+    },
+    '.cm-hybrid-property-row-structured .cm-hybrid-property-name-cell': {
+      maxWidth: '14rem',
+    },
+    '.cm-hybrid-property-row-structured .cm-hybrid-property-value': {
+      width: '100%',
     },
     '.cm-hybrid-property-name': {
       color: 'var(--vscode-descriptionForeground)',

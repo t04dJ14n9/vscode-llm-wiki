@@ -63,6 +63,9 @@ export class FrontmatterPropertiesWidget extends WidgetType {
     for (const [propertyIndex, property] of this.properties.entries()) {
       const row = document.createElement('div');
       row.className = 'cm-hybrid-property-row';
+      if (property.table) {
+        row.classList.add('cm-hybrid-property-row-structured');
+      }
 
       const name = this.createPropertyNameInput(view, property, propertyIndex);
       const nameCell = document.createElement('div');
@@ -857,6 +860,7 @@ function renderFrontmatterTable(
     const cell = document.createElement('th');
     cell.scope = 'col';
     cell.textContent = column;
+    cell.dataset.column = column;
     headingRow.appendChild(cell);
   }
   head.appendChild(headingRow);
@@ -867,6 +871,8 @@ function renderFrontmatterTable(
     const rowElement = document.createElement('tr');
     for (const [columnIndex, cellValue] of row.entries()) {
       const cell = document.createElement('td');
+      const column = table.columns[columnIndex];
+      if (column) cell.dataset.column = column;
       const path = table.paths[rowIndex]?.[columnIndex];
       if (!path) {
         cell.textContent = cellValue;

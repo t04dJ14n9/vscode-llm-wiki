@@ -336,6 +336,58 @@ test.describe('LLM Wiki — E2E Bidirectional Links', () => {
     await expect(tables.nth(1).locator('tbody')).toContainText('Tab survey');
   });
 
+  test('wide structured source tables use the full properties surface with readable columns', async ({ page }) => {
+    await page.setViewportSize({ width: 1100, height: 900 });
+    await page.goto('http://localhost:8979/test.html');
+    await waitForEditorBootstrap(page);
+    const doc = [
+      '---',
+      'type: Query',
+      'sources:',
+      '  - id: project',
+      '    resource: ../projects/nanochat.md',
+      '    title: Nanochat project card',
+      '    commit: ""',
+      '  - id: speedrun',
+      '    resource: ../projects/code/nanochat/runs/speedrun.sh',
+      '    title: Nanochat speedrun',
+      '    commit: 92d63d4e8bb4df75c3b71618f31ddde2378b2bcd',
+      '  - id: cpu-run',
+      '    resource: ../projects/code/nanochat/runs/runcpu.sh',
+      '    title: Nanochat CPU run',
+      '    commit: 92d63d4e8bb4df75c3b71618f31ddde2378b2bcd',
+      '---',
+      '',
+      '# Structured metadata',
+    ].join('\n');
+    await page.evaluate(text => window.postMessage({ type: 'setText', text }, '*'), doc);
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+
+    const metrics = await page.locator('.cm-hybrid-property-structured-table').evaluate(table => {
+      const properties = table.closest('.cm-hybrid-properties-rows');
+      const content = table.closest('.cm-content');
+      const headings = Array.from(table.querySelectorAll('th'));
+      const headingWidth = (name: string): number =>
+        headings.find(heading => heading.textContent === name)?.getBoundingClientRect().width ?? 0;
+      return {
+        contentWidth: content?.getBoundingClientRect().width ?? 0,
+        propertiesWidth: properties?.getBoundingClientRect().width ?? 0,
+        resourceWidth: headingWidth('resource'),
+        tableWidth: table.getBoundingClientRect().width,
+        titleWidth: headingWidth('title'),
+        tallestRow: Math.max(
+          ...Array.from(table.querySelectorAll('tbody tr'))
+            .map(row => row.getBoundingClientRect().height),
+        ),
+      };
+    });
+
+    expect(metrics.propertiesWidth).toBeGreaterThan(metrics.contentWidth * 0.9);
+    expect(metrics.tableWidth).toBeGreaterThan(metrics.propertiesWidth * 0.9);
+    expect(metrics.resourceWidth).toBeGreaterThan(metrics.titleWidth * 1.4);
+    expect(metrics.tallestRow).toBeLessThan(90);
+  });
+
   test('structured frontmatter cells are editable without leaving the properties surface', async ({ page }) => {
     await page.goto('http://localhost:8979/test.html');
     await waitForEditorBootstrap(page);
