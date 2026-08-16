@@ -107,18 +107,19 @@ test('filesystem wiki resolves basename wikilinks to the closest note', () => {
   assert.equal(link.resolved, true);
 });
 
-test('filesystem wiki resolves OKF concept IDs and directory indexes', () => {
+test('filesystem wiki resolves only canonical OKF directory indexes', () => {
   const wiki = filesystemWiki.createFilesystemWiki([
     {
-      path: 'index.md',
+      path: '_index.md',
       text: [
         '# Home',
         '[Concepts](concepts/)',
         '[Tokenization](/concepts/tokenization)',
+        '[Legacy](legacy/)',
       ].join('\n'),
     },
     {
-      path: 'concepts/index.md',
+      path: 'concepts/_index.md',
       text: '# Concepts',
     },
     {
@@ -129,23 +130,28 @@ test('filesystem wiki resolves OKF concept IDs and directory indexes', () => {
       path: 'concepts/tokenization.md',
       text: '# Tokenization',
     },
+    {
+      path: 'legacy/index.md',
+      text: '# Legacy index',
+    },
   ]);
 
-  const forward = filesystemWiki.getForwardLinks(wiki, 'index.md');
+  const forward = filesystemWiki.getForwardLinks(wiki, '_index.md');
   const graph = filesystemWiki.getConceptGraph(wiki);
 
   assert.deepEqual(
     forward.map(link => [link.targetPath, link.resolved]),
     [
-      ['concepts/index.md', true],
+      ['concepts/_index.md', true],
       ['concepts/tokenization.md', true],
+      ['legacy.md', false],
     ],
   );
   assert.deepEqual(
     graph.edges.map(edge => [edge.source, edge.target]),
     [
-      ['index.md', 'concepts/index.md'],
-      ['index.md', 'concepts/tokenization.md'],
+      ['_index.md', 'concepts/_index.md'],
+      ['_index.md', 'concepts/tokenization.md'],
     ],
   );
 });

@@ -275,6 +275,7 @@ git commit -m "feat(vault): make underscore indexes canonical"
 **Files:**
 - Modify: `packages/vscode-extension/src/filesystemWiki.ts:777-794`
 - Modify: `packages/vscode-extension/src/localLinkTargetResolver.ts:83-109`
+- Modify: `packages/vscode-extension/src/uriDispatcher.ts:145-165`
 - Modify: `packages/vscode-extension/test/backlinksProvider.test.mjs:110-150`
 - Modify: `packages/vscode-extension/test/localLinkTargetResolver.test.mjs:118-195`
 - Modify: `packages/vscode-extension/test/uriDispatcher.test.mjs:129-190`
@@ -363,18 +364,31 @@ const indexPath = containedVaultPath(
 When `direct` is a directory and that file does not exist, return
 `undefined`; do not return the directory itself.
 
-- [ ] **Step 7: Run focused GREEN**
+- [ ] **Step 7: Keep unresolved directories out of generic file opening**
+
+In the `image` / `text` / `unknown` branch of `dispatchUri`, open an existing
+path only when it is not a directory:
+
+```typescript
+if (existsSync(filePath) && !hostLinkProbe.isDirectory(filePath)) {
+  await vscode.commands.executeCommand('vscode.open', vscode.Uri.file(filePath));
+  return;
+}
+```
+
+- [ ] **Step 8: Run focused GREEN**
 
 Run the same three-suite Node command from Step 4.
 
 Expected: all tests pass.
 
-- [ ] **Step 8: Commit extension resolution**
+- [ ] **Step 9: Commit extension resolution**
 
 ```bash
 git add \
   packages/vscode-extension/src/filesystemWiki.ts \
   packages/vscode-extension/src/localLinkTargetResolver.ts \
+  packages/vscode-extension/src/uriDispatcher.ts \
   packages/vscode-extension/test/backlinksProvider.test.mjs \
   packages/vscode-extension/test/localLinkTargetResolver.test.mjs \
   packages/vscode-extension/test/uriDispatcher.test.mjs

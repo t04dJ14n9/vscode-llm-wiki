@@ -781,7 +781,7 @@ function resolveKnownDocumentPath(
 ): string | undefined {
   const normalized = comparablePath(candidate);
   const withExtension = comparablePath(ensureMarkdownExtension(candidate));
-  const directoryIndex = comparablePath(joinNotePath(candidate, 'index.md'));
+  const directoryIndex = comparablePath(joinNotePath(candidate, '_index.md'));
   const candidates = preferDirectoryIndex
     ? [directoryIndex, normalized, withExtension]
     : [normalized, withExtension, directoryIndex];

@@ -91,11 +91,12 @@ function vaultRelativeTarget(
     if (probe.isDirectory(direct)) {
       const indexPath = containedVaultPath(
         vaultRoot,
-        `${bundlePath.replace(/[\\/]+$/, '')}/index.md`,
+        `${bundlePath.replace(/[\\/]+$/, '')}/_index.md`,
       );
       if (indexPath && probe.exists(indexPath)) {
         return { uri: `${vaultRelativePath(vaultRoot, indexPath)}${suffix}`, origin: 'vault' };
       }
+      return undefined;
     }
     return { uri: `${vaultRelativePath(vaultRoot, direct)}${suffix}`, origin: 'vault' };
   }

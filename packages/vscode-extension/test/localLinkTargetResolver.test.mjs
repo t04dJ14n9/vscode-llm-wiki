@@ -118,11 +118,11 @@ test('a target missing in both places stays a contained vault path', () => {
 });
 
 test('an existing absolute directory does not hijack a root-looking target', () => {
-  const probe = probeFor(['/vault/playbook/index.md'], ['/playbook', '/vault/playbook']);
+  const probe = probeFor(['/vault/playbook/_index.md'], ['/playbook', '/vault/playbook']);
 
   assert.deepEqual(
     resolveLocalLinkTarget('/vault', '/playbook', probe, ABSOLUTE_ALLOWED),
-    { uri: 'playbook/index.md', origin: 'vault' },
+    { uri: 'playbook/_index.md', origin: 'vault' },
   );
 });
 
@@ -176,19 +176,31 @@ test('without a vault root every target is left unchanged', () => {
   );
 });
 
-test('vault directories resolve to their index and concept IDs gain the Markdown suffix', () => {
+test('vault directories resolve to their underscore index and concept IDs gain the Markdown suffix', () => {
   const probe = probeFor(
-    ['/vault/summaries/index.md', '/vault/concepts/tokenization.md'],
+    ['/vault/summaries/_index.md', '/vault/concepts/tokenization.md'],
     ['/vault/summaries'],
   );
 
   assert.deepEqual(
     resolveLocalLinkTarget('/vault', 'summaries/', probe),
-    { uri: 'summaries/index.md', origin: 'vault' },
+    { uri: 'summaries/_index.md', origin: 'vault' },
   );
   assert.deepEqual(
     resolveLocalLinkTarget('/vault', 'concepts/tokenization', probe),
     { uri: 'concepts/tokenization.md', origin: 'vault' },
+  );
+});
+
+test('vault directories do not fall back to index.md', () => {
+  const probe = probeFor(
+    ['/vault/summaries/index.md'],
+    ['/vault/summaries'],
+  );
+
+  assert.deepEqual(
+    resolveLocalLinkTarget('/vault', 'summaries/', probe),
+    { uri: 'summaries/', origin: 'unchanged' },
   );
 });
 
