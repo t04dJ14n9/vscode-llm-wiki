@@ -346,6 +346,7 @@ export function markdownReferenceDefinitionSourceSpan(
   if (!match) return null;
 
   const label = match[2] ?? '';
+  if (label.startsWith('^')) return null;
   const rawDestination = match[3] ?? '';
   const destination = parseMarkdownLinkDestination(rawDestination);
   const normalizedLabel = normalizeReferenceLabel(label);
