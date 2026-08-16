@@ -315,7 +315,7 @@ function orderPdfTextItems(items: OrderedPdfTextItem[]): any[] {
 
   const singleRowMerged = mergeSingleRowPdfTextLanes(lanes, typicalHeight, laneGap);
   const segmented = singleRowMerged.flatMap(lane => (
-    pdfTextLaneHasDisjointPeer(lane, singleRowMerged, typicalHeight, laneGap)
+    pdfTextLaneHasDisjointPeer(lane, singleRowMerged, typicalHeight)
       ? [lane]
       : splitPdfTextLaneAtVerticalGaps(lane, typicalHeight, laneGap)
   ));
@@ -330,7 +330,6 @@ function pdfTextLaneHasDisjointPeer(
   lane: OrderedPdfTextLane,
   lanes: OrderedPdfTextLane[],
   typicalHeight: number,
-  laneGap: number,
 ): boolean {
   if (pdfTextVisualRowCount(lane.items, typicalHeight) < 2) return false;
   const bounds = pdfTextLaneBounds(lane);
@@ -348,7 +347,7 @@ function pdfTextLaneHasDisjointPeer(
       peerBounds.left - bounds.right,
       bounds.left - peerBounds.right,
     );
-    return verticalOverlap >= typicalHeight && horizontalGap > laneGap;
+    return verticalOverlap >= typicalHeight && horizontalGap >= 0;
   });
 }
 

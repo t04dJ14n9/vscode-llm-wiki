@@ -527,6 +527,31 @@ test('section gaps keep short indented blocks in each two-column lane contiguous
   ]);
 });
 
+for (const [gutter, lowerWidth] of [
+  ['touching', 42],
+  ['one-pixel', 41],
+]) {
+  test(`${gutter} column gutters keep short indented section blocks lane-major`, () => {
+    const normalized = extraction.normalizeBasicPdfTextRects([
+      { content: 'left upper 1', rect: rect(0, 0, 40, 8) },
+      { content: 'left upper 2', rect: rect(0, 10, 40, 8) },
+      { content: 'left indented lower', rect: rect(8, 50, lowerWidth, 8) },
+      { content: 'right upper 1', rect: rect(50, 0, 40, 8) },
+      { content: 'right upper 2', rect: rect(50, 10, 40, 8) },
+      { content: 'right indented lower', rect: rect(58, 50, 32, 8) },
+    ]);
+
+    assert.deepEqual(normalized.map(item => item.content), [
+      'left upper 1',
+      'left upper 2',
+      'left indented lower',
+      'right upper 1',
+      'right upper 2',
+      'right indented lower',
+    ]);
+  });
+}
+
 test('section gaps preserve lane-major order across three PDF columns', () => {
   const normalized = extraction.normalizeBasicPdfTextRects([
     { content: 'left upper 1', rect: rect(0, 0, 30, 8) },
