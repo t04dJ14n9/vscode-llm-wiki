@@ -10,7 +10,13 @@ from pathlib import Path
 from typing import Protocol
 from urllib.parse import urlparse
 
-from rebuild_indexes import IndexBuildError, build_indexes, owned_directories
+from rebuild_indexes import (
+    INDEX_FILE,
+    LOG_FILE,
+    IndexBuildError,
+    build_indexes,
+    owned_directories,
+)
 from vaultlib import (
     ALLOWED_STATUSES,
     TAG_REGISTRY,
@@ -47,7 +53,7 @@ REQUIRED_FILES = (
     "README.md",
     "SCHEMA.md",
     "AGENTS.md",
-    "index.md",
+    INDEX_FILE,
     "log.md",
 )
 REQUIRED_DIRECTORIES = (
@@ -66,6 +72,7 @@ ROOT_TYPES = {
     "SCHEMA.md": "Reference",
     "AGENTS.md": "Playbook",
 }
+RESERVED_MARKDOWN = {INDEX_FILE, LOG_FILE}
 DIRECTORY_TYPES = {
     "summaries": "Summary",
     "entities": "Entity",
@@ -328,7 +335,7 @@ def _concept_files(vault_root: Path) -> tuple[Path, ...]:
     return tuple(
         path
         for path in _markdown_files(vault_root)
-        if path.name not in {"index.md", "log.md"}
+        if path.name not in RESERVED_MARKDOWN
     )
 
 
@@ -338,7 +345,7 @@ def _compiled_pages(vault_root: Path) -> tuple[Path, ...]:
         pages.extend(
             path
             for path in (vault_root / directory).glob("*.md")
-            if path.name not in {"index.md", "log.md"}
+            if path.name not in RESERVED_MARKDOWN
         )
     return tuple(sorted(pages))
 
@@ -430,7 +437,7 @@ def _index_body(
     path: Path,
 ) -> tuple[str | None, list[Issue]]:
     text = path.read_text(encoding="utf-8")
-    if path == vault_root / "index.md":
+    if path == vault_root / INDEX_FILE:
         document, issues = _read_document(
             vault_root,
             path,
@@ -469,7 +476,7 @@ def check_reserved_files(
 ) -> list[Issue]:
     issues: list[Issue] = []
     for path in _markdown_files(vault_root):
-        if path.name != "index.md":
+        if path.name != INDEX_FILE:
             continue
         body, index_issues = _index_body(vault_root, path)
         issues.extend(index_issues)
@@ -565,14 +572,14 @@ def check_generated_indexes(
 ) -> list[Issue]:
     issues: list[Issue] = []
     for directory in owned_directories(vault_root):
-        path = directory / "index.md"
+        path = directory / INDEX_FILE
         if not path.is_file():
             issues.append(
                 _issue(
                     "index.missing",
                     vault_root,
                     path,
-                    "every visible bundle-owned directory requires index.md",
+                    f"every visible bundle-owned directory requires {INDEX_FILE}",
                 )
             )
     try:
@@ -905,7 +912,7 @@ def check_raw_snapshots(
     raw_dir = vault_root / "raw"
     companion_stems: set[str] = set()
     for path in sorted(raw_dir.glob("*.md")):
-        if path.name == "index.md":
+        if path.name == INDEX_FILE:
             continue
         companion_stems.add(path.stem)
         document, read_issues = _read_document(
