@@ -3,18 +3,10 @@ type: "Software Project"
 title: "Nanochat"
 description: "An exact-commit snapshot of Karpathy's compact end-to-end language-model training and inference harness."
 resource: "https://github.com/karpathy/nanochat"
-tags:
-  ["language-models", "project-nanochat", "reproducibility", "training-systems"]
+tags: ["language-models", "project-nanochat", "reproducibility", "training-systems"]
 status: "stable"
 generated: { "by": "codex/gpt-5.6", "at": "2026-08-13T00:00:00Z" }
-sources:
-  [
-    {
-      "id": "nanochat-repository",
-      "resource": "https://github.com/karpathy/nanochat",
-      "title": "Nanochat repository",
-    },
-  ]
+sources: [{ "id": "nanochat-repository", "resource": "https://github.com/karpathy/nanochat", "title": "Nanochat repository" }]
 repository_url: "https://github.com/karpathy/nanochat.git"
 default_branch: "master"
 pinned_commit: "92d63d4e8bb4df75c3b71618f31ddde2378b2bcd"
