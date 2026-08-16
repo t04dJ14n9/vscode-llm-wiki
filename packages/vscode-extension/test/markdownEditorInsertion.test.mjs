@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+let linkPreviewResolver;
 
 function loadTsModule(relativePath, mocks = {}) {
   const filename = join(packageRoot, relativePath);
@@ -36,6 +37,7 @@ function loadTsModule(relativePath, mocks = {}) {
       };
     }
     if (request === './cursorCrop') return cursorCrop;
+    if (request === './linkPreviewResolver') return linkPreviewResolver;
     return originalLoad.call(this, request, parent, isMain);
   };
   try {
@@ -51,6 +53,7 @@ const cursorCrop = loadTsModule('src/cursorCrop.ts', {
     PDF_DISCUSSION_MAX_PNG_BYTES: 5 * 1024 * 1024,
   },
 });
+linkPreviewResolver = loadTsModule('src/linkPreviewResolver.ts');
 
 test('insert helper replaces selections and returns cursor positions', () => {
   const { applyInsertText } = loadTsModule('webview-src/insertText.ts');
@@ -428,7 +431,7 @@ test('markdown editor provider uses selection-preserving focus for Vim host shor
   );
 });
 
-test('markdown editor provider autosaves webview edits like Obsidian live editing', async () => {
+test('markdown editor provider leaves regular edits to VS Code autosave or explicit save', async () => {
   const messages = [];
   const saveCalls = [];
   const vscode = createVscodeMock();
@@ -447,7 +450,84 @@ test('markdown editor provider autosaves webview edits like Obsidian live editin
   await panel.fireMessage({ type: 'edit', text: '# Updated\n' });
   await new Promise(resolve => setTimeout(resolve, 220));
 
+  assert.equal(saveCalls.length, 0);
+
+  await panel.fireMessage({ type: 'save' });
   assert.equal(saveCalls.length, 1);
+});
+
+test('markdown editor provider keeps associated untitled edits until explicit save', async () => {
+  const messages = [];
+  const saveCalls = [];
+  let document;
+  const vscode = createVscodeMock({
+    applyEdit: async edit => {
+      document.setText(edit.replacements.at(-1).text);
+      return true;
+    },
+  });
+  const { MarkdownEditorProvider } = loadTsModule('src/markdownEditorProvider.ts', { vscode });
+  const provider = new MarkdownEditorProvider({ extensionUri: { scheme: 'file', path: '/extension' } });
+  document = createDocumentMock({
+    uri: {
+      scheme: 'untitled',
+      fsPath: '/vault/notes/Draft.md',
+      path: '/vault/notes/Draft.md',
+      toString: () => 'untitled:/vault/notes/Draft.md',
+    },
+    isUntitled: true,
+    save: async () => {
+      saveCalls.push(document.getText());
+      return true;
+    },
+  });
+  const panel = createPanelMock(messages);
+
+  await provider.resolveCustomTextEditor(document, panel, {});
+  await panel.fireMessage({ type: 'edit', text: '# Draft\n' });
+  await new Promise(resolve => setTimeout(resolve, 220));
+  assert.deepEqual(saveCalls, []);
+
+  await panel.fireMessage({ type: 'save' });
+  assert.deepEqual(saveCalls, ['# Draft\n']);
+});
+
+test('markdown editor provider flushes queued webview edits through the host save path', async () => {
+  const messages = [];
+  const pendingEdits = [];
+  let document;
+  const vscode = createVscodeMock({
+    applyEdit: edit => {
+      const replacement = edit.replacements.at(-1);
+      let resolveEdit;
+      const applied = new Promise(resolve => {
+        resolveEdit = resolve;
+      });
+      pendingEdits.push({
+        text: replacement.text,
+        complete: () => {
+          document.setText(replacement.text);
+          resolveEdit(true);
+        },
+      });
+      return applied;
+    },
+  });
+  const { MarkdownEditorProvider } = loadTsModule('src/markdownEditorProvider.ts', { vscode });
+  const provider = new MarkdownEditorProvider({ extensionUri: { scheme: 'file', path: '/extension' } });
+  document = createDocumentMock({ text: '# Note\n' });
+  const panel = createPanelMock(messages);
+
+  await provider.resolveCustomTextEditor(document, panel, {});
+  await panel.fireMessage({ type: 'edit', text: '# Queued update\n' });
+  await new Promise(resolve => setImmediate(resolve));
+  const flush = provider.flushActiveEditsBeforeSave(document.uri);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(pendingEdits.length, 1);
+  pendingEdits[0].complete();
+
+  assert.equal(await flush, true);
+  assert.equal(document.getText(), '# Queued update\n');
 });
 
 test('markdown editor provider does not replay stale text while webview edits are pending', async () => {
@@ -641,6 +721,36 @@ test('markdown editor provider exposes the active custom markdown selection as r
   ]);
 });
 
+test('markdown editor provider reports an inclusive source range when selection ends at next-line column zero', async () => {
+  const messages = [];
+  const vscode = createVscodeMock();
+  const { MarkdownEditorProvider } = loadTsModule('src/markdownEditorProvider.ts', { vscode });
+  const provider = new MarkdownEditorProvider({
+    extensionUri: { scheme: 'file', path: '/extension' },
+    workspaceState: createStorageMock(),
+  });
+  const document = createDocumentMock({ text: 'first line\nsecond line\nthird line\n' });
+  const panel = createPanelMock(messages);
+
+  await provider.resolveCustomTextEditor(document, panel, {});
+  await panel.fireMessage({
+    type: 'selectionChanged',
+    selection: { from: 0, to: 'first line\nsecond line\n'.length },
+  });
+
+  assert.deepEqual(provider.getActiveSelectionContext(), {
+    uri: document.uri,
+    text: 'first line\nsecond line\n',
+    startLine: 1,
+    endLine: 2,
+    metadata: {
+      kind: 'markdown',
+      from: 0,
+      to: 'first line\nsecond line\n'.length,
+    },
+  });
+});
+
 test('markdown editor provider keeps selections separate for duplicate editor groups', async () => {
   const firstMessages = [];
   const secondMessages = [];
@@ -771,6 +881,45 @@ test('markdown editor provider routes Cursor selection intent through the shared
   ]);
 });
 
+test('markdown editor provider routes Copy for Agent intent through the shared host command', async () => {
+  const messages = [];
+  const executeCommandCalls = [];
+  const vscode = createVscodeMock({ executeCommandCalls });
+  const { MarkdownEditorProvider } = loadTsModule('src/markdownEditorProvider.ts', { vscode });
+  const provider = new MarkdownEditorProvider({
+    extensionUri: { scheme: 'file', path: '/extension' },
+    workspaceState: createStorageMock(),
+  });
+  const panel = createPanelMock(messages);
+
+  await provider.resolveCustomTextEditor(createDocumentMock(), panel, {});
+  await panel.fireMessage({ type: 'copySelectionForAgent' });
+
+  assert.deepEqual(executeCommandCalls.at(-1), [
+    'llm-wiki.copySelectionForAgent',
+  ]);
+});
+
+test('markdown editor provider leaves provider-specific selection routing absent', async () => {
+  const messages = [];
+  const executeCommandCalls = [];
+  const vscode = createVscodeMock({ executeCommandCalls });
+  const { MarkdownEditorProvider } = loadTsModule('src/markdownEditorProvider.ts', { vscode });
+  const provider = new MarkdownEditorProvider({
+    extensionUri: { scheme: 'file', path: '/extension' },
+    workspaceState: createStorageMock(),
+  });
+  const panel = createPanelMock(messages);
+
+  await provider.resolveCustomTextEditor(createDocumentMock(), panel, {});
+  await panel.fireMessage({ type: 'sendToAgent', agentId: 'codex' });
+
+  assert.equal(
+    executeCommandCalls.some(([command]) => command === 'llm-wiki.addSelectionToAgent'),
+    false,
+  );
+});
+
 test('markdown editor provider anchors an empty custom markdown selection to the whole document range', async () => {
   const messages = [];
   const vscode = createVscodeMock();
@@ -813,13 +962,76 @@ test('markdown editor provider routes openUri messages through the host link tar
   });
   const panel = createPanelMock(messages);
 
-  await provider.resolveCustomTextEditor(createDocumentMock(), panel, {});
+  const document = createDocumentMock();
+  await provider.resolveCustomTextEditor(document, panel, {});
   await panel.fireMessage({ type: 'openUri', uri: 'https://example.com/docs' });
 
   assert.deepEqual(executeCommandCalls.at(-1), [
     'llm-wiki.openLinkTarget',
     'https://example.com/docs',
+    document.uri,
   ]);
+});
+
+test('markdown editor provider resolves previews without opening or focusing the target', async () => {
+  const messages = [];
+  const executeCommandCalls = [];
+  const resolverCalls = [];
+  const preview = {
+    kind: 'markdown',
+    target: '../raw/source.md',
+    title: 'Source',
+    path: 'raw/source.md',
+    excerpt: 'Bounded source evidence.',
+  };
+  const vscode = createVscodeMock({
+    executeCommandCalls,
+    workspaceFolder: { uri: createUri('/vault') },
+  });
+  const { MarkdownEditorProvider } = loadTsModule('src/markdownEditorProvider.ts', {
+    vscode,
+    './linkPreviewResolver': {
+      resolveLinkPreviewTarget: async input => {
+        resolverCalls.push(input);
+        return preview;
+      },
+    },
+  });
+  const provider = new MarkdownEditorProvider({
+    extensionUri: { scheme: 'file', path: '/extension' },
+    workspaceState: createStorageMock(),
+  });
+  const panel = createPanelMock(messages);
+  const document = createDocumentMock({ uri: 'file:///vault/notes/Concepts/Note.md' });
+
+  await provider.resolveCustomTextEditor(document, panel, {});
+  messages.length = 0;
+  await panel.fireMessage({
+    type: 'resolveLinkPreview',
+    requestId: 'preview-1',
+    uri: '../raw/source.md',
+    relativeToDocument: true,
+  });
+
+  assert.deepEqual(resolverCalls, [{
+    workspaceRoot: '/vault',
+    documentPath: '/vault/notes/Concepts/Note.md',
+    target: '../raw/source.md',
+    relativeToDocument: true,
+  }]);
+  assert.deepEqual(messages, [{
+    type: 'linkPreview',
+    requestId: 'preview-1',
+    preview,
+  }]);
+  assert.equal(
+    executeCommandCalls.some(([command]) => command === 'llm-wiki.openLinkTarget'),
+    false,
+  );
+  assert.equal(
+    executeCommandCalls.some(([command]) => command === 'vscode.open'),
+    false,
+  );
 });
 
 test('markdown editor provider resolves ordinary relative links from nested index notes', async () => {
@@ -836,11 +1048,8 @@ test('markdown editor provider resolves ordinary relative links from nested inde
   });
   const panel = createPanelMock(messages);
 
-  await provider.resolveCustomTextEditor(
-    createDocumentMock({ uri: 'file:///vault/summaries/index.md' }),
-    panel,
-    {},
-  );
+  const document = createDocumentMock({ uri: 'file:///vault/summaries/index.md' });
+  await provider.resolveCustomTextEditor(document, panel, {});
   await panel.fireMessage({
     type: 'openUri',
     uri: 'nanochat-end-to-end-training-pipeline.md',
@@ -850,6 +1059,7 @@ test('markdown editor provider resolves ordinary relative links from nested inde
   assert.deepEqual(executeCommandCalls.at(-1), [
     'llm-wiki.openLinkTarget',
     'summaries/nanochat-end-to-end-training-pipeline.md',
+    document.uri,
   ]);
 });
 
@@ -867,11 +1077,8 @@ test('markdown editor provider keeps resolved wikilinks vault-relative', async (
   });
   const panel = createPanelMock(messages);
 
-  await provider.resolveCustomTextEditor(
-    createDocumentMock({ uri: 'file:///vault/daily/2026-08-13.md' }),
-    panel,
-    {},
-  );
+  const document = createDocumentMock({ uri: 'file:///vault/daily/2026-08-13.md' });
+  await provider.resolveCustomTextEditor(document, panel, {});
   await panel.fireMessage({
     type: 'openUri',
     uri: 'concepts/byte-pair-encoding.md',
@@ -881,6 +1088,7 @@ test('markdown editor provider keeps resolved wikilinks vault-relative', async (
   assert.deepEqual(executeCommandCalls.at(-1), [
     'llm-wiki.openLinkTarget',
     'concepts/byte-pair-encoding.md',
+    document.uri,
   ]);
 });
 
@@ -925,11 +1133,8 @@ test('markdown editor provider resolves generated daily and learning-note links 
   });
 
   const dailyPanel = createPanelMock(messages);
-  await provider.resolveCustomTextEditor(
-    createDocumentMock({ uri: 'file:///vault/wiki/daily/2026-08-10.md' }),
-    dailyPanel,
-    {},
-  );
+  const dailyDocument = createDocumentMock({ uri: 'file:///vault/wiki/daily/2026-08-10.md' });
+  await provider.resolveCustomTextEditor(dailyDocument, dailyPanel, {});
   await dailyPanel.fireMessage({
     type: 'openUri',
     uri: '../learning/Memory%20Systems.md',
@@ -937,11 +1142,8 @@ test('markdown editor provider resolves generated daily and learning-note links 
   });
 
   const learningPanel = createPanelMock(messages);
-  await provider.resolveCustomTextEditor(
-    createDocumentMock({ uri: 'file:///vault/wiki/learning/Memory Systems.md' }),
-    learningPanel,
-    {},
-  );
+  const learningDocument = createDocumentMock({ uri: 'file:///vault/wiki/learning/Memory Systems.md' });
+  await provider.resolveCustomTextEditor(learningDocument, learningPanel, {});
   await learningPanel.fireMessage({
     type: 'openUri',
     uri: '../../notes/Concepts/Memory.md#L4-L5',
@@ -954,9 +1156,9 @@ test('markdown editor provider resolves generated daily and learning-note links 
   });
 
   assert.deepEqual(executeCommandCalls.slice(-3), [
-    ['llm-wiki.openLinkTarget', 'wiki/learning/Memory%20Systems.md'],
-    ['llm-wiki.openLinkTarget', 'notes/Concepts/Memory.md#L4-L5'],
-    ['llm-wiki.openLinkTarget', 'notes/Concepts/Root Link.md#Overview'],
+    ['llm-wiki.openLinkTarget', 'wiki/learning/Memory%20Systems.md', dailyDocument.uri],
+    ['llm-wiki.openLinkTarget', 'notes/Concepts/Memory.md#L4-L5', learningDocument.uri],
+    ['llm-wiki.openLinkTarget', 'notes/Concepts/Root Link.md#Overview', learningDocument.uri],
   ]);
 });
 
@@ -1013,18 +1215,56 @@ test('markdown editor provider opens macOS Dictionary for webview lookup request
 test('markdown editor provider closes the custom editor on webview close messages', async () => {
   const messages = [];
   const disposeCalls = [];
-  const vscode = createVscodeMock();
+  const document = createDocumentMock();
+  const noteTab = { input: { uri: document.uri, viewType: 'llm-wiki.markdownEditor' } };
+  const closedTabs = [];
+  const vscode = createVscodeMock({
+    tabGroups: {
+      all: [{ viewColumn: 1, tabs: [noteTab] }],
+      close: async tab => {
+        closedTabs.push(tab);
+        return true;
+      },
+    },
+  });
   const { MarkdownEditorProvider } = loadTsModule('src/markdownEditorProvider.ts', { vscode });
   const provider = new MarkdownEditorProvider({
     extensionUri: { scheme: 'file', path: '/extension' },
     workspaceState: createStorageMock(),
   });
-  const panel = createPanelMock(messages, { disposeCalls });
+  const panel = createPanelMock(messages, { disposeCalls, viewColumn: 1 });
 
-  await provider.resolveCustomTextEditor(createDocumentMock(), panel, {});
+  await provider.resolveCustomTextEditor(document, panel, {});
   await panel.fireMessage({ type: 'close' });
 
-  assert.equal(disposeCalls.length, 1);
+  assert.deepEqual(closedTabs, [noteTab]);
+  assert.equal(disposeCalls.length, 0);
+});
+
+test('markdown editor provider handles Ctrl/Cmd+W through the native close of its own tab', async () => {
+  const messages = [];
+  const disposeCalls = [];
+  const document = createDocumentMock({ isUntitled: true });
+  const noteTab = { input: { uri: document.uri, viewType: 'llm-wiki.markdownEditor' } };
+  const closedTabs = [];
+  const vscode = createVscodeMock({
+    tabGroups: {
+      all: [{ viewColumn: 1, tabs: [noteTab] }],
+      close: async tab => {
+        closedTabs.push(tab);
+        return true;
+      },
+    },
+  });
+  const { MarkdownEditorProvider } = loadTsModule('src/markdownEditorProvider.ts', { vscode });
+  const provider = new MarkdownEditorProvider({ extensionUri: { scheme: 'file', path: '/extension' } });
+  const panel = createPanelMock(messages, { disposeCalls, viewColumn: 1 });
+
+  await provider.resolveCustomTextEditor(document, panel, {});
+  await panel.fireMessage({ type: 'closeActiveEditor' });
+
+  assert.deepEqual(closedTabs, [noteTab]);
+  assert.deepEqual(disposeCalls, []);
 });
 
 test('markdown editor provider saves before closing on webview saveAndClose messages', async () => {
@@ -1134,13 +1374,13 @@ function createVscodeMock(options = {}) {
         selection: null,
         revealRange() {},
       }),
-      tabGroups: options.activeTabUri
+      tabGroups: options.tabGroups ?? (options.activeTabUri
         ? {
             activeTabGroup: {
               activeTab: { input: { uri: options.activeTabUri } },
             },
           }
-        : undefined,
+        : undefined),
     },
     WorkspaceEdit,
     Position: class Position {
@@ -1187,6 +1427,7 @@ function createDocumentMock(options = {}) {
     : uri;
   return {
     uri: uriObject,
+    isUntitled: options.isUntitled ?? false,
     isClosed: false,
     getText: () => text,
     setText: nextText => {
@@ -1212,6 +1453,7 @@ function createPanelMock(messages, options = {}) {
   return {
     active: options.active ?? true,
     visible: true,
+    viewColumn: options.viewColumn,
     reveal: (...args) => {
       options.revealCalls?.push(args);
     },

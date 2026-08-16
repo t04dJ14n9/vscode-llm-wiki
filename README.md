@@ -92,6 +92,21 @@ This path never opens `selection.md` as a temporary text editor.
 Handoffs are deliberately draft-only. LLM Wiki never presses Send, and an
 optional crop failure does not discard the verified text context.
 
+For local selections, chat responses should reuse the exact clickable
+`open_uri` host link from `.llm_wiki/agent/selection.json` (also shown as the
+**Source** link in `selection.md`). Use the emitted `cursor://` or `vscode://`
+form verbatim; do not construct its versioned payload or expose the internal
+`file:///…/.llm_wiki_anchor` bridge. Persisted vault notes continue to use
+portable relative Markdown links and wikilinks, while web selections retain
+their direct `https://` source.
+
+The generated host links have this shape:
+
+```text
+cursor://llm-wiki.llm-wiki-vscode/open-anchor?target=v1.<generated-payload>
+vscode://llm-wiki.llm-wiki-vscode/open-anchor?target=v1.<generated-payload>
+```
+
 ## Current desktop features
 
 - A CodeMirror-based Markdown editor with rendered headings, links, math,
@@ -246,6 +261,7 @@ repository.
 - [Architecture and VS Code Integration](docs/architecture-and-vscode-integration.md)
 - [Current Feature List](docs/feature%20list.md)
 - [Current Implementation Detail](docs/implementation%20detail.md)
+- [TODO and Roadmap](docs/TODO.md)
 
 The remaining proposals, assessments, timelines, reference notes, and files
 under `docs/superpowers/` are historical design records. They may describe

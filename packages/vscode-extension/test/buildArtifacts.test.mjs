@@ -34,10 +34,28 @@ test('Markdown source retains stable typography and selection contracts', () => 
   );
   assert.match(
     source,
-    /\.cm-lineNumbers \.cm-gutterElement': \{[\s\S]{0,500}cursor: 'default'/,
+    /\.cm-lineNumbers \.cm-gutterElement': \{[\s\S]{0,500}cursor: 'pointer'/,
   );
   assert.match(source, /\.cm-active-inline-code': \{[\s\S]{0,500}fontFamily: 'var\(--llm-wiki-editor-font-family/);
   assert.match(source, /\.cm-active-footnote-def-label': \{[\s\S]{0,300}fontSize: '0\.85em'/);
+});
+
+test('agent rules require reusing the generated host link instead of the anchor bridge', () => {
+  const repositoryRoot = resolve(extensionRoot, '..', '..');
+  for (const relativePath of [
+    'README.md',
+    '.agents/skills/llm-wiki/SKILL.md',
+  ]) {
+    const rules = readFileSync(join(repositoryRoot, relativePath), 'utf8');
+    assert.match(rules, /cursor:\/\/llm-wiki\.llm-wiki-vscode\/open-anchor/);
+    assert.match(rules, /vscode:\/\/llm-wiki\.llm-wiki-vscode\/open-anchor/);
+    assert.match(rules, /open_uri/);
+    assert.match(
+      rules,
+      /(?:never|do not)[\s\S]{0,120}\.llm_wiki_anchor|\.llm_wiki_anchor[\s\S]{0,120}(?:never|do not)/i,
+    );
+    assert.match(rules, /wikilink|relative Markdown link/i);
+  }
 });
 
 test('build emits all VS Code extension and webview runtime artifacts', () => {
@@ -136,17 +154,23 @@ test('combined PDF artifacts retain dormant Ask protocol but omit removed select
   }
 });
 
-test('production PDF bundle contains provider dispatch contract and no static Cursor flag', () => {
-  const bundle = readFileSync(join(dist, 'pdf-viewer.js'), 'utf8');
-  for (const value of [
-    'agentHandoffCapabilities',
-    'sendToAgent',
-    'Send to ',
-    'Codex',
-    'Claude Code',
-    'CodeBuddy',
-  ]) assert.equal(bundle.includes(value), true);
-  assert.equal(bundle.includes('__llmWikiAddToCursorChat'), false);
+test('provider-specific selection controls are absent from production Markdown and PDF bundles', () => {
+  for (const file of ['markdown-editor.js', 'pdf-viewer.js']) {
+    const bundle = readFileSync(join(dist, file), 'utf8');
+    assert.equal(bundle.includes('Copy for Agent'), true, `${file} must expose Copy for Agent`);
+    assert.equal(bundle.includes('Add to Chat'), true, `${file} must retain the Cursor action`);
+    assert.equal(bundle.includes('cursorAgent'), true, `${file} must gate Add to Chat on Cursor`);
+    for (const removed of [
+      'sendToAgent',
+      'Send to ',
+      'Send to Codex',
+      'Send to Claude Code',
+      'Send to CodeBuddy',
+      'provider-action',
+    ]) assert.equal(bundle.includes(removed), false, `${file} still exposes ${removed}`);
+  }
+  const pdfBundle = readFileSync(join(dist, 'pdf-viewer.js'), 'utf8');
+  assert.equal(pdfBundle.includes('__llmWikiAddToCursorChat'), false);
 });
 
 test('webview webpack entries use VS Code webview size budgets', () => {
@@ -161,21 +185,36 @@ test('webview webpack entries use VS Code webview size budgets', () => {
   }
 });
 
-test('manifest opens markdown notes in the LLM Wiki custom editor by default', () => {
+test('manifest leaves Markdown ownership optional so missing files become native untitled buffers first', () => {
   const markdownEditor = manifest.contributes.customEditors.find(
     editor => editor.viewType === 'llm-wiki.markdownEditor',
   );
   assert.ok(markdownEditor, 'missing markdown custom editor contribution');
   assert.equal(
     markdownEditor.priority,
-    'default',
-    'markdown custom editor should be the default editor for Obsidian-like note editing',
+    'option',
+    'Markdown must first receive VS Code\'s associated untitled text model',
   );
   assert.equal(
     manifest.contributes.configurationDefaults['workbench.editorAssociations']['*.md'],
-    'llm-wiki.markdownEditor',
-    'workspace defaults should route markdown files into the custom editor',
+    undefined,
+    'a default association claims missing paths before VS Code can make them untitled',
   );
+});
+
+test('manifest leaves the terminal Backquote shortcut to VS Code in Vim mode', () => {
+  const consumedShortcutBindings = (manifest.contributes.keybindings ?? [])
+    .filter(binding => binding.command === 'llm-wiki.consumeVimHostShortcut');
+
+  for (const binding of consumedShortcutBindings) {
+    for (const platformKey of ['key', 'mac', 'win', 'linux']) {
+      assert.doesNotMatch(
+        binding[platformKey] ?? '',
+        /(?:ctrl|cmd)\+`/i,
+        `${platformKey} must not reserve the terminal Backquote shortcut`,
+      );
+    }
+  }
 });
 
 test('manifest routes immutable LLM Wiki anchor bridge files to their dedicated editor', () => {
@@ -199,6 +238,14 @@ test('manifest contributes a command palette toggle for markdown Vim mode', () =
   );
   assert.ok(toggleVimCommand, 'missing markdown Vim mode toggle command');
   assert.equal(toggleVimCommand.title, 'LLM Wiki: Toggle Vim Mode');
+});
+
+test('manifest contributes a PDF toolbar recovery command', () => {
+  const command = manifest.contributes.commands.find(
+    candidate => candidate.command === 'llm-wiki.togglePdfToolbar',
+  );
+  assert.ok(command, 'missing PDF toolbar toggle command');
+  assert.equal(command.title, 'LLM Wiki: Toggle PDF Toolbar');
 });
 
 test('manifest contributes context-aware Markdown and PDF outlines to the main Explorer sidebar', () => {
@@ -234,13 +281,14 @@ test('manifest contributes context-aware Markdown and PDF outlines to the main E
   );
 });
 
-test('manifest exposes selection export command while omitting Agent Context and Problems UI', () => {
+test('manifest exposes Copy for Agent while omitting the selection export command, Agent Context, and Problems UI', () => {
   const viewIds = (manifest.contributes.views['llm-wiki'] ?? []).map(view => view.id);
   const commandIds = (manifest.contributes.commands ?? []).map(command => command.command);
 
   assert.equal(viewIds.includes('llm-wiki-agent-context'), false);
   assert.equal(viewIds.includes('llm-wiki-problems'), false);
-  assert.equal(commandIds.includes('llm-wiki.addSelectionToContext'), true);
+  assert.equal(commandIds.includes('llm-wiki.copySelectionForAgent'), true);
+  assert.equal(commandIds.includes('llm-wiki.addSelectionToContext'), false);
   assert.equal(commandIds.includes('llm-wiki.addSelectionToChat'), true);
   assert.equal(commandIds.includes('llm-wiki.addCursorBrowserSelectionToChat'), true);
   assert.equal(commandIds.includes('llm-wiki.experimentalBrowser.open'), true);
@@ -263,32 +311,50 @@ test('manifest exposes selection export command while omitting Agent Context and
   );
 });
 
-test('manifest exposes generic Add to Chat only on Cursor while selection-to-agent remains product neutral', () => {
-  const command = manifest.contributes.commands.find(
+test('manifest exposes Copy for Agent in both hosts while Add to Chat stays Cursor-only', () => {
+  const addToChat = manifest.contributes.commands.find(
     item => item.command === 'llm-wiki.addSelectionToChat',
   );
-  assert.equal(command?.title, 'LLM Wiki: Add to Chat');
-  assert.equal(command?.enablement, 'llmWikiHostIsCursor');
+  assert.equal(addToChat?.title, 'LLM Wiki: Add to Chat');
+  assert.equal(addToChat?.enablement, 'llmWikiHostIsCursor');
 
-  const genericContributions = [
+  const addToChatContributions = [
     ...Object.values(manifest.contributes.menus ?? {}).flat(),
     ...(manifest.contributes.keybindings ?? []),
-  ].filter(item => item.command === command.command);
-  assert.ok(genericContributions.length > 0);
-  assert.ok(genericContributions.every(
+  ].filter(item => item.command === addToChat.command);
+  assert.ok(addToChatContributions.length > 0);
+  assert.ok(addToChatContributions.every(
     item => item.when.includes('llmWikiHostIsCursor'),
   ));
 
-  const selectionCommand = manifest.contributes.commands.find(
-    item => item.command === 'llm-wiki.addSelectionToContext',
+  const copyForAgent = manifest.contributes.commands.find(
+    item => item.command === 'llm-wiki.copySelectionForAgent',
   );
-  assert.equal(selectionCommand?.enablement, undefined);
-  const selectionContributions = Object.values(manifest.contributes.menus ?? {})
+  assert.equal(copyForAgent?.title, 'LLM Wiki: Copy for Agent');
+  assert.equal(copyForAgent?.icon, '$(copy)');
+  assert.equal(copyForAgent?.enablement, undefined);
+  const copyForAgentContributions = Object.values(manifest.contributes.menus ?? {})
     .flat()
-    .filter(item => item.command === selectionCommand.command);
-  assert.ok(selectionContributions.length > 0);
-  assert.ok(selectionContributions.every(
+    .filter(item => item.command === copyForAgent.command);
+  assert.ok(copyForAgentContributions.length > 0);
+  assert.ok(copyForAgentContributions.every(
     item => !item.when.includes('llmWikiHostIsCursor'),
+  ));
+  assert.ok(copyForAgentContributions.some(
+    item => item.when.includes("activeCustomEditorId == 'llm-wiki.markdownEditor'")
+      && item.when.includes('llmWikiMarkdownHasSelection'),
+  ));
+  assert.ok(copyForAgentContributions.some(
+    item => item.when.includes('llmWikiPdfOpen')
+      && item.when.includes('llmWikiPdfHasAgentClipboardSelection'),
+  ));
+  const pdfAddToChat = addToChatContributions.find(
+    item => item.when.includes('llmWikiPdfOpen'),
+  );
+  assert.match(pdfAddToChat?.when ?? '', /llmWikiPdfHasSelection/);
+  assert.doesNotMatch(pdfAddToChat?.when ?? '', /llmWikiPdfHasAgentClipboardSelection/);
+  assert.ok(copyForAgentContributions.some(
+    item => item.when.includes('editorLangId == markdown') && item.when.includes('editorHasSelection'),
   ));
   assert.equal(
     (manifest.activationEvents ?? []).includes('onView:llm-wiki.learningChat'),
@@ -299,6 +365,24 @@ test('manifest exposes generic Add to Chat only on Cursor while selection-to-age
       item => item.id === 'llm-wiki.learningChat',
     ),
     false,
+  );
+});
+
+test('manifest contributes guarded focus restoration for an active Cursor handoff', () => {
+  const command = manifest.contributes.commands.find(
+    item => item.command === 'llm-wiki.focusMarkdownEditor',
+  );
+  assert.equal(command?.title, 'LLM Wiki: Focus Markdown Editor');
+
+  const escapeBinding = (manifest.contributes.keybindings ?? []).find(
+    item => item.command === 'llm-wiki.focusMarkdownEditor'
+      && item.key === 'escape',
+  );
+  assert.ok(escapeBinding, 'missing guarded Escape focus binding');
+  assert.match(escapeBinding.when, /llmWikiAgentHandoffActive/);
+  assert.match(
+    escapeBinding.when,
+    /activeCustomEditorId == 'llm-wiki\.markdownEditor'/,
   );
 });
 

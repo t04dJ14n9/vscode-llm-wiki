@@ -133,6 +133,24 @@ export function normalizePdfOutlineDestination(
 }
 
 /**
+ * Creates an internal XYZ destination without changing the reader's zoom.
+ */
+export function pdfOutlineXyzDestination(
+  pageIndex: number,
+  x: number,
+  y: number,
+): PdfDestinationObject | undefined {
+  return normalizePdfOutlineDestination({
+    pageIndex,
+    zoom: {
+      mode: PdfZoomMode.XYZ,
+      params: { x, y, zoom: 0 },
+    },
+    view: [],
+  });
+}
+
+/**
  * Defensively normalizes outline entries received through a message boundary.
  */
 export function normalizePdfOutlineEntries(value: unknown): PdfOutlineEntry[] {

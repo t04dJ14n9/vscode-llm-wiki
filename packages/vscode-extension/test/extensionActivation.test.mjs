@@ -81,6 +81,19 @@ function loadTsModule(relativePath, mocks = {}) {
         ...(mocks[request] ?? {}),
       };
     }
+    if (request === './agentClipboard') {
+      return mocks[request] ?? {
+        formatMarkdownAgentReference: (relativePath, startLine, endLine) =>
+          `@${relativePath}#${startLine === endLine ? startLine : `${startLine}-${endLine}`}`,
+      };
+    }
+    if (request === './pdfAgentClipboardImage') {
+      return mocks[request] ?? {
+        persistPdfAgentClipboardImage: () => {
+          throw new Error('Unexpected PDF agent clipboard image persistence');
+        },
+      };
+    }
     if (Object.prototype.hasOwnProperty.call(mocks, request)) {
       return mocks[request];
     }
@@ -262,6 +275,47 @@ test('activation reopens an already-open markdown vault note in the custom edito
   assert.equal(outlineRegisterCount, 1);
 });
 
+test('activation persistently routes an associated untitled Markdown document without changing its URI', async () => {
+  const executeCommandCalls = [];
+  const vscode = createVscodeMock({ executeCommandCalls, activeDocumentUri: undefined });
+  const { activate } = loadTsModule('src/extension.ts', createActivationMocks({ vscode }));
+  const associatedUntitledUri = {
+    scheme: 'untitled',
+    fsPath: '/vault/notes/Draft.md',
+    path: '/vault/notes/Draft.md',
+    toString: () => 'untitled:/vault/notes/Draft.md',
+  };
+
+  activate({ subscriptions: [] });
+  vscode.__fireOpenDocument({ uri: associatedUntitledUri, languageId: 'markdown' });
+  await new Promise(resolve => setImmediate(resolve));
+
+  assert.deepEqual(
+    executeCommandCalls.filter(([command]) => command === 'vscode.openWith'),
+    [['vscode.openWith', associatedUntitledUri, 'llm-wiki.markdownEditor']],
+  );
+});
+
+test('activation leaves generic untitled Markdown buffers with the native editor', async () => {
+  const executeCommandCalls = [];
+  const vscode = createVscodeMock({ executeCommandCalls, activeDocumentUri: undefined });
+  const { activate } = loadTsModule('src/extension.ts', createActivationMocks({ vscode }));
+
+  activate({ subscriptions: [] });
+  vscode.__fireOpenDocument({
+    uri: {
+      scheme: 'untitled',
+      fsPath: 'Untitled-1',
+      path: 'Untitled-1',
+      toString: () => 'untitled:Untitled-1',
+    },
+    languageId: 'markdown',
+  });
+  await new Promise(resolve => setImmediate(resolve));
+
+  assert.deepEqual(executeCommandCalls.filter(([command]) => command === 'vscode.openWith'), []);
+});
+
 test('activation routes product URI anchor links through the LLM Wiki dispatcher', async () => {
   const dispatchCalls = [];
   const warningMessages = [];
@@ -323,281 +377,496 @@ test('activation registers one multi-root-aware immutable anchor-file bridge', (
   assert.equal(registrations[0].options, undefined);
 });
 
-test('selection export follows the active Markdown or PDF tab and opens an agent handoff', async () => {
-  const treeProviderIds = [];
-  const calls = [];
-  const handoffs = [];
-  const pdfSelection = {
-    uri: { fsPath: '/vault/raw/papers/attention.pdf', scheme: 'file' },
-    text: 'FlashAttention uses tiling',
-    startLine: 2,
-    endLine: 2,
-  };
-  const markdownSelection = {
-    uri: { fsPath: '/vault/notes/attention.md', scheme: 'file' },
-    text: 'Markdown passage',
-    startLine: 4,
-    endLine: 4,
-  };
+test('Copy for Agent routes a PDF title action to the active webview without export or provider handoff', async () => {
+  let copyRequests = 0;
+  const pdfUri = { fsPath: '/vault/raw/papers/attention.pdf', scheme: 'file' };
   const vscode = createVscodeMock({
     executeCommandCalls: [],
     activeDocumentUri: undefined,
-    activeTabUri: markdownSelection.uri,
-    activeTabViewType: 'llm-wiki.markdownEditor',
-    treeProviderIds,
+    activeTabUri: pdfUri,
+    activeTabViewType: 'llm-wiki.pdfViewer',
   });
-
   const mocks = createActivationMocks({ vscode });
   mocks['./agentContext'] = {
-    addSelectionToContext: async (vaultRoot, options) => {
-      const selection = await options.getActiveSelectionContext();
-      calls.push({
-        vaultRoot,
-        selection,
-      });
-      return selection === undefined
-        ? false
-        : {
-            directoryPath: `/vault/.llm_wiki/agent/exports/export-${calls.length}`,
-            markdownPath: `/vault/.llm_wiki/agent/exports/export-${calls.length}/selection.md`,
-            jsonPath: `/vault/.llm_wiki/agent/exports/export-${calls.length}/selection.json`,
-          };
-    },
-    syncSelectionExportAttachment: async () => undefined,
+    addSelectionToContext: async () => assert.fail('Copy for Agent must not export a selection'),
   };
   mocks['./agentHandoff'] = {
-    handoffSelectionToAgent: async uri => handoffs.push(uri.fsPath),
+    handoffSelectionToAgent: async () => assert.fail('Copy for Agent must not open a provider'),
+    handoffSelectionToCursor: async () => assert.fail('Copy for Agent must not open Cursor Chat'),
   };
   mocks['./pdfEditorProvider'] = {
     PdfEditorProvider: class {
       static viewType = 'llm-wiki.pdfViewer';
-      constructor() {}
-      getActiveWebview() {
-        return undefined;
-      }
-      async getActiveSelectionContext() {
-        return pdfSelection;
-      }
-    },
-  };
-  mocks['./markdownEditorProvider'] = {
-    MarkdownEditorProvider: class {
-      static viewType = 'llm-wiki.markdownEditor';
-      async captureActiveSelectionContext() {
-        return markdownSelection;
+      getActiveWebview() { return undefined; }
+      async copySelectionForAgent() {
+        copyRequests += 1;
+        return true;
       }
     },
   };
 
   const { activate } = loadTsModule('src/extension.ts', mocks);
-
   activate({ subscriptions: [] });
-  await vscode.__registeredCommands['llm-wiki.addSelectionToContext']();
-  vscode.window.tabGroups.activeTabGroup.activeTab.input.viewType = undefined;
-  await vscode.__registeredCommands['llm-wiki.addSelectionToContext']();
-  vscode.window.tabGroups.activeTabGroup.activeTab.input.uri = pdfSelection.uri;
-  vscode.window.tabGroups.activeTabGroup.activeTab.input.viewType =
-    'llm-wiki.pdfViewer';
-  await vscode.__registeredCommands['llm-wiki.addSelectionToContext']();
 
-  assert.deepEqual(treeProviderIds.sort(), [
-    'llm-wiki-backlinks',
-    'llm-wiki-forward-links',
-  ]);
-  assert.deepEqual(calls, [
-    { vaultRoot: '/vault', selection: markdownSelection },
-    { vaultRoot: '/vault', selection: undefined },
-    { vaultRoot: '/vault', selection: pdfSelection },
-  ]);
-  assert.deepEqual(handoffs, [
-    '/vault/.llm_wiki/agent/exports/export-1/selection.md',
-    '/vault/.llm_wiki/agent/exports/export-3/selection.md',
-  ]);
+  assert.equal(vscode.__registeredCommands['llm-wiki.addSelectionToContext'], undefined);
+  assert.equal(await vscode.__registeredCommands['llm-wiki.copySelectionForAgent'](), true);
+  assert.equal(copyRequests, 1);
 });
 
-test('selection exports use the workspace folder that owns each selected document', async () => {
-  const exports = [];
-  const agentHandoffs = [];
-  const cursorHandoffs = [];
-  let markdownCaptureCount = 0;
-  let pdfCaptureCount = 0;
-  let nativeGetTextCount = 0;
-  const markdownSelection = {
-    uri: { fsPath: '/vault-b/notes/attention.md', scheme: 'file' },
-    text: 'Markdown passage',
-    startLine: 4,
-    endLine: 4,
-  };
-  const pdfSelection = {
-    uri: { fsPath: '/vault-a/raw/papers/attention.pdf', scheme: 'file' },
-    text: 'Custom PDF passage',
-    startLine: 2,
-    endLine: 2,
-  };
-  const suppliedPdfSelection = {
-    uri: { fsPath: '/vault-b/raw/papers/supplied.pdf', scheme: 'file' },
-    text: 'Supplied PDF passage',
-    startLine: 3,
-    endLine: 3,
-  };
-  const nativeUri = { fsPath: '/vault-b/notes/native.md', scheme: 'file' };
+test('legacy provider-specific Markdown selection command is absent', () => {
   const vscode = createVscodeMock({
     executeCommandCalls: [],
     activeDocumentUri: undefined,
-    activeTabUri: markdownSelection.uri,
-    activeTabViewType: 'llm-wiki.markdownEditor',
   });
-  vscode.workspace.workspaceFolders = [
-    { uri: { fsPath: '/vault-a' } },
-    { uri: { fsPath: '/vault-b' } },
-  ];
-  vscode.workspace.getWorkspaceFolder = uri =>
-    vscode.workspace.workspaceFolders.find(folder =>
-      uri.fsPath === folder.uri.fsPath
-      || uri.fsPath.startsWith(`${folder.uri.fsPath}/`)
-    );
+  const { activate } = loadTsModule('src/extension.ts', createActivationMocks({ vscode }));
 
+  activate({ subscriptions: [] });
+
+  assert.equal(vscode.__registeredCommands['llm-wiki.addSelectionToContext'], undefined);
+  assert.equal(vscode.__registeredCommands['llm-wiki.addSelectionToAgent'], undefined);
+});
+
+test('Copy for Agent copies a multi-line Markdown reference without export or handoff', async () => {
+  const clipboardWrites = [];
+  const exportCalls = [];
+  const handoffCalls = [];
+  const informationMessages = [];
+  const uri = { scheme: 'file', fsPath: '/vault/notes/source.md' };
+  const selection = {
+    uri,
+    text: 'selected',
+    startLine: 12,
+    endLine: 14,
+    metadata: { kind: 'markdown' },
+  };
+  const vscode = createVscodeMock({
+    executeCommandCalls: [],
+    activeDocumentUri: undefined,
+    activeTabUri: uri,
+    activeTabViewType: 'llm-wiki.markdownEditor',
+    informationMessages,
+  });
+  vscode.env.clipboard = {
+    writeText: async text => clipboardWrites.push(text),
+  };
   const mocks = createActivationMocks({ vscode });
   mocks['./agentContext'] = {
-    addSelectionToContext: async (vaultRoot, options) => {
-      const selection = await options.getActiveSelectionContext();
-      exports.push({ vaultRoot, selection });
-      const directoryPath = `${vaultRoot}/.llm_wiki/agent/exports/export-${exports.length}`;
-      return {
-        directoryPath,
-        markdownPath: `${directoryPath}/selection.md`,
-        jsonPath: `${directoryPath}/selection.json`,
-      };
+    addSelectionToContext: async (...args) => {
+      exportCalls.push(args);
+      return undefined;
     },
-    syncSelectionExportAttachment: async () => undefined,
   };
   mocks['./agentHandoff'] = {
-    handoffSelectionToAgent: async uri => {
-      agentHandoffs.push(uri.fsPath);
+    handoffSelectionToAgent: async (...args) => {
+      handoffCalls.push(args);
       return 'codex';
     },
-    handoffSelectionToCursor: async uri => {
-      cursorHandoffs.push(uri.fsPath);
+  };
+  mocks['./markdownEditorProvider'] = {
+    MarkdownEditorProvider: class {
+      static viewType = 'llm-wiki.markdownEditor';
+      async captureActiveSelectionContext() { return selection; }
+    },
+  };
+  const { activate } = loadTsModule('src/extension.ts', mocks);
+  activate({ subscriptions: [] });
+
+  const copied = await vscode.__registeredCommands['llm-wiki.copySelectionForAgent']();
+
+  assert.equal(copied, true);
+  assert.deepEqual(clipboardWrites, ['@notes/source.md#12-14']);
+  assert.equal(exportCalls.length, 0);
+  assert.equal(handoffCalls.length, 0);
+  assert.equal(informationMessages.at(-1), 'Selection copied for agent.');
+});
+
+test('Copy for Agent formats a single-line Markdown selection without a range suffix', async () => {
+  const clipboardWrites = [];
+  const uri = { scheme: 'file', fsPath: '/vault/notes/source.md' };
+  const selection = {
+    uri,
+    text: 'selected',
+    startLine: 12,
+    endLine: 12,
+    metadata: { kind: 'markdown' },
+  };
+  const vscode = createVscodeMock({
+    executeCommandCalls: [],
+    activeDocumentUri: undefined,
+    activeTabUri: uri,
+    activeTabViewType: 'llm-wiki.markdownEditor',
+  });
+  vscode.env.clipboard = {
+    writeText: async text => clipboardWrites.push(text),
+  };
+  const mocks = createActivationMocks({ vscode });
+  mocks['./markdownEditorProvider'] = {
+    MarkdownEditorProvider: class {
+      static viewType = 'llm-wiki.markdownEditor';
+      async captureActiveSelectionContext() { return selection; }
+    },
+  };
+  const { activate } = loadTsModule('src/extension.ts', mocks);
+  activate({ subscriptions: [] });
+
+  assert.equal(await vscode.__registeredCommands['llm-wiki.copySelectionForAgent'](), true);
+  assert.deepEqual(clipboardWrites, ['@notes/source.md#12']);
+});
+
+test('dirty Markdown copy saves and recaptures the source range before writing the reference', async () => {
+  const clipboardWrites = [];
+  const saveCalls = [];
+  const uri = { scheme: 'file', fsPath: '/vault/notes/source.md' };
+  let dirty = true;
+  let saved = false;
+  const beforeSave = {
+    uri,
+    text: 'selected before save',
+    startLine: 3,
+    endLine: 3,
+    metadata: { kind: 'markdown' },
+  };
+  const afterSave = {
+    ...beforeSave,
+    text: 'selected after save',
+    startLine: 12,
+    endLine: 14,
+  };
+  const document = {
+    uri,
+    get isDirty() { return dirty; },
+    save: async () => {
+      saveCalls.push('save');
+      dirty = false;
+      saved = true;
       return true;
     },
   };
+  const vscode = createVscodeMock({
+    executeCommandCalls: [],
+    activeDocumentUri: undefined,
+    activeTabUri: uri,
+    activeTabViewType: 'llm-wiki.markdownEditor',
+  });
+  vscode.workspace.textDocuments = [document];
+  vscode.env.clipboard = {
+    writeText: async text => clipboardWrites.push(text),
+  };
+  const mocks = createActivationMocks({ vscode });
+  mocks['./markdownEditorProvider'] = {
+    MarkdownEditorProvider: class {
+      static viewType = 'llm-wiki.markdownEditor';
+      async captureActiveSelectionContext() { return saved ? afterSave : beforeSave; }
+    },
+  };
+  const { activate } = loadTsModule('src/extension.ts', mocks);
+  activate({ subscriptions: [] });
+
+  assert.equal(await vscode.__registeredCommands['llm-wiki.copySelectionForAgent'](), true);
+  assert.deepEqual(saveCalls, ['save']);
+  assert.deepEqual(clipboardWrites, ['@notes/source.md#12-14']);
+});
+
+test('Markdown copy aborts with the select warning when post-save recapture rejects', async () => {
+  const clipboardWrites = ['existing clipboard'];
+  const warnings = [];
+  const uri = { scheme: 'file', fsPath: '/vault/notes/source.md' };
+  let dirty = true;
+  let captureCount = 0;
+  const selection = {
+    uri,
+    text: 'selected',
+    startLine: 2,
+    endLine: 2,
+    metadata: { kind: 'markdown' },
+  };
+  const vscode = createVscodeMock({
+    executeCommandCalls: [],
+    activeDocumentUri: undefined,
+    activeTabUri: uri,
+    activeTabViewType: 'llm-wiki.markdownEditor',
+    warningMessages: warnings,
+  });
+  vscode.workspace.textDocuments = [{
+    uri,
+    get isDirty() { return dirty; },
+    save: async () => {
+      dirty = false;
+      return true;
+    },
+  }];
+  vscode.env.clipboard = {
+    writeText: async text => clipboardWrites.push(text),
+  };
+  const mocks = createActivationMocks({ vscode });
   mocks['./markdownEditorProvider'] = {
     MarkdownEditorProvider: class {
       static viewType = 'llm-wiki.markdownEditor';
       async captureActiveSelectionContext() {
-        markdownCaptureCount += 1;
-        return markdownSelection;
+        captureCount += 1;
+        if (captureCount === 1) return selection;
+        throw new Error('webview selection request failed');
       }
     },
   };
-  mocks['./pdfEditorProvider'] = {
-    PdfEditorProvider: class {
-      static viewType = 'llm-wiki.pdfViewer';
-      getActiveWebview() {
-        return undefined;
-      }
-      async getActiveSelectionContext() {
-        pdfCaptureCount += 1;
-        return pdfSelection;
-      }
-    },
-  };
-
   const { activate } = loadTsModule('src/extension.ts', mocks);
   activate({ subscriptions: [] });
 
-  await vscode.__registeredCommands['llm-wiki.addSelectionToContext']();
-  vscode.window.tabGroups.activeTabGroup.activeTab.input = {
-    uri: pdfSelection.uri,
-    viewType: 'llm-wiki.pdfViewer',
-  };
-  await vscode.__registeredCommands['llm-wiki.addSelectionToContext']();
-  await vscode.__registeredCommands['llm-wiki.addSelectionToChat']({
-    selection: suppliedPdfSelection,
-  });
-  vscode.window.tabGroups.activeTabGroup.activeTab.input = {
-    uri: nativeUri,
-    viewType: undefined,
-  };
-  vscode.window.activeTextEditor = {
-    document: {
-      uri: nativeUri,
-      getText() {
-        nativeGetTextCount += 1;
-        return 'Native passage';
-      },
-    },
-    selection: {
-      isEmpty: false,
-      start: { line: 6 },
-      end: { line: 7 },
-    },
-  };
-  await vscode.__registeredCommands['llm-wiki.addSelectionToContext']();
+  assert.equal(await vscode.__registeredCommands['llm-wiki.copySelectionForAgent'](), false);
+  assert.equal(captureCount, 2);
+  assert.deepEqual(clipboardWrites, ['existing clipboard']);
+  assert.deepEqual(warnings, ['Select Markdown text before copying for agent.']);
+});
 
-  assert.deepEqual(
-    exports.map(({ vaultRoot, selection }) => ({
-      vaultRoot,
-      source: selection.uri.fsPath,
-      text: selection.text,
-    })),
-    [
-      {
-        vaultRoot: '/vault-b',
-        source: '/vault-b/notes/attention.md',
-        text: 'Markdown passage',
-      },
-      {
-        vaultRoot: '/vault-a',
-        source: '/vault-a/raw/papers/attention.pdf',
-        text: 'Custom PDF passage',
-      },
-      {
-        vaultRoot: '/vault-b',
-        source: '/vault-b/raw/papers/supplied.pdf',
-        text: 'Supplied PDF passage',
-      },
-      {
-        vaultRoot: '/vault-b',
-        source: '/vault-b/notes/native.md',
-        text: 'Native passage',
-      },
-    ],
-  );
-  assert.equal(markdownCaptureCount, 1);
-  assert.equal(pdfCaptureCount, 1);
-  assert.equal(nativeGetTextCount, 1);
-  assert.deepEqual(agentHandoffs, [
-    '/vault-b/.llm_wiki/agent/exports/export-1/selection.md',
-    '/vault-a/.llm_wiki/agent/exports/export-2/selection.md',
-    '/vault-b/.llm_wiki/agent/exports/export-4/selection.md',
-  ]);
-  assert.deepEqual(cursorHandoffs, [
-    '/vault-b/.llm_wiki/agent/exports/export-3/selection.md',
+test('dirty custom Markdown copy flushes queued webview edits before saving and recapturing', async () => {
+  const clipboardWrites = [];
+  const events = [];
+  const uri = { scheme: 'file', fsPath: '/vault/notes/source.md' };
+  let dirty = true;
+  let flushed = false;
+  const beforeFlush = {
+    uri,
+    text: 'selected before edit',
+    startLine: 2,
+    endLine: 2,
+    metadata: { kind: 'markdown' },
+  };
+  const afterFlush = {
+    ...beforeFlush,
+    text: 'selected after edit',
+    startLine: 12,
+    endLine: 14,
+  };
+  const document = {
+    uri,
+    get isDirty() { return dirty; },
+    save: async () => {
+      events.push('save');
+      dirty = false;
+      return true;
+    },
+  };
+  const vscode = createVscodeMock({
+    executeCommandCalls: [],
+    activeDocumentUri: undefined,
+    activeTabUri: uri,
+    activeTabViewType: 'llm-wiki.markdownEditor',
+  });
+  vscode.workspace.textDocuments = [document];
+  vscode.env.clipboard = {
+    writeText: async text => clipboardWrites.push(text),
+  };
+  const mocks = createActivationMocks({ vscode });
+  mocks['./markdownEditorProvider'] = {
+    MarkdownEditorProvider: class {
+      static viewType = 'llm-wiki.markdownEditor';
+      async flushActiveEditsBeforeSave(selectionUri) {
+        events.push(['flush', selectionUri]);
+        flushed = true;
+        return true;
+      }
+      async captureActiveSelectionContext() { return flushed ? afterFlush : beforeFlush; }
+    },
+  };
+  const { activate } = loadTsModule('src/extension.ts', mocks);
+  activate({ subscriptions: [] });
+
+  assert.equal(await vscode.__registeredCommands['llm-wiki.copySelectionForAgent'](), true);
+  assert.deepEqual(events, [['flush', uri], 'save']);
+  assert.deepEqual(clipboardWrites, ['@notes/source.md#12-14']);
+});
+
+test('Markdown copy rejects an out-of-workspace reference without changing the clipboard', async () => {
+  const clipboardWrites = ['existing clipboard'];
+  const warnings = [];
+  const uri = { scheme: 'file', fsPath: '/outside/source.md' };
+  const selection = {
+    uri,
+    text: 'selected',
+    startLine: 2,
+    endLine: 2,
+    metadata: { kind: 'markdown' },
+  };
+  const vscode = createVscodeMock({
+    executeCommandCalls: [],
+    activeDocumentUri: undefined,
+    activeTabUri: uri,
+    activeTabViewType: 'llm-wiki.markdownEditor',
+    warningMessages: warnings,
+  });
+  vscode.workspace.asRelativePath = () => '/outside/source.md';
+  vscode.env.clipboard = {
+    writeText: async text => clipboardWrites.push(text),
+  };
+  const mocks = createActivationMocks({ vscode });
+  mocks['./agentClipboard'] = {
+    formatMarkdownAgentReference: relativePath => {
+      if (relativePath.startsWith('/')) {
+        throw new TypeError('Markdown agent reference path must be workspace-relative.');
+      }
+      return '@notes/source.md#2';
+    },
+  };
+  mocks['./markdownEditorProvider'] = {
+    MarkdownEditorProvider: class {
+      static viewType = 'llm-wiki.markdownEditor';
+      async captureActiveSelectionContext() { return selection; }
+    },
+  };
+  const { activate } = loadTsModule('src/extension.ts', mocks);
+  activate({ subscriptions: [] });
+
+  assert.equal(await vscode.__registeredCommands['llm-wiki.copySelectionForAgent'](), false);
+  assert.deepEqual(clipboardWrites, ['existing clipboard']);
+  assert.deepEqual(warnings, [
+    'Save the Markdown note inside the current workspace before copying for agent.',
   ]);
 });
 
-test('generic Add to Chat routes exact Markdown and PDF exports directly to Cursor while explicit routes stay explicit', async () => {
-  const exports = [];
-  const pickerCalls = [];
-  const explicitCalls = [];
-  const cursorCalls = [];
-  const attachmentSyncs = [];
+test('untitled Markdown copy leaves the clipboard unchanged and asks the user to save first', async () => {
+  const clipboardWrites = ['existing clipboard'];
+  const warnings = [];
+  const uri = { scheme: 'untitled', fsPath: '/vault/notes/source.md' };
+  const selection = {
+    uri,
+    text: 'draft',
+    startLine: 2,
+    endLine: 2,
+    metadata: { kind: 'markdown' },
+  };
+  const vscode = createVscodeMock({
+    executeCommandCalls: [],
+    activeDocumentUri: undefined,
+    activeTabUri: uri,
+    activeTabViewType: 'llm-wiki.markdownEditor',
+    warningMessages: warnings,
+  });
+  vscode.env.clipboard = {
+    writeText: async text => clipboardWrites.push(text),
+  };
+  const mocks = createActivationMocks({ vscode });
+  mocks['./markdownEditorProvider'] = {
+    MarkdownEditorProvider: class {
+      static viewType = 'llm-wiki.markdownEditor';
+      async captureActiveSelectionContext() { return selection; }
+    },
+  };
+  const { activate } = loadTsModule('src/extension.ts', mocks);
+  activate({ subscriptions: [] });
+
+  assert.equal(await vscode.__registeredCommands['llm-wiki.copySelectionForAgent'](), false);
+  assert.deepEqual(clipboardWrites, ['existing clipboard']);
+  assert.deepEqual(warnings, ['Save this Markdown note before copying for agent.']);
+});
+
+test('failed dirty Markdown copy leaves the clipboard unchanged and shows the save warning', async () => {
+  const clipboardWrites = ['existing clipboard'];
+  const warnings = [];
+  const uri = { scheme: 'file', fsPath: '/vault/notes/source.md' };
+  const selection = {
+    uri,
+    text: 'selected',
+    startLine: 2,
+    endLine: 2,
+    metadata: { kind: 'markdown' },
+  };
+  const vscode = createVscodeMock({
+    executeCommandCalls: [],
+    activeDocumentUri: undefined,
+    activeTabUri: uri,
+    activeTabViewType: 'llm-wiki.markdownEditor',
+    warningMessages: warnings,
+  });
+  vscode.workspace.textDocuments = [{
+    uri,
+    isDirty: true,
+    save: async () => false,
+  }];
+  vscode.env.clipboard = {
+    writeText: async text => clipboardWrites.push(text),
+  };
+  const mocks = createActivationMocks({ vscode });
+  mocks['./markdownEditorProvider'] = {
+    MarkdownEditorProvider: class {
+      static viewType = 'llm-wiki.markdownEditor';
+      async captureActiveSelectionContext() { return selection; }
+    },
+  };
+  const { activate } = loadTsModule('src/extension.ts', mocks);
+  activate({ subscriptions: [] });
+
+  assert.equal(await vscode.__registeredCommands['llm-wiki.copySelectionForAgent'](), false);
+  assert.deepEqual(clipboardWrites, ['existing clipboard']);
+  assert.deepEqual(warnings, ['Save the Markdown note before copying for agent.']);
+});
+
+test('empty Markdown copy leaves the clipboard unchanged and shows the select warning', async () => {
+  const clipboardWrites = ['existing clipboard'];
+  const warnings = [];
+  const uri = { scheme: 'file', fsPath: '/vault/notes/source.md' };
+  const selection = {
+    uri,
+    text: '',
+    startLine: 2,
+    endLine: 2,
+    metadata: { kind: 'markdown' },
+  };
+  const vscode = createVscodeMock({
+    executeCommandCalls: [],
+    activeDocumentUri: undefined,
+    activeTabUri: uri,
+    activeTabViewType: 'llm-wiki.markdownEditor',
+    warningMessages: warnings,
+  });
+  vscode.env.clipboard = {
+    writeText: async text => clipboardWrites.push(text),
+  };
+  const mocks = createActivationMocks({ vscode });
+  mocks['./markdownEditorProvider'] = {
+    MarkdownEditorProvider: class {
+      static viewType = 'llm-wiki.markdownEditor';
+      async captureActiveSelectionContext() { return selection; }
+    },
+  };
+  const { activate } = loadTsModule('src/extension.ts', mocks);
+  activate({ subscriptions: [] });
+
+  assert.equal(await vscode.__registeredCommands['llm-wiki.copySelectionForAgent'](), false);
+  assert.deepEqual(clipboardWrites, ['existing clipboard']);
+  assert.deepEqual(warnings, ['Select Markdown text before copying for agent.']);
+});
+
+test('Add to Chat stays Cursor-only while provider-specific selection commands are absent', async () => {
+  const markdownCalls = [];
+  const rawTextCalls = [];
+  const persistedImages = [];
   const markdownSelection = {
     uri: { fsPath: '/vault/notes/attention.md', scheme: 'file' },
     text: 'Markdown passage',
     startLine: 4,
     endLine: 4,
+    metadata: { kind: 'markdown' },
   };
   const pdfSelection = {
-    uri: { fsPath: '/vault/raw/papers/attention.pdf', scheme: 'file' },
+    uri: {
+      fsPath: '/vault/raw/papers/attention.pdf',
+      scheme: 'file',
+      toString: () => 'file:///vault/raw/papers/attention.pdf',
+    },
     text: 'FlashAttention uses tiling',
     startLine: 2,
     endLine: 2,
     sourceLabel: 'raw/papers/attention.pdf',
     rangeLabel: 'page 2',
+    anchorUri: 'raw/papers/attention.pdf#page=2',
   };
   const snapshotPng = Uint8Array.from([10, 20, 30]);
+  const rawPdfText = [
+    'Source: [raw/papers/attention.pdf (page 2)](<cursor://llm-wiki/open-anchor?target=attention>)',
+    '',
+    'Selected text:',
+    'FlashAttention uses tiling',
+  ].join('\n');
   const vscode = createVscodeMock({
     executeCommandCalls: [],
     activeDocumentUri: undefined,
@@ -606,21 +875,29 @@ test('generic Add to Chat routes exact Markdown and PDF exports directly to Curs
   });
   const mocks = createActivationMocks({ vscode });
   mocks['./agentContext'] = {
-    addSelectionToContext: async (vaultRoot, options) => {
-      exports.push({
-        vaultRoot,
-        selection: await options.getActiveSelectionContext(),
-      });
-      const directoryPath = `/vault/.llm_wiki/agent/exports/export-${exports.length}`;
+    addSelectionToContext: async () =>
+      assert.fail('PDF Add to Chat must not create selection.md'),
+    syncSelectionExportAttachment: async () =>
+      assert.fail('PDF Add to Chat must not create an export crop alias'),
+  };
+  mocks['./agentClipboard'] = {
+    formatMarkdownAgentReference: (relativePath, startLine, endLine) =>
+      `@${relativePath}#${startLine === endLine ? startLine : `${startLine}-${endLine}`}`,
+    createPdfAgentClipboardContext: input => ({
+      selectionKey: input.selectionKey,
+      sourceLabel: 'raw/papers/attention.pdf (page 2)',
+      sourceHref: 'cursor://llm-wiki/open-anchor?target=attention',
+      selectedText: input.selectedText,
+      plainText: rawPdfText,
+    }),
+  };
+  mocks['./pdfAgentClipboardImage'] = {
+    persistPdfAgentClipboardImage: input => {
+      persistedImages.push(input);
       return {
-        directoryPath,
-        markdownPath: `${directoryPath}/selection.md`,
-        jsonPath: `${directoryPath}/selection.json`,
+        absolutePath: '/vault/.llm_wiki/agent/clipboard/pdf-selection-a.png',
+        relativePath: '.llm_wiki/agent/clipboard/pdf-selection-a.png',
       };
-    },
-    syncSelectionExportAttachment: async (exported, fileName, bytes) => {
-      attachmentSyncs.push({ exported, fileName, bytes });
-      return bytes ? `${exported.directoryPath}/${fileName}` : undefined;
     },
   };
   mocks['./cursorCrop'] = {
@@ -629,24 +906,16 @@ test('generic Add to Chat routes exact Markdown and PDF exports directly to Curs
       : undefined,
   };
   mocks['./agentHandoff'] = {
-    handoffSelectionToAgent: async (contextUri, attachments) => {
-      pickerCalls.push({
-        markdownPath: contextUri.fsPath,
-        attachments: attachments.map(uri => uri.fsPath),
-      });
-      return 'codex';
-    },
-    handoffSelectionToAgentId: async (agentId, contextUri, attachments) => {
-      explicitCalls.push({
-        agentId,
-        markdownPath: contextUri.fsPath,
+    handoffSelectionToCursor: async (context, attachments) => {
+      markdownCalls.push({
+        context,
         attachments: attachments.map(uri => uri.fsPath),
       });
       return true;
     },
-    handoffSelectionToCursor: async (contextUri, attachments) => {
-      cursorCalls.push({
-        markdownPath: contextUri.fsPath,
+    handoffRawTextToCursor: async (input, attachments) => {
+      rawTextCalls.push({
+        input,
         attachments: attachments.map(uri => uri.fsPath),
       });
       return true;
@@ -673,13 +942,10 @@ test('generic Add to Chat routes exact Markdown and PDF exports directly to Curs
   const { activate } = loadTsModule('src/extension.ts', mocks);
   activate({ subscriptions: [] });
 
+  assert.equal(vscode.__registeredCommands['llm-wiki.addSelectionToContext'], undefined);
+  assert.equal(vscode.__registeredCommands['llm-wiki.addSelectionToAgent'], undefined);
   await vscode.__registeredCommands['llm-wiki.addSelectionToChat']();
   await vscode.__registeredCommands['llm-wiki.addSelectionToChat']({
-    selection: pdfSelection,
-    snapshotPng,
-  });
-  await vscode.__registeredCommands['llm-wiki.addSelectionToAgent']({
-    agentId: 'codex',
     selection: pdfSelection,
     snapshotPng,
   });
@@ -688,64 +954,61 @@ test('generic Add to Chat routes exact Markdown and PDF exports directly to Curs
     snapshotPng,
   });
 
-  assert.deepEqual(exports, [
-    { vaultRoot: '/vault', selection: markdownSelection },
-    { vaultRoot: '/vault', selection: pdfSelection },
-    { vaultRoot: '/vault', selection: pdfSelection },
-    { vaultRoot: '/vault', selection: pdfSelection },
-  ]);
-  assert.deepEqual(pickerCalls, []);
-  assert.deepEqual(explicitCalls, [{
-    agentId: 'codex',
-    markdownPath: '/vault/.llm_wiki/agent/exports/export-3/selection.md',
-    attachments: ['/vault/.llm_wiki/agent/exports/export-3/selection.png'],
-  }]);
-  assert.deepEqual(cursorCalls, [
+  assert.deepEqual(markdownCalls, [
     {
-      markdownPath: '/vault/.llm_wiki/agent/exports/export-1/selection.md',
+      context: {
+        kind: 'markdown-range',
+        uri: markdownSelection.uri,
+        range: { startLine: 4, endLine: 4 },
+      },
       attachments: [],
     },
+  ]);
+  assert.deepEqual(rawTextCalls, [
     {
-      markdownPath: '/vault/.llm_wiki/agent/exports/export-2/selection.md',
-      attachments: ['/vault/.llm_wiki/agent/exports/export-2/selection.png'],
+      input: {
+        uri: pdfSelection.uri,
+        range: { startLine: 2, endLine: 2 },
+        rawText: rawPdfText,
+      },
+      attachments: ['/vault/.llm_wiki/agent/clipboard/pdf-selection-a.png'],
     },
     {
-      markdownPath: '/vault/.llm_wiki/agent/exports/export-4/selection.md',
-      attachments: ['/vault/.llm_wiki/agent/exports/export-4/selection.png'],
+      input: {
+        uri: pdfSelection.uri,
+        range: { startLine: 2, endLine: 2 },
+        rawText: rawPdfText,
+      },
+      attachments: ['/vault/.llm_wiki/agent/clipboard/pdf-selection-a.png'],
     },
   ]);
-  assert.deepEqual(
-    attachmentSyncs.map(({ exported, fileName, bytes }) => ({
-      directoryPath: exported.directoryPath,
-      fileName,
-      bytes,
-    })),
-    [
-      {
-        directoryPath: '/vault/.llm_wiki/agent/exports/export-1',
-        fileName: 'selection.png',
-        bytes: undefined,
-      },
-      {
-        directoryPath: '/vault/.llm_wiki/agent/exports/export-2',
-        fileName: 'selection.png',
-        bytes: snapshotPng,
-      },
-      {
-        directoryPath: '/vault/.llm_wiki/agent/exports/export-3',
-        fileName: 'selection.png',
-        bytes: snapshotPng,
-      },
-      {
-        directoryPath: '/vault/.llm_wiki/agent/exports/export-4',
-        fileName: 'selection.png',
-        bytes: snapshotPng,
-      },
-    ],
-  );
+  assert.deepEqual(persistedImages, [
+    {
+      rootPath: '/vault',
+      sourceIdentity: 'file:///vault/raw/papers/attention.pdf',
+      selectionKey: JSON.stringify({
+        anchorUri: 'raw/papers/attention.pdf#page=2',
+        startLine: 2,
+        endLine: 2,
+        text: 'FlashAttention uses tiling',
+      }),
+      bytes: snapshotPng,
+    },
+    {
+      rootPath: '/vault',
+      sourceIdentity: 'file:///vault/raw/papers/attention.pdf',
+      selectionKey: JSON.stringify({
+        anchorUri: 'raw/papers/attention.pdf#page=2',
+        startLine: 2,
+        endLine: 2,
+        text: 'FlashAttention uses tiling',
+      }),
+      bytes: snapshotPng,
+    },
+  ]);
 });
 
-test('activation provides explicit agent capabilities to PDF hosts and sets the product context', () => {
+test('activation provides the Cursor capability to PDF hosts and sets the product context', () => {
   for (const cursorAgent of [false, true]) {
     const executeCommandCalls = [];
     const providerOptions = [];
@@ -762,10 +1025,7 @@ test('activation provides explicit agent capabilities to PDF hosts and sets the 
       }),
       onDidChange: () => ({ dispose() {} }),
     };
-    const snapshot = {
-      cursorAgent,
-      providers: [{ id: 'codex', label: 'Codex' }],
-    };
+    const snapshot = { cursorAgent, providers: [{ id: 'codex', label: 'Codex' }] };
     let sourceReadCount = 0;
     let sourceCreateCount = 0;
     const onDidChange = () => ({ dispose() {} });
@@ -785,7 +1045,6 @@ test('activation provides explicit agent capabilities to PDF hosts and sets the 
         return source;
       },
       handoffSelectionToAgent: async () => undefined,
-      handoffSelectionToAgentId: async () => false,
       handoffSelectionToCursor: async () => false,
     };
     mocks['./pdfEditorProvider'] = {
@@ -851,54 +1110,79 @@ test('PDF Cmd-L asks the active webview for the same crop-aware agent handoff', 
   assert.equal(requested, 1);
 });
 
-test('explicit agent command without selection re-requests the active PDF for the same agent', async () => {
-  const explicitRequests = [];
-  let cursorRequests = 0;
-  const pdfUri = { fsPath: '/vault/raw/papers/attention.pdf', scheme: 'file' };
+test('Cursor handoff marks agent focus and Escape restores the Markdown editor', async () => {
+  const executeCommandCalls = [];
+  const markdownSelection = {
+    uri: { fsPath: '/vault/notes/attention.md', scheme: 'file' },
+    text: 'Selected Markdown passage',
+    startLine: 4,
+    endLine: 5,
+    metadata: { kind: 'markdown' },
+  };
+  let focusCalls = 0;
   const vscode = createVscodeMock({
-    executeCommandCalls: [],
+    executeCommandCalls,
     activeDocumentUri: undefined,
-    activeTabUri: pdfUri,
-    activeTabViewType: 'llm-wiki.pdfViewer',
+    activeTabUri: markdownSelection.uri,
+    activeTabViewType: 'llm-wiki.markdownEditor',
   });
   const mocks = createActivationMocks({ vscode });
-  mocks['./agentContext'] = {
-    addSelectionToContext: async () => assert.fail('Host must let the PDF webview capture its crop'),
+  mocks['./agentHandoff'] = {
+    handoffSelectionToCursor: async () => true,
   };
-  mocks['./pdfEditorProvider'] = {
-    PdfEditorProvider: class {
-      static viewType = 'llm-wiki.pdfViewer';
-      async addSelectionToAgent(agentId) {
-        explicitRequests.push(agentId);
+  mocks['./markdownEditorProvider'] = {
+    MarkdownEditorProvider: class {
+      static viewType = 'llm-wiki.markdownEditor';
+      constructor() {}
+      async captureActiveSelectionContext() {
+        return markdownSelection;
       }
-      async addSelectionToCursorChat() {
-        cursorRequests += 1;
-      }
-      getActiveWebview() {
-        return undefined;
+      async focusActiveEditor() {
+        focusCalls += 1;
+        return true;
       }
     },
   };
 
   const { activate } = loadTsModule('src/extension.ts', mocks);
   activate({ subscriptions: [] });
-  await vscode.__registeredCommands['llm-wiki.addSelectionToAgent']({
-    agentId: 'codex',
-  });
 
-  assert.deepEqual(explicitRequests, ['codex']);
-  assert.equal(cursorRequests, 0);
+  await vscode.__registeredCommands['llm-wiki.addSelectionToChat']();
+  assert.ok(executeCommandCalls.some(
+    ([command, key, value]) => command === 'setContext'
+      && key === 'llmWikiAgentHandoffActive'
+      && value === true,
+  ));
+
+  await vscode.__registeredCommands['llm-wiki.focusMarkdownEditor']();
+  assert.equal(focusCalls, 1);
+  assert.ok(executeCommandCalls.some(
+    ([command, key, value]) => command === 'setContext'
+      && key === 'llmWikiAgentHandoffActive'
+      && value === false,
+  ));
 });
 
-test('Add to Chat falls back to immutable text when crop persistence fails', async () => {
+test('Add to Chat keeps raw PDF text when crop persistence fails', async () => {
   const cursorHandoffs = [];
   const warningMessages = [];
   const selection = {
-    uri: { fsPath: '/vault/raw/papers/attention.pdf', scheme: 'file' },
+    uri: {
+      fsPath: '/vault/raw/papers/attention.pdf',
+      scheme: 'file',
+      toString: () => 'file:///vault/raw/papers/attention.pdf',
+    },
     text: 'FlashAttention uses tiling',
     startLine: 2,
     endLine: 2,
+    anchorUri: 'raw/papers/attention.pdf#page=2',
   };
+  const rawText = [
+    'Source: [raw/papers/attention.pdf (page 2)](<cursor://llm-wiki/open-anchor?target=attention>)',
+    '',
+    'Selected text:',
+    'FlashAttention uses tiling',
+  ].join('\n');
   const vscode = createVscodeMock({
     executeCommandCalls: [],
     activeDocumentUri: undefined,
@@ -906,12 +1190,23 @@ test('Add to Chat falls back to immutable text when crop persistence fails', asy
   });
   const mocks = createActivationMocks({ vscode });
   mocks['./agentContext'] = {
-    addSelectionToContext: async () => ({
-      directoryPath: '/vault/.llm_wiki/agent/exports/export-1',
-      markdownPath: '/vault/.llm_wiki/agent/exports/export-1/selection.md',
-      jsonPath: '/vault/.llm_wiki/agent/exports/export-1/selection.json',
+    addSelectionToContext: async () =>
+      assert.fail('PDF Add to Chat must not create selection.md'),
+    syncSelectionExportAttachment: async () =>
+      assert.fail('PDF Add to Chat must not create an export crop alias'),
+  };
+  mocks['./agentClipboard'] = {
+    formatMarkdownAgentReference: () => '',
+    createPdfAgentClipboardContext: input => ({
+      selectionKey: input.selectionKey,
+      sourceLabel: 'raw/papers/attention.pdf (page 2)',
+      sourceHref: 'cursor://llm-wiki/open-anchor?target=attention',
+      selectedText: input.selectedText,
+      plainText: rawText,
     }),
-    syncSelectionExportAttachment: async () => {
+  };
+  mocks['./pdfAgentClipboardImage'] = {
+    persistPdfAgentClipboardImage: () => {
       throw new Error('read-only filesystem');
     },
   };
@@ -919,9 +1214,9 @@ test('Add to Chat falls back to immutable text when crop persistence fails', asy
     validateCursorCropPng: value => value,
   };
   mocks['./agentHandoff'] = {
-    handoffSelectionToCursor: async (contextUri, attachments) => {
+    handoffRawTextToCursor: async (input, attachments) => {
       cursorHandoffs.push({
-        contextPath: contextUri.fsPath,
+        input,
         attachmentPaths: attachments.map(uri => uri.fsPath),
       });
       return true;
@@ -936,7 +1231,11 @@ test('Add to Chat falls back to immutable text when crop persistence fails', asy
   });
 
   assert.deepEqual(cursorHandoffs, [{
-    contextPath: '/vault/.llm_wiki/agent/exports/export-1/selection.md',
+    input: {
+      uri: selection.uri,
+      range: { startLine: 2, endLine: 2 },
+      rawText,
+    },
     attachmentPaths: [],
   }]);
   assert.ok(warningMessages.includes(
@@ -988,9 +1287,9 @@ test('Cursor Browser selection is exported with its crop and routed to the activ
     validateCursorCropPng: value => value,
   };
   mocks['./agentHandoff'] = {
-    handoffSelectionToAgent: async (contextUri, attachmentUris) => {
+    handoffSelectionToAgent: async (context, attachmentUris) => {
       handoffs.push({
-        contextPath: contextUri.fsPath,
+        contextPath: context.uri.fsPath,
         attachmentPaths: attachmentUris.map(uri => uri.fsPath),
       });
       return 'codex';
@@ -1052,9 +1351,9 @@ test('experimental owned reader routes its validated text and synthetic crop thr
     validateCursorCropPng: value => value,
   };
   mocks['./agentHandoff'] = {
-    handoffSelectionToAgent: async (contextUri, attachmentUris) => {
+    handoffSelectionToAgent: async (context, attachmentUris) => {
       handoffs.push({
-        contextPath: contextUri.fsPath,
+        contextPath: context.uri.fsPath,
         attachmentPaths: attachmentUris.map(uri => uri.fsPath),
       });
       return 'codebuddy';
@@ -1312,14 +1611,16 @@ test('activation retries reopening a startup PDF while VS Code keeps it in the t
   );
 });
 
-test('startup custom-editor recovery uses short bounded retries instead of polling', () => {
+test('custom-editor recovery uses short startup retries plus persistent document routing instead of polling', () => {
   const source = readFileSync(join(packageRoot, 'src', 'extension.ts'), 'utf8');
 
   assert.match(
     source,
     /STARTUP_CUSTOM_EDITOR_RETRY_DELAYS_MS\s*=\s*\[0,\s*250,\s*1_000\]/,
   );
-  assert.match(source, /STARTUP_CUSTOM_EDITOR_MONITOR_MS\s*=\s*1_500/);
+  assert.match(source, /onDidOpenTextDocument/);
+  assert.doesNotMatch(source, /STARTUP_CUSTOM_EDITOR_MONITOR_MS/);
+  assert.doesNotMatch(source, /stopMonitoring/);
   assert.doesNotMatch(source, /\bsetInterval\s*\(/);
   assert.doesNotMatch(source, /\b20_000\b/);
 });
@@ -1589,6 +1890,33 @@ test('activation registers PDF view mode toggle commands', async () => {
   ]);
 });
 
+test('activation registers the PDF toolbar recovery command', async () => {
+  let toggleCalls = 0;
+  const vscode = createVscodeMock({
+    executeCommandCalls: [],
+    activeDocumentUri: undefined,
+  });
+  const mocks = createActivationMocks({ vscode });
+  mocks['./pdfEditorProvider'] = {
+    PdfEditorProvider: class {
+      static viewType = 'llm-wiki.pdfViewer';
+      async togglePdfToolbar() {
+        toggleCalls += 1;
+      }
+      getActiveWebview() {
+        return undefined;
+      }
+    },
+  };
+
+  const { activate } = loadTsModule('src/extension.ts', mocks);
+
+  activate({ subscriptions: [] });
+  assert.ok(vscode.__registeredCommands['llm-wiki.togglePdfToolbar']);
+  await vscode.__registeredCommands['llm-wiki.togglePdfToolbar']();
+  assert.equal(toggleCalls, 1);
+});
+
 test('openPdfMarkdownColumns command opens the active PDF beside an available markdown note', async () => {
   const executeCommandCalls = [];
   const pdfUri = { fsPath: '/vault/raw/pdf/ddia.pdf', scheme: 'file' };
@@ -1701,7 +2029,42 @@ test('activation routes markdown link targets through the LLM Wiki dispatcher', 
   assert.equal(dispatched.length, 1);
   assert.equal(dispatched[0][0], '/vault');
   assert.equal(dispatched[0][1], 'https://example.com/docs');
-  assert.equal(dispatched[0].length, 2);
+  assert.deepEqual(dispatched[0][2], { allowAbsoluteTargets: true });
+});
+
+test('activation resolves link targets against the folder that owns the source document', async () => {
+  const dispatched = [];
+  const secondSourceUri = { fsPath: '/second/notes/Deep.md', scheme: 'file' };
+  const vscode = createVscodeMock({
+    executeCommandCalls: [],
+    activeDocumentUri: undefined,
+    activeTabUri: undefined,
+  });
+  vscode.workspace.workspaceFolders = [
+    { uri: { fsPath: '/first' } },
+    { uri: { fsPath: '/second' } },
+  ];
+  vscode.workspace.getWorkspaceFolder = uri => uri?.fsPath?.startsWith('/second/')
+    ? { uri: { fsPath: '/second' } }
+    : undefined;
+
+  const { activate } = loadTsModule('src/extension.ts', {
+    ...createActivationMocks({ vscode }),
+    './uriDispatcher': { dispatchUri: (...args) => dispatched.push(args) },
+  });
+  activate({ subscriptions: [] });
+  await new Promise(resolve => setTimeout(resolve, 0));
+
+  await vscode.__registeredCommands['llm-wiki.openLinkTarget'](
+    '/playbook/guide.md',
+    secondSourceUri,
+  );
+  await vscode.__registeredCommands['llm-wiki.openLinkTarget'](
+    '/playbook/guide.md',
+    { fsPath: '/elsewhere/notes/Other.md', scheme: 'file' },
+  );
+
+  assert.deepEqual(dispatched.map(([root]) => root), ['/second', '/first']);
 });
 
 test('activation refreshes LLM Wiki side panes when the active custom editor tab changes', async () => {
@@ -2050,11 +2413,11 @@ test('no-folder activation keeps custom viewers read-only and gates repository l
 
   await vscode.__registeredCommands['llm-wiki.generateDailyNote']();
   await vscode.__registeredCommands['llm-wiki.syncRepository']();
-  await vscode.__registeredCommands['llm-wiki.addSelectionToContext']();
+  assert.equal(vscode.__registeredCommands['llm-wiki.addSelectionToContext'], undefined);
   assert.equal(dailyNoteCount, 0);
   assert.equal(syncCount, 0);
   assert.equal(exportedSelectionCount, 0);
-  assert.equal(warningMessages.length, 3);
+  assert.equal(warningMessages.length, 2);
   assert.ok(warningMessages.every(message =>
     message === 'Open a folder to use LLM Wiki notes and repository features.'
   ));
@@ -2069,7 +2432,7 @@ test('no-folder activation keeps custom viewers read-only and gates repository l
     pdfPath: 'relative.pdf',
   });
   assert.deepEqual(openedPdfTargets, [['/outside/read-only.pdf', 3, undefined]]);
-  assert.equal(warningMessages.length, 4);
+  assert.equal(warningMessages.length, 3);
 });
 
 test('production activation leaves Ask PDF and Codex uncomposed', () => {
@@ -2197,6 +2560,7 @@ function createVscodeMock({
   const registeredCommands = {};
   const registeredUriHandlers = [];
   const activeEditorChangeHandlers = [];
+  const openDocumentHandlers = [];
   const tabChangeHandlers = [];
 
   return {
@@ -2204,6 +2568,9 @@ function createVscodeMock({
     __registeredUriHandlers: registeredUriHandlers,
     __fireActiveEditorChange: editor => {
       for (const handler of activeEditorChangeHandlers) handler(editor);
+    },
+    __fireOpenDocument: document => {
+      for (const handler of openDocumentHandlers) handler(document);
     },
     __fireTabChange: event => {
       for (const handler of tabChangeHandlers) handler(event);
@@ -2213,6 +2580,10 @@ function createVscodeMock({
       workspaceFolders: [{ uri: { fsPath: '/vault' } }],
       asRelativePath: uri => uri?.fsPath?.replace('/vault/', '') ?? 'notes/Concepts/FlashAttention.md',
       createFileSystemWatcher: () => watcher,
+      onDidOpenTextDocument: callback => {
+        openDocumentHandlers.push(callback);
+        return { dispose() {} };
+      },
       getConfiguration: () => ({ get: (_key, fallback) => fallback }),
     },
     window: {
@@ -2224,6 +2595,7 @@ function createVscodeMock({
       } : undefined,
       visibleTextEditors: visibleTextEditors ?? [],
       tabGroups: {
+        all: [],
         onDidChangeTabs: callback => {
           tabChangeHandlers.push(callback);
           return { dispose() {} };

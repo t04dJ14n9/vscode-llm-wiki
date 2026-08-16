@@ -29,8 +29,217 @@ const reducedMotionCodeBlockCopyTooltipStyles = {
   transition: 'none',
 };
 
+// CodeMirror paints selections in `.cm-selectionLayer` (z-index -2). Keep the
+// fenced-code wash one layer behind it so selected code remains visible.
+const codeSurface = (color: string) => ({
+  position: 'relative',
+  backgroundColor: 'transparent',
+  '--llm-wiki-code-surface': color,
+});
+
+const codeSurfaceBackdrop = {
+  content: '""',
+  position: 'absolute',
+  inset: '0',
+  zIndex: '-3',
+  borderRadius: 'inherit',
+  backgroundColor: 'var(--llm-wiki-code-surface)',
+  pointerEvents: 'none',
+};
+
+const imagePreviewStyles = {
+  '.cm-hybrid-image': {
+    display: 'inline-block',
+    position: 'relative',
+    maxWidth: '100%',
+  },
+  '.cm-hybrid-image-expand': {
+    position: 'absolute',
+    top: '8px',
+    right: '8px',
+    zIndex: '1',
+    border: '1px solid var(--vscode-button-secondaryBorder, var(--vscode-panel-border))',
+    borderRadius: '3px',
+    padding: '2px 6px',
+    color: 'var(--vscode-button-secondaryForeground, var(--vscode-editor-foreground))',
+    backgroundColor: 'var(--vscode-button-secondaryBackground, var(--vscode-editorWidget-background))',
+    font: 'inherit',
+    fontSize: '0.85em',
+    cursor: 'pointer',
+    boxShadow: '0 1px 4px rgba(0, 0, 0, 0.35)',
+  },
+  '.cm-hybrid-image-expand:hover': {
+    backgroundColor: 'var(--vscode-button-secondaryHoverBackground, var(--vscode-list-hoverBackground))',
+  },
+  '.cm-hybrid-image-expand:focus-visible': {
+    outline: '1px solid var(--vscode-focusBorder)',
+    outlineOffset: '2px',
+  },
+};
+
+const structuredPropertyStyles = {
+  '.cm-hybrid-property-structured-table-wrap': {
+    width: '100%',
+    maxWidth: '100%',
+    overflowX: 'auto',
+    padding: '2px 0',
+  },
+  '.cm-hybrid-property-structured-table': {
+    width: '100%',
+    minWidth: '38rem',
+    borderCollapse: 'collapse',
+    fontSize: '0.92em',
+    lineHeight: '1.35',
+    tableLayout: 'fixed',
+  },
+  '.cm-hybrid-property-structured-table th, .cm-hybrid-property-structured-table td': {
+    border: '1px solid var(--vscode-panel-border, color-mix(in srgb, var(--vscode-editor-foreground) 22%, transparent))',
+    padding: '3px 8px',
+    textAlign: 'left',
+    verticalAlign: 'top',
+    overflowWrap: 'anywhere',
+    whiteSpace: 'normal',
+  },
+  '.cm-hybrid-property-structured-table [data-column="id"]': {
+    width: '12%',
+  },
+  '.cm-hybrid-property-structured-table [data-column="resource"]': {
+    width: '42%',
+  },
+  '.cm-hybrid-property-structured-table [data-column="title"]': {
+    width: '20%',
+  },
+  '.cm-hybrid-property-structured-table [data-column="commit"]': {
+    width: '26%',
+  },
+  '.cm-hybrid-property-structured-table th': {
+    color: 'var(--vscode-editor-foreground)',
+    backgroundColor: 'color-mix(in srgb, var(--vscode-editor-foreground) 7%, transparent)',
+    fontWeight: '600',
+  },
+  '.cm-hybrid-property-structured-cell': {
+    display: 'block',
+    width: '100%',
+    minWidth: '3em',
+    border: '0',
+    padding: '0',
+    color: 'inherit',
+    backgroundColor: 'transparent',
+    font: 'inherit',
+    textAlign: 'left',
+    cursor: 'text',
+  },
+  '.cm-hybrid-property-structured-cell-controls': {
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: '4px',
+  },
+  '.cm-hybrid-property-structured-cell-controls .cm-hybrid-property-structured-cell': {
+    flex: '1 1 auto',
+    minWidth: '0',
+  },
+  // The cell display is a block-level button, so the browser's default
+  // `[hidden] { display: none }` rule is overridden by the class rule above.
+  // Restore the hidden state while its inline editor is active; otherwise the
+  // old value remains painted underneath the input.
+  '.cm-hybrid-property-structured-cell[hidden]': {
+    display: 'none',
+  },
+  '.cm-hybrid-property-structured-cell:hover': {
+    outline: '1px solid color-mix(in srgb, var(--vscode-focusBorder) 55%, transparent)',
+    outlineOffset: '1px',
+  },
+  '.cm-hybrid-property-structured-cell:focus-visible': {
+    outline: '1px solid var(--vscode-focusBorder)',
+    outlineOffset: '1px',
+  },
+  '.cm-hybrid-property-structured-cell-input': {
+    boxSizing: 'border-box',
+    width: '100%',
+    minWidth: '8em',
+    border: '1px solid var(--vscode-focusBorder)',
+    borderRadius: '2px',
+    padding: '1px 3px',
+    color: 'var(--vscode-input-foreground, var(--vscode-editor-foreground))',
+    backgroundColor: 'var(--vscode-input-background, var(--vscode-editor-background))',
+    font: 'inherit',
+  },
+};
+
+const frontmatterLinkStyles = {
+  '.cm-hybrid-property-scalar-controls': {
+    display: 'inline-flex',
+    maxWidth: '100%',
+    alignItems: 'center',
+    gap: '4px',
+  },
+  '.cm-hybrid-property-link.cm-hybrid-property-link': {
+    minWidth: '0',
+    overflow: 'hidden',
+    color: 'var(--vscode-textLink-foreground)',
+    cursor: 'pointer',
+    textDecoration: 'underline',
+    textDecorationThickness: '1.5px',
+    textOverflow: 'ellipsis',
+    textUnderlineOffset: '2px',
+    whiteSpace: 'nowrap',
+  },
+  '.cm-hybrid-property-edit': {
+    flex: '0 0 auto',
+    width: '22px',
+    minWidth: '22px',
+    height: '22px',
+    border: '0',
+    borderRadius: '3px',
+    padding: '0',
+    overflow: 'hidden',
+    color: 'var(--vscode-descriptionForeground)',
+    backgroundColor: 'transparent',
+    cursor: 'pointer',
+    fontSize: '0',
+  },
+  '.cm-hybrid-property-edit::before': {
+    content: '"✎"',
+    fontSize: '13px',
+    lineHeight: '1',
+  },
+  '.cm-hybrid-property-edit:hover': {
+    color: 'var(--vscode-editor-foreground)',
+    backgroundColor: 'var(--vscode-toolbar-hoverBackground, rgba(127,127,127,.16))',
+  },
+  '.cm-hybrid-property-link:focus-visible, .cm-hybrid-property-edit:focus-visible': {
+    outline: '1px solid var(--vscode-focusBorder)',
+    outlineOffset: '1px',
+  },
+};
+
+const footnoteInteractionStyles = {
+  '.cm-hybrid-footnote-ref': {
+    color: 'var(--vscode-textLink-foreground)',
+    fontSize: '0.78em',
+    verticalAlign: 'super',
+    lineHeight: '0',
+    fontWeight: '600',
+    cursor: 'pointer',
+  },
+  '.cm-hybrid-footnote-def-label': {
+    color: 'var(--vscode-textLink-foreground)',
+    fontSize: '0.85em',
+    verticalAlign: 'super',
+    lineHeight: '0',
+    fontWeight: '600',
+    cursor: 'pointer',
+  },
+  '.cm-hybrid-footnote-ref:focus-visible, .cm-hybrid-footnote-def-label:focus-visible': {
+    outline: '1px solid var(--vscode-focusBorder, currentColor)',
+    outlineOffset: '2px',
+  },
+};
+
 export function hybridStyles() {
   return EditorView.baseTheme({
+    ...imagePreviewStyles,
+    ...structuredPropertyStyles,
     '.cm-hybrid-heading-line': {
       fontWeight: '700',
       lineHeight: '1.45',
@@ -323,14 +532,25 @@ export function hybridStyles() {
     '.cm-hybrid-properties-rows': {
       display: 'grid',
       gap: '0.15em',
-      maxWidth: '36rem',
+      width: '100%',
+      maxWidth: 'none',
     },
     '.cm-hybrid-property-row': {
       display: 'grid',
       gridTemplateColumns: 'minmax(9rem, 0.36fr) 1fr',
       gap: '1rem',
-      alignItems: 'center',
+      alignItems: 'start',
       minHeight: '1.65em',
+    },
+    '.cm-hybrid-property-row-structured': {
+      gridTemplateColumns: 'minmax(0, 1fr)',
+      gap: '0.35em',
+    },
+    '.cm-hybrid-property-row-structured .cm-hybrid-property-name-cell': {
+      maxWidth: '14rem',
+    },
+    '.cm-hybrid-property-row-structured .cm-hybrid-property-value': {
+      width: '100%',
     },
     '.cm-hybrid-property-name': {
       color: 'var(--vscode-descriptionForeground)',
@@ -394,10 +614,11 @@ export function hybridStyles() {
       textAlign: 'left',
       cursor: 'text',
     },
+    ...frontmatterLinkStyles,
     '.cm-hybrid-property-chip-display:hover, .cm-hybrid-property-scalar-display:hover': {
       backgroundColor: 'color-mix(in srgb, var(--vscode-editor-foreground) 6%, transparent)',
     },
-    '.cm-hybrid-properties-rows[hidden], .cm-hybrid-property-list-input[hidden], .cm-hybrid-property-value-input[hidden], .cm-hybrid-property-chip-display[hidden], .cm-hybrid-property-scalar-display[hidden]': {
+    '.cm-hybrid-properties-rows[hidden], .cm-hybrid-property-list-input[hidden], .cm-hybrid-property-value-input[hidden], .cm-hybrid-property-chip-display[hidden], .cm-hybrid-property-scalar-display[hidden], .cm-hybrid-property-scalar-controls[hidden], .cm-hybrid-property-structured-cell-controls[hidden]': {
       display: 'none',
     },
     '.cm-hybrid-property-value-input': {
@@ -727,13 +948,14 @@ export function hybridStyles() {
       display: 'none',
     },
     '.cm-hybrid-codeblock-inner': {
+      ...codeSurface('var(--llm-wiki-codeblock-background)'),
       boxSizing: 'border-box',
       height: '1lh',
       borderTopLeftRadius: '4px',
       borderTopRightRadius: '4px',
-      backgroundColor: 'var(--llm-wiki-codeblock-background)',
       overflow: 'visible',
     },
+    '.cm-hybrid-codeblock-inner::before': codeSurfaceBackdrop,
     '.cm-hybrid-codeblock-header': {
       boxSizing: 'border-box',
       position: 'relative',
@@ -744,7 +966,7 @@ export function hybridStyles() {
       padding: '0 38px 0 14px',
       borderTopLeftRadius: '4px',
       borderTopRightRadius: '4px',
-      backgroundColor: 'var(--llm-wiki-codeblock-background)',
+      backgroundColor: 'transparent',
     },
     '.cm-hybrid-codeblock-language': {
       color: 'var(--vscode-descriptionForeground)',
@@ -790,25 +1012,27 @@ export function hybridStyles() {
       backgroundColor: 'color-mix(in srgb, var(--vscode-editor-foreground) 10%, transparent)',
     },
     '.cm-hybrid-codeblock-content-line': {
+      ...codeSurface('var(--llm-wiki-codeblock-background)'),
       boxSizing: 'border-box',
       paddingLeft: '14px',
       paddingRight: '14px',
-      backgroundColor: 'var(--llm-wiki-codeblock-background)',
       fontFamily: 'var(--llm-wiki-editor-font-family, var(--vscode-editor-font-family, ui-monospace, Menlo, monospace))',
       fontSize: '1em',
       lineHeight: 'inherit',
       color: 'var(--vscode-editor-foreground)',
     },
+    '.cm-hybrid-codeblock-content-line::before': codeSurfaceBackdrop,
     '.cm-hybrid-codeblock-active-opening-line, .cm-hybrid-codeblock-active-closing-line': {
+      ...codeSurface('var(--llm-wiki-codeblock-background)'),
       boxSizing: 'border-box',
       paddingLeft: '14px',
       paddingRight: '14px',
-      backgroundColor: 'var(--llm-wiki-codeblock-background)',
       fontFamily: 'var(--llm-wiki-editor-font-family, var(--vscode-editor-font-family, ui-monospace, Menlo, monospace))',
       fontSize: '1em',
       lineHeight: 'inherit',
       color: 'var(--vscode-editor-foreground)',
     },
+    '.cm-hybrid-codeblock-active-opening-line::before, .cm-hybrid-codeblock-active-closing-line::before': codeSurfaceBackdrop,
     '.cm-hybrid-codeblock-active-opening-line': {
       borderTopLeftRadius: '4px',
       borderTopRightRadius: '4px',
@@ -878,6 +1102,7 @@ export function hybridStyles() {
       fontStyle: 'italic',
     },
     '.cm-hybrid-codeblock-footer': {
+      ...codeSurface('var(--llm-wiki-codeblock-background)'),
       display: 'block',
       boxSizing: 'border-box',
       height: '1lh',
@@ -888,22 +1113,9 @@ export function hybridStyles() {
       lineHeight: 'inherit',
       borderBottomLeftRadius: '4px',
       borderBottomRightRadius: '4px',
-      backgroundColor: 'var(--llm-wiki-codeblock-background)',
     },
-    '.cm-hybrid-footnote-ref': {
-      color: 'var(--vscode-textLink-foreground)',
-      fontSize: '0.78em',
-      verticalAlign: 'super',
-      lineHeight: '0',
-      fontWeight: '600',
-    },
-    '.cm-hybrid-footnote-def-label': {
-      color: 'var(--vscode-textLink-foreground)',
-      fontSize: '0.85em',
-      verticalAlign: 'super',
-      lineHeight: '0',
-      fontWeight: '600',
-    },
+    '.cm-hybrid-codeblock-footer::before': codeSurfaceBackdrop,
+    ...footnoteInteractionStyles,
     '.cm-hybrid-footnote-def-separator': {
       color: 'var(--vscode-descriptionForeground)',
       fontSize: '0.85em',

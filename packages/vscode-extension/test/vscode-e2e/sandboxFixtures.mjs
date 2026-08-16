@@ -7,6 +7,10 @@ export const MULTIPAGE_PDF_FIXTURE = 'raw/pdf/multipage-fixture.pdf';
 export const VIM_SANDBOXES = Object.freeze({
   modifierShortcuts: sandbox('vim-modifier-shortcuts.md', 'LLM Wiki E2E Vim modifier shortcuts'),
   commandO: sandbox('vim-command-o.md', 'LLM Wiki E2E Vim command O'),
+  openLinePersistence: sandbox(
+    'vim-open-line-persistence.md',
+    'LLM Wiki E2E Vim open line persistence',
+  ),
   delayedFocus: sandbox('vim-delayed-focus.md', 'LLM Wiki E2E Vim delayed focus'),
   deleteLine: sandbox('vim-delete-line.md', 'LLM Wiki E2E Vim delete line'),
   deleteHeading: sandbox('vim-delete-heading.md', 'LLM Wiki E2E Vim delete heading'),

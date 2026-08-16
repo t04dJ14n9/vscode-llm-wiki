@@ -49,6 +49,9 @@ class TableWidget extends WidgetType {
     wrapper.dataset.sourceTo = String(this.blockTo);
     const draftRows = this.rows.map(row => row.map(cell => cell.text));
     let activeInput: HTMLInputElement | null = null;
+    let cancelled = false;
+    let committed = false;
+    const editableCells: Array<{ rowIndex: number; cellIndex: number }> = [];
     const inner = document.createElement('div');
     inner.className = 'cm-hybrid-table-widget-inner';
 
@@ -75,13 +78,14 @@ class TableWidget extends WidgetType {
         input.spellcheck = false;
         input.autocomplete = 'off';
         input.setAttribute('aria-label', `Table cell ${cell.text}`);
+        input.dataset.tableRow = String(rowIndex);
+        input.dataset.tableColumn = String(cellIndex);
+        editableCells.push({ rowIndex, cellIndex });
         input.addEventListener('input', () => {
           draftRows[rowIndex]![cellIndex] = input.value;
         });
 
-        const activate = (event: Event) => {
-          event.preventDefault();
-          event.stopPropagation();
+        const activateInput = () => {
           if (activeInput && activeInput !== input) {
             activeInput.hidden = true;
             const previousDisplay = activeInput.previousElementSibling;
@@ -93,10 +97,43 @@ class TableWidget extends WidgetType {
           input.focus({ preventScroll: true });
           input.select();
         };
+        const activate = (event: Event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          activateInput();
+        };
         display.addEventListener('mousedown', activate);
         display.addEventListener('click', event => event.stopPropagation());
         element.append(display, input);
         tr.appendChild(element);
+
+        input.addEventListener('keydown', event => {
+          if (event.key === 'Enter') {
+            event.preventDefault();
+            event.stopPropagation();
+            commit();
+            return;
+          }
+          if (event.key === 'Escape') {
+            event.preventDefault();
+            event.stopPropagation();
+            cancel();
+            return;
+          }
+          if (event.key === 'Tab') {
+            event.preventDefault();
+            event.stopPropagation();
+            const currentIndex = editableCells.findIndex(cellPosition => (
+              cellPosition.rowIndex === rowIndex && cellPosition.cellIndex === cellIndex
+            ));
+            if (currentIndex < 0) return;
+            commit();
+            const direction = event.shiftKey ? -1 : 1;
+            const nextIndex = (currentIndex + direction + editableCells.length) % editableCells.length;
+            const next = editableCells[nextIndex]!;
+            focusTableInput(view, this.blockFrom, next.rowIndex, next.cellIndex);
+          }
+        });
       }
       tbody.appendChild(tr);
     });
@@ -105,14 +142,35 @@ class TableWidget extends WidgetType {
     inner.appendChild(table);
     wrapper.appendChild(inner);
 
+    const closeActiveInput = () => {
+      if (!activeInput) return;
+      activeInput.hidden = true;
+      const display = activeInput.previousElementSibling;
+      if (display instanceof HTMLElement) display.hidden = false;
+      activeInput = null;
+    };
+    const commit = (): boolean => {
+      if (committed || cancelled) return false;
+      committed = true;
+      const source = serializeMarkdownTable(draftRows, this.alignments);
+      if (source !== view.state.doc.sliceString(this.blockFrom, this.blockTo)) {
+        view.dispatch({
+          changes: { from: this.blockFrom, to: this.blockTo, insert: source },
+        });
+      }
+      closeActiveInput();
+      return true;
+    };
+    const cancel = () => {
+      if (cancelled || committed) return;
+      cancelled = true;
+      closeActiveInput();
+    };
+
     wrapper.addEventListener('focusout', event => {
       const nextTarget = event.relatedTarget;
       if (nextTarget instanceof Node && wrapper.contains(nextTarget)) return;
-      const source = serializeMarkdownTable(draftRows, this.alignments);
-      if (source === view.state.doc.sliceString(this.blockFrom, this.blockTo)) return;
-      view.dispatch({
-        changes: { from: this.blockFrom, to: this.blockTo, insert: source },
-      });
+      commit();
     });
     wrapper.addEventListener('mousedown', event => {
       event.stopPropagation();
@@ -147,6 +205,30 @@ class TableWidget extends WidgetType {
   override ignoreEvent(): boolean {
     return false;
   }
+}
+
+function focusTableInput(
+  view: EditorView,
+  blockFrom: number,
+  rowIndex: number,
+  cellIndex: number,
+  attempt = 0,
+): void {
+  requestAnimationFrame(() => {
+    const input = view.dom.querySelector<HTMLInputElement>(
+      `.cm-hybrid-table-widget[data-source-from="${blockFrom}"] `
+        + `.cm-hybrid-table-cell-input[data-table-row="${rowIndex}"][data-table-column="${cellIndex}"]`,
+    );
+    if (!input) {
+      if (attempt < 3) focusTableInput(view, blockFrom, rowIndex, cellIndex, attempt + 1);
+      return;
+    }
+    const display = input.previousElementSibling;
+    if (display instanceof HTMLElement) display.hidden = true;
+    input.hidden = false;
+    input.focus({ preventScroll: true });
+    input.select();
+  });
 }
 
 function serializeMarkdownTable(rows: string[][], alignments: TableAlignment[]): string {

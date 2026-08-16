@@ -6,9 +6,16 @@ import {
 import { existsSync, lstatSync, mkdirSync, statSync, writeFileSync } from 'fs';
 import { isAbsolute, join, relative, resolve, sep } from 'path';
 import { llmWikiAnchorTargetFromString } from './anchorUris';
+import { resolveLocalLinkTarget } from './localLinkTargetResolver';
 
 export interface DispatchUriOptions {
   openWebTarget?(url: string): Promise<void> | void;
+  /**
+   * Allow a root-looking target to open a real absolute path outside the vault.
+   * Off by default: product deep links are triggerable by any web page, so only
+   * navigation the user started inside the editor may reach the filesystem.
+   */
+  allowAbsoluteTargets?: boolean;
 }
 
 export async function dispatchUri(
@@ -17,7 +24,12 @@ export async function dispatchUri(
   options: DispatchUriOptions = {},
 ): Promise<void> {
   const resolvedUri = llmWikiAnchorTargetFromString(uri) ?? uri;
-  const navigableUri = resolveOkfLinkTarget(vaultRoot, resolvedUri);
+  const absoluteTargetsAllowed = options.allowAbsoluteTargets === true
+    && vscode.workspace.isTrusted !== false;
+  const resolution = resolveLocalLinkTarget(vaultRoot, resolvedUri, hostLinkProbe, {
+    allowAbsoluteTargets: absoluteTargetsAllowed,
+  });
+  const navigableUri = resolution.uri;
   const anchorFileUri = localAnchorFileUri(navigableUri);
   if (anchorFileUri) {
     await vscode.commands.executeCommand(
@@ -39,16 +51,23 @@ export async function dispatchUri(
     return;
   }
   const workspaceRoot = vaultRoot ?? '';
+  // An explicitly requested absolute path is intentionally outside the vault, so
+  // it bypasses vault containment. It can still only be opened, never created.
+  const absoluteTarget = resolution.origin === 'absolute';
+  const targetFilePath = (candidatePath: string): string | undefined =>
+    absoluteTarget && isAbsolute(candidatePath)
+      ? candidatePath
+      : workspaceFilePath(workspaceRoot, candidatePath);
 
   switch (target.kind) {
     case 'note': {
       if (!target.path) break;
-      const filePath = workspaceFilePath(workspaceRoot, target.path);
+      const filePath = targetFilePath(target.path);
       if (!filePath) {
         showOutsideWorkspaceError(target.path);
         return;
       }
-      ensureMarkdownNoteExists(workspaceRoot, filePath);
+      if (!absoluteTarget) ensureMarkdownNoteExists(workspaceRoot, filePath);
       const fileUri = vscode.Uri.file(filePath);
       await vscode.commands.executeCommand(
         'vscode.openWith',
@@ -67,7 +86,7 @@ export async function dispatchUri(
 
     case 'code': {
       if (!target.path) break;
-      const direct = workspaceFilePath(workspaceRoot, target.path);
+      const direct = targetFilePath(target.path);
       if (!direct) {
         showOutsideWorkspaceError(target.path);
         return;
@@ -127,7 +146,7 @@ export async function dispatchUri(
     case 'text':
     case 'unknown': {
       if (target.path) {
-        const filePath = workspaceFilePath(workspaceRoot, target.path);
+        const filePath = targetFilePath(target.path);
         if (!filePath) {
           showOutsideWorkspaceError(target.path);
           return;
@@ -149,88 +168,10 @@ export async function dispatchUri(
   vscode.window.showErrorMessage(`Cannot open link target: ${navigableUri}`);
 }
 
-/**
- * OKF concept IDs omit `.md`, bundle-relative links begin with `/`, and
- * hierarchical indexes may link to a directory. Resolve those portable forms
- * to concrete bundle files before classifying the target.
- */
-export function resolveOkfLinkTarget(
-  vaultRoot: string | undefined,
-  uri: string,
-): string {
-  if (
-    !vaultRoot
-    || !uri
-    || uri.startsWith('#')
-    || /^[A-Za-z][A-Za-z0-9+.-]*:/.test(uri)
-  ) {
-    return uri;
-  }
-
-  const suffixIndex = uri.search(/[?#]/);
-  const rawPath = suffixIndex < 0 ? uri : uri.slice(0, suffixIndex);
-  const suffix = suffixIndex < 0 ? '' : uri.slice(suffixIndex);
-  if (!rawPath) return uri;
-
-  let decodedPath: string;
-  try {
-    decodedPath = decodeURIComponent(rawPath);
-  } catch {
-    decodedPath = rawPath;
-  }
-  const bundlePath = decodedPath.replace(/^\/+/, '');
-  if (!bundlePath) return uri;
-
-  if (
-    decodedPath.toLowerCase().endsWith('.pdf')
-    && isAbsolute(decodedPath)
-    && isWorkspaceContainedPath(vaultRoot, decodedPath)
-  ) {
-    return uri;
-  }
-
-  const direct = workspaceFilePath(vaultRoot, bundlePath);
-  if (direct && existsSync(direct)) {
-    if (isDirectory(direct)) {
-      const indexPath = workspaceFilePath(
-        vaultRoot,
-        `${bundlePath.replace(/[\\/]+$/, '')}/index.md`,
-      );
-      if (indexPath && existsSync(indexPath)) {
-        return `${workspaceRelativePath(vaultRoot, indexPath)}${suffix}`;
-      }
-    }
-    return `${workspaceRelativePath(vaultRoot, direct)}${suffix}`;
-  }
-
-  if (!/\.[^/\\]+$/.test(bundlePath)) {
-    const concept = workspaceFilePath(vaultRoot, `${bundlePath}.md`);
-    if (concept && existsSync(concept)) {
-      return `${workspaceRelativePath(vaultRoot, concept)}${suffix}`;
-    }
-  }
-
-  // In OKF, a leading slash is bundle-relative rather than filesystem-root
-  // absolute. Preserve existing absolute PDFs so standalone PDF viewing keeps
-  // working when no bundle file matches.
-  if (
-    rawPath.startsWith('/')
-    && !(decodedPath.toLowerCase().endsWith('.pdf') && existsSync(decodedPath))
-  ) {
-    return `${bundlePath}${suffix}`;
-  }
-  return uri;
-}
-
-function workspaceRelativePath(workspaceRoot: string, filePath: string): string {
-  return relative(resolve(workspaceRoot), filePath).split(sep).join('/');
-}
-
-function isWorkspaceContainedPath(workspaceRoot: string, filePath: string): boolean {
-  const fromRoot = relative(resolve(workspaceRoot), resolve(filePath));
-  return fromRoot === ''
-    || (!fromRoot.startsWith(`..${sep}`) && fromRoot !== '..' && !isAbsolute(fromRoot));
-}
+const hostLinkProbe = {
+  exists: (path: string): boolean => existsSync(path),
+  isDirectory,
+};
 
 function isDirectory(filePath: string): boolean {
   try {

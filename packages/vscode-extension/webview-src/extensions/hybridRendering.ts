@@ -5,21 +5,25 @@ import type { EditorState, Range, Transaction } from '@codemirror/state';
 import DOMPurify from 'dompurify';
 import mermaid from 'mermaid';
 import {
+  htmlCommentSourceSpans,
   inlineCodeSourceSpans,
   isEscapedAt,
   markdownLinkSourceSpans,
   markdownReferenceDefinitions,
   markdownReferenceDefinitionSourceSpans,
   markdownReferenceLinkSourceSpans,
+  obsidianCommentSourceSpans,
   overlapsSpan,
   parseMarkdownLinkDestination,
 } from '../markdownSpans';
+import type { InlineCodeSpan } from '../markdownSpans';
 import { isCodeFenceClosing, parseCodeFenceOpening } from '../markdownFences';
 import { setextHeadingLevelForLines } from '../../src/markdownHeadingSyntax';
 import { parseWikiLinkTarget } from '../../src/wikiLinks';
 import { addCodeBlockDecorations, addCodeSyntaxDecorations } from './hybridCodeBlocks';
 import {
   ImageWidget,
+  parseMarkdownImageLabel,
   parseObsidianImageEmbed,
   renderedImageElement,
   resolveImageResource,
@@ -450,7 +454,7 @@ function calloutIconElement(type: string): HTMLSpanElement {
 }
 
 interface InlineTextMatch {
-  kind: 'bold' | 'code' | 'highlight' | 'italic' | 'math' | 'strike';
+  kind: 'bold' | 'code' | 'footnote' | 'highlight' | 'italic' | 'math' | 'strike';
   from: number;
   to: number;
   text: string;
@@ -726,6 +730,7 @@ function nextCalloutInlineMatch(
     context ? calloutMarkdownImageMatch(source, position, context) : null,
     context ? calloutReferenceImageMatch(source, position, context) : null,
     context ? calloutWikiImageMatch(source, position, context) : null,
+    calloutFootnoteMatch(source, position),
     calloutMarkdownLinkMatch(source, position),
     context ? calloutReferenceLinkMatch(source, position, context) : null,
     calloutWikiLinkMatch(source, position),
@@ -738,6 +743,21 @@ function nextCalloutInlineMatch(
   ].filter((match): match is InlineMatch => match != null);
   candidates.sort((first, second) => first.from - second.from || second.to - first.to);
   return candidates[0] ?? null;
+}
+
+function calloutFootnoteMatch(source: string, position: number): InlineTextMatch | null {
+  const pattern = /\[\^([^\]\s]+)\]/g;
+  pattern.lastIndex = position;
+  const match = pattern.exec(source);
+  if (!match) return null;
+  const from = match.index;
+  if (isEscapedAt(source, from)) return calloutFootnoteMatch(source, from + 1);
+  return {
+    kind: 'footnote',
+    from,
+    to: from + match[0].length,
+    text: match[1] ?? '',
+  };
 }
 
 function calloutMarkdownImageMatch(
@@ -898,6 +918,17 @@ function calloutInlineElement(
     return renderedImageElement(match.alt, match.url, match.sourceFrom, match.sourceTo, match.dimensions, context!.view);
   }
   if (match.kind === 'math') return calloutInlineMathElement(match.text, classPrefix);
+  if (match.kind === 'footnote') {
+    const element = document.createElement('span');
+    element.className = 'cm-hybrid-footnote-ref';
+    element.textContent = match.text;
+    element.tabIndex = 0;
+    element.setAttribute('role', 'link');
+    element.ariaLabel = `Footnote ${match.text}`;
+    element.dataset.footnoteId = match.text;
+    element.dataset.footnoteKind = 'reference';
+    return element;
+  }
   if (match.kind === 'markdown-link' || match.kind === 'wiki-link') {
     return calloutInlineLinkElement(match, classPrefix);
   }
@@ -915,6 +946,11 @@ function calloutInlineLinkElement(match: InlineLinkMatch, classPrefix = 'cm-hybr
   button.className = `${classPrefix}-link`;
   button.textContent = match.text || match.uri;
   button.title = match.uri;
+  button.dataset.linkPreviewTarget = match.uri;
+  button.dataset.linkPreviewLabel = match.text || match.uri;
+  if (match.kind === 'markdown-link' && isDocumentRelativeUri(match.uri)) {
+    button.dataset.linkPreviewRelativeToDocument = 'true';
+  }
 
   const stopEditorSelection = (event: Event) => {
     event.preventDefault();
@@ -953,7 +989,7 @@ function calloutInlineMathElement(expression: string, classPrefix = 'cm-hybrid-c
   return element;
 }
 
-function calloutInlineTagName(kind: Exclude<InlineTextMatch['kind'], 'math'>): keyof HTMLElementTagNameMap {
+function calloutInlineTagName(kind: Exclude<InlineTextMatch['kind'], 'footnote' | 'math'>): keyof HTMLElementTagNameMap {
   if (kind === 'bold') return 'strong';
   if (kind === 'code') return 'code';
   if (kind === 'highlight') return 'mark';
@@ -961,7 +997,7 @@ function calloutInlineTagName(kind: Exclude<InlineTextMatch['kind'], 'math'>): k
   return 'em';
 }
 
-function calloutInlineClassSuffix(kind: Exclude<InlineTextMatch['kind'], 'math'>): string {
+function calloutInlineClassSuffix(kind: Exclude<InlineTextMatch['kind'], 'footnote' | 'math'>): string {
   return kind === 'code' ? 'inline-code' : kind;
 }
 
@@ -1161,8 +1197,6 @@ const highlightMark = Decoration.mark({ class: 'cm-hybrid-highlight' });
 const inlineCodeMark = Decoration.mark({ class: 'cm-hybrid-inline-code' });
 const linkTextMark = Decoration.mark({ class: 'cm-hybrid-link-text' });
 const tagMark = Decoration.mark({ class: 'cm-hybrid-tag' });
-const footnoteRefMark = Decoration.mark({ class: 'cm-hybrid-footnote-ref' });
-const footnoteDefLabelMark = Decoration.mark({ class: 'cm-hybrid-footnote-def-label' });
 const sourceLine = Decoration.line({ class: 'cm-hybrid-source-line' });
 const blockquoteLine = Decoration.line({ class: 'cm-hybrid-blockquote-line' });
 const listLine = Decoration.line({ class: 'cm-hybrid-list-line' });
@@ -1224,12 +1258,17 @@ function buildHybridDecorations(state: EditorState): DecorationSet {
   const decorations: Range<Decoration>[] = [];
   const active = activeLinesFromState(state);
   const frontmatter = findFrontmatterBlock(state.doc);
+  const sourceText = state.doc.toString();
+  // Obsidian comments are hidden in reading mode. HTML comments remain ordinary
+  // Markdown source (generated-file banners commonly use them), so do not pass
+  // them to the renderer that removes comment text.
+  const obsidianCommentRanges = obsidianCommentSourceSpans(sourceText);
   const commentRanges = [
-    ...findObsidianCommentRanges(state.doc),
-    ...findHtmlCommentRanges(state.doc),
+    ...obsidianCommentRanges,
+    ...htmlCommentSourceSpans(sourceText),
   ];
-  const referenceDefinitions = markdownReferenceDefinitions(state.doc.toString());
-  const referenceDefinitionSpans = markdownReferenceDefinitionSourceSpans(state.doc.toString());
+  const referenceDefinitions = markdownReferenceDefinitions(sourceText);
+  const referenceDefinitionSpans = markdownReferenceDefinitionSourceSpans(sourceText);
 
   let lineNumber = 1;
   while (lineNumber <= state.doc.lines) {
@@ -1295,11 +1334,11 @@ function buildHybridDecorations(state: EditorState): DecorationSet {
           line.from,
           line.to,
           line.text,
-          commentRanges,
+          obsidianCommentRanges,
           referenceDefinitions,
           referenceDefinitionSpans,
           decorations,
-          false,
+          { renderActiveMarkdownLinks: false },
         );
       }
     } else if (!activeLineKeepsBlockSource(
@@ -1309,26 +1348,30 @@ function buildHybridDecorations(state: EditorState): DecorationSet {
       commentRanges,
     )) {
       const renderedLineDecorations: Range<Decoration>[] = [];
+      const renderActiveImages = imageSourceSpans(line.from, line.text, referenceDefinitions).length > 0;
       decorateRenderedLine(
         line.from,
         line.to,
         line.text,
-        commentRanges,
+        obsidianCommentRanges,
         referenceDefinitions,
         referenceDefinitionSpans,
         renderedLineDecorations,
-        true,
+        { renderActiveMarkdownLinks: true, renderActiveImages },
       );
       const revealedSpans = activeInlineRevealSpans(
         state,
         line.from,
-        line.to,
         line.text,
         referenceDefinitions,
       );
       decorations.push(...renderedLineDecorations.filter(decoration => (
         !rangeOverlapsAny(decoration.from, decoration.to, revealedSpans)
       )));
+    } else {
+      // Heading/block-id/HTML lines intentionally retain source while active;
+      // an image widget is additive and can remain mounted after that source.
+      replaceImages(line.from, line.text, referenceDefinitions, decorations, [], true);
     }
     lineNumber = line.number + 1;
   }
@@ -1359,48 +1402,56 @@ function activeLineKeepsBlockSource(
 function activeInlineRevealSpans(
   state: EditorState,
   lineFrom: number,
-  lineTo: number,
   text: string,
   referenceDefinitions: ReturnType<typeof markdownReferenceDefinitions>,
 ): Span[] {
   const sourceSpans = inlineSourceSpans(lineFrom, text, referenceDefinitions);
-  const compactLinkLabels = [
-    ...markdownLinkSourceSpans(lineFrom, text),
-    ...markdownReferenceLinkSourceSpans(lineFrom, text, referenceDefinitions),
-  ].filter(link => !link.image);
+  const imageSpans = imageSourceSpans(lineFrom, text, referenceDefinitions);
   const revealed: Span[] = [];
   for (const range of state.selection.ranges) {
-    const selectionFrom = Math.max(lineFrom, Math.min(range.from, range.to));
-    const selectionTo = Math.min(lineTo, Math.max(range.from, range.to));
-    if (selectionTo < lineFrom || selectionFrom > lineTo) continue;
     for (const span of sourceSpans) {
       const containsCaret = range.empty
         && range.head >= span.from
         && range.head < span.to;
-      const overlapsSelection = !range.empty
-        && selectionFrom < span.to
-        && selectionTo > span.from;
-      if (!containsCaret && !overlapsSelection) continue;
+      // A non-empty selection should retain the rendered live-preview labels.
+      // The raw source remains available through copy/edit operations, while
+      // revealing every URL and delimiter makes a paragraph selection noisy
+      // and can expose hidden destinations that were not under the caret.
+      if (!containsCaret) continue;
 
-      const compactLabel = compactLinkLabels.find(link => (
-        link.from === span.from
-        && link.to === span.to
-        && (
-          range.empty
-            ? range.head >= link.labelFrom && range.head <= link.labelTo
-            : range.from >= link.labelFrom && range.to <= link.labelTo
-        )
-      ));
-      // A caret in the already-visible label should not expand the hidden URL
-      // into the line. Besides being calmer to read, this prevents a wrapped
-      // destination from moving the following line when the caret enters or
-      // leaves the link. Moving into the brackets/destination still reveals
-      // the complete source so it remains editable.
-      if (compactLabel) continue;
+      // Keep the preview visible while the caret moves through an image source.
+      if (
+        containsCaret
+        && range.head >= span.from
+        && imageSpans.some(image => image.from === span.from && image.to === span.to)
+      ) {
+        continue;
+      }
+
       revealed.push(span);
     }
   }
   return uniqueSpans(revealed);
+}
+
+function imageSourceSpans(
+  lineFrom: number,
+  text: string,
+  referenceDefinitions: ReturnType<typeof markdownReferenceDefinitions>,
+): Span[] {
+  const spans: Span[] = [
+    ...markdownLinkSourceSpans(lineFrom, text)
+      .filter(link => link.image)
+      .map(link => ({ from: link.from, to: link.to })),
+    ...markdownReferenceLinkSourceSpans(lineFrom, text, referenceDefinitions)
+      .filter(link => link.image)
+      .map(link => ({ from: link.from, to: link.to })),
+  ];
+  for (const match of text.matchAll(/!\[\[[^\]\n]+\]\]/g)) {
+    const from = lineFrom + (match.index ?? 0);
+    spans.push({ from, to: from + match[0].length });
+  }
+  return spans;
 }
 
 function inlineSourceSpans(
@@ -1943,9 +1994,16 @@ function decorateRenderedLine(
   referenceDefinitions: ReturnType<typeof markdownReferenceDefinitions>,
   referenceDefinitionSpans: Span[],
   decorations: Range<Decoration>[],
-  renderActiveMarkdownLinks: boolean,
+  options: {
+    renderActiveMarkdownLinks?: boolean;
+    renderActiveImages?: boolean;
+  } = {},
 ): void {
   const reserved: Span[] = [];
+  const {
+    renderActiveMarkdownLinks = false,
+    renderActiveImages = false,
+  } = options;
 
   if (lineOverlapsSpan(lineFrom, lineTo, referenceDefinitionSpans)) {
     hideRenderedLineSource(lineFrom, lineTo, decorations);
@@ -2003,7 +2061,7 @@ function decorateRenderedLine(
     }
   }
 
-  replaceImages(lineFrom, text, referenceDefinitions, decorations, reserved);
+  replaceImages(lineFrom, text, referenceDefinitions, decorations, reserved, renderActiveImages);
   renderObsidianComments(lineFrom, lineTo, obsidianComments, decorations, reserved);
   renderInlineHtml(lineFrom, text, decorations, reserved);
   renderFootnotes(lineFrom, text, decorations, reserved);
@@ -2113,7 +2171,13 @@ function renderFootnotes(
     const idTo = idFrom + id.length;
     const markerTo = lineFrom + definition[0].length;
     addReplace(decorations, reserved, lineFrom + markerStart, idFrom);
-    addMark(decorations, reserved, idFrom, idTo, footnoteDefLabelMark);
+    addMark(
+      decorations,
+      reserved,
+      idFrom,
+      idTo,
+      interactiveFootnoteMark('definition', id),
+    );
     reserved.push({ from: idFrom, to: idTo });
     addReplace(decorations, reserved, idTo, markerTo, footnoteDefinitionSeparatorWidget);
   }
@@ -2128,10 +2192,36 @@ function renderFootnotes(
     const idFrom = sourceFrom + 2;
     const idTo = idFrom + id.length;
     addReplace(decorations, reserved, sourceFrom, idFrom);
-    addMark(decorations, reserved, idFrom, idTo, footnoteRefMark);
+    addMark(
+      decorations,
+      reserved,
+      idFrom,
+      idTo,
+      interactiveFootnoteMark('reference', id),
+    );
     reserved.push({ from: idFrom, to: idTo });
     addReplace(decorations, reserved, idTo, sourceTo);
   }
+}
+
+function interactiveFootnoteMark(
+  kind: 'reference' | 'definition',
+  id: string,
+): Decoration {
+  return Decoration.mark({
+    class: kind === 'reference'
+      ? 'cm-hybrid-footnote-ref'
+      : 'cm-hybrid-footnote-def-label',
+    attributes: {
+      role: 'link',
+      tabindex: '0',
+      'aria-label': kind === 'reference'
+        ? `Footnote ${id}`
+        : `Back to first reference for footnote ${id}`,
+      'data-footnote-id': id,
+      'data-footnote-kind': kind,
+    },
+  });
 }
 
 function renderObsidianComments(
@@ -2146,53 +2236,6 @@ function renderObsidianComments(
     const to = Math.min(lineTo, comment.to);
     addReplace(decorations, reserved, from, to);
   }
-}
-
-function findObsidianCommentRanges(doc: EditorView['state']['doc']): Span[] {
-  const text = doc.toString();
-  const ranges: Span[] = [];
-  let start: number | null = null;
-  let index = 0;
-
-  while (index < text.length - 1) {
-    if (text[index] !== '%' || text[index + 1] !== '%') {
-      index++;
-      continue;
-    }
-
-    if (start == null) {
-      start = index;
-    } else {
-      ranges.push({ from: start, to: index + 2 });
-      start = null;
-    }
-    index += 2;
-  }
-
-  if (start != null) {
-    ranges.push({ from: start, to: text.length });
-  }
-  return ranges;
-}
-
-function findHtmlCommentRanges(doc: EditorView['state']['doc']): Span[] {
-  const text = doc.toString();
-  const ranges: Span[] = [];
-  let searchFrom = 0;
-
-  while (searchFrom < text.length) {
-    const start = text.indexOf('<!--', searchFrom);
-    if (start < 0) break;
-    const end = text.indexOf('-->', start + 4);
-    if (end < 0) {
-      ranges.push({ from: start, to: text.length });
-      break;
-    }
-    ranges.push({ from: start, to: end + 3 });
-    searchFrom = end + 3;
-  }
-
-  return ranges;
 }
 
 function renderInlineMath(
@@ -2265,6 +2308,7 @@ function replaceImages(
   referenceDefinitions: ReturnType<typeof markdownReferenceDefinitions>,
   decorations: Range<Decoration>[],
   reserved: Span[],
+  renderActiveImages = false,
 ): void {
   const codeSpans = inlineCodeSourceSpans(lineFrom, text);
   for (const image of markdownLinkSourceSpans(lineFrom, text).filter(span => span.image)) {
@@ -2273,12 +2317,14 @@ function replaceImages(
     const from = image.from;
     const to = image.to;
     if (overlaps({ from, to }, codeSpans)) continue;
-    addReplace(
+    const parsed = parseMarkdownImageLabel(image.label, url);
+    addImageDecoration(
       decorations,
       reserved,
       from,
       to,
-      new ImageWidget(image.label, resolveImageResource(url, 'relative'), from, to),
+      new ImageWidget(parsed.alt, resolveImageResource(url, 'relative'), from, to, parsed.dimensions),
+      renderActiveImages,
     );
   }
 
@@ -2286,12 +2332,20 @@ function replaceImages(
     const from = image.from;
     const to = image.to;
     if (overlaps({ from, to }, codeSpans)) continue;
-    addReplace(
+    const parsed = parseMarkdownImageLabel(image.label, image.definition.destination);
+    addImageDecoration(
       decorations,
       reserved,
       from,
       to,
-      new ImageWidget(image.label, resolveImageResource(image.definition.destination, 'relative'), from, to),
+      new ImageWidget(
+        parsed.alt,
+        resolveImageResource(image.definition.destination, 'relative'),
+        from,
+        to,
+        parsed.dimensions,
+      ),
+      renderActiveImages,
     );
   }
 
@@ -2302,14 +2356,32 @@ function replaceImages(
     const to = from + match[0].length;
     if (isEscapedAt(text, match.index)) continue;
     if (overlaps({ from, to }, codeSpans)) continue;
-    addReplace(
+    addImageDecoration(
       decorations,
       reserved,
       from,
       to,
       new ImageWidget(image.alt, resolveImageResource(image.url, 'vault'), from, to, image.dimensions),
+      renderActiveImages,
     );
   }
+}
+
+function addImageDecoration(
+  decorations: Range<Decoration>[],
+  reserved: Span[],
+  from: number,
+  to: number,
+  widget: ImageWidget,
+  renderActiveImage: boolean,
+): void {
+  if (renderActiveImage) {
+    // Keep raw source on an active heading/block-id/etc. line and append the
+    // preview after that source as an additive block widget.
+    decorations.push(Decoration.widget({ widget, block: true, side: 1 }).range(to));
+    return;
+  }
+  addReplace(decorations, reserved, from, to, widget);
 }
 
 function renderInlineCode(
@@ -2356,22 +2428,50 @@ function renderMarkdownLinks(
   decorations: Range<Decoration>[],
   reserved: Span[],
 ): void {
+  const codeSpans = inlineCodeSourceSpans(lineFrom, text);
+
   for (const link of markdownLinkSourceSpans(lineFrom, text)) {
     if (link.image) continue;
+    if (isInsideInlineCode(link, codeSpans)) continue;
     const href = link.destination;
     if (href.startsWith('llm-wiki://')) continue;
-    addMark(decorations, reserved, link.labelFrom, link.labelTo, linkTextMark);
+    addMark(decorations, blockingSpans(reserved, codeSpans, link), link.labelFrom, link.labelTo, linkTextMark);
     addReplace(decorations, reserved, link.from, link.labelFrom);
     addReplace(decorations, reserved, link.labelTo, link.to);
   }
 
   for (const link of markdownReferenceLinkSourceSpans(lineFrom, text, referenceDefinitions)) {
     if (link.image) continue;
-    if (overlaps({ from: link.from, to: link.to }, reserved)) continue;
-    addMark(decorations, reserved, link.labelFrom, link.labelTo, linkTextMark);
+    if (isInsideInlineCode(link, codeSpans)) continue;
+    const blocking = blockingSpans(reserved, codeSpans, link);
+    if (overlaps({ from: link.from, to: link.to }, blocking)) continue;
+    addMark(decorations, blocking, link.labelFrom, link.labelTo, linkTextMark);
     addReplace(decorations, reserved, link.from, link.labelFrom);
     addReplace(decorations, reserved, link.labelTo, link.to);
   }
+}
+
+/** True when the entire link is inside inline code and should stay literal. */
+function isInsideInlineCode(link: { from: number; to: number }, codeSpans: InlineCodeSpan[]): boolean {
+  return codeSpans.some(span => span.contentFrom <= link.from && span.contentTo >= link.to);
+}
+
+/**
+ * Inline-code decorations reserve their content before links render. A link
+ * whose label is itself code (for example [`run.sh`](x)) should still render as
+ * one link, so ignore only reservations wholly contained by that label's code.
+ */
+function blockingSpans(
+  reserved: Span[],
+  codeSpans: InlineCodeSpan[],
+  link: { labelFrom: number; labelTo: number },
+): Span[] {
+  return reserved.filter(span => !codeSpans.some(code => (
+    code.from >= link.labelFrom
+    && code.to <= link.labelTo
+    && code.contentFrom <= span.from
+    && code.contentTo >= span.to
+  )));
 }
 
 function renderDelimited(

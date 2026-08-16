@@ -14,6 +14,39 @@ const smokePdfPath = process.env.LLM_WIKI_PDF_SMOKE_PATH;
 
 test.skip(!smokePdfPath, 'Set LLM_WIKI_PDF_SMOKE_PATH to run the real-PDF selection smoke test');
 
+test('real Sennrich PDF receives a conservative inferred outline without captions', async ({ page }) => {
+  test.setTimeout(180_000);
+  test.skip(
+    !smokePdfPath?.includes('neural-machine-translation-of-rare-words-with-subword-units'),
+    'Set LLM_WIKI_PDF_SMOKE_PATH to the Sennrich subword-units PDF',
+  );
+  if (!smokePdfPath) throw new Error('LLM_WIKI_PDF_SMOKE_PATH is required');
+  await page.route('**/fixtures/manual-smoke.pdf', async route => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/pdf',
+      body: readFileSync(smokePdfPath),
+    });
+  });
+
+  await page.goto('http://localhost:8979/pdf-viewer.html?fixture=manual-smoke');
+  await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 11/, { timeout: 30_000 });
+  await page.getByRole('button', { name: 'Toggle sidebar' }).click();
+  const navigation = page.getByRole('complementary', { name: 'PDF navigation' });
+  await navigation.getByRole('tab', { name: 'Outline' }).click();
+  await expect(navigation.locator('.pdf-outline-kind')).toHaveText(
+    'Inferred outline',
+    { timeout: 120_000 },
+  );
+
+  const titles = await navigation.locator('.pdf-outline-row .pdf-outline-label').allTextContents();
+  expect(titles).toContain('2 Neural Machine Translation');
+  expect(titles).toContain('4 Evaluation');
+  expect(titles.some(title => /^Algorithm\s+1\b/u.test(title))).toBe(false);
+  expect(titles.some(title => /^Figure\s+1\b/u.test(title))).toBe(false);
+  expect(titles.some(title => /Rico Sennrich|Barry Haddow|Alexandra Birch/u.test(title))).toBe(false);
+});
+
 test('real PDF page 18 selects only the opening rendering paragraph and preserves zoom', async ({ page }) => {
   test.setTimeout(180_000);
   if (!smokePdfPath) throw new Error('LLM_WIKI_PDF_SMOKE_PATH is required');
@@ -268,6 +301,127 @@ test('real PDF page 2 restores a stripped join marker for whole-word selection',
   await expect(page.locator('#page-1 .pdf-selection-rect')).not.toHaveCount(0);
 });
 
+test('real DataComp page 2 selects the Figure 1 caption through Introduction in visual order', async ({ page }) => {
+  test.setTimeout(180_000);
+  if (!smokePdfPath) throw new Error('LLM_WIKI_PDF_SMOKE_PATH is required');
+  const pdf = prepareSinglePageSmokePdf(smokePdfPath, 2);
+  await page.route('**/fixtures/manual-smoke.pdf', async route => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/pdf',
+      body: pdf,
+    });
+  });
+
+  await page.goto('http://localhost:8979/pdf-viewer.html?fixture=manual-smoke');
+  await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 1/, { timeout: 30_000 });
+  await expect.poll(() => page.locator('#page-1 .text-layer span[data-item-index]').count(), {
+    timeout: 60_000,
+  }).toBeGreaterThan(100);
+
+  const drag = await page.locator('#page-1 .text-layer').evaluate((layer: HTMLElement) => {
+    const spans = Array.from(layer.querySelectorAll<HTMLElement>('span[data-item-index]'));
+    const start = spans.find(span => (span.textContent ?? '').includes('Figure 1:'));
+    const end = spans.find(span => (
+      span.textContent ?? ''
+    ).includes('training datasets that enable efficient generalization'));
+    if (!start || !end) {
+      throw new Error(`Could not locate DataComp caption drag: ${JSON.stringify(
+        spans.map(span => span.textContent ?? ''),
+      )}`);
+    }
+    const startRect = start.getBoundingClientRect();
+    const endRect = end.getBoundingClientRect();
+    return {
+      start: {
+        x: startRect.left + 0.5,
+        y: startRect.top + startRect.height / 2,
+      },
+      end: {
+        x: endRect.right + Math.max(4, endRect.height),
+        y: endRect.top + endRect.height / 2,
+      },
+    };
+  });
+
+  await page.evaluate(() => {
+    window.__mockMessages = [];
+  });
+  await page.mouse.move(drag.start.x, drag.start.y);
+  await page.mouse.down();
+  await page.mouse.move(drag.end.x, drag.end.y, { steps: 40 });
+  await page.mouse.up();
+
+  await expect.poll(() => latestSelectionSnippet(page), { timeout: 10_000 })
+    .toContain('Figure 1:');
+  const snippet = compactSelectionText(await latestSelectionSnippet(page));
+  const nativeText = compactSelectionText(await page.evaluate(
+    () => window.getSelection()?.toString() ?? '',
+  ));
+  expect(snippet).toMatch(
+    /^Figure 1: Improving training sets leads to better models that are cheaper to train\./,
+  );
+  expect(snippet).toContain('1 Introduction');
+  expect(snippet).toContain(
+    'Large training datasets are an important driver of progress in the recent language modeling (LM)',
+  );
+  expect(snippet).toContain(
+    'training datasets that enable efficient generalization on a wide range of downstream tasks. Indeed,',
+  );
+  expect(snippet).not.toContain('Core evals score');
+  expect(snippet).not.toContain('DCLM-Baseline');
+  expect(snippet).not.toContain('Total training FLOPS');
+  expect(nativeText).toBe(snippet);
+});
+
+test('real DataComp page 2 graph-label drag selects the nearest label instead of body prose', async ({ page }) => {
+  test.setTimeout(180_000);
+  if (!smokePdfPath) throw new Error('LLM_WIKI_PDF_SMOKE_PATH is required');
+  const pdf = prepareSinglePageSmokePdf(smokePdfPath, 2);
+  await page.route('**/fixtures/manual-smoke.pdf', async route => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/pdf',
+      body: pdf,
+    });
+  });
+
+  await page.goto('http://localhost:8979/pdf-viewer.html?fixture=manual-smoke');
+  await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 1/, { timeout: 30_000 });
+  const label = page
+    .locator('#page-1 .text-layer span[data-item-index]')
+    .filter({ hasText: 'Core evals score' })
+    .first();
+  await expect(label).toBeVisible({ timeout: 60_000 });
+  const drag = await label.evaluate((span: HTMLElement) => {
+    const rect = span.getBoundingClientRect();
+    return {
+      start: { x: rect.left + rect.width / 2, y: rect.bottom - 1 },
+      end: { x: rect.left + rect.width / 2, y: rect.top + 1 },
+    };
+  });
+
+  await page.evaluate(() => {
+    window.__mockMessages = [];
+  });
+  await page.mouse.move(drag.start.x, drag.start.y);
+  await page.mouse.down();
+  await page.mouse.move(drag.end.x, drag.end.y, { steps: 30 });
+  await page.mouse.up();
+
+  await expect.poll(async () => compactSelectionText(await latestSelectionSnippet(page)), {
+    timeout: 10_000,
+  }).toBe('Core evals score');
+  const snippet = compactSelectionText(await latestSelectionSnippet(page));
+  const nativeText = compactSelectionText(await page.evaluate(
+    () => window.getSelection()?.toString() ?? '',
+  ));
+  expect(snippet).not.toContain('Large training datasets');
+  expect(snippet).not.toContain('Figure 1:');
+  expect(nativeText).toBe(snippet);
+  await expect(page.locator('#page-1 .pdf-selection-rect')).not.toHaveCount(0);
+});
+
 async function setContinuousScroll(page: Page, enabled: boolean): Promise<void> {
   const trigger = page.getByRole('button', { name: 'Display options' });
   const menu = page.getByRole('menu', { name: 'Display options' });
@@ -343,6 +497,10 @@ async function latestSelectionSnippet(page: Page): Promise<string> {
       ?.filter(message => message.type === 'selectionChanged' && message.anchor)
       .at(-1)?.anchor?.snippet ?? '',
   ));
+}
+
+function compactSelectionText(value: string): string {
+  return value.replace(/\s+/gu, ' ').trim();
 }
 
 async function focusViewer(page: Page): Promise<void> {

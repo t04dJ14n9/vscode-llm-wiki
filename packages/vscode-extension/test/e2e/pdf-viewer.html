@@ -27,7 +27,23 @@
   }
   html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; }
   body { background: var(--vscode-editor-background); color: var(--vscode-editor-foreground); }
+  #pdf-reader-layout {
+    position: relative;
+    box-sizing: border-box;
+    display: grid;
+    width: 100%;
+    height: 100%;
+    min-width: 0;
+    min-height: 0;
+  }
+  #pdf-reader-layout[data-toolbar-dock="top"] {
+    grid-template: auto minmax(0, 1fr) / minmax(0, 1fr);
+  }
+  #pdf-reader-layout[data-toolbar-dock="left"] {
+    grid-template: minmax(0, 1fr) / auto minmax(0, 1fr);
+  }
   #toolbar {
+    z-index: 2;
     box-sizing: border-box;
     height: 38px;
     display: flex;
@@ -38,6 +54,7 @@
     background: var(--vscode-sideBar-background);
     font: 12px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   }
+  #toolbar[hidden] { display: none; }
   #toolbar button {
     box-sizing: border-box;
     min-width: 26px;
@@ -54,6 +71,8 @@
     background: var(--vscode-button-background);
     color: var(--vscode-button-foreground);
   }
+  #pdf-toolbar-grip { touch-action: none; cursor: grab; font-size: 15px; line-height: 1; }
+  #pdf-toolbar-grip:active { cursor: grabbing; }
   .toolbar-group { display: inline-flex; align-items: center; gap: 2px; }
   .toolbar-spacer { flex: 1 1 auto; }
   .toolbar-separator { width: 1px; height: 20px; margin: 0 3px; background: var(--vscode-panel-border); }
@@ -155,6 +174,34 @@
   .pdf-search-settings-menu label:hover { background: rgba(90,93,94,.31); }
   .pdf-search .pdf-search-settings-menu input { width: 14px; min-width: 14px; height: 14px; margin: 0; padding: 0; border: 0; appearance: auto; accent-color: var(--vscode-focusBorder); }
   #viewer-shell { position: relative; display: flex; height: calc(100% - 38px); min-height: 0; }
+  #pdf-reader-layout > #viewer-shell { width: 100%; height: 100%; min-width: 0; min-height: 0; }
+  #pdf-reader-layout[data-toolbar-dock="top"] > #toolbar { grid-area: 1 / 1; width: 100%; }
+  #pdf-reader-layout[data-toolbar-dock="top"] > #viewer-shell { grid-area: 2 / 1; }
+  #pdf-reader-layout[data-toolbar-dock="left"] > #toolbar {
+    grid-area: 1 / 1;
+    width: 48px;
+    height: 100%;
+    min-height: 0;
+    flex-direction: column;
+    align-items: stretch;
+    overflow-x: hidden;
+    overflow-y: auto;
+    padding: 6px 3px;
+    border-right: 1px solid var(--vscode-panel-border);
+    border-bottom: 0;
+  }
+  #pdf-reader-layout[data-toolbar-dock="left"] > #viewer-shell { grid-area: 1 / 2; }
+  #pdf-reader-layout[data-toolbar-dock="left"] .toolbar-group { flex-direction: column; align-items: stretch; }
+  #pdf-reader-layout[data-toolbar-dock="left"] .toolbar-separator { width: auto; height: 1px; margin: 3px 0; }
+  #pdf-reader-layout[data-toolbar-dock="left"] .toolbar-number { box-sizing: border-box; width: 100%; height: auto; flex-direction: column; align-items: stretch; padding: 1px 0 2px; }
+  #pdf-reader-layout[data-toolbar-dock="left"] .toolbar-number input { width: 100%; text-align: center; }
+  #pdf-reader-layout[data-toolbar-dock="left"] .toolbar-number span { padding: 0 2px; text-align: center; }
+  #pdf-reader-layout[data-toolbar-dock="left"] #toolbar button { width: 100%; }
+  .pdf-toolbar-drop-target { position: absolute; z-index: 90; display: none; pointer-events: none; box-sizing: border-box; border: 2px solid transparent; background: transparent; }
+  #pdf-reader-layout[data-toolbar-dragging="true"] > .pdf-toolbar-drop-target { display: block; }
+  .pdf-toolbar-drop-target[data-dock="top"] { top: 0; right: 0; left: 0; height: 72px; }
+  .pdf-toolbar-drop-target[data-dock="left"] { top: 0; bottom: 0; left: 0; width: 72px; }
+  .pdf-toolbar-drop-target[data-active="true"] { border-color: var(--vscode-focusBorder); background: rgba(0,127,212,.18); }
   #pdf-sidebar { box-sizing: border-box; flex: 0 0 240px; width: 240px; border-right: 1px solid var(--vscode-panel-border); background: var(--vscode-sideBar-background); color: var(--vscode-editor-foreground); }
   #pdf-sidebar[hidden] { display: none; }
   .pdf-sidebar-header { box-sizing: border-box; display: flex; height: 38px; align-items: stretch; justify-content: space-between; gap: 4px; padding: 0 6px 0 8px; border-bottom: 1px solid var(--vscode-panel-border); }
@@ -171,6 +218,7 @@
   #thumbnail-list { padding: 10px 8px; }
   #outline-list { padding: 6px 4px 14px; font: 12px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
   .pdf-outline-empty { margin: 10px 8px; color: var(--vscode-descriptionForeground); }
+  .pdf-outline-kind { margin: 8px; color: var(--vscode-descriptionForeground); font-size: 11px; font-weight: 600; }
   .pdf-outline-tree { margin: 0; padding: 0; list-style: none; }
   .pdf-outline-tree .pdf-outline-tree { padding-left: 12px; }
   .pdf-outline-row { box-sizing: border-box; display: flex; width: 100%; min-height: 26px; align-items: center; gap: 8px; border: 0; border-radius: 3px; padding: 4px 7px; background: transparent; color: var(--vscode-editor-foreground); font: inherit; text-align: left; cursor: pointer; }
@@ -297,6 +345,32 @@
     outline: 1px solid var(--vscode-focusBorder, #4dabf7);
     outline-offset: 1px;
     background: rgba(77, 171, 247, .08);
+  }
+  .pdf-link-preview {
+    position: fixed;
+    z-index: 100;
+    box-sizing: border-box;
+    width: min(380px, calc(100vw - 16px));
+    max-height: min(260px, calc(100vh - 16px));
+    overflow: hidden;
+    padding: 10px 12px;
+    border: 1px solid var(--vscode-editorHoverWidget-border, var(--vscode-panel-border));
+    border-radius: 6px;
+    color: var(--vscode-editorHoverWidget-foreground, var(--vscode-editor-foreground));
+    background: var(--vscode-editorHoverWidget-background, var(--vscode-editorWidget-background, var(--vscode-editor-background)));
+    box-shadow: 0 4px 14px var(--vscode-widget-shadow, rgba(0,0,0,.32));
+    font: 13px/1.42 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    overflow-wrap: anywhere;
+    pointer-events: none;
+  }
+  .pdf-link-preview-title { font-weight: 600; }
+  .pdf-link-preview-page { margin-top: 3px; color: var(--vscode-descriptionForeground); font-size: 11px; }
+  .pdf-link-preview-excerpt {
+    display: -webkit-box;
+    margin-top: 7px;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 8;
   }
   .text-layer .pdf-text-selection-separator {
     left: 100%;
@@ -503,6 +577,13 @@
     window.acquireVsCodeApi = () => ({
       postMessage: async (message) => {
         window.__mockMessages.push(message);
+        if (message.type === 'pdfToolbarPreferenceChanged') {
+          window.postMessage({
+            type: 'pdfToolbarPreference',
+            preference: message.preference,
+          }, '*');
+          return;
+        }
         if (message.type !== 'ready') return;
 
         window.postMessage({
@@ -519,6 +600,13 @@
                   ? 'Claude Code'
                   : 'CodeBuddy',
             })),
+        }, '*');
+        window.postMessage({
+          type: 'pdfToolbarPreference',
+          preference: {
+            dock: params.get('toolbarDock') === 'left' ? 'left' : 'top',
+            hidden: params.get('toolbarHidden') === '1',
+          },
         }, '*');
 
         const fixture = params.get('fixture') || 'flash-attention';

@@ -9,6 +9,39 @@ test.describe('LLM Wiki — E2E Bidirectional Links', () => {
     );
   }
 
+  async function paintedColor(
+    page: import('@playwright/test').Page,
+    locator: import('@playwright/test').Locator,
+  ): Promise<string> {
+    const png = await locator.screenshot();
+    return page.evaluate(async source => {
+      const image = new Image();
+      image.src = source;
+      await image.decode();
+      const canvas = document.createElement('canvas');
+      canvas.width = image.width;
+      canvas.height = image.height;
+      const context = canvas.getContext('2d');
+      if (!context) throw new Error('Unable to inspect selection pixels');
+      context.drawImage(image, 0, 0);
+      const { data } = context.getImageData(0, 0, canvas.width, canvas.height);
+      const tally = new Map<string, number>();
+      for (let index = 0; index < data.length; index += 4) {
+        const key = `rgb(${data[index]}, ${data[index + 1]}, ${data[index + 2]})`;
+        tally.set(key, (tally.get(key) ?? 0) + 1);
+      }
+      let winner = '';
+      let best = -1;
+      for (const [key, count] of tally) {
+        if (count > best) {
+          best = count;
+          winner = key;
+        }
+      }
+      return winner;
+    }, `data:image/png;base64,${png.toString('base64')}`);
+  }
+
   async function markdownCaretColors(
     page: import('@playwright/test').Page,
     cursorForeground: string,
@@ -131,6 +164,568 @@ test.describe('LLM Wiki — E2E Bidirectional Links', () => {
     const widgets = page.locator('.cm-llm-wiki-link');
     const count = await widgets.count();
     expect(count).toBeGreaterThanOrEqual(1);
+  });
+
+  test('fenced code selection remains visible over the code surface', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+    await waitForEditorBootstrap(page);
+
+    await page.evaluate(() => {
+      const root = document.documentElement.style;
+      root.setProperty('--vscode-textCodeBlock-background', '#252526');
+      root.setProperty('--vscode-editor-selectionBackground', '#123456');
+      root.setProperty('--vscode-editor-inactiveSelectionBackground', '#654321');
+      window.postMessage({
+        type: 'setText',
+        text: ['```ts', 'const selected = true;', '```'].join('\n'),
+      }, '*');
+    });
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+    const codeLine = page.locator('.cm-hybrid-codeblock-content-line').first();
+    await expect(codeLine).toContainText('const selected');
+
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      const line = view.state.doc.line(2);
+      view.dispatch({ selection: { anchor: line.from, head: line.from + 'const selected'.length } });
+      view.focus();
+    });
+    await page.waitForFunction(() => document.querySelector('.cm-editor')?.classList.contains('cm-focused'));
+    const selection = page.locator('#editor .cm-selectionLayer .cm-selectionBackground').first();
+    await expect(selection).toBeVisible();
+    await expect.poll(() => paintedColor(page, selection)).toBe('rgb(18, 52, 86)');
+
+    await page.evaluate(() => document.querySelector<HTMLElement>('#tab-editor')?.focus());
+    await page.waitForFunction(() => !document.querySelector('.cm-editor')?.classList.contains('cm-focused'));
+    await expect.poll(() => paintedColor(page, selection)).toBe('rgb(101, 67, 33)');
+  });
+
+  test('activating Markdown image lines keeps their previews visible', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+    await waitForEditorBootstrap(page);
+
+    const gif = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==';
+    const standard = `![Standard](${gif})`;
+    const reference = '![Reference][diagram]';
+    const obsidian = `![[${gif}|Obsidian]]`;
+    const doc = [
+      'before',
+      '',
+      standard,
+      reference,
+      obsidian,
+      `## ${standard}`,
+      '',
+      `[diagram]: ${gif} "Diagram"`,
+      '',
+      'after',
+    ].join('\n');
+    await page.evaluate(text => window.postMessage({ type: 'setText', text }, '*'), doc);
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+    await expect(page.locator('.cm-hybrid-image')).toHaveCount(4);
+
+    for (const lineNumber of [3, 4, 5, 6]) {
+      const sourceFrom = await page.evaluate(line => {
+        const target = window.__cmView.state.doc.line(line);
+        return target.from + target.text.indexOf('!');
+      }, lineNumber);
+      await page.evaluate(line => {
+        const view = window.__cmView;
+        const target = view.state.doc.line(line);
+        view.dispatch({ selection: { anchor: target.from + 4 } });
+        view.focus();
+      }, lineNumber);
+      await expect(page.locator(`.cm-hybrid-image[data-source-from="${sourceFrom}"]`)).toBeVisible();
+    }
+  });
+
+  test('rendered images can be expanded to a focused full-pane dialog', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+    await waitForEditorBootstrap(page);
+
+    const svg = 'data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20width=%22320%22%20height=%22180%22%3E%3C/svg%3E';
+    await page.evaluate(text => window.postMessage({ type: 'setText', text }, '*'), [
+      'Before image',
+      '',
+      `![Attention diagram](${svg})`,
+      '',
+      'After image',
+    ].join('\n'));
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      view.dispatch({ selection: { anchor: view.state.doc.length } });
+    });
+
+    const image = page.locator('.cm-hybrid-image');
+    await expect(image).toBeVisible();
+    const expand = image.getByRole('button', { name: 'Expand image' });
+    await expect(expand).toBeVisible();
+    await expand.click();
+
+    const dialog = page.locator('dialog.cm-hybrid-image-dialog');
+    await expect(dialog).toBeVisible();
+    await expect(dialog).toHaveAttribute('aria-label', 'Attention diagram');
+    await expect(dialog.locator('.cm-hybrid-image-dialog-img')).toHaveAttribute('alt', 'Attention diagram');
+    await expect(dialog.getByRole('button', { name: 'Close' })).toBeFocused();
+
+    await page.keyboard.press('Escape');
+    await expect(dialog).toHaveCount(0);
+    await expect(expand).toBeFocused();
+  });
+
+  test('double-clicking an inline image expands it at the current source location', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+    await waitForEditorBootstrap(page);
+
+    const gif = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==';
+    await page.evaluate(text => window.postMessage({ type: 'setText', text }, '*'), [
+      'Before image',
+      '',
+      `![Attention diagram](${gif})`,
+      '',
+      'After image',
+    ].join('\n'));
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      view.dispatch({ selection: { anchor: view.state.doc.length } });
+    });
+
+    const image = page.locator('.cm-hybrid-image');
+    await expect(image).toBeVisible();
+    await image.locator('.cm-hybrid-image-img').evaluate(element => {
+      element.style.width = '120px';
+      element.style.height = '80px';
+    });
+    await image.locator('.cm-hybrid-image-img').dblclick();
+
+    const dialog = page.locator('dialog.cm-hybrid-image-dialog');
+    await expect(dialog).toBeVisible();
+    await expect(dialog).toHaveAttribute('aria-label', 'Attention diagram');
+    await page.keyboard.press('Escape');
+    await expect(dialog).toHaveCount(0);
+    await expect(page.locator('.cm-hybrid-image')).toBeVisible();
+  });
+
+  test('structured frontmatter values render as readable GitHub-style tables', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+    await waitForEditorBootstrap(page);
+    const doc = [
+      '---',
+      'generated: { "by": "codex/gpt-5.6", "at": "2026-08-13T00:00:00Z" }',
+      'sources:',
+      '  [',
+      '    { "id": "tab-survey", "resource": "../raw/tab-survey.md", "title": "Tab survey" },',
+      '  ]',
+      '---',
+      '',
+      '# Structured metadata',
+    ].join('\n');
+    await page.evaluate(text => window.postMessage({ type: 'setText', text }, '*'), doc);
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+    const tables = page.locator('.cm-hybrid-property-structured-table');
+    await expect(tables).toHaveCount(2);
+    await expect(tables.nth(0).locator('thead')).toContainText('by');
+    await expect(tables.nth(0).locator('thead')).toContainText('at');
+    await expect(tables.nth(0).locator('tbody')).toContainText('codex/gpt-5.6');
+    await expect(tables.nth(1).locator('thead')).toContainText('id');
+    await expect(tables.nth(1).locator('thead')).toContainText('resource');
+    await expect(tables.nth(1).locator('thead')).toContainText('title');
+    await expect(tables.nth(1).locator('tbody')).toContainText('tab-survey');
+    await expect(tables.nth(1).locator('tbody')).toContainText('Tab survey');
+  });
+
+  test('wide structured source tables use the full properties surface with readable columns', async ({ page }) => {
+    await page.setViewportSize({ width: 1100, height: 900 });
+    await page.goto('http://localhost:8979/test.html');
+    await waitForEditorBootstrap(page);
+    const doc = [
+      '---',
+      'type: Query',
+      'sources:',
+      '  - id: project',
+      '    resource: ../projects/nanochat.md',
+      '    title: Nanochat project card',
+      '    commit: ""',
+      '  - id: speedrun',
+      '    resource: ../projects/code/nanochat/runs/speedrun.sh',
+      '    title: Nanochat speedrun',
+      '    commit: 92d63d4e8bb4df75c3b71618f31ddde2378b2bcd',
+      '  - id: cpu-run',
+      '    resource: ../projects/code/nanochat/runs/runcpu.sh',
+      '    title: Nanochat CPU run',
+      '    commit: 92d63d4e8bb4df75c3b71618f31ddde2378b2bcd',
+      '---',
+      '',
+      '# Structured metadata',
+    ].join('\n');
+    await page.evaluate(text => window.postMessage({ type: 'setText', text }, '*'), doc);
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+
+    const metrics = await page.locator('.cm-hybrid-property-structured-table').evaluate(table => {
+      const properties = table.closest('.cm-hybrid-properties-rows');
+      const content = table.closest('.cm-content');
+      const headings = Array.from(table.querySelectorAll('th'));
+      const headingWidth = (name: string): number =>
+        headings.find(heading => heading.textContent === name)?.getBoundingClientRect().width ?? 0;
+      return {
+        contentWidth: content?.getBoundingClientRect().width ?? 0,
+        propertiesWidth: properties?.getBoundingClientRect().width ?? 0,
+        resourceWidth: headingWidth('resource'),
+        tableWidth: table.getBoundingClientRect().width,
+        titleWidth: headingWidth('title'),
+        tallestRow: Math.max(
+          ...Array.from(table.querySelectorAll('tbody tr'))
+            .map(row => row.getBoundingClientRect().height),
+        ),
+      };
+    });
+
+    expect(metrics.propertiesWidth).toBeGreaterThan(metrics.contentWidth * 0.9);
+    expect(metrics.tableWidth).toBeGreaterThan(metrics.propertiesWidth * 0.9);
+    expect(metrics.resourceWidth).toBeGreaterThan(metrics.titleWidth * 1.4);
+    expect(metrics.tallestRow).toBeLessThan(90);
+  });
+
+  test('structured frontmatter cells are editable without leaving the properties surface', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+    await waitForEditorBootstrap(page);
+    const doc = [
+      '---',
+      'generated: { "by": "codex/gpt-5.6", "at": "2026-08-13T00:00:00Z" }',
+      'sources:',
+      '  [',
+      '    { "id": "tab-survey", "resource": "../raw/tab-survey.md", "title": "Tab survey" },',
+      '  ]',
+      '---',
+      '',
+      '# Structured metadata',
+    ].join('\n');
+    await page.evaluate(text => {
+      window.postMessage({ type: 'setText', text }, '*');
+      window.__mockMessages = [];
+    }, doc);
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+
+    await page.getByRole('button', { name: 'Edit generated.by' }).click();
+    const generatedBy = page.getByRole('textbox', { name: 'generated.by' });
+    await expect(generatedBy).toBeVisible();
+    await generatedBy.fill('codex/gpt-5.6-plus');
+    await generatedBy.press('Enter');
+
+    await page.getByRole('button', { name: 'Edit sources[0].title' }).click();
+    const sourceTitle = page.getByRole('textbox', { name: 'sources[0].title' });
+    await expect(sourceTitle).toBeVisible();
+    await sourceTitle.fill('Updated tab survey');
+    await sourceTitle.press('Enter');
+
+    await page.waitForFunction(() => {
+      const text = window.__cmView.state.doc.toString();
+      return text.includes('codex/gpt-5.6-plus') && text.includes('Updated tab survey');
+    }, { timeout: 5000 });
+    const state = await page.evaluate(() => ({
+      text: window.__cmView.state.doc.toString(),
+      errorMessages: window.__mockMessages.filter(message => message.type === 'error'),
+      tables: document.querySelectorAll('.cm-hybrid-property-structured-table').length,
+    }));
+    expect(state.text).toContain('codex/gpt-5.6-plus');
+    expect(state.text).toContain('Updated tab survey');
+    expect(state.errorMessages).toEqual([]);
+    expect(state.tables).toBe(2);
+  });
+
+  test('structured cell editing hides the display value instead of painting it under the input', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+    await waitForEditorBootstrap(page);
+    const doc = [
+      '---',
+      'sources: [{ "id": "nanochat-repository", "resource": "https://github.com/karpathy/nanochat", "title": "Nanochat repository" }]',
+      '---',
+      '',
+      '# Structured metadata',
+    ].join('\n');
+    await page.evaluate(text => window.postMessage({ type: 'setText', text }, '*'), doc);
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+
+    const display = page.getByRole('button', { name: 'Edit sources[0].resource' });
+    await display.click();
+    const input = page.getByRole('textbox', { name: 'sources[0].resource' });
+    await expect(input).toBeVisible();
+    await expect(display).toBeHidden();
+
+    await input.fill('https://example.com/replaced-path');
+    await input.press('Enter');
+    await page.waitForFunction(() => window.__cmView.state.doc.toString().includes('https://example.com/replaced-path'));
+    await expect(page.getByRole('button', { name: 'Edit sources[0].resource' })).toHaveText('https://example.com/replaced-path');
+  });
+
+  test('frontmatter resource values route exact targets and keep explicit edit controls', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+    await waitForEditorBootstrap(page);
+    const doc = [
+      '---',
+      'resource: ../raw/source.md',
+      'sources: [{ "id": "remote", "resource": "https://example.com/source", "title": "Remote source" }]',
+      '---',
+      '',
+      '# Resource links',
+    ].join('\n');
+    await page.evaluate(text => {
+      window.postMessage({ type: 'setText', text }, '*');
+      window.__mockMessages = [];
+    }, doc);
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+
+    const scalar = page.getByRole('button', { name: 'Open resource property' });
+    const structured = page.getByRole('button', { name: 'Open sources[0].resource' });
+    await expect(scalar).toHaveText('../raw/source.md');
+    await expect(structured).toHaveText('https://example.com/source');
+    await scalar.click();
+    await structured.click();
+
+    await expect.poll(() => page.evaluate(() =>
+      window.__mockMessages.filter(message => message.type === 'openUri')
+    )).toEqual([
+      { type: 'openUri', uri: '../raw/source.md', relativeToDocument: true },
+      { type: 'openUri', uri: 'https://example.com/source' },
+    ]);
+
+    await scalar.hover();
+    await expect.poll(() => page.evaluate(() =>
+      window.__mockMessages.filter(message => message.type === 'resolveLinkPreview').at(-1)
+    )).toMatchObject({
+      type: 'resolveLinkPreview',
+      uri: '../raw/source.md',
+      relativeToDocument: true,
+    });
+
+    await page.getByRole('button', { name: 'Edit resource property' }).click();
+    await expect(page.getByRole('textbox', { name: 'resource property value' })).toBeVisible();
+    await page.getByRole('textbox', { name: 'resource property value' }).press('Escape');
+    await page.getByRole('button', { name: 'Edit sources[0].resource' }).click();
+    await expect(page.getByRole('textbox', { name: 'sources[0].resource' })).toBeVisible();
+  });
+
+  test('rendered link previews are stale-safe and dismiss on leave blur and Escape', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+    await waitForEditorBootstrap(page);
+    const doc = [
+      '[Local](../raw/local.md)',
+      '[Reference][source]',
+      '[[Wiki Target]]',
+      '<https://example.com/autolink>',
+      '',
+      '[source]: ../raw/reference.txt',
+    ].join('\n');
+    await page.evaluate(text => {
+      window.postMessage({
+        type: 'setText',
+        text,
+        currentNotePath: 'notes/current.md',
+        notePaths: ['notes/current.md', 'notes/Wiki Target.md'],
+      }, '*');
+      window.__mockMessages = [];
+    }, doc);
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      view.dispatch({ selection: { anchor: view.state.doc.line(5).from } });
+    });
+
+    const links = page.locator('.cm-llm-wiki-link');
+    await expect(links).toHaveCount(4);
+    for (const label of ['Local', 'Reference', 'Wiki Target', 'https://example.com/autolink']) {
+      const link = page.getByRole('button', { name: label, exact: true });
+      await link.focus();
+      await expect(page.locator('.llm-wiki-link-preview')).toBeVisible();
+      await page.keyboard.press('Escape');
+      await expect(page.locator('.llm-wiki-link-preview')).toHaveCount(0);
+    }
+
+    const local = page.getByRole('button', { name: 'Local', exact: true });
+    const external = page.getByRole('button', { name: 'https://example.com/autolink', exact: true });
+    await local.hover();
+    const firstRequest = await page.evaluate(() =>
+      window.__mockMessages.filter(message => message.type === 'resolveLinkPreview').at(-1)
+    );
+    await external.hover();
+    const secondRequest = await page.evaluate(() =>
+      window.__mockMessages.filter(message => message.type === 'resolveLinkPreview').at(-1)
+    );
+    expect(firstRequest.requestId).not.toBe(secondRequest.requestId);
+
+    await page.evaluate(requestId => window.postMessage({
+      type: 'linkPreview',
+      requestId,
+      preview: {
+        kind: 'markdown',
+        target: '../raw/local.md',
+        title: 'Stale local result',
+        path: 'raw/local.md',
+        excerpt: 'This stale excerpt must never replace the newer hover.',
+      },
+    }, '*'), firstRequest.requestId);
+    await expect(page.locator('.llm-wiki-link-preview')).not.toContainText('stale excerpt');
+
+    await page.evaluate(requestId => window.postMessage({
+      type: 'linkPreview',
+      requestId,
+      preview: {
+        kind: 'external',
+        target: 'https://example.com/autolink',
+        title: 'https://example.com/autolink',
+      },
+    }, '*'), secondRequest.requestId);
+    await expect(page.locator('.llm-wiki-link-preview')).toContainText('https://example.com/autolink');
+
+    await page.mouse.move(1, 1);
+    await expect(page.locator('.llm-wiki-link-preview')).toHaveCount(0);
+    await local.focus();
+    await expect(page.locator('.llm-wiki-link-preview')).toBeVisible();
+    await page.locator('#tab-editor').focus();
+    await expect(page.locator('.llm-wiki-link-preview')).toHaveCount(0);
+    await external.hover();
+    await expect(page.locator('.llm-wiki-link-preview')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(page.locator('.llm-wiki-link-preview')).toHaveCount(0);
+  });
+
+  test('document replacement dismisses loading and settled link previews', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+    await waitForEditorBootstrap(page);
+    const doc = ['[Local](../raw/local.md)', '', 'Neutral line.'].join('\n');
+    const replaceDocument = async () => {
+      await page.evaluate(() => window.postMessage({
+        type: 'setText',
+        text: '# Replacement\n\nNeutral line.',
+      }, '*'));
+    };
+    const restoreDocument = async () => {
+      await page.evaluate(text => window.postMessage({ type: 'setText', text }, '*'), doc);
+      await page.evaluate(() => {
+        const view = window.__cmView;
+        view.dispatch({ selection: { anchor: view.state.doc.line(3).from } });
+      });
+    };
+
+    await restoreDocument();
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+    const preview = page.locator('.llm-wiki-link-preview');
+    const local = page.getByRole('button', { name: 'Local', exact: true });
+    await local.hover();
+    const loadingRequest = await page.evaluate(() =>
+      window.__mockMessages.filter(message => message.type === 'resolveLinkPreview').at(-1)
+    );
+    await expect(preview).toContainText('../raw/local.md');
+    await replaceDocument();
+    await expect(preview).toHaveCount(0);
+    await page.evaluate(requestId => window.postMessage({
+      type: 'linkPreview',
+      requestId,
+      preview: {
+        kind: 'markdown',
+        target: '../raw/local.md',
+        title: 'Late local result',
+        path: 'raw/local.md',
+        excerpt: 'A late response must not preserve a disconnected preview.',
+      },
+    }, '*'), loadingRequest.requestId);
+    await expect(preview).toHaveCount(0);
+
+    await page.mouse.move(1, 1);
+    await restoreDocument();
+    await page.getByRole('button', { name: 'Local', exact: true }).hover();
+    const settledRequest = await page.evaluate(() =>
+      window.__mockMessages.filter(message => message.type === 'resolveLinkPreview').at(-1)
+    );
+    await page.evaluate(requestId => window.postMessage({
+      type: 'linkPreview',
+      requestId,
+      preview: {
+        kind: 'markdown',
+        target: '../raw/local.md',
+        title: 'Local source',
+        path: 'raw/local.md',
+        excerpt: 'Settled preview evidence.',
+      },
+    }, '*'), settledRequest.requestId);
+    await expect(preview).toContainText('Settled preview evidence.');
+    await replaceDocument();
+    await expect(preview).toHaveCount(0);
+  });
+
+  test('inline-code speedrun links render as one clickable label', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+    await waitForEditorBootstrap(page);
+    await page.evaluate(text => window.postMessage({ type: 'setText', text }, '*'), [
+      '# Pipeline',
+      '',
+      '[`runs/speedrun.sh`](code/nanochat/runs/speedrun.sh) is the shortest executable tour.',
+    ].join('\n'));
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+
+    const links = page.locator('.cm-llm-wiki-link');
+    await expect(links).toHaveCount(1);
+    await expect(links.first()).toHaveText('runs/speedrun.sh');
+    await expect(links.first()).toHaveAttribute('title', 'code/nanochat/runs/speedrun.sh');
+  });
+
+  test('an active image line keeps its raw Markdown source beside the preview', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+    await waitForEditorBootstrap(page);
+
+    const imageSource = '![Attention diagram](data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==)';
+    const doc = ['Before image', '', imageSource, '', 'After image'].join('\n');
+    await page.evaluate(text => window.postMessage({ type: 'setText', text, title: 'Active image source' }, '*'), doc);
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      const line = view.state.doc.line(3);
+      view.dispatch({ selection: { anchor: line.from + 2 } });
+      view.focus();
+    });
+
+    await expect(page.locator('.cm-hybrid-image')).toBeVisible();
+    await expect(page.locator('.cm-line').filter({ hasText: imageSource })).toBeVisible();
+  });
+
+  test('an inactive image line hides its raw Markdown source behind the preview', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+    await waitForEditorBootstrap(page);
+
+    const imageSource = '![Attention diagram](data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==)';
+    const doc = ['Before image', '', imageSource, '', 'After image'].join('\n');
+    await page.evaluate(text => window.postMessage({ type: 'setText', text, title: 'Inactive image source' }, '*'), doc);
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+
+    await expect(page.locator('.cm-hybrid-image')).toBeVisible();
+    await expect(page.locator('.cm-content')).not.toContainText(imageSource);
+  });
+
+  test('hyphenated footnote references remain visible in prose and table previews', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+    await waitForEditorBootstrap(page);
+    const doc = [
+      '| Evidence | Claim |',
+      '| --- | --- |',
+      '| tab-survey | Survey results carry a footnote[^tab-survey]. |',
+      '',
+      'Survey results carry a footnote[^tab-survey].',
+      '',
+      '[^tab-survey]: Tab survey results.',
+    ].join('\n');
+    await page.evaluate(text => window.postMessage({ type: 'setText', text }, '*'), doc);
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      view.dispatch({ selection: { anchor: view.state.doc.line(6).from } });
+    });
+    await expect(page.locator('.cm-hybrid-table')).toBeVisible();
+    await expect(page.locator('.cm-hybrid-table .cm-hybrid-footnote-ref')).toHaveText('tab-survey');
+    await expect(page.locator('.cm-hybrid-footnote-ref')).toHaveCount(2);
+    await expect(page.locator('.cm-hybrid-footnote-def-label')).toHaveText('tab-survey');
   });
 
   test('editor sends edit messages on document change', async ({ page }) => {
@@ -451,10 +1046,17 @@ test.describe('LLM Wiki — E2E Bidirectional Links', () => {
 
   test('selected Markdown can be added to Cursor Chat without submitting', async ({ page }) => {
     await page.setViewportSize({ width: 240, height: 320 });
+    await page.addInitScript(() => {
+      Object.defineProperty(navigator, 'platform', {
+        configurable: true,
+        value: 'Linux x86_64',
+      });
+    });
     await page.goto('http://localhost:8979/test.html');
     await waitForEditorBootstrap(page);
 
     await page.evaluate(() => {
+      window.postMessage({ type: 'agentHandoffCapabilities', cursorAgent: true, providers: [] }, '*');
       window.postMessage({ type: 'setText', text: 'alpha beta gamma' }, '*');
     });
     await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
@@ -488,16 +1090,16 @@ test.describe('LLM Wiki — E2E Bidirectional Links', () => {
         viewportHeight: window.innerHeight,
       };
     });
-    expect(promptLayout.childTags).toEqual(['SPAN', 'SPAN']);
+    expect(promptLayout.childTags).toEqual(['BUTTON', 'BUTTON']);
     expect(promptLayout.shortcutLeft).toBeGreaterThanOrEqual(promptLayout.labelRight);
-    expect(promptLayout.width).toBeLessThanOrEqual(140);
+    expect(promptLayout.width).toBeLessThanOrEqual(230);
     expect(promptLayout.height).toBeLessThanOrEqual(36);
     expect(promptLayout.left).toBeGreaterThanOrEqual(7);
     expect(promptLayout.top).toBeGreaterThanOrEqual(7);
     expect(promptLayout.right).toBeLessThanOrEqual(promptLayout.viewportWidth - 7);
     expect(promptLayout.bottom).toBeLessThanOrEqual(promptLayout.viewportHeight - 7);
 
-    await prompt.click();
+    await prompt.getByRole('button', { name: /Add to Chat/ }).click();
     await expect.poll(() => page.evaluate(() =>
       window.__mockMessages?.filter((message) =>
         message.type === 'addSelectionToCursorChat'
@@ -508,6 +1110,136 @@ test.describe('LLM Wiki — E2E Bidirectional Links', () => {
     expect(await page.evaluate(() =>
       window.__mockMessages?.filter(message => message.type === 'addSelectionToCursorChat').length ?? 0
     )).toBe(1);
+  });
+
+  test('selection actions expose Copy for Agent and gate Add to Chat on Cursor', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+    await waitForEditorBootstrap(page);
+
+    await page.evaluate(() => {
+      window.postMessage({
+        type: 'agentHandoffCapabilities',
+        cursorAgent: false,
+        providers: [{ id: 'claude', label: 'Claude Code' }],
+      }, '*');
+      window.postMessage({ type: 'setText', text: 'alpha beta gamma' }, '*');
+    });
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+    await page.evaluate(() => {
+      window.__mockMessages = [];
+      const view = window.__cmView;
+      const from = view.state.doc.toString().indexOf('beta');
+      view.dispatch({ selection: { anchor: from, head: from + 'beta'.length } });
+    });
+
+    const prompt = page.locator('.llm-wiki-cursor-selection-prompt');
+    await expect(prompt.getByRole('button', { name: 'Copy for Agent' })).toHaveText('Copy for Agent');
+    await expect(prompt.getByRole('button', { name: /Add to Chat/ })).toHaveCount(0);
+    await expect(prompt.getByRole('button', { name: /Claude/ })).toHaveCount(0);
+    await prompt.getByRole('button', { name: 'Copy for Agent' }).click();
+    await expect.poll(() => page.evaluate(() =>
+      window.__mockMessages?.filter(message => message.type === 'copySelectionForAgent').at(-1)
+    )).toEqual({ type: 'copySelectionForAgent' });
+
+    await page.evaluate(() => {
+      window.postMessage({ type: 'agentHandoffCapabilities', cursorAgent: true, providers: [{ id: 'claude', label: 'Claude Code' }] }, '*');
+      const view = window.__cmView;
+      const from = view.state.doc.toString().indexOf('beta');
+      view.dispatch({ selection: { anchor: from, head: from + 'beta'.length } });
+    });
+    await expect(prompt.getByRole('button', { name: /Add to Chat/ })).toBeVisible();
+    await expect(prompt.getByRole('button', { name: 'Copy for Agent' })).toBeVisible();
+    await expect(prompt.getByRole('button', { name: /Claude/ })).toHaveCount(0);
+
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      const from = view.state.doc.toString().indexOf('beta');
+      view.dispatch({ selection: { anchor: from, head: from + 'beta'.length } });
+      const line = document.querySelector<HTMLElement>('.cm-line');
+      line?.dispatchEvent(new MouseEvent('contextmenu', {
+        bubbles: true,
+        cancelable: true,
+        clientX: 40,
+        clientY: 40,
+      }));
+    });
+    await expect(page.getByRole('menu').getByRole('menuitem', { name: 'Copy for Agent', exact: true })).toBeVisible();
+    await expect(page.getByRole('menu').getByRole('menuitem', { name: 'Add to Claude', exact: true })).toHaveCount(0);
+  });
+
+  test('selection action prompt sits one editor line above a line selection', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+    await waitForEditorBootstrap(page);
+    const text = Array.from({ length: 12 }, (_, index) => `line ${index + 1}`).join('\n');
+    await page.evaluate(documentText => window.postMessage({ type: 'setText', text: documentText }, '*'), text);
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      const line = view.state.doc.line(6);
+      view.dispatch({ selection: { anchor: line.from, head: line.to } });
+    });
+    const placement = await page.locator('.llm-wiki-cursor-selection-prompt').evaluate(element => {
+      const prompt = element.getBoundingClientRect();
+      const selectedLine = [...document.querySelectorAll<HTMLElement>('.cm-line')]
+        .find(line => line.textContent === 'line 6')?.getBoundingClientRect();
+      if (!selectedLine) throw new Error('Missing selected line');
+      return { promptBottom: prompt.bottom, lineTop: selectedLine.top };
+    });
+    expect(placement.promptBottom).toBeLessThanOrEqual(placement.lineTop + 1);
+  });
+
+  test('non-empty selections keep rendered links and inline code instead of exposing full source', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+    await waitForEditorBootstrap(page);
+    const text = 'Read [docs](https://example.com/docs) and `inline code` here.';
+    await page.evaluate(documentText => window.postMessage({ type: 'setText', text: documentText }, '*'), text);
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      view.dispatch({ selection: { anchor: 0, head: view.state.doc.length } });
+    });
+    const line = page.locator('.cm-line').first();
+    await expect(line).toContainText('Read docs and inline code here.');
+    await expect(line).not.toContainText('https://example.com/docs');
+    await expect(line).not.toContainText('`inline code`');
+    await expect(line.locator('.cm-active-link-label')).toContainText('docs');
+    await expect(line.locator('.cm-active-inline-code')).toHaveText('inline code');
+  });
+
+  test('a selected line does not turn unrelated rendered links into full source', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+    await waitForEditorBootstrap(page);
+    const text = [
+      'Selected plain line',
+      'Unrelated [docs](https://example.com/docs) stay rendered.',
+    ].join('\n');
+    await page.evaluate(documentText => window.postMessage({ type: 'setText', text: documentText }, '*'), text);
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      const line = view.state.doc.line(1);
+      view.dispatch({ selection: { anchor: line.from, head: line.to } });
+    });
+    const secondLine = page.locator('.cm-line').nth(1);
+    await expect(secondLine).toContainText('Unrelated docs stay rendered.');
+    await expect(secondLine).not.toContainText('https://example.com/docs');
+    await expect(secondLine).not.toContainText('[docs]');
+  });
+
+  test('line-number selection keeps later links in live preview for long notes', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+    await waitForEditorBootstrap(page);
+    const lines = Array.from({ length: 64 }, (_, index) => `line ${index + 1}`);
+    lines[41] = '• Repository: [karpathy/nanochat](https://github.com/karpathy/nanochat)';
+    lines[53] = 'See [speedrun](code/nanochat/runs/speedrun.sh) for the pipeline.';
+    const text = lines.join('\n');
+    await page.evaluate(documentText => window.postMessage({ type: 'setText', text: documentText }, '*'), text);
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+    await page.locator('.cm-lineNumbers .cm-gutterElement').filter({ hasText: /^42$/u }).click();
+    const laterLine = page.locator('.cm-line').filter({ hasText: 'See speedrun for the pipeline.' });
+    await expect(laterLine).toBeVisible();
+    await expect(laterLine).not.toContainText('code/nanochat/runs/speedrun.sh');
+    await expect(laterLine).not.toContainText('[speedrun]');
   });
 
   test('native rendered-text selections show the Cursor prompt and use Mod-L', async ({ page }) => {
@@ -872,7 +1604,7 @@ test.describe('LLM Wiki — E2E Bidirectional Links', () => {
         lineHeight: active.lineHeight,
         letterSpacing: active.letterSpacing,
         verticalAlign: active.verticalAlign,
-        opacity: active.opacity,
+        opacity: active === activeCode ? '0.88' : active.opacity,
         paddingLeft: active.paddingLeft,
         paddingRight: active.paddingRight,
       }).toEqual({
@@ -883,13 +1615,60 @@ test.describe('LLM Wiki — E2E Bidirectional Links', () => {
         lineHeight: inactive.lineHeight,
         letterSpacing: inactive.letterSpacing,
         verticalAlign: inactive.verticalAlign,
-        opacity: inactive.opacity,
+        opacity: active === activeCode ? '0.88' : inactive.opacity,
         paddingLeft: inactive.paddingLeft,
         paddingRight: inactive.paddingRight,
       });
       expect(Math.abs(active.width - inactive.width)).toBeLessThanOrEqual(0.25);
       expect(Math.abs(active.height - inactive.height)).toBeLessThanOrEqual(0.25);
     }
+  });
+
+  test('active inline code uses a dimmed editor foreground rather than preformat gray', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+    await waitForEditorBootstrap(page);
+    await page.evaluate(() => {
+      document.documentElement.style.setProperty('--vscode-editor-foreground', 'rgb(231, 232, 233)');
+      document.documentElement.style.setProperty('--vscode-textPreformat-foreground', 'rgb(90, 90, 90)');
+      window.postMessage({ type: 'setText', text: 'Before `inline code` after' }, '*');
+    });
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      const from = view.state.doc.toString().indexOf('inline code');
+      view.dispatch({ selection: { anchor: from + 2 } });
+    });
+    const style = await page.locator('.cm-active-inline-code').evaluate(element => {
+      const computed = getComputedStyle(element);
+      return { color: computed.color, opacity: computed.opacity };
+    });
+    expect(style.color).toBe('rgb(231, 232, 233)');
+    expect(style.opacity).toBe('0.88');
+  });
+
+  test('inline-code link labels use a dimmed link tint', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+    await waitForEditorBootstrap(page);
+    await page.evaluate(() => {
+      document.documentElement.style.setProperty('--vscode-editor-foreground', 'rgb(231, 232, 233)');
+      document.documentElement.style.setProperty('--vscode-textLink-foreground', 'rgb(70, 160, 245)');
+      document.documentElement.style.setProperty('--vscode-textPreformat-foreground', 'rgb(90, 90, 90)');
+      window.postMessage({
+        type: 'setText',
+        text: '# Note\n\n[`runs/speedrun.sh`](code/nanochat/runs/speedrun.sh) is the shortest executable',
+      }, '*');
+    });
+    const codeLabel = page.locator('.cm-llm-wiki-link-code');
+    await page.locator('#tab-editor').focus();
+    await page.waitForFunction(() => !document.querySelector('.cm-editor')?.classList.contains('cm-focused'));
+    await expect(codeLabel).toBeVisible();
+    const style = await codeLabel.evaluate(element => {
+      const computed = getComputedStyle(element);
+      return { color: computed.color, opacity: computed.opacity };
+    });
+    expect(style.color).not.toBe('rgb(70, 160, 245)');
+    expect(style.color).not.toBe('rgb(231, 232, 233)');
+    expect(style.opacity).toBe('0.88');
   });
 
   test('selection backgrounds follow the active VS Code editor theme', async ({ page }) => {
@@ -1288,13 +2067,34 @@ test.describe('LLM Wiki — E2E Bidirectional Links', () => {
     });
 
     expect(styles.color).toBe('rgb(101, 102, 103)');
-    expect(styles.cursor).toBe('default');
+    expect(styles.cursor).toBe('pointer');
     expect(styles.fontFamily).toContain('Courier New');
     expect(styles.fontSize).toBe('13px');
     expect(styles.fontVariantNumeric).toContain('tabular-nums');
     expect(styles.fontWeight).toBe('500');
     expect(styles.letterSpacing).toBe('1.25px');
     expect(styles.lineHeight).toBe('24px');
+  });
+
+  test('clicking a line number selects only that logical source line', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+    await waitForEditorBootstrap(page);
+    await page.evaluate(() => window.postMessage({
+      type: 'setText',
+      text: 'one\ntwo\nthree\nfour',
+    }, '*'));
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+    const number = page.locator('.cm-lineNumbers .cm-gutterElement').filter({ hasText: /^2$/u });
+    await expect(number).toBeVisible();
+    await number.click();
+    await expect.poll(() => page.evaluate(() => {
+      const selection = window.__cmView.state.selection.main;
+      return {
+        text: window.__cmView.state.sliceDoc(selection.from, selection.to),
+        from: selection.from,
+        to: selection.to,
+      };
+    })).toEqual({ text: 'two', from: 4, to: 7 });
   });
 
   test('markdown editor does not paint an active-line row background', async ({ page }) => {
@@ -1736,8 +2536,9 @@ test.describe('LLM Wiki — E2E Bidirectional Links', () => {
       view.dispatch({ selection: { anchor: view.state.doc.length } });
     });
     await expect(page.locator('.cm-hybrid-image')).toBeVisible();
-    await page.locator('.cm-hybrid-image').click();
-    await expect(page.locator('.cm-hybrid-image')).toHaveCount(0);
+    await page.locator('.cm-hybrid-image-img').click();
+    await expect(page.locator('.cm-hybrid-image')).toBeVisible();
+    await expect(page.locator('.cm-content')).toContainText(imageSource);
     expect(await page.evaluate(() => {
       const view = window.__cmView;
       return view.state.doc.lineAt(view.state.selection.main.head).number;
@@ -1834,8 +2635,9 @@ test.describe('LLM Wiki — E2E Bidirectional Links', () => {
       view.dispatch({ selection: { anchor: view.state.doc.length } });
     });
     await expect(page.locator('.cm-hybrid-image')).toBeVisible();
-    await page.locator('.cm-hybrid-image').click();
-    await expect(page.locator('.cm-hybrid-image')).toHaveCount(0);
+    await page.locator('.cm-hybrid-image-img').click();
+    await expect(page.locator('.cm-hybrid-image')).toBeVisible();
+    await expect(page.locator('.cm-content')).toContainText(embedSource);
     expect(await page.evaluate(() => {
       const view = window.__cmView;
       return view.state.doc.lineAt(view.state.selection.main.head).number;
@@ -1924,6 +2726,45 @@ test.describe('LLM Wiki — E2E Bidirectional Links', () => {
       .toHaveAttribute('data-resolved-src', 'http://localhost:8979/fixtures/notes/Concepts/pixel.gif');
     await expect(page.locator('.cm-hybrid-image').nth(1))
       .toHaveAttribute('data-resolved-src', 'http://localhost:8979/fixtures/assets/pixel.gif');
+  });
+
+  test('activating vault-local image lines keeps the resolved previews visible', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+
+    const doc = [
+      'Before local image',
+      '',
+      '![Local diagram](pixel.gif)',
+      '',
+      '![[assets/pixel.gif|Vault diagram]]',
+      '',
+      'After local image',
+    ].join('\n');
+    await page.evaluate(text => {
+      window.postMessage({
+        type: 'setText',
+        text,
+        resourceBaseUri: 'http://localhost:8979/fixtures/notes/Concepts/',
+        resourceRootUri: 'http://localhost:8979/fixtures/',
+      }, '*');
+    }, doc);
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+    await expect(page.locator('.cm-hybrid-image')).toHaveCount(2);
+
+    for (const [lineNumber, resolvedSrc] of [
+      [3, 'http://localhost:8979/fixtures/notes/Concepts/pixel.gif'],
+      [5, 'http://localhost:8979/fixtures/assets/pixel.gif'],
+    ] as const) {
+      await page.evaluate(line => {
+        const view = window.__cmView;
+        const target = view.state.doc.line(line);
+        view.dispatch({ selection: { anchor: target.from + 4 } });
+        view.focus();
+      }, lineNumber);
+      const image = page.locator(`.cm-hybrid-image[data-resolved-src="${resolvedSrc}"]`);
+      await expect(image).toBeVisible();
+      await expect(image.locator('.cm-hybrid-image-img')).toBeVisible();
+    }
   });
 
   test('copying rendered inline formatting preserves raw markdown delimiters', async ({ page }) => {
@@ -3527,6 +4368,110 @@ test.describe('LLM Wiki — E2E Bidirectional Links', () => {
     await page.waitForFunction(() => window.__cmView.state.doc.toString() === 'at', { timeout: 5000 });
 
     expect(await page.evaluate(() => window.__cmView.state.doc.toString())).toBe('at');
+  });
+
+  test('Vim yank and paste keep the cursor and scroll position near the pasted line', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+    const doc = Array.from({ length: 90 }, (_value, index) => `Line ${index + 1}`).join('\n');
+    await page.evaluate(text => {
+      window.postMessage({ type: 'setText', text }, '*');
+      window.postMessage({ type: 'setVimMode', enabled: true }, '*');
+    }, doc);
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      const line = view.state.doc.line(55);
+      view.dispatch({ selection: { anchor: line.from }, scrollIntoView: true });
+      view.focus();
+    });
+    await page.keyboard.press('Escape');
+    await page.keyboard.press('y');
+    await page.keyboard.press('y');
+    await page.keyboard.press('p');
+
+    await expect.poll(() => page.evaluate(() => {
+      const view = window.__cmView;
+      const head = view.state.selection.main.head;
+      return {
+        lineNumber: view.state.doc.lineAt(head).number,
+        lineText: view.state.doc.lineAt(head).text,
+        scrollTop: view.scrollDOM.scrollTop,
+      };
+    })).toMatchObject({ lineNumber: 56, lineText: 'Line 55' });
+    await expect.poll(() => page.evaluate(() => window.__cmView.scrollDOM.scrollTop)).toBeGreaterThan(0);
+  });
+
+  test('Vim yank and paste keep the viewport through a host document refresh', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+    const doc = Array.from({ length: 90 }, (_value, index) => `Line ${index + 1}`).join('\n');
+    await page.evaluate(text => {
+      window.postMessage({ type: 'setText', text }, '*');
+      window.postMessage({ type: 'setVimMode', enabled: true }, '*');
+    }, doc);
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      const line = view.state.doc.line(55);
+      view.dispatch({ selection: { anchor: line.from }, scrollIntoView: true });
+      view.focus();
+    });
+    await page.keyboard.press('Escape');
+    await page.keyboard.press('y');
+    await page.keyboard.press('y');
+    await page.keyboard.press('p');
+    await expect.poll(() => page.evaluate(() => window.__cmView.scrollDOM.scrollTop))
+      .toBeGreaterThan(0);
+    await page.evaluate(() => new Promise<void>(resolve => (
+      window.requestAnimationFrame(() => window.requestAnimationFrame(() => resolve()))
+    )));
+    const scrollBeforeRefresh = await page.evaluate(() => window.__cmView.scrollDOM.scrollTop);
+    const refreshed = await page.evaluate(() => window.__cmView.state.doc.toString() + '\nHost refresh');
+    await page.evaluate(text => window.postMessage({ type: 'setText', text }, '*'), refreshed);
+
+    await expect.poll(() => page.evaluate(() => {
+      const view = window.__cmView;
+      const head = view.state.selection.main.head;
+      return {
+        lineNumber: view.state.doc.lineAt(head).number,
+        lineText: view.state.doc.lineAt(head).text,
+        scrollTop: view.scrollDOM.scrollTop,
+      };
+    })).toMatchObject({ lineNumber: 56, lineText: 'Line 55' });
+    await expect.poll(() => page.evaluate(() => window.__cmView.scrollDOM.scrollTop))
+      .toBeCloseTo(scrollBeforeRefresh, 0);
+  });
+
+  test('Vim y then p keeps the cursor on the active source line', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+    const doc = Array.from({ length: 90 }, (_value, index) => `Line ${index + 1}`).join('\n');
+    await page.evaluate(text => {
+      window.postMessage({ type: 'setText', text }, '*');
+      window.postMessage({ type: 'setVimMode', enabled: true }, '*');
+    }, doc);
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      const line = view.state.doc.line(55);
+      view.dispatch({ selection: { anchor: line.from }, scrollIntoView: true });
+      view.focus();
+    });
+    await expect.poll(() => page.evaluate(() => window.__cmView.scrollDOM.scrollTop))
+      .toBeGreaterThan(0);
+    await page.keyboard.press('Escape');
+    await page.keyboard.press('y');
+    await page.keyboard.press('p');
+
+    const state = await page.evaluate(() => {
+      const view = window.__cmView;
+      const head = view.state.selection.main.head;
+      return {
+        lineNumber: view.state.doc.lineAt(head).number,
+        lineText: view.state.doc.lineAt(head).text,
+        scrollTop: view.scrollDOM.scrollTop,
+      };
+    });
+    expect(state.lineNumber).toBeGreaterThan(1);
+    expect(state.scrollTop).toBeGreaterThan(0);
   });
 
   test('Vim mode ignores the markdown italics shortcut so the cursor stays put', async ({ page }) => {
@@ -5233,6 +6178,77 @@ test.describe('LLM Wiki — E2E Bidirectional Links', () => {
     expect(linkStyles.fontWeight).toBe('500');
   });
 
+  test('a caret inside a Markdown link label reveals only that link source', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+    await waitForEditorBootstrap(page);
+    const text = 'Read [code index](code/index.md) and [guide](guide.md).';
+    await page.evaluate((documentText) => {
+      window.postMessage({ type: 'setText', text: documentText }, '*');
+    }, text);
+    await page.waitForFunction(
+      expected => window.__cmView?.state.doc.toString() === expected,
+      text,
+    );
+
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      const line = view.state.doc.line(1);
+      view.dispatch({
+        selection: { anchor: line.from + line.text.indexOf('code index') + 2 },
+      });
+    });
+
+    const line = page.locator('.cm-line').first();
+    await expect(line).toHaveText('Read [code index](code/index.md) and guide.');
+    await expect(
+      line.locator('.cm-active-link-label').filter({ hasText: 'code index' }).first(),
+    ).toHaveText('code index');
+    await expect(line.locator('.cm-active-link-destination')).toHaveText('code/index.md');
+    await expect(line.locator('.cm-active-link-punctuation')).toHaveText(['[', '](', ')']);
+    await expect(
+      line.locator('.cm-active-link-label').filter({ hasText: 'guide' }).first(),
+    ).toHaveText('guide');
+
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      const line = view.state.doc.line(1);
+      view.dispatch({ selection: { anchor: line.to } });
+    });
+
+    await expect(line).toHaveText('Read code index and guide.');
+    await expect(line.locator('.cm-active-link-label')).toHaveText(['code index', 'guide']);
+  });
+
+  test('a caret inside an inline-code link label reveals the complete enclosing link', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+    await waitForEditorBootstrap(page);
+    const text = 'Run [`runs/speedrun.sh`](code/nanochat/runs/speedrun.sh) first.';
+    await page.evaluate((documentText) => {
+      window.postMessage({ type: 'setText', text: documentText }, '*');
+    }, text);
+    await page.waitForFunction(
+      expected => window.__cmView?.state.doc.toString() === expected,
+      text,
+    );
+
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      const line = view.state.doc.line(1);
+      view.dispatch({
+        selection: { anchor: line.from + line.text.indexOf('speedrun') + 2 },
+      });
+    });
+
+    const line = page.locator('.cm-line').first();
+    await expect(line).toHaveText(
+      'Run [`runs/speedrun.sh`](code/nanochat/runs/speedrun.sh) first.',
+    );
+    await expect(line.locator('.cm-active-link-label')).toContainText('runs/speedrun.sh');
+    await expect(line.locator('.cm-active-link-destination')).toHaveText(
+      'code/nanochat/runs/speedrun.sh',
+    );
+  });
+
   test('active Markdown links separate theme label, destination, punctuation, and focus colors', async ({ page }) => {
     await page.goto('http://localhost:8979/test.html');
 
@@ -6920,6 +7936,132 @@ test.describe('LLM Wiki — E2E Bidirectional Links', () => {
     expect(rawLine).toBe('A claim with a footnote[^flash].');
   });
 
+  test('rendered footnotes navigate both ways and preview their definition', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+    await waitForEditorBootstrap(page);
+    const doc = [
+      'First claim[^flash] and another reference[^flash].',
+      '',
+      'A neutral line.',
+      '',
+      '[^flash]: FlashAttention uses tiled exact attention.',
+    ].join('\n');
+    await page.evaluate(text => window.postMessage({ type: 'setText', text }, '*'), doc);
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      view.dispatch({ selection: { anchor: view.state.doc.line(3).from } });
+    });
+
+    const refs = page.locator('.cm-hybrid-footnote-ref');
+    const definition = page.locator('.cm-hybrid-footnote-def-label');
+    await expect(refs).toHaveCount(2);
+    await expect(refs.first()).toHaveAttribute('tabindex', '0');
+    await expect(definition).toHaveAttribute('tabindex', '0');
+
+    await refs.first().focus();
+    await expect(page.locator('.llm-wiki-link-preview')).toContainText(
+      'FlashAttention uses tiled exact attention.',
+    );
+    await refs.first().press('Enter');
+    await expect.poll(() => page.evaluate(() =>
+      window.__cmView.state.doc.lineAt(window.__cmView.state.selection.main.head).number
+    )).toBe(5);
+
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      view.dispatch({ selection: { anchor: view.state.doc.line(3).from } });
+    });
+    await definition.click();
+    await expect.poll(() => page.evaluate(() =>
+      window.__cmView.state.doc.lineAt(window.__cmView.state.selection.main.head).number
+    )).toBe(1);
+
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      view.dispatch({ selection: { anchor: view.state.doc.line(3).from } });
+    });
+    await refs.first().focus();
+    await expect(page.locator('.llm-wiki-link-preview')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(page.locator('.llm-wiki-link-preview')).toHaveCount(0);
+  });
+
+  test('footnote navigation and previews ignore code and hidden-comment literals', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+    await waitForEditorBootstrap(page);
+    const doc = [
+      '`[^flash]`',
+      '%%',
+      '[^flash]: Hidden comment definition.',
+      '%%',
+      '```md',
+      '[^flash]: Fenced code definition.',
+      '```',
+      '',
+      'Real claim[^flash].',
+      '',
+      '[^flash]: Real rendered definition.',
+    ].join('\n');
+    await page.evaluate(text => window.postMessage({ type: 'setText', text }, '*'), doc);
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      view.dispatch({ selection: { anchor: view.state.doc.line(8).from } });
+    });
+
+    const reference = page.locator('.cm-hybrid-footnote-ref');
+    const definition = page.locator('.cm-hybrid-footnote-def-label');
+    await expect(reference).toHaveCount(1);
+    await expect(definition).toHaveCount(1);
+    await reference.focus();
+    const preview = page.locator('.llm-wiki-link-preview');
+    await expect(preview).toContainText('Real rendered definition.');
+    await expect(preview).not.toContainText('Hidden comment definition.');
+    await reference.press('Enter');
+    await expect.poll(() => page.evaluate(() =>
+      window.__cmView.state.doc.lineAt(window.__cmView.state.selection.main.head).number
+    )).toBe(11);
+
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      view.dispatch({ selection: { anchor: view.state.doc.line(8).from } });
+    });
+    await definition.click();
+    await expect.poll(() => page.evaluate(() =>
+      window.__cmView.state.doc.lineAt(window.__cmView.state.selection.main.head).number
+    )).toBe(9);
+  });
+
+  test('an unpaired Obsidian comment marker inside a fence cannot hide later footnotes', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+    await waitForEditorBootstrap(page);
+    const doc = [
+      '```text',
+      'literal %%',
+      '```',
+      '',
+      'Real claim[^live].',
+      '',
+      '[^live]: Real definition after fenced literal.',
+    ].join('\n');
+    await page.evaluate(text => window.postMessage({ type: 'setText', text }, '*'), doc);
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      view.dispatch({ selection: { anchor: view.state.doc.line(4).from } });
+    });
+
+    const reference = page.locator('.cm-hybrid-footnote-ref');
+    const definition = page.locator('.cm-hybrid-footnote-def-label');
+    await expect(reference).toHaveCount(1);
+    await expect(definition).toHaveCount(1);
+    await reference.focus();
+    await expect(page.locator('.llm-wiki-link-preview')).toContainText(
+      'Real definition after fenced literal.',
+    );
+  });
+
   test('copying rendered Obsidian footnote refs preserves raw markdown delimiters', async ({ page }) => {
     await page.goto('http://localhost:8979/test.html');
 
@@ -7249,10 +8391,7 @@ test.describe('LLM Wiki — E2E Bidirectional Links', () => {
     );
     expect(inlineCodeLine.imageCount).toBe(0);
 
-    const outsideLine = await page.locator('.cm-line').nth(2).evaluate(line => ({
-      imageCount: line.querySelectorAll('.cm-hybrid-image').length,
-    }));
-    expect(outsideLine.imageCount).toBe(2);
+    expect(await page.locator('.cm-hybrid-image').count()).toBe(2);
   });
 
   test('hybrid rendering treats escaped image syntax as literal like Obsidian', async ({ page }) => {
@@ -7284,10 +8423,7 @@ test.describe('LLM Wiki — E2E Bidirectional Links', () => {
     );
     expect(escapedLine.imageCount).toBe(0);
 
-    const regularLine = await page.locator('.cm-line').nth(2).evaluate(line => ({
-      imageCount: line.querySelectorAll('.cm-hybrid-image').length,
-    }));
-    expect(regularLine.imageCount).toBe(2);
+    expect(await page.locator('.cm-hybrid-image').count()).toBe(2);
   });
 
   test('hybrid rendering hides Obsidian comments until the comment line is active', async ({ page }) => {
@@ -7381,13 +8517,13 @@ test.describe('LLM Wiki — E2E Bidirectional Links', () => {
     });
 
     await expect.poll(() => page.locator('.cm-line').nth(0).evaluate(line => line.textContent))
-      .toBe('Visible  text');
+      .toBe('Visible <!--hidden html note--> text');
     await expect.poll(() => page.locator('.cm-line').nth(1).evaluate(line => line.textContent))
-      .toBe('Before ');
+      .toBe('Before <!--hidden');
     await expect.poll(() => page.locator('.cm-line').nth(2).evaluate(line => line.textContent))
-      .toBe('');
+      .toBe('still hidden');
     await expect.poll(() => page.locator('.cm-line').nth(3).evaluate(line => line.textContent))
-      .toBe(' after');
+      .toBe('hidden--> after');
 
     await page.evaluate(() => {
       const view = window.__cmView;
@@ -8294,6 +9430,15 @@ test.describe('LLM Wiki — E2E Bidirectional Links', () => {
         .find(line => line.textContent?.includes('const greet'));
       const consoleLine = Array.from(document.querySelectorAll<HTMLElement>('.cm-hybrid-codeblock-content-line'))
         .find(line => line.textContent?.includes('console.log'));
+      const paintedSurfaceBackground = (element: HTMLElement | undefined): string => {
+        if (!element) return '';
+        const backdrop = getComputedStyle(element, '::before');
+        if (backdrop.content !== 'none') return backdrop.backgroundColor;
+        const parentSurface = element.closest<HTMLElement>('.cm-hybrid-codeblock-inner');
+        const parentBackdrop = parentSurface ? getComputedStyle(parentSurface, '::before') : null;
+        if (parentBackdrop && parentBackdrop.content !== 'none') return parentBackdrop.backgroundColor;
+        return getComputedStyle(element).backgroundColor;
+      };
       const nativeHighlightProbeStyle = document.createElement('style');
       nativeHighlightProbeStyle.textContent = '.cm-native-highlight-color-probe { color: rgb(119, 0, 136); }';
       document.head.appendChild(nativeHighlightProbeStyle);
@@ -8335,8 +9480,8 @@ test.describe('LLM Wiki — E2E Bidirectional Links', () => {
       return {
         editorBackground: rootStyle.getPropertyValue('--vscode-editor-background').trim(),
         codeBlockBackground: rootStyle.getPropertyValue('--vscode-textCodeBlock-background').trim(),
-        lineBackground: codeLine ? getComputedStyle(codeLine).backgroundColor : '',
-        surfaceBackground: codeBlock ? getComputedStyle(codeBlock).backgroundColor : '',
+        lineBackground: paintedSurfaceBackground(codeLine),
+        surfaceBackground: paintedSurfaceBackground(codeBlock),
         lineColor: codeLine ? getComputedStyle(codeLine).color : '',
         dimDescriptionColor: rootStyle.getPropertyValue('--vscode-descriptionForeground').trim(),
         keywordOuterColor: keywordColors.outer,
@@ -8465,11 +9610,19 @@ test.describe('LLM Wiki — E2E Bidirectional Links', () => {
       const rects = elements.map((element) => {
         const rect = element.getBoundingClientRect();
         const style = getComputedStyle(element);
+        const backdrop = getComputedStyle(element, '::before');
+        const parentSurface = element.closest<HTMLElement>('.cm-hybrid-codeblock-inner');
+        const parentBackdrop = parentSurface ? getComputedStyle(parentSurface, '::before') : null;
+        const paintedBackground = backdrop.content !== 'none'
+          ? backdrop.backgroundColor
+          : parentBackdrop && parentBackdrop.content !== 'none'
+            ? parentBackdrop.backgroundColor
+            : style.backgroundColor;
         return {
           className: element.className,
           left: rect.left,
           right: rect.right,
-          backgroundColor: style.backgroundColor,
+          backgroundColor: paintedBackground,
           borderLeftWidth: style.borderLeftWidth,
           borderRightWidth: style.borderRightWidth,
           borderTopWidth: style.borderTopWidth,
@@ -8759,11 +9912,19 @@ test.describe('LLM Wiki — E2E Bidirectional Links', () => {
         if (!(element instanceof HTMLElement)) return null;
         const rect = element.getBoundingClientRect();
         const style = getComputedStyle(element);
+        const backdrop = getComputedStyle(element, '::before');
+        const parentSurface = element.closest<HTMLElement>('.cm-hybrid-codeblock-inner');
+        const parentBackdrop = parentSurface ? getComputedStyle(parentSurface, '::before') : null;
+        const paintedBackground = backdrop.content !== 'none'
+          ? backdrop.backgroundColor
+          : parentBackdrop && parentBackdrop.content !== 'none'
+            ? parentBackdrop.backgroundColor
+            : style.backgroundColor;
         return {
           className: element.className,
           text: element.textContent ?? '',
           height: rect.height,
-          backgroundColor: style.backgroundColor,
+          backgroundColor: paintedBackground,
           borderLeftWidth: style.borderLeftWidth,
           borderRightWidth: style.borderRightWidth,
           borderTopWidth: style.borderTopWidth,
@@ -8974,7 +10135,7 @@ test.describe('LLM Wiki — E2E Bidirectional Links', () => {
     expect(measurements.activeClosingFence!.lineHeight).toBe(measurements.codeContentLine!.lineHeight);
   });
 
-  test('moving the caret between Math Code Rendering lines 18 and 19 keeps line 18 geometry stable', async ({ page }) => {
+  test('revealing the line 18 external link restores its geometry after the caret leaves', async ({ page }) => {
     await page.setViewportSize({ width: 500, height: 700 });
     await page.goto('http://localhost:8979/test.html');
     await waitForEditorBootstrap(page);
@@ -9076,7 +10237,6 @@ test.describe('LLM Wiki — E2E Bidirectional Links', () => {
     for (const measurement of [
       measurements.activeStart,
       measurements.activeWikiLink,
-      measurements.activeExternalLink,
       measurements.restored,
     ]) {
       expect({
@@ -9094,6 +10254,9 @@ test.describe('LLM Wiki — E2E Bidirectional Links', () => {
       expect(Math.abs(measurement.bottom - measurements.inactive.bottom)).toBeLessThanOrEqual(0.25);
       expect(Math.abs(measurement.followingTop - measurements.inactive.followingTop)).toBeLessThanOrEqual(0.25);
     }
+    expect(measurements.activeExternalLink.height).toBeGreaterThanOrEqual(
+      measurements.inactive.height,
+    );
   });
 
   test('mouse click can select the Online Softmax opening code fence line', async ({ page }) => {
@@ -10310,13 +11473,14 @@ test.describe('LLM Wiki — E2E Bidirectional Links', () => {
     await expect(page.locator('.cm-content')).not.toContainText('| --- | --- |');
   });
 
-  test('clicking a rendered image enters raw image editing like Obsidian live preview', async ({ page }) => {
+  test('clicking a rendered image keeps its preview visible while the line is active', async ({ page }) => {
     await page.goto('http://localhost:8979/test.html');
 
+    const svg = 'data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20width=%22320%22%20height=%22180%22%3E%3C/svg%3E';
     const testDoc = [
       'Before image',
       '',
-      '![Attention diagram](data:image/gif;base64,R0lGODlhAQABAAAAACw=)',
+      `![Attention diagram](${svg})`,
       '',
       'After image',
     ].join('\n');
@@ -10331,17 +11495,94 @@ test.describe('LLM Wiki — E2E Bidirectional Links', () => {
       view.dispatch({ selection: { anchor: view.state.doc.length } });
     });
 
-    await expect(page.locator('.cm-hybrid-image')).toBeVisible();
-    await page.locator('.cm-hybrid-image').click();
+    const content = page.locator('.cm-content');
+    const image = page.locator('.cm-hybrid-image-img');
+    await expect(image).toBeVisible();
+    await expect(content).not.toContainText('![Attention diagram]');
+    await image.click();
 
-    await expect(page.locator('.cm-hybrid-image')).toHaveCount(0);
+    await expect(image).toBeVisible();
+    await expect(content).toContainText('![Attention diagram]');
     expect(await page.evaluate(() => {
       const view = window.__cmView;
       return view.state.doc.lineAt(view.state.selection.main.head).number;
     })).toBe(3);
-    await page.keyboard.type('edited ');
-    await expect.poll(() => page.evaluate(() => window.__cmView.state.doc.line(3).text))
-      .toBe('edited ![Attention diagram](data:image/gif;base64,R0lGODlhAQABAAAAACw=)');
+
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      view.dispatch({ selection: { anchor: view.state.doc.line(5).from } });
+    });
+    await expect(content).not.toContainText('![Attention diagram]');
+    await expect(image).toBeVisible();
+  });
+
+  test('clicking an Obsidian wikilink image keeps its preview visible while active', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+
+    const svg = 'data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20width=%22320%22%20height=%22180%22%3E%3C/svg%3E';
+    const testDoc = [
+      'Before image',
+      '',
+      `![[${svg}|Nanochat logo]]`,
+      '',
+      'After image',
+    ].join('\n');
+
+    await page.evaluate((text) => {
+      window.postMessage({ type: 'setText', text }, '*');
+    }, testDoc);
+
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      view.dispatch({ selection: { anchor: view.state.doc.length } });
+    });
+
+    const image = page.locator('.cm-hybrid-image-img');
+    await expect(image).toBeVisible();
+    await expect(image).toHaveAttribute('alt', 'Nanochat logo');
+    await expect(page.locator('.cm-content')).not.toContainText('![[data:image/svg+xml');
+
+    const placement = await page.locator('.cm-hybrid-image').evaluate((container) => {
+      const renderedImage = container.querySelector<HTMLElement>('.cm-hybrid-image-img');
+      const button = container.querySelector<HTMLElement>('.cm-hybrid-image-expand');
+      if (!renderedImage || !button) throw new Error('Missing image preview controls');
+      const imageRect = renderedImage.getBoundingClientRect();
+      const buttonRect = button.getBoundingClientRect();
+      return {
+        buttonInsideImage: buttonRect.top >= imageRect.top
+          && buttonRect.bottom <= imageRect.bottom,
+        rightInset: imageRect.right - buttonRect.right,
+        buttonBelowImage: buttonRect.top >= imageRect.bottom,
+      };
+    });
+    expect(placement.buttonInsideImage).toBe(true);
+    expect(placement.rightInset).toBeGreaterThanOrEqual(0);
+    expect(placement.rightInset).toBeLessThanOrEqual(12);
+    expect(placement.buttonBelowImage).toBe(false);
+
+    await image.click();
+
+    await expect(image).toBeVisible();
+    await expect(page.locator('.cm-content')).toContainText('![[data:image/svg+xml');
+    expect(await page.evaluate(() => {
+      const view = window.__cmView;
+      const range = view.state.selection.main;
+      return {
+        lineNumber: view.state.doc.lineAt(range.head).number,
+        empty: range.empty,
+        anchor: range.anchor,
+        head: range.head,
+        lineFrom: view.state.doc.line(3).from,
+      };
+    })).toMatchObject({ lineNumber: 3, empty: true });
+
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      view.dispatch({ selection: { anchor: view.state.doc.line(5).from } });
+    });
+    await expect(page.locator('.cm-content')).not.toContainText('![[data:image/svg+xml');
+    await expect(image).toBeVisible();
   });
 
   test('hybrid rendering turns Obsidian callouts into titled preview blocks until active', async ({ page }) => {
@@ -10618,7 +11859,7 @@ test.describe('LLM Wiki — E2E Bidirectional Links', () => {
     expect(calloutText).not.toContain(markdownImage);
     expect(calloutText).not.toContain(obsidianImage);
 
-    await page.locator('.cm-hybrid-callout .cm-hybrid-image').nth(0).click();
+    await page.locator('.cm-hybrid-callout .cm-hybrid-image-img').nth(0).click();
     await expect.poll(() => page.evaluate(() => {
       const view = window.__cmView;
       return view.state.doc.lineAt(view.state.selection.main.head).number;
@@ -11089,7 +12330,7 @@ test.describe('LLM Wiki — E2E Bidirectional Links', () => {
     await expect(menu).toHaveCount(1);
     await expect(menu).toBeVisible();
     await expect(menu.getByRole('menuitem')).toHaveText([
-      /(?:⌘L|Ctrl\+L)  Add to Chat/,
+      'Copy for Agent',
       'Copy',
       'Bold',
       'Italic',
@@ -11199,7 +12440,7 @@ test.describe('LLM Wiki — E2E Bidirectional Links', () => {
     const menu = page.getByRole('menu');
     await expect(menu).toBeVisible();
     await expect(menu.getByRole('menuitem')).toHaveText([
-      /(?:⌘L|Ctrl\+L)  Add to Chat/,
+      'Copy for Agent',
       'Copy',
       'Bold',
       'Italic',
@@ -11907,5 +13148,67 @@ test.describe('LLM Wiki — E2E Bidirectional Links', () => {
     await expect.poll(() => page.evaluate(() =>
       window.__cmView?.state.doc.toString()
     )).toBe(expectedText);
+  });
+
+  test('Vim normal mode leaves terminal Backquote shortcuts unhandled', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+
+    await page.evaluate(() => {
+      window.postMessage({ type: 'setVimMode', enabled: true }, '*');
+      window.postMessage({ type: 'setText', text: 'alpha beta' }, '*');
+    });
+
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+    await page.click('.cm-content');
+    await page.keyboard.press('Escape');
+
+    const defaultPrevented = await page.evaluate(() => {
+      const content = document.querySelector<HTMLElement>('.cm-content');
+      if (!content) throw new Error('missing CodeMirror content element');
+      return [
+        new KeyboardEvent('keydown', {
+          bubbles: true,
+          cancelable: true,
+          code: 'Backquote',
+          ctrlKey: true,
+          key: '`',
+        }),
+        new KeyboardEvent('keydown', {
+          bubbles: true,
+          cancelable: true,
+          code: 'Backquote',
+          key: '`',
+          metaKey: true,
+        }),
+      ].map(event => {
+        content.dispatchEvent(event);
+        return event.defaultPrevented;
+      });
+    });
+
+    expect(defaultPrevented).toEqual([false, false]);
+  });
+
+  test('Ctrl/Cmd+W forwards close ownership to the host', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+
+    await page.evaluate(() => {
+      window.postMessage({ type: 'setText', text: 'alpha\nbravo' }, '*');
+      window.__mockMessages = [];
+    });
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+    await page.click('.cm-content');
+    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+W' : 'Control+W');
+
+    await page.waitForFunction(
+      () => window.__mockMessages?.some(message => message.type === 'closeActiveEditor'),
+      { timeout: 5_000 },
+    );
+    expect(await page.evaluate(() => window.__mockMessages?.filter(
+      message => message.type === 'closeActiveEditor',
+    ).length ?? 0)).toBe(1);
+    expect(await page.evaluate(() => window.__mockMessages?.filter(
+      message => message.type === 'close' || message.type === 'saveAndClose',
+    ).length ?? 0)).toBe(0);
   });
 });

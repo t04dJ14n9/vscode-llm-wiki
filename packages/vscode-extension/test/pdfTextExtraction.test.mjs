@@ -507,6 +507,83 @@ test('column detection keeps each PDF reading lane contiguous', () => {
   ]);
 });
 
+test('section gaps keep short indented blocks in each two-column lane contiguous', () => {
+  const normalized = extraction.normalizeBasicPdfTextRects([
+    { content: 'left upper 1', rect: rect(0, 0, 50, 8) },
+    { content: 'left upper 2', rect: rect(0, 10, 50, 8) },
+    { content: 'left indented lower', rect: rect(8, 50, 32, 8) },
+    { content: 'right upper 1', rect: rect(70, 0, 50, 8) },
+    { content: 'right upper 2', rect: rect(70, 10, 50, 8) },
+    { content: 'right indented lower', rect: rect(78, 50, 32, 8) },
+  ]);
+
+  assert.deepEqual(normalized.map(item => item.content), [
+    'left upper 1',
+    'left upper 2',
+    'left indented lower',
+    'right upper 1',
+    'right upper 2',
+    'right indented lower',
+  ]);
+});
+
+for (const [gutter, lowerWidth] of [
+  ['touching', 42],
+  ['one-pixel', 41],
+]) {
+  test(`${gutter} column gutters keep short indented section blocks lane-major`, () => {
+    const normalized = extraction.normalizeBasicPdfTextRects([
+      { content: 'left upper 1', rect: rect(0, 0, 40, 8) },
+      { content: 'left upper 2', rect: rect(0, 10, 40, 8) },
+      { content: 'left indented lower', rect: rect(8, 50, lowerWidth, 8) },
+      { content: 'right upper 1', rect: rect(50, 0, 40, 8) },
+      { content: 'right upper 2', rect: rect(50, 10, 40, 8) },
+      { content: 'right indented lower', rect: rect(58, 50, 32, 8) },
+    ]);
+
+    assert.deepEqual(normalized.map(item => item.content), [
+      'left upper 1',
+      'left upper 2',
+      'left indented lower',
+      'right upper 1',
+      'right upper 2',
+      'right indented lower',
+    ]);
+  });
+}
+
+test('section gaps preserve lane-major order across three PDF columns', () => {
+  const normalized = extraction.normalizeBasicPdfTextRects([
+    { content: 'left upper 1', rect: rect(0, 0, 30, 8) },
+    { content: 'left upper 2', rect: rect(0, 10, 30, 8) },
+    { content: 'left lower 1', rect: rect(0, 40, 30, 8) },
+    { content: 'left lower 2', rect: rect(0, 50, 30, 8) },
+    { content: 'middle upper 1', rect: rect(50, 0, 30, 8) },
+    { content: 'middle upper 2', rect: rect(50, 10, 30, 8) },
+    { content: 'middle lower 1', rect: rect(50, 40, 30, 8) },
+    { content: 'middle lower 2', rect: rect(50, 50, 30, 8) },
+    { content: 'right upper 1', rect: rect(100, 0, 30, 8) },
+    { content: 'right upper 2', rect: rect(100, 10, 30, 8) },
+    { content: 'right lower 1', rect: rect(100, 40, 30, 8) },
+    { content: 'right lower 2', rect: rect(100, 50, 30, 8) },
+  ]);
+
+  assert.deepEqual(normalized.map(item => item.content), [
+    'left upper 1',
+    'left upper 2',
+    'left lower 1',
+    'left lower 2',
+    'middle upper 1',
+    'middle upper 2',
+    'middle lower 1',
+    'middle lower 2',
+    'right upper 1',
+    'right upper 2',
+    'right lower 1',
+    'right lower 2',
+  ]);
+});
+
 test('column detection reconnects a body lane after vertically overlapping margin captions', () => {
   const normalized = extraction.normalizeBasicPdfTextRects([
     { content: 'body intro', rect: rect(0, 0, 60, 8) },
@@ -528,6 +605,38 @@ test('column detection reconnects a body lane after vertically overlapping margi
     'caption 1',
     'caption 2',
     'caption 3',
+  ]);
+});
+
+test('figure regions stay ahead of a caption and split body lane despite source-order interleaving', () => {
+  const normalized = extraction.normalizeBasicPdfTextRects([
+    { content: 'chart left 1', rect: rect(140, 0, 10, 8) },
+    { content: 'chart left 2', rect: rect(140, 10, 10, 8) },
+    { content: 'body continuation 2', rect: rect(0, 100, 10, 8) },
+    { content: 'body continuation 3', rect: rect(0, 110, 10, 8) },
+    { content: 'chart middle 1', rect: rect(180, 0, 10, 8) },
+    { content: 'chart middle 2', rect: rect(180, 10, 10, 8) },
+    { content: 'Figure 1: chart caption', rect: rect(20, 40, 100, 8) },
+    { content: 'caption continuation', rect: rect(20, 50, 100, 8) },
+    { content: '1 Introduction', rect: rect(20, 70, 100, 8) },
+    { content: 'body opening 1', rect: rect(20, 90, 100, 8) },
+    { content: 'chart right 1', rect: rect(220, 0, 10, 8) },
+    { content: 'chart right 2', rect: rect(220, 10, 10, 8) },
+  ]);
+
+  assert.deepEqual(normalized.map(item => item.content), [
+    'chart left 1',
+    'chart left 2',
+    'chart middle 1',
+    'chart middle 2',
+    'chart right 1',
+    'chart right 2',
+    'Figure 1: chart caption',
+    'caption continuation',
+    '1 Introduction',
+    'body opening 1',
+    'body continuation 2',
+    'body continuation 3',
   ]);
 });
 

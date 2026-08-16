@@ -1,13 +1,19 @@
 import { test as base, expect, chromium, type Page, type BrowserContext } from '@playwright/test';
 import path from 'path';
 import fs from 'fs';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
 import { resolveVsCodeE2eTestDir } from './testDirectory.mjs';
 import { MULTIPAGE_PDF_FIXTURE, VIM_SANDBOXES } from './sandboxFixtures.mjs';
 
 const TEST_DIR = resolveVsCodeE2eTestDir();
 const WS_URL_FILE = path.resolve(TEST_DIR, 'ws-url');
 const DEBUG_PORT_FILE = path.resolve(TEST_DIR, 'debug-port');
+const CODE_CLI_FILE = path.resolve(TEST_DIR, 'code-cli');
+const USER_DATA_DIR = path.resolve(TEST_DIR, 'user-data');
+const EXTENSIONS_DIR = path.resolve(TEST_DIR, 'extensions');
 const SCREENSHOT_DIR = path.resolve(__dirname, '..', '..', '..', '..', 'e2e-report', 'vscode-e2e-screenshots');
+const execFileAsync = promisify(execFile);
 
 // Ensure screenshot directory exists
 if (!fs.existsSync(SCREENSHOT_DIR)) {
@@ -188,6 +194,7 @@ interface DevtoolsTarget {
 async function evaluateLlmWikiWebview<T>(
   docNeedle: string,
   body: string,
+  titleNeedle?: string,
 ): Promise<T> {
   const debugPort = Number(fs.readFileSync(DEBUG_PORT_FILE, 'utf-8').trim());
   const deadline = Date.now() + 15_000;
@@ -229,7 +236,8 @@ async function evaluateLlmWikiWebview<T>(
           };
         }
         const source = view.state.doc.toString();
-        if (!source.includes(${JSON.stringify(docNeedle)})) {
+        const title = doc.querySelector('input.cm-hybrid-document-title')?.value ?? '';
+        if (!source.includes(${JSON.stringify(docNeedle)}) || (${JSON.stringify(titleNeedle)} && !title.includes(${JSON.stringify(titleNeedle)}))) {
           return { ok: false, reason: 'doc mismatch', preview: source.slice(0, 120) };
         }
         return { ok: true, value: await (async () => {
@@ -337,6 +345,7 @@ async function cdpEvaluate<T>(wsUrl: string, expression: string): Promise<T> {
       reject(new Error(`CDP websocket error: ${String(event)}`));
     });
   });
+
 }
 
 function expectCloseTo(actual: number, expected: number, tolerance = 1): void {
@@ -344,6 +353,39 @@ function expectCloseTo(actual: number, expected: number, tolerance = 1): void {
 }
 
 test.describe('LLM Wiki — VS Code Extension E2E', () => {
+
+  test('the real VS Code CLI opens a missing Markdown path as an unsaved LLM Wiki document', async ({ vsCodePage: page }) => {
+    const filename = `cli-untitled-${Date.now()}.md`;
+    const target = path.resolve(TEST_DIR, 'fixtures', 'test-vault', 'notes', filename);
+    const content = '# CLI untitled markdown\n\nOnly explicit save creates this file.\n';
+    fs.rmSync(target, { force: true });
+
+    const codeCli = fs.readFileSync(CODE_CLI_FILE, 'utf-8').trim();
+    await execFileAsync(codeCli, [
+      '--reuse-window',
+      `--user-data-dir=${USER_DATA_DIR}`,
+      `--extensions-dir=${EXTENSIONS_DIR}`,
+      target,
+    ], {
+      env: { ...process.env, ELECTRON_NO_ATTACH_CONSOLE: '1' },
+      timeout: 30_000,
+    });
+
+    await expect.poll(() => fs.existsSync(target)).toBe(false);
+    await expect(page.locator('.tab.active, .tab[aria-selected="true"]').filter({ hasText: filename }).last()).toBeVisible({
+      timeout: 15_000,
+    });
+    await evaluateLlmWikiWebview('', `
+      view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: ${JSON.stringify(content)} } });
+    `, filename.replace(/\.md$/i, ''));
+    await page.waitForTimeout(450);
+    expect(fs.existsSync(target)).toBe(false);
+
+    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+S' : 'Control+S');
+    await expect.poll(() => fs.existsSync(target), { timeout: 15_000 }).toBe(true);
+    expect(fs.readFileSync(target, 'utf-8')).toBe(content);
+    fs.rmSync(target, { force: true });
+  });
 
   test('extension activates and VS Code loads', async ({ vsCodePage: page }) => {
     // Verify VS Code workbench is loaded
@@ -1352,6 +1394,40 @@ test.describe('LLM Wiki — VS Code Extension E2E', () => {
       lineNumber: 2,
       offset: 4,
     });
+  });
+
+  test('Vim normal-mode o keeps the inserted line until VS Code saves the document', async ({ vsCodePage: page }) => {
+    const fixture = VIM_SANDBOXES.openLinePersistence;
+    const initialNeedle = await openVimSandbox(page, fixture);
+    await ensureHostVimMode(page, initialNeedle, true);
+    const fixturePath = path.resolve(__dirname, 'fixtures', 'test-vault', fixture.relativePath);
+    const diskTextBefore = fs.readFileSync(fixturePath, 'utf8');
+
+    await evaluateLlmWikiWebview(initialNeedle, `
+      win.postMessage({
+        type: 'setText',
+        text: ['First line', 'Second line', 'Third line'].join('\\n'),
+      }, '*');
+      win.postMessage({ type: 'setVimMode', enabled: true }, '*');
+      await new Promise(resolve => setTimeout(resolve, 100));
+      const currentView = win.__cmView;
+      currentView.dispatch({
+        selection: { anchor: currentView.state.doc.line(2).from },
+        scrollIntoView: true,
+      });
+      currentView.focus();
+      return true;
+    `);
+
+    await page.keyboard.press('Escape');
+    await page.keyboard.press('o');
+    await page.waitForTimeout(600);
+
+    const editorText = await evaluateLlmWikiWebview<string>('Second line', `
+      return view.state.doc.toString();
+    `);
+    expect(editorText).toBe('First line\nSecond line\n\nThird line');
+    expect(fs.readFileSync(fixturePath, 'utf8')).toBe(diskTextBefore);
   });
 
   test('Vim host shortcut keeps the next edit anchored after delayed focus retries', async ({ vsCodePage: page }) => {

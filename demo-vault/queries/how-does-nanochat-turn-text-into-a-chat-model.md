@@ -4,8 +4,8 @@ title: "How does Nanochat turn text into a chat model?"
 description: "A concise answer that follows artifacts and objectives from documents to an assistant checkpoint."
 tags: ["language-models", "post-training", "pretraining", "project-nanochat"]
 status: "stable"
-generated: {"by": "codex/gpt-5.6", "at": "2026-08-13T00:00:00Z"}
-sources: [{"id": "dataset", "resource": "../projects/code/nanochat/nanochat/dataset.py", "title": "Nanochat dataset loader", "commit": "92d63d4e8bb4df75c3b71618f31ddde2378b2bcd"}, {"id": "tokenizer", "resource": "../projects/code/nanochat/nanochat/tokenizer.py", "title": "Nanochat tokenizer", "commit": "92d63d4e8bb4df75c3b71618f31ddde2378b2bcd"}, {"id": "base", "resource": "../projects/code/nanochat/scripts/base_train.py", "title": "Nanochat base training", "commit": "92d63d4e8bb4df75c3b71618f31ddde2378b2bcd"}, {"id": "sft", "resource": "../projects/code/nanochat/scripts/chat_sft.py", "title": "Nanochat supervised finetuning", "commit": "92d63d4e8bb4df75c3b71618f31ddde2378b2bcd"}]
+generated: { "by": "codex/gpt-5.6", "at": "2026-08-13T00:00:00Z" }
+sources: [{"id":"dataset","resource":"../projects/code/nanochat/nanochat/dataset.py","title":"Nanochat dataset loader","commit":"92d63d4e8bb4df75c3b71618f31ddde2378b2bcd"},{"id":"tokenizer","resource":"../projects/code/nanochat/nanochat/tokenizer.py","title":"Nanochat tokenizer","commit":"92d63d4e8bb4df75c3b71618f31ddde2378b2bcd"},{"id":"base","resource":"../projects/code/nanochat/scripts/base_train.py","title":"Nanochat base training","commit":"92d63d4e8bb4df75c3b71618f31ddde2378b2bcd"},{"id":"sft","resource":"../projects/code/nanochat/scripts/chat_sft.py","title":"Nanochat supervised finetuning","commit":"92d63d4e8bb4df75c3b71618f31ddde2378b2bcd"}]
 ---
 
 # How does Nanochat turn text into a chat model?
@@ -51,6 +51,9 @@ Hardware-dependent kernels and evaluation settings also affect results.
 - [Nanochat model family](../entities/nanochat-model-family.md)
 
 [^dataset]: Nanochat dataset loader
+
 [^tokenizer]: Nanochat tokenizer
+
 [^base]: Nanochat base training
+
 [^sft]: Nanochat supervised finetuning

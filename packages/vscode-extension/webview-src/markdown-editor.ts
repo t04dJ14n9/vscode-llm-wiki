@@ -20,6 +20,7 @@ import { search, searchKeymap } from '@codemirror/search';
 import { vim, Vim } from '@replit/codemirror-vim';
 import type { CodeMirrorV, InputStateInterface, MotionArgs, Pos, vimState } from '@replit/codemirror-vim';
 import {
+  type BlockInfo,
   Decoration,
   type DecorationSet,
   EditorView,
@@ -46,11 +47,13 @@ import { isCodeFenceClosing, parseCodeFenceOpening } from './markdownFences';
 import {
   inlineCodeSourceSpans,
   isEscapedAt,
+  markdownFootnoteIndex,
   markdownLinkSourceSpans,
   markdownReferenceDefinitions,
   markdownReferenceLinkSourceSpans,
   parseMarkdownLinkDestination,
 } from './markdownSpans';
+import type { InlineCodeSpan } from './markdownSpans';
 import { setextHeadingLevelForLines } from '../src/markdownHeadingSyntax';
 import { parseWikiLinkTarget } from '../src/wikiLinks';
 
@@ -73,10 +76,16 @@ class HlLinkWidget extends WidgetType {
     button.className = 'cm-llm-wiki-link';
     button.dataset.sourceFrom = String(this.sourceFrom);
     button.dataset.sourceTo = String(this.sourceTo);
+    button.dataset.linkPreviewTarget = this.uri;
+    button.dataset.linkPreviewLabel = this.label || this.uri;
+    button.ariaLabel = this.label || this.uri;
+    if (this.relativeToDocument) {
+      button.dataset.linkPreviewRelativeToDocument = 'true';
+    }
     if (isExternalUri(this.uri)) {
       button.classList.add('cm-external-link');
     }
-    button.textContent = this.label || this.uri;
+    appendLinkLabel(button, this.label || this.uri);
     button.title = this.uri;
     const stopEditorSelection = (event: Event) => {
       event.preventDefault();
@@ -107,6 +116,30 @@ class HlLinkWidget extends WidgetType {
   override ignoreEvent(): boolean {
     return true;
   }
+}
+
+/**
+ * Render an inline-code label without leaking its Markdown delimiters. A source
+ * link such as [`runs/speedrun.sh`](x) is one clickable widget, while the label
+ * retains the editor's code styling.
+ */
+function appendLinkLabel(button: HTMLElement, label: string): void {
+  const codeSpans = inlineCodeSourceSpans(0, label);
+  if (codeSpans.length === 0) {
+    button.textContent = label;
+    return;
+  }
+
+  let cursor = 0;
+  for (const span of codeSpans) {
+    if (span.from > cursor) button.append(label.slice(cursor, span.from));
+    const code = document.createElement('code');
+    code.className = 'cm-llm-wiki-link-code';
+    code.textContent = label.slice(span.contentFrom, span.contentTo);
+    button.appendChild(code);
+    cursor = span.to;
+  }
+  if (cursor < label.length) button.append(label.slice(cursor));
 }
 
 interface LearningAnnotation {
@@ -536,6 +569,19 @@ let applyingHostUpdate = false;
 let vimModeEnabled = false;
 let currentNotePath: string | undefined;
 let knownNotePaths: string[] = [];
+let linkPreviewSequence = 0;
+let activeLinkPreview: {
+  anchor: HTMLElement;
+  card: HTMLElement;
+  requestId?: string;
+  previousDescribedBy: string | null;
+} | undefined;
+interface AgentSurfaceCapabilities {
+  cursorAgent: boolean;
+}
+let agentCapabilities: AgentSurfaceCapabilities = {
+  cursorAgent: false,
+};
 let llmWikiVimMotionsInstalled = false;
 let llmWikiVimExCommandsInstalled = false;
 let llmWikiVimMarkdownKeysInstalled = false;
@@ -637,6 +683,43 @@ function handleVimNormalModeBeforeInput(event: InputEvent, editorView: EditorVie
   return true;
 }
 
+function handleRenderedSelectionBeforeInput(event: InputEvent, editorView: EditorView): boolean {
+  if (
+    vimModeEnabled
+    || event.inputType !== 'insertText'
+    || typeof event.data !== 'string'
+  ) {
+    return false;
+  }
+
+  const selection = editorView.state.selection.main;
+  if (selection.empty || editorView.state.selection.ranges.length !== 1) return false;
+
+  const domSelection = window.getSelection();
+  if (!domSelection?.anchorNode || !domSelection.focusNode) return false;
+
+  let domAnchor: number;
+  let domHead: number;
+  try {
+    domAnchor = editorView.posAtDOM(domSelection.anchorNode, domSelection.anchorOffset);
+    domHead = editorView.posAtDOM(domSelection.focusNode, domSelection.focusOffset);
+  } catch {
+    return false;
+  }
+  if (domAnchor === selection.anchor && domHead === selection.head) return false;
+
+  event.preventDefault();
+  event.stopPropagation();
+  event.stopImmediatePropagation();
+  editorView.dispatch({
+    changes: { from: selection.from, to: selection.to, insert: event.data },
+    selection: { anchor: selection.from + event.data.length },
+    scrollIntoView: true,
+    userEvent: 'input.type',
+  });
+  return true;
+}
+
 function isPlainBacktickKeydown(event: KeyboardEvent): boolean {
   if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return false;
   return event.key === '`' || event.code === 'Backquote';
@@ -667,7 +750,9 @@ const vimBacktickGuard = ViewPlugin.define((editorView: EditorView) => {
   };
   const beforeinput = (event: Event) => {
     if (event instanceof InputEvent) {
-      handleVimNormalModeBeforeInput(event, editorView);
+      if (!handleRenderedSelectionBeforeInput(event, editorView)) {
+        handleVimNormalModeBeforeInput(event, editorView);
+      }
     }
   };
   editorView.dom.addEventListener('keydown', keydown, true);
@@ -819,6 +904,47 @@ function firstNonWhitespaceColumn(text: string): number {
   return match?.index ?? text.length;
 }
 
+function sourceLineBounds(doc: Text, position: number): { from: number; to: number } {
+  const line = doc.lineAt(position);
+  return {
+    from: line.from,
+    // Gutter selection represents the logical source line, excluding its
+    // terminating newline so copy/agent handoff do not absorb the next row.
+    to: line.to,
+  };
+}
+
+function extendGutterSelection(
+  doc: Text,
+  main: SelectionRange,
+  clicked: { from: number; to: number },
+): SelectionRange {
+  const anchorLine = sourceLineBounds(doc, main.anchor);
+  return clicked.from >= anchorLine.from
+    ? EditorSelection.range(anchorLine.from, clicked.to)
+    : EditorSelection.range(anchorLine.to, clicked.from);
+}
+
+function selectSourceLineFromGutter(view: EditorView, block: BlockInfo, event: Event): boolean {
+  if (!(event instanceof MouseEvent) || event.button !== 0) return false;
+  // Modified gutter clicks belong to the host/editor's native affordances.
+  if (event.altKey || event.ctrlKey || event.metaKey) return false;
+  const { doc } = view.state;
+  if (!Number.isInteger(block.from) || block.from < 0 || block.from > doc.length) return false;
+
+  const clicked = sourceLineBounds(doc, block.from);
+  const selection = event.shiftKey
+    ? extendGutterSelection(doc, view.state.selection.main, clicked)
+    : EditorSelection.range(clicked.from, clicked.to);
+  event.preventDefault();
+  view.dispatch({
+    selection: EditorSelection.create([selection]),
+    userEvent: 'select.gutter',
+  });
+  view.focus();
+  return true;
+}
+
 function createView(text: string, title?: string): EditorView {
   const initialBodyPosition = initialBodyPositionAfterFrontmatter(text);
   const editorCaret = 'var(--vscode-editorCursor-foreground, var(--vscode-editor-foreground))';
@@ -830,7 +956,7 @@ function createView(text: string, title?: string): EditorView {
         ? undefined
         : EditorSelection.cursor(initialBodyPosition),
       extensions: [
-        lineNumbers(),
+        lineNumbers({ domEventHandlers: { mousedown: selectSourceLineFromGutter } }),
         foldGutter({ openText: '⌄', closedText: '›' }),
         vimBacktickGuard,
         vimModeCompartment.of(vimModeEnabled ? [vim()] : []),
@@ -905,6 +1031,40 @@ function createView(text: string, title?: string): EditorView {
             color: 'var(--vscode-descriptionForeground)',
             fontSize: '11px',
           },
+          '.llm-wiki-link-preview': {
+            position: 'fixed',
+            zIndex: '1100',
+            boxSizing: 'border-box',
+            width: 'min(380px, calc(100vw - 16px))',
+            maxHeight: 'min(260px, calc(100vh - 16px))',
+            padding: '10px 12px',
+            overflow: 'hidden',
+            border: '1px solid var(--vscode-editorHoverWidget-border, var(--vscode-widget-border, var(--vscode-panel-border)))',
+            borderRadius: '6px',
+            color: 'var(--vscode-editorHoverWidget-foreground, var(--vscode-editor-foreground))',
+            backgroundColor: 'var(--vscode-editorHoverWidget-background, var(--vscode-editorWidget-background, var(--vscode-editor-background)))',
+            boxShadow: '0 4px 14px var(--vscode-widget-shadow, rgba(0, 0, 0, .32))',
+            font: '13px/1.42 var(--vscode-font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif)',
+            overflowWrap: 'anywhere',
+            pointerEvents: 'none',
+            whiteSpace: 'normal',
+          },
+          '.llm-wiki-link-preview-title': {
+            fontWeight: '600',
+          },
+          '.llm-wiki-link-preview-path': {
+            marginTop: '3px',
+            color: 'var(--vscode-descriptionForeground)',
+            fontSize: '11px',
+          },
+          '.llm-wiki-link-preview-excerpt': {
+            display: '-webkit-box',
+            marginTop: '7px',
+            overflow: 'hidden',
+            color: 'var(--vscode-editorHoverWidget-foreground, var(--vscode-editor-foreground))',
+            WebkitBoxOrient: 'vertical',
+            WebkitLineClamp: '8',
+          },
         }),
         Prec.highest(keymap.of([
           { key: 'Ctrl-o', run: handleControlO, preventDefault: true },
@@ -934,6 +1094,12 @@ function createView(text: string, title?: string): EditorView {
         }),
         EditorView.lineWrapping,
         EditorView.updateListener.of(update => {
+          if (
+            update.docChanged
+            || (activeLinkPreview && !activeLinkPreview.anchor.isConnected)
+          ) {
+            dismissLinkPreview();
+          }
           if (update.docChanged && !applyingHostUpdate) {
             vscode.postMessage({ type: 'edit', text: update.state.doc.toString() });
           }
@@ -953,13 +1119,23 @@ function createView(text: string, title?: string): EditorView {
             },
             preventDefault: true,
           },
+          {
+            // The focused webview otherwise swallows the workbench close key.
+            // Ask the extension host to close this document's own tab so VS
+            // Code retains native dirty/untitled/Save As prompts.
+            key: 'Mod-w',
+            run: () => {
+              vscode.postMessage({ type: 'closeActiveEditor' });
+              return true;
+            },
+            preventDefault: true,
+          },
           { key: 'Mod-e', run: obsidianLikeCommands['markdown:toggle-preview']!, preventDefault: true },
           { key: 'Mod-o', run: consumeInVimMode, preventDefault: true },
           { key: 'Mod-b', run: runOutsideVimMode(obsidianLikeCommands['editor:toggle-bold']!), preventDefault: true },
           { key: 'Mod-i', run: runOutsideVimMode(obsidianLikeCommands['editor:toggle-italics']!), preventDefault: true },
           { key: 'Mod-Shift-x', run: runOutsideVimMode(obsidianLikeCommands['editor:toggle-strikethrough']!), preventDefault: true },
           { key: 'Mod-c', run: editorView => copySelectionToClipboard(editorView, postCopyTextToHost) },
-          { key: 'Mod-`', run: runOutsideVimMode(obsidianLikeCommands['editor:toggle-code']!), preventDefault: true },
           { key: 'Mod-k', run: runOutsideVimMode(obsidianLikeCommands['editor:insert-link']!), preventDefault: true },
           {
             key: 'Mod-l',
@@ -1062,7 +1238,10 @@ function createView(text: string, title?: string): EditorView {
             padding: '0',
             lineHeight: 'var(--llm-wiki-editor-line-height, 24px)',
             textAlign: 'right',
-            cursor: 'default',
+            cursor: 'pointer',
+          },
+          '.cm-lineNumbers .cm-gutterElement:hover': {
+            color: 'var(--vscode-editorLineNumber-activeForeground, var(--vscode-editor-foreground))',
           },
           '.cm-cursor, .cm-dropCursor': {
             borderLeftColor: editorCaret,
@@ -1292,6 +1471,17 @@ function createView(text: string, title?: string): EditorView {
             color: 'var(--vscode-textLink-activeForeground, var(--vscode-textLink-foreground))',
             backgroundColor: 'transparent',
           },
+          '.cm-llm-wiki-link-code': {
+            backgroundColor: 'var(--vscode-textCodeBlock-background, rgba(127,127,127,.18))',
+            borderRadius: '4px',
+            padding: '1px 5px',
+            // Keep inline-code labels readable without letting the link tint
+            // overpower the code token, while retaining a visible link cue.
+            color: 'color-mix(in srgb, var(--vscode-textLink-foreground) 78%, var(--vscode-editor-foreground) 22%)',
+            opacity: '0.88',
+            fontFamily: 'var(--llm-wiki-editor-font-family, var(--vscode-editor-font-family, ui-monospace, Menlo, monospace))',
+            fontSize: '1em',
+          },
           '.cm-llm-wiki-link:focus-visible, .cm-active-link-label:focus-visible': {
             outline: '1px solid var(--vscode-contrastBorder, var(--vscode-focusBorder, currentColor))',
             outlineOffset: '1px',
@@ -1353,7 +1543,8 @@ function createView(text: string, title?: string): EditorView {
             backgroundColor: 'var(--vscode-textCodeBlock-background, rgba(127,127,127,.18))',
             borderRadius: '4px',
             padding: '1px 5px',
-            color: 'var(--vscode-textPreformat-foreground, inherit)',
+            color: 'var(--vscode-editor-foreground, inherit)',
+            opacity: '0.88',
             fontFamily: 'var(--llm-wiki-editor-font-family, var(--vscode-editor-font-family, ui-monospace, Menlo, monospace))',
           },
           '.cm-active-math-delimiter': {
@@ -1429,6 +1620,7 @@ function createView(text: string, title?: string): EditorView {
       vscode.postMessage({ type: 'copyText', text });
     }
   });
+  setupLinkPreviewInteractions(editorView);
   editorView.dom.addEventListener('webkitmouseforcedown', event => {
     handleForceLookup(event as MouseEvent, editorView);
   }, true);
@@ -1687,17 +1879,30 @@ function showMarkdownSelectionContextMenu(editorView: EditorView, clientX: numbe
   const runCommand = (command: string) => {
     obsidianLikeCommands[command]?.(editorView);
   };
+  const cursorItems = agentCapabilities.cursorAgent
+    ? [
+        {
+          id: 'add-selection-to-cursor-chat',
+          label: `${cursorSelectionShortcutLabel()}  Add to Chat`,
+          onSelect: () => {
+            addSelectionToCursorChat(editorView);
+            editorView.focus();
+          },
+        },
+        { type: 'separator' as const },
+      ]
+    : [];
 
   showObsidianContextMenu({
     clientX,
     clientY,
     items: [
+      ...cursorItems,
       {
-        id: 'add-selection-to-cursor-chat',
-        label: `${cursorSelectionShortcutLabel()}  Add to Chat`,
+        id: 'copy-selection-for-agent',
+        label: 'Copy for Agent',
         onSelect: () => {
-          addSelectionToCursorChat(editorView);
-          editorView.focus();
+          copySelectionForAgent(editorView);
         },
       },
       { type: 'separator' },
@@ -1729,66 +1934,107 @@ function addSelectionToCursorChat(editorView: EditorView): boolean {
   return true;
 }
 
+function copySelectionForAgent(editorView: EditorView): boolean {
+  syncNativeSelectionToEditorSelection(editorView);
+  const selection = editorView.state.selection.main;
+  if (selection.empty) return false;
+  vscode.postMessage({ type: 'copySelectionForAgent' });
+  return true;
+}
+
 let cursorSelectionPrompt:
-  | { button: HTMLButtonElement; editorView: EditorView }
+  | {
+    container: HTMLDivElement;
+    editorView: EditorView;
+    capabilityKey: string;
+  }
   | undefined;
 
 function updateCursorSelectionPrompt(editorView: EditorView): void {
   const selection = editorView.state.selection.main;
   if (selection.empty || !editorView.dom.isConnected) {
-    cursorSelectionPrompt?.button.remove();
+    cursorSelectionPrompt?.container.remove();
     cursorSelectionPrompt = undefined;
     return;
   }
 
-  if (!cursorSelectionPrompt) {
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = 'llm-wiki-cursor-selection-prompt';
-    button.setAttribute('aria-label', `Add to Chat ${cursorSelectionShortcutLabel()}`);
-    const label = document.createElement('span');
-    label.className = 'add-to-chat-label';
-    label.textContent = 'Add to Chat';
-    const shortcut = document.createElement('span');
-    shortcut.className = 'add-to-chat-shortcut';
-    shortcut.textContent = cursorSelectionShortcutLabel();
-    button.append(label, shortcut);
-    button.addEventListener('pointerdown', event => {
+  const capabilityKey = String(agentCapabilities.cursorAgent);
+  if (!cursorSelectionPrompt || cursorSelectionPrompt.capabilityKey !== capabilityKey) {
+    cursorSelectionPrompt?.container.remove();
+    const container = document.createElement('div');
+    container.className = 'llm-wiki-cursor-selection-prompt';
+    container.setAttribute('role', 'toolbar');
+    container.setAttribute('aria-label', 'Selection actions');
+
+    if (agentCapabilities.cursorAgent) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'llm-wiki-cursor-selection-primary';
+      button.setAttribute('aria-label', `Add to Chat ${cursorSelectionShortcutLabel()}`);
+      const label = document.createElement('span');
+      label.className = 'add-to-chat-label';
+      label.textContent = 'Add to Chat';
+      const shortcut = document.createElement('span');
+      shortcut.className = 'add-to-chat-shortcut';
+      shortcut.textContent = cursorSelectionShortcutLabel();
+      button.append(label, shortcut);
+      button.addEventListener('pointerdown', event => {
+        event.preventDefault();
+        event.stopPropagation();
+      });
+      button.addEventListener('click', event => {
+        event.preventDefault();
+        event.stopPropagation();
+        const current = cursorSelectionPrompt?.editorView;
+        if (current) {
+          addSelectionToCursorChat(current);
+          current.focus();
+        }
+      });
+      container.appendChild(button);
+    }
+
+    const copyButton = document.createElement('button');
+    copyButton.type = 'button';
+    copyButton.className = 'llm-wiki-cursor-selection-copy';
+    copyButton.setAttribute('aria-label', 'Copy for Agent');
+    copyButton.textContent = 'Copy for Agent';
+    copyButton.addEventListener('pointerdown', event => {
       event.preventDefault();
       event.stopPropagation();
     });
-    button.addEventListener('click', event => {
+    copyButton.addEventListener('click', event => {
       event.preventDefault();
       event.stopPropagation();
       const current = cursorSelectionPrompt?.editorView;
-      if (current) {
-        addSelectionToCursorChat(current);
-        current.focus();
-      }
+      if (!current) return;
+      copySelectionForAgent(current);
     });
+    container.appendChild(copyButton);
     ensureCursorSelectionPromptStyles();
-    document.body.appendChild(button);
-    cursorSelectionPrompt = { button, editorView };
+    document.body.appendChild(container);
+    cursorSelectionPrompt = { container, editorView, capabilityKey };
   } else {
     cursorSelectionPrompt.editorView = editorView;
   }
 
-  const button = cursorSelectionPrompt.button;
-  button.style.visibility = 'hidden';
+  const container = cursorSelectionPrompt.container;
+  container.style.visibility = 'hidden';
   const forward = selection.head >= selection.anchor;
   const coords = editorView.coordsAtPos(selection.head, forward ? -1 : 1);
   if (!coords) {
-    button.remove();
+    container.remove();
     cursorSelectionPrompt = undefined;
     return;
   }
-  const box = button.getBoundingClientRect();
+  const box = container.getBoundingClientRect();
   const left = Math.max(8, Math.min(window.innerWidth - box.width - 8, coords.left - box.width / 2));
-  const above = coords.top - box.height - 8;
+  const lineHeight = Math.max(20, editorView.defaultLineHeight || 24);
+  const above = coords.top - box.height - lineHeight - 4;
   const top = above >= 8 ? above : Math.min(window.innerHeight - box.height - 8, coords.bottom + 8);
-  button.style.left = `${left}px`;
-  button.style.top = `${Math.max(8, top)}px`;
-  button.style.visibility = 'visible';
+  container.style.left = `${left}px`;
+  container.style.top = `${Math.max(8, top)}px`;
+  container.style.visibility = 'visible';
 }
 
 function cursorSelectionShortcutLabel(): string {
@@ -1805,8 +2051,11 @@ function ensureCursorSelectionPromptStyles(): void {
       z-index: 1000;
       box-sizing: border-box;
       display: inline-flex;
+      max-width: calc(100vw - 16px);
       align-items: center;
       gap: 6px;
+      overflow-x: auto;
+      overflow-y: hidden;
       height: 28px;
       padding: 2px 6px 2px 8px;
       border: 1px solid var(--vscode-commandCenter-inactiveBorder, var(--vscode-widget-border, rgba(127, 127, 127, .35)));
@@ -1815,15 +2064,39 @@ function ensureCursorSelectionPromptStyles(): void {
       color: var(--vscode-editorWidget-foreground, var(--vscode-editorHoverWidget-foreground));
       box-shadow: 0 6px 18px var(--vscode-inlineChat-shadow, var(--vscode-widget-shadow, rgba(0, 0, 0, .3)));
       font: 12px var(--vscode-font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
+      scrollbar-width: none;
       white-space: nowrap;
+    }
+    .llm-wiki-cursor-selection-prompt::-webkit-scrollbar {
+      display: none;
+    }
+    .llm-wiki-cursor-selection-prompt > button {
+      box-sizing: border-box;
+      flex: 0 0 auto;
+      min-height: 24px;
+      border: 0;
+      border-radius: 5px;
+      background: transparent;
+      color: inherit;
+      font: inherit;
       cursor: pointer;
     }
-    .llm-wiki-cursor-selection-prompt:hover {
+    .llm-wiki-cursor-selection-prompt > button:hover {
       background: var(--vscode-toolbar-hoverBackground, rgba(127, 127, 127, .16));
     }
-    .llm-wiki-cursor-selection-prompt:focus-visible {
+    .llm-wiki-cursor-selection-prompt > button:focus-visible {
       outline: 2px solid var(--vscode-focusBorder, #007fd4);
       outline-offset: 1px;
+    }
+    .llm-wiki-cursor-selection-prompt .llm-wiki-cursor-selection-primary {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 0 2px 0 3px;
+    }
+    .llm-wiki-cursor-selection-prompt .llm-wiki-cursor-selection-copy {
+      padding: 0 7px;
+      color: var(--vscode-descriptionForeground, inherit);
     }
     .llm-wiki-cursor-selection-prompt .add-to-chat-shortcut {
       display: inline-flex;
@@ -2517,6 +2790,260 @@ function findLinkTarget(
   return null;
 }
 
+interface LinkPreviewPayload {
+  kind: string;
+  target: string;
+  title: string;
+  path?: string;
+  page?: number;
+  excerpt?: string;
+}
+
+function setupLinkPreviewInteractions(editorView: EditorView): void {
+  const root = editorView.dom;
+  root.addEventListener('pointerover', event => {
+    const anchor = linkPreviewAnchor(event.target);
+    if (!anchor || linkPreviewContains(anchor, event.relatedTarget)) return;
+    showLinkPreview(editorView, anchor);
+  });
+  root.addEventListener('pointerout', event => {
+    const anchor = linkPreviewAnchor(event.target);
+    if (
+      !anchor
+      || linkPreviewContains(anchor, event.relatedTarget)
+      || activeLinkPreview?.anchor !== anchor
+    ) return;
+    dismissLinkPreview();
+  });
+  root.addEventListener('focusin', event => {
+    const anchor = linkPreviewAnchor(event.target);
+    if (anchor) showLinkPreview(editorView, anchor);
+  });
+  root.addEventListener('focusout', event => {
+    const anchor = linkPreviewAnchor(event.target);
+    if (
+      !anchor
+      || linkPreviewContains(anchor, event.relatedTarget)
+      || activeLinkPreview?.anchor !== anchor
+    ) return;
+    dismissLinkPreview();
+  });
+  root.addEventListener('pointerdown', event => {
+    if (!footnoteAnchor(event.target)) return;
+    event.preventDefault();
+    event.stopPropagation();
+  }, true);
+  root.addEventListener('click', event => {
+    const anchor = footnoteAnchor(event.target);
+    if (!anchor) return;
+    event.preventDefault();
+    event.stopPropagation();
+    navigateFootnote(editorView, anchor);
+  });
+  root.addEventListener('keydown', event => {
+    const anchor = footnoteAnchor(event.target);
+    if (!anchor || (event.key !== 'Enter' && event.key !== ' ')) return;
+    event.preventDefault();
+    event.stopPropagation();
+    navigateFootnote(editorView, anchor);
+  }, true);
+  document.addEventListener('keydown', event => {
+    if (event.key !== 'Escape' || !activeLinkPreview) return;
+    event.preventDefault();
+    event.stopPropagation();
+    dismissLinkPreview();
+  }, true);
+}
+
+function linkPreviewContains(anchor: HTMLElement, target: EventTarget | null): boolean {
+  return target instanceof Node && anchor.contains(target);
+}
+
+function linkPreviewAnchor(target: EventTarget | null): HTMLElement | null {
+  if (!(target instanceof Element)) return null;
+  return target.closest<HTMLElement>(
+    '[data-link-preview-target], [data-footnote-id][data-footnote-kind]',
+  );
+}
+
+function footnoteAnchor(target: EventTarget | null): HTMLElement | null {
+  const anchor = linkPreviewAnchor(target);
+  return anchor?.dataset.footnoteId && anchor.dataset.footnoteKind ? anchor : null;
+}
+
+function showLinkPreview(editorView: EditorView, anchor: HTMLElement): void {
+  dismissLinkPreview();
+  const footnoteId = anchor.dataset.footnoteId;
+  const target = anchor.dataset.linkPreviewTarget;
+  if (!footnoteId && !target) return;
+
+  const previousDescribedBy = anchor.getAttribute('aria-describedby');
+  const card = document.createElement('div');
+  card.className = 'llm-wiki-link-preview';
+  card.id = `llm-wiki-link-preview-${++linkPreviewSequence}`;
+  card.setAttribute('role', 'tooltip');
+  anchor.setAttribute(
+    'aria-describedby',
+    [previousDescribedBy, card.id].filter(Boolean).join(' '),
+  );
+
+  let requestId: string | undefined;
+  if (footnoteId) {
+    const definition = findFootnoteDefinition(editorView.state.doc, footnoteId);
+    populateLinkPreview(card, {
+      kind: 'footnote',
+      target: `[^${footnoteId}]`,
+      title: `Footnote ${footnoteId}`,
+      path: 'This document',
+      excerpt: definition?.text || 'No matching footnote definition.',
+    });
+  } else {
+    const label = anchor.dataset.linkPreviewLabel?.trim() || target!;
+    populateLinkPreview(card, {
+      kind: 'unavailable',
+      target: target!,
+      title: label,
+      path: target!,
+    });
+    requestId = `link-preview-${linkPreviewSequence}`;
+  }
+
+  editorView.dom.appendChild(card);
+  activeLinkPreview = { anchor, card, requestId, previousDescribedBy };
+  positionLinkPreview(anchor, card);
+
+  if (target && requestId) {
+    vscode.postMessage({
+      type: 'resolveLinkPreview',
+      requestId,
+      uri: target,
+      ...(anchor.dataset.linkPreviewRelativeToDocument === 'true'
+        ? { relativeToDocument: true }
+        : {}),
+    });
+  }
+}
+
+function applyResolvedLinkPreview(message: unknown): void {
+  if (!message || typeof message !== 'object') return;
+  const raw = message as Record<string, unknown>;
+  const active = activeLinkPreview;
+  if (!active) return;
+  if (!active.anchor.isConnected) {
+    dismissLinkPreview();
+    return;
+  }
+  if (
+    typeof raw.requestId !== 'string'
+    || raw.requestId !== active.requestId
+  ) return;
+  const preview = normalizedLinkPreview(raw.preview);
+  if (!preview) return;
+  populateLinkPreview(active.card, preview);
+  positionLinkPreview(active.anchor, active.card);
+}
+
+function normalizedLinkPreview(value: unknown): LinkPreviewPayload | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const raw = value as Record<string, unknown>;
+  if (
+    typeof raw.kind !== 'string'
+    || typeof raw.target !== 'string'
+    || typeof raw.title !== 'string'
+  ) return null;
+  return {
+    kind: raw.kind,
+    target: raw.target.slice(0, 2048),
+    title: raw.title.slice(0, 512),
+    ...(typeof raw.path === 'string' ? { path: raw.path.slice(0, 1024) } : {}),
+    ...(Number.isSafeInteger(raw.page) && Number(raw.page) > 0
+      ? { page: Number(raw.page) }
+      : {}),
+    ...(typeof raw.excerpt === 'string' ? { excerpt: raw.excerpt.slice(0, 480) } : {}),
+  };
+}
+
+function populateLinkPreview(card: HTMLElement, preview: LinkPreviewPayload): void {
+  card.replaceChildren();
+  const title = document.createElement('div');
+  title.className = 'llm-wiki-link-preview-title';
+  title.textContent = preview.title;
+  card.appendChild(title);
+  const pathLabel = preview.path
+    ?? (preview.page ? `Page ${preview.page}` : preview.target);
+  if (pathLabel) {
+    const pathElement = document.createElement('div');
+    pathElement.className = 'llm-wiki-link-preview-path';
+    pathElement.textContent = preview.page && preview.path
+      ? `${preview.path} · Page ${preview.page}`
+      : pathLabel;
+    card.appendChild(pathElement);
+  }
+  if (preview.excerpt) {
+    const excerpt = document.createElement('div');
+    excerpt.className = 'llm-wiki-link-preview-excerpt';
+    excerpt.textContent = preview.excerpt.slice(0, 480);
+    card.appendChild(excerpt);
+  }
+}
+
+function positionLinkPreview(anchor: HTMLElement, card: HTMLElement): void {
+  const anchorRect = anchor.getBoundingClientRect();
+  const margin = 8;
+  const width = card.offsetWidth || Math.min(380, window.innerWidth - margin * 2);
+  const height = card.offsetHeight || 80;
+  const left = Math.min(
+    Math.max(margin, anchorRect.left),
+    Math.max(margin, window.innerWidth - width - margin),
+  );
+  const below = anchorRect.bottom + margin;
+  const top = below + height <= window.innerHeight - margin
+    ? below
+    : Math.max(margin, anchorRect.top - height - margin);
+  card.style.left = `${Math.round(left)}px`;
+  card.style.top = `${Math.round(top)}px`;
+}
+
+function dismissLinkPreview(): void {
+  const active = activeLinkPreview;
+  if (!active) return;
+  activeLinkPreview = undefined;
+  active.card.remove();
+  if (!active.anchor.isConnected) return;
+  if (active.previousDescribedBy) {
+    active.anchor.setAttribute('aria-describedby', active.previousDescribedBy);
+  } else {
+    active.anchor.removeAttribute('aria-describedby');
+  }
+}
+
+function navigateFootnote(editorView: EditorView, anchor: HTMLElement): void {
+  const id = anchor.dataset.footnoteId;
+  const kind = anchor.dataset.footnoteKind;
+  if (!id || (kind !== 'reference' && kind !== 'definition')) return;
+  const destination = kind === 'reference'
+    ? findFootnoteDefinition(editorView.state.doc, id)?.position
+    : findFirstFootnoteReference(editorView.state.doc, id);
+  if (destination === undefined) return;
+  dismissLinkPreview();
+  editorView.dispatch({
+    selection: { anchor: destination },
+    scrollIntoView: true,
+  });
+  editorView.focus();
+}
+
+function findFootnoteDefinition(
+  doc: Text,
+  id: string,
+): { position: number; text: string } | undefined {
+  return markdownFootnoteIndex(doc.toString()).definitions.get(id);
+}
+
+function findFirstFootnoteReference(doc: Text, id: string): number | undefined {
+  return markdownFootnoteIndex(doc.toString()).references.get(id)?.[0];
+}
+
 window.addEventListener('message', event => {
   const message = event.data;
   switch (message?.type) {
@@ -2544,15 +3071,25 @@ window.addEventListener('message', event => {
         return;
       }
       applyingHostUpdate = true;
+      const scrollPosition = {
+        left: view.scrollDOM.scrollLeft,
+        top: view.scrollDOM.scrollTop,
+      };
       const selection = preserveSelectionByLineAndColumn(view.state, message.text);
       view.dispatch({
         changes: { from: 0, to: current.length, insert: message.text },
         selection,
+        scrollIntoView: false,
         effects: documentTitle === undefined ? undefined : setDocumentTitle.of(documentTitle),
       });
+      restoreEditorScrollPosition(view, scrollPosition);
       applyingHostUpdate = false;
       break;
     }
+
+    case 'linkPreview':
+      applyResolvedLinkPreview(message);
+      break;
 
     case 'insertText': {
       const requestId = typeof message.requestId === 'string' ? message.requestId : undefined;
@@ -2628,6 +3165,11 @@ window.addEventListener('message', event => {
       applyVimMode(view, message.enabled);
       break;
 
+    case 'agentHandoffCapabilities':
+      agentCapabilities = normalizeAgentSurfaceCapabilities(message);
+      if (view) updateCursorSelectionPrompt(view);
+      break;
+
     case 'revealPosition':
       if (!view) return;
       if (typeof message.anchor !== 'number' || typeof message.head !== 'number') return;
@@ -2685,6 +3227,16 @@ function normalizeLearningAnnotations(value: unknown): LearningAnnotation[] {
   });
 }
 
+function normalizeAgentSurfaceCapabilities(value: unknown): AgentSurfaceCapabilities {
+  if (!value || typeof value !== 'object') {
+    return { cursorAgent: false };
+  }
+  const raw = value as { cursorAgent?: unknown };
+  return {
+    cursorAgent: raw.cursorAgent === true,
+  };
+}
+
 function nonNegativeInteger(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
     ? value
@@ -2722,6 +3274,19 @@ function preserveSelectionByLineAndColumn(state: EditorState, nextText: string):
     head: documentPositionToLineColumn(state.doc, range.head),
   }));
   return restoreSelectionByLineAndColumn(nextText, ranges, state.selection.mainIndex);
+}
+
+function restoreEditorScrollPosition(
+  editorView: EditorView,
+  position: { left: number; top: number },
+): void {
+  const restore = () => {
+    if (!editorView.dom.isConnected) return;
+    editorView.scrollDOM.scrollLeft = position.left;
+    editorView.scrollDOM.scrollTop = position.top;
+  };
+  restore();
+  requestAnimationFrame(restore);
 }
 
 function documentPositionToLineColumn(doc: Text, position: number): LineColumn {
@@ -2844,12 +3409,16 @@ function collectLineDecorations(
   referenceDefinitions: ReturnType<typeof markdownReferenceDefinitions>,
   decorations: Range<Decoration>[],
 ): void {
-  const occupied: { from: number; to: number }[] = inlineCodeSourceSpans(lineFrom, text);
+  const inlineCodeSpans = inlineCodeSourceSpans(lineFrom, text);
+  const occupied: { from: number; to: number }[] = [...inlineCodeSpans];
   let match: RegExpExecArray | null;
   for (const link of markdownLinkSourceSpans(lineFrom, text)) {
     const sourceFrom = link.from;
     const sourceTo = link.to;
-    if (occupied.some(span => sourceFrom < span.to && sourceTo > span.from)) continue;
+    if (isLinkInsideInlineCode(link, inlineCodeSpans)) continue;
+    if (occupied.some(span => (
+      sourceFrom < span.to && sourceTo > span.from && !isSpanInsideLinkLabel(span, link)
+    ))) continue;
     if (link.image) {
       occupied.push({ from: sourceFrom, to: sourceTo });
       continue;
@@ -2871,7 +3440,10 @@ function collectLineDecorations(
   for (const link of markdownReferenceLinkSourceSpans(lineFrom, text, referenceDefinitions)) {
     const sourceFrom = link.from;
     const sourceTo = link.to;
-    if (occupied.some(span => sourceFrom < span.to && sourceTo > span.from)) continue;
+    if (isLinkInsideInlineCode(link, inlineCodeSpans)) continue;
+    if (occupied.some(span => (
+      sourceFrom < span.to && sourceTo > span.from && !isSpanInsideLinkLabel(span, link)
+    ))) continue;
     if (link.image) {
       occupied.push({ from: sourceFrom, to: sourceTo });
       continue;
@@ -2918,6 +3490,22 @@ function collectLineDecorations(
   }
 }
 
+/** True when the whole link is literal text inside an inline-code run. */
+function isLinkInsideInlineCode(
+  link: { from: number; to: number },
+  inlineCodeSpans: InlineCodeSpan[],
+): boolean {
+  return inlineCodeSpans.some(span => span.contentFrom <= link.from && span.contentTo >= link.to);
+}
+
+/** True when an inline-code reservation is the visible label of this link. */
+function isSpanInsideLinkLabel(
+  span: { from: number; to: number },
+  link: { labelFrom: number; labelTo: number },
+): boolean {
+  return span.from >= link.labelFrom && span.to <= link.labelTo;
+}
+
 function collectActiveLineDecorations(
   lineFrom: number,
   text: string,
@@ -2937,7 +3525,7 @@ function collectActiveLineDecorations(
     if (!uri) continue;
     const sourceFrom = link.from;
     const sourceTo = link.to;
-    if (inlineCodeSpans.some(span => sourceFrom < span.to && sourceTo > span.from)) continue;
+    if (isLinkInsideInlineCode(link, inlineCodeSpans)) continue;
     const from = link.labelFrom;
     const to = link.labelTo;
     decorations.push((isExternalUri(uri) ? activeExternalLinkLabelMark : activeLinkLabelMark).range(from, to));
@@ -2961,7 +3549,7 @@ function collectActiveLineDecorations(
     if (link.image) continue;
     const sourceFrom = link.from;
     const sourceTo = link.to;
-    if (inlineCodeSpans.some(span => sourceFrom < span.to && sourceTo > span.from)) continue;
+    if (isLinkInsideInlineCode(link, inlineCodeSpans)) continue;
     const from = link.labelFrom;
     const to = link.labelTo;
     decorations.push((isExternalUri(link.definition.destination) ? activeExternalLinkLabelMark : activeLinkLabelMark).range(from, to));

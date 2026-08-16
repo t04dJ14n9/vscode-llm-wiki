@@ -52,7 +52,7 @@
             "filenamePattern": "*.md"
           }
         ],
-        "priority": "default"
+        "priority": "option"
       },
       {
         "viewType": "llm-wiki.anchorFile",
@@ -79,15 +79,19 @@
         "title": "LLM Wiki: Open In Markdown Editor"
       },
       {
-        "command": "llm-wiki.addSelectionToContext",
-        "title": "LLM Wiki: Send Selection to Agent…",
-        "icon": "$(selection)"
+        "command": "llm-wiki.copySelectionForAgent",
+        "title": "LLM Wiki: Copy for Agent",
+        "icon": "$(copy)"
       },
       {
         "command": "llm-wiki.addSelectionToChat",
         "title": "LLM Wiki: Add to Chat",
         "icon": "$(comment-discussion)",
         "enablement": "llmWikiHostIsCursor"
+      },
+      {
+        "command": "llm-wiki.focusMarkdownEditor",
+        "title": "LLM Wiki: Focus Markdown Editor"
       },
       {
         "command": "llm-wiki.addCursorBrowserSelectionToChat",
@@ -163,6 +167,10 @@
         "icon": "$(split-horizontal)"
       },
       {
+        "command": "llm-wiki.togglePdfToolbar",
+        "title": "LLM Wiki: Toggle PDF Toolbar"
+      },
+      {
         "command": "llm-wiki.openPdfMarkdownColumns",
         "title": "LLM Wiki: Open PDF and Markdown Columns",
         "icon": "$(layout-sidebar-right)"
@@ -195,12 +203,6 @@
       },
       {
         "command": "llm-wiki.consumeVimHostShortcut",
-        "key": "ctrl+`",
-        "mac": "cmd+`",
-        "when": "activeCustomEditorId == 'llm-wiki.markdownEditor' && llmWikiMarkdownVimMode"
-      },
-      {
-        "command": "llm-wiki.consumeVimHostShortcut",
         "key": "ctrl+k",
         "mac": "cmd+k",
         "when": "activeCustomEditorId == 'llm-wiki.markdownEditor' && llmWikiMarkdownVimMode"
@@ -210,6 +212,11 @@
         "key": "ctrl+l",
         "mac": "cmd+l",
         "when": "llmWikiHostIsCursor && ((activeCustomEditorId == 'llm-wiki.markdownEditor' && llmWikiMarkdownHasSelection) || (llmWikiPdfOpen && llmWikiPdfHasSelection))"
+      },
+      {
+        "command": "llm-wiki.focusMarkdownEditor",
+        "key": "escape",
+        "when": "llmWikiAgentHandoffActive && activeCustomEditorId == 'llm-wiki.markdownEditor'"
       },
       {
         "command": "llm-wiki.consumeVimHostShortcut",
@@ -269,13 +276,13 @@
     "menus": {
       "editor/title": [
         {
-          "command": "llm-wiki.addSelectionToContext",
-          "when": "activeCustomEditorId == 'llm-wiki.markdownEditor'",
+          "command": "llm-wiki.copySelectionForAgent",
+          "when": "activeCustomEditorId == 'llm-wiki.markdownEditor' && llmWikiMarkdownHasSelection",
           "group": "navigation@1"
         },
         {
           "command": "llm-wiki.addSelectionToChat",
-          "when": "llmWikiHostIsCursor && activeCustomEditorId == 'llm-wiki.markdownEditor'",
+          "when": "llmWikiHostIsCursor && activeCustomEditorId == 'llm-wiki.markdownEditor' && llmWikiMarkdownHasSelection",
           "group": "navigation@2"
         },
         {
@@ -319,8 +326,8 @@
           "group": "navigation@8"
         },
         {
-          "command": "llm-wiki.addSelectionToContext",
-          "when": "llmWikiPdfOpen && llmWikiPdfHasSelection",
+          "command": "llm-wiki.copySelectionForAgent",
+          "when": "llmWikiPdfOpen && llmWikiPdfHasAgentClipboardSelection",
           "group": "navigation@9"
         },
         {
@@ -330,6 +337,11 @@
         }
       ],
       "editor/context": [
+        {
+          "command": "llm-wiki.copySelectionForAgent",
+          "when": "editorLangId == markdown && editorHasSelection",
+          "group": "navigation@9"
+        },
         {
           "command": "llm-wiki.addSelectionToChat",
           "when": "llmWikiHostIsCursor && editorLangId == markdown && editorHasSelection",
@@ -376,8 +388,7 @@
     },
     "configurationDefaults": {
       "workbench.editorAssociations": {
-        "*.pdf": "llm-wiki.pdfViewer",
-        "*.md": "llm-wiki.markdownEditor"
+        "*.pdf": "llm-wiki.pdfViewer"
       }
     }
   },
@@ -399,12 +410,13 @@
     "@codemirror/search": "^6.7.0",
     "@codemirror/state": "^6.6.0",
     "@codemirror/view": "^6.43.0",
+    "@lezer/highlight": "^1.2.3",
     "@llm-wiki/core": "workspace:*",
     "@llm-wiki/pdf-editor": "workspace:*",
-    "@lezer/highlight": "^1.2.3",
     "@mathjax/src": "^4.1.2",
     "@replit/codemirror-vim": "^6.3.0",
     "dompurify": "^3.4.7",
+    "markdownlint": "^0.40.0",
     "mermaid": "11.4.1",
     "prismjs": "1.29.0",
     "turndown": "^7.2.4",

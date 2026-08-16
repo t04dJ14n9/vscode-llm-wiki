@@ -28,6 +28,14 @@ import type {
 } from './pdfDiscussionProtocol';
 import type { LearningNoteResult, LearningNoteStore } from './learningNoteStore';
 import type { SelectionContext } from './selectionContext';
+import {
+  createPdfAgentClipboardContext,
+  formatPdfAgentClipboardImageReference,
+  pdfAgentClipboardSelectionKey,
+  type PdfAgentClipboardContext,
+  type PdfAgentClipboardSelection,
+} from './agentClipboard';
+import { persistPdfAgentClipboardImage } from './pdfAgentClipboardImage';
 
 interface PdfSelectionAnchor {
   id?: string;
@@ -45,7 +53,6 @@ interface PdfSelectionAnchor {
 
 type PdfSelectionAction =
   | 'addToCursorChat'
-  | 'sendToAgent'
   | 'copyLink'
   | 'copyRectEmbed';
 
@@ -73,12 +80,11 @@ interface ActivePdfWebview {
   pdfUri: vscode.Uri;
   ready: boolean;
   pendingAnchor?: PdfAnchorNavigation;
-  pendingSelectionAgentRequests?: Map<string, {
-    agentId: ExternalAgentId;
-    selectionKey: string;
-  }>;
+  agentClipboardContext?: PdfAgentClipboardContext;
   selection?: PdfSelectionAnchor;
   outline?: PdfOutlineEntry[];
+  outlineInferred?: boolean;
+  outlineLoading?: boolean;
   postMessage(message: unknown): void;
 }
 
@@ -101,6 +107,13 @@ interface PdfFileFingerprint {
   birthtimeNs: bigint;
 }
 
+export type PdfToolbarDock = 'top' | 'left';
+
+export interface PdfToolbarPreference {
+  dock: PdfToolbarDock;
+  hidden: boolean;
+}
+
 export interface PdfEditorProviderOptions {
   vaultRoot?: string;
   documentRoot?: string;
@@ -113,11 +126,13 @@ export interface PdfEditorProviderOptions {
 
 export const ADD_SELECTION_TO_CURSOR_CHAT_COMMAND =
   'llm-wiki.addSelectionToCursorChat';
-export const ADD_SELECTION_TO_AGENT_COMMAND =
-  'llm-wiki.addSelectionToAgent';
 
 const PDF_DISCUSSION_CONSENT_KEY = 'llmWiki.pdf.askPdfConsent';
-const MAX_PENDING_SELECTION_AGENT_REQUESTS = 32;
+const PDF_TOOLBAR_PREFERENCE_KEY = 'llmWiki.pdf.toolbarPreference.v1';
+const DEFAULT_PDF_TOOLBAR_PREFERENCE: PdfToolbarPreference = {
+  dock: 'top',
+  hidden: false,
+};
 
 export interface OpenCodexThreadResult {
   threadId: string;
@@ -158,6 +173,7 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
   private readonly learningNoteStore?: LearningNoteStore;
   private readonly agentCapabilities: () => AgentSurfaceCapabilities;
   private readonly pdfOutlineListeners = new Set<(uri: vscode.Uri) => unknown>();
+  private pdfToolbarPreference: PdfToolbarPreference;
   readonly onDidChangePdfOutline: vscode.Event<vscode.Uri> = (listener, thisArgs, disposables) => {
     const wrapped = thisArgs
       ? (uri: vscode.Uri) => listener.call(thisArgs, uri)
@@ -170,7 +186,6 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
     return disposable;
   };
   private activeKey: string | undefined;
-  private selectionAgentRequestSequence = 0;
 
   constructor(context: vscode.ExtensionContext, options: PdfEditorProviderOptions);
   constructor(
@@ -197,6 +212,9 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
       cursorAgent: false,
       providers: [],
     }));
+    this.pdfToolbarPreference = normalizePdfToolbarPreference(
+      context.globalState?.get(PDF_TOOLBAR_PREFERENCE_KEY),
+    );
     if (options.onDidChangeAgentCapabilities) {
       context.subscriptions.push(
         options.onDidChangeAgentCapabilities(
@@ -229,7 +247,43 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
   }
 
   getPdfOutline(uri: vscode.Uri): readonly PdfOutlineEntry[] | undefined {
-    return this.webviews.get(uri.toString())?.outline;
+    const active = this.webviews.get(uri.toString());
+    return active?.outlineLoading ? undefined : active?.outline;
+  }
+
+  isPdfOutlineInferred(uri: vscode.Uri): boolean {
+    const active = this.webviews.get(uri.toString());
+    return active?.outlineLoading !== true
+      && active?.outlineInferred === true
+      && Boolean(active.outline?.length);
+  }
+
+  getPdfToolbarPreference(): PdfToolbarPreference {
+    return { ...this.pdfToolbarPreference };
+  }
+
+  async setPdfToolbarPreference(value: unknown): Promise<PdfToolbarPreference> {
+    if (!validPdfToolbarPreference(value)) return this.getPdfToolbarPreference();
+    const next = normalizePdfToolbarPreference(value, this.pdfToolbarPreference);
+    if (
+      next.dock === this.pdfToolbarPreference.dock
+      && next.hidden === this.pdfToolbarPreference.hidden
+    ) return this.getPdfToolbarPreference();
+    this.pdfToolbarPreference = next;
+    this.broadcastPdfToolbarPreference();
+    try {
+      await this.context.globalState?.update(PDF_TOOLBAR_PREFERENCE_KEY, next);
+    } catch {
+      // The live preference remains usable even when persistence is unavailable.
+    }
+    return this.getPdfToolbarPreference();
+  }
+
+  async togglePdfToolbar(): Promise<PdfToolbarPreference> {
+    return this.setPdfToolbarPreference({
+      dock: this.pdfToolbarPreference.dock,
+      hidden: !this.pdfToolbarPreference.hidden,
+    });
   }
 
   async revealPdfOutlineDestination(
@@ -269,19 +323,11 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
     active.postMessage({ type: 'addSelectionToCursorChat' });
   }
 
-  async addSelectionToAgent(agentId: ExternalAgentId): Promise<void> {
+  async copySelectionForAgent(): Promise<boolean> {
     const active = this.getActiveWebview();
-    if (!active || !isExternalAgentId(agentId)) return;
-    const selectionKey = pdfSelectionAnchorKey(active.selection);
-    if (!selectionKey) return;
-    const requestId = `pdf-agent-${++this.selectionAgentRequestSequence}`;
-    const requests = active.pendingSelectionAgentRequests ??= new Map();
-    if (requests.size >= MAX_PENDING_SELECTION_AGENT_REQUESTS) {
-      const oldestRequestId = requests.keys().next().value;
-      if (oldestRequestId !== undefined) requests.delete(oldestRequestId);
-    }
-    requests.set(requestId, { agentId, selectionKey });
-    active.postMessage({ type: 'captureSelectionForAgent', requestId });
+    if (!active) return false;
+    active.postMessage({ type: 'copySelectionForAgent' });
+    return true;
   }
 
   async getActiveSelectionContext(): Promise<SelectionContext | undefined> {
@@ -370,6 +416,11 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
       this.activeKey = key;
       await vscode.commands.executeCommand('setContext', 'llmWikiPdfOpen', true);
       await vscode.commands.executeCommand('setContext', 'llmWikiPdfHasSelection', false);
+      await vscode.commands.executeCommand(
+        'setContext',
+        'llmWikiPdfHasAgentClipboardSelection',
+        false,
+      );
     }
 
     webview.onDidReceiveMessage(async (message: any) => {
@@ -382,41 +433,20 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
         case 'ready': {
           active.ready = true;
           this.postAgentHandoffCapabilities(webview);
+          this.postPdfToolbarPreference(active);
           await this.loadPdf(webview, pdfUri);
           this.flushPendingAnchor(active);
           break;
         }
+        case 'pdfToolbarPreferenceChanged':
+          await this.setPdfToolbarPreference(message.preference);
+          break;
         case 'selectionAction': {
-          if (Object.prototype.hasOwnProperty.call(message, 'requestId')) {
-            const requestId = typeof message.requestId === 'string' && message.requestId.length > 0
-              ? message.requestId
-              : undefined;
-            if (!requestId) break;
-            const pendingRequest = active.pendingSelectionAgentRequests?.get(requestId);
-            active.pendingSelectionAgentRequests?.delete(requestId);
-            if (
-              !pendingRequest
-              || message.action !== 'addToCursorChat'
-              || pendingRequest.selectionKey !== pdfSelectionAnchorKey(message.anchor)
-            ) {
-              break;
-            }
-            await this.handleSelectionAction(
-              pdfUri,
-              'sendToAgent',
-              message.anchor,
-              message.snapshotPngBase64,
-              pendingRequest.agentId,
-              message.cropCaptureFailed,
-            );
-            break;
-          }
           await this.handleSelectionAction(
             pdfUri,
             message.action,
             message.anchor,
             message.snapshotPngBase64,
-            message.agentId,
             message.cropCaptureFailed,
           );
           break;
@@ -424,6 +454,47 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
         case 'copyText': {
           const text = normalizePdfMessageText(message.text);
           if (text) await vscode.env.clipboard.writeText(text);
+          break;
+        }
+        case 'agentClipboardResult': {
+          const context = active.agentClipboardContext;
+          if (
+            !context
+            || typeof message.selectionKey !== 'string'
+            || message.selectionKey !== context.selectionKey
+          ) break;
+          if (message.status === 'image-reference') {
+            const png = decodeCursorCropPngBase64(message.pngBase64);
+            if (!png || !this.vaultRoot) {
+              await this.copyPdfAgentClipboardTextFallback(context);
+              break;
+            }
+            try {
+              const image = persistPdfAgentClipboardImage({
+                rootPath: this.vaultRoot,
+                sourceIdentity: active.pdfUri.toString(),
+                selectionKey: context.selectionKey,
+                bytes: png,
+              });
+              const plainText = formatPdfAgentClipboardImageReference(
+                context.plainText,
+                image.relativePath,
+              );
+              await vscode.env.clipboard.writeText(plainText);
+              vscode.window.showInformationMessage(
+                'Selection text and image reference copied for agent.',
+              );
+            } catch {
+              await this.copyPdfAgentClipboardTextFallback(context);
+            }
+            break;
+          }
+          if (
+            message.status !== 'text-fallback'
+            || typeof message.plainText !== 'string'
+            || message.plainText !== context.plainText
+          ) break;
+          await this.copyPdfAgentClipboardTextFallback(context);
           break;
         }
         case 'lookupSelection':
@@ -438,10 +509,16 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
           break;
         }
         case 'selectionChanged':
-          await this.updateActiveSelection(key, message.anchor);
+          await this.updateActiveSelection(key, message.anchor, message.clipboardSelection);
           break;
         case 'pdfOutline':
-          active.outline = normalizePdfOutlineEntries(message.items);
+          active.outlineLoading = message.loading === true;
+          active.outline = active.outlineLoading
+            ? undefined
+            : normalizePdfOutlineEntries(message.items);
+          active.outlineInferred = !active.outlineLoading
+            && message.inferred === true
+            && Boolean(active.outline?.length);
           this.firePdfOutlineChanged(pdfUri);
           break;
         case 'pageChanged':
@@ -458,24 +535,38 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
           this.activeKey = undefined;
           await vscode.commands.executeCommand('setContext', 'llmWikiPdfOpen', false);
           await vscode.commands.executeCommand('setContext', 'llmWikiPdfHasSelection', false);
+          await vscode.commands.executeCommand(
+            'setContext',
+            'llmWikiPdfHasAgentClipboardSelection',
+            false,
+          );
         }
         return;
       }
       this.activeKey = key;
       await vscode.commands.executeCommand('setContext', 'llmWikiPdfOpen', true);
       await vscode.commands.executeCommand('setContext', 'llmWikiPdfHasSelection', Boolean(active.selection));
+      await vscode.commands.executeCommand(
+        'setContext',
+        'llmWikiPdfHasAgentClipboardSelection',
+        Boolean(active.agentClipboardContext),
+      );
       await this.sendPdfDiscussionState(webview, pdfUri);
       this.firePdfOutlineChanged(pdfUri);
     });
 
     webviewPanel.onDidDispose(async () => {
-      active.pendingSelectionAgentRequests?.clear();
       this.webviews.delete(key);
       this.firePdfOutlineChanged(pdfUri);
       if (this.activeKey === key) {
         this.activeKey = undefined;
         await vscode.commands.executeCommand('setContext', 'llmWikiPdfOpen', false);
         await vscode.commands.executeCommand('setContext', 'llmWikiPdfHasSelection', false);
+        await vscode.commands.executeCommand(
+          'setContext',
+          'llmWikiPdfHasAgentClipboardSelection',
+          false,
+        );
       }
     });
 
@@ -513,6 +604,19 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
     const message = this.agentHandoffCapabilitiesMessage();
     for (const active of this.webviews.values()) {
       active.postMessage(message);
+    }
+  }
+
+  private postPdfToolbarPreference(active: ActivePdfWebview): void {
+    active.postMessage({
+      type: 'pdfToolbarPreference',
+      preference: this.getPdfToolbarPreference(),
+    });
+  }
+
+  private broadcastPdfToolbarPreference(): void {
+    for (const active of this.webviews.values()) {
+      this.postPdfToolbarPreference(active);
     }
   }
 
@@ -948,17 +1052,12 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
     action: unknown,
     anchor: PdfSelectionAnchor,
     rawSnapshotPngBase64?: unknown,
-    rawAgentId?: unknown,
     rawCropCaptureFailed?: unknown,
   ): Promise<void> {
     if (!isPdfSelectionAction(action)) return;
-    if (action === 'addToCursorChat' || action === 'sendToAgent') {
-      const agentId = action === 'sendToAgent' && isExternalAgentId(rawAgentId)
-        ? rawAgentId
-        : undefined;
-      if (action === 'sendToAgent' && !agentId) return;
+    if (action === 'addToCursorChat') {
       const selection = this.toSelectionContext(pdfUri, anchor);
-      if (!selection) throw new Error('Cannot send an empty PDF selection to an agent');
+      if (!selection) throw new Error('Cannot add an empty PDF selection to chat');
       const snapshotPng = decodeCursorCropPngBase64(rawSnapshotPngBase64);
       if (rawCropCaptureFailed === true) {
         vscode.window.showWarningMessage(
@@ -966,9 +1065,8 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
         );
       }
       await vscode.commands.executeCommand(
-        agentId ? ADD_SELECTION_TO_AGENT_COMMAND : ADD_SELECTION_TO_CURSOR_CHAT_COMMAND,
+        ADD_SELECTION_TO_CURSOR_CHAT_COMMAND,
         {
-          ...(agentId ? { agentId } : {}),
           selection,
           ...(snapshotPng ? { snapshotPng } : {}),
         },
@@ -998,13 +1096,54 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
     }
   }
 
-  private async updateActiveSelection(key: string, anchor: unknown): Promise<void> {
+  private async updateActiveSelection(
+    key: string,
+    anchor: unknown,
+    clipboardSelection: unknown,
+  ): Promise<void> {
     const active = this.webviews.get(key);
     if (!active) return;
-    active.pendingSelectionAgentRequests?.clear();
     active.selection = normalizePdfSelectionAnchor(anchor);
+    const normalizedClipboardSelection = normalizePdfAgentClipboardSelection(clipboardSelection);
+    let context: PdfAgentClipboardContext | undefined;
+    if (normalizedClipboardSelection) {
+      const relativePath = vscode.workspace.asRelativePath(active.pdfUri);
+      context = createPdfAgentClipboardContext({
+        selectionKey: normalizedClipboardSelection.selectionKey,
+        relativePath,
+        startPage: normalizedClipboardSelection.selection.startPage,
+        endPage: normalizedClipboardSelection.selection.endPage,
+        selectedText: normalizedClipboardSelection.selection.selectedText,
+        anchorUri: pdfHref(relativePath, {
+          page: normalizedClipboardSelection.selection.startPage,
+        }),
+      });
+    }
+    active.agentClipboardContext = context;
+    active.postMessage({
+      type: 'agentClipboardContext',
+      ...(context ? { context } : {}),
+    });
     if (this.activeKey === key) {
       await vscode.commands.executeCommand('setContext', 'llmWikiPdfHasSelection', Boolean(active.selection));
+      await vscode.commands.executeCommand(
+        'setContext',
+        'llmWikiPdfHasAgentClipboardSelection',
+        Boolean(active.agentClipboardContext),
+      );
+    }
+  }
+
+  private async copyPdfAgentClipboardTextFallback(
+    context: PdfAgentClipboardContext,
+  ): Promise<void> {
+    try {
+      await vscode.env.clipboard.writeText(context.plainText);
+      vscode.window.showWarningMessage(
+        'Selection text copied, but the image reference could not be saved.',
+      );
+    } catch {
+      vscode.window.showErrorMessage('The selection could not be copied.');
     }
   }
 
@@ -1050,10 +1189,16 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
   <title>LLM Wiki PDF</title>
   <style>
     html, body { height: 100%; margin: 0; padding: 0; background: var(--vscode-editor-background); color: var(--vscode-editor-foreground); overflow: hidden; }
-    #toolbar { box-sizing: border-box; height: 38px; display: flex; gap: 4px; align-items: center; padding: 0 6px; border-bottom: 1px solid var(--vscode-panel-border); background: var(--vscode-sideBar-background); font: 12px var(--vscode-font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif); }
+    #pdf-reader-layout { position: relative; box-sizing: border-box; display: grid; width: 100%; height: 100%; min-width: 0; min-height: 0; }
+    #pdf-reader-layout[data-toolbar-dock="top"] { grid-template: auto minmax(0, 1fr) / minmax(0, 1fr); }
+    #pdf-reader-layout[data-toolbar-dock="left"] { grid-template: minmax(0, 1fr) / auto minmax(0, 1fr); }
+    #toolbar { z-index: 2; box-sizing: border-box; height: 38px; display: flex; gap: 4px; align-items: center; padding: 0 6px; border-bottom: 1px solid var(--vscode-panel-border); background: var(--vscode-sideBar-background); font: 12px var(--vscode-font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif); }
+    #toolbar[hidden] { display: none; }
     #toolbar button { box-sizing: border-box; min-width: 26px; height: 26px; padding: 0 6px; border: 1px solid var(--vscode-button-border, transparent); background: transparent; color: var(--vscode-button-secondaryForeground); border-radius: 3px; cursor: pointer; }
     #toolbar button:hover { background: var(--vscode-toolbar-hoverBackground, rgba(90,93,94,.31)); }
     #toolbar button[aria-pressed="true"] { background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
+    #pdf-toolbar-grip { touch-action: none; cursor: grab; font-size: 15px; line-height: 1; }
+    #pdf-toolbar-grip:active { cursor: grabbing; }
     .toolbar-group { display: inline-flex; align-items: center; gap: 2px; }
     .toolbar-spacer { flex: 1 1 auto; }
     .toolbar-separator { width: 1px; height: 20px; margin: 0 3px; background: var(--vscode-panel-border); }
@@ -1095,6 +1240,34 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
     .pdf-search-settings-menu label:hover { background: var(--vscode-toolbar-hoverBackground, rgba(90,93,94,.31)); }
     .pdf-search .pdf-search-settings-menu input { width: 14px; min-width: 14px; height: 14px; margin: 0; padding: 0; border: 0; appearance: auto; accent-color: var(--vscode-focusBorder); }
     #viewer-shell { position: relative; display: flex; height: calc(100% - 38px); min-height: 0; }
+    #pdf-reader-layout > #viewer-shell { width: 100%; height: 100%; min-width: 0; min-height: 0; }
+    #pdf-reader-layout[data-toolbar-dock="top"] > #toolbar { grid-area: 1 / 1; width: 100%; }
+    #pdf-reader-layout[data-toolbar-dock="top"] > #viewer-shell { grid-area: 2 / 1; }
+    #pdf-reader-layout[data-toolbar-dock="left"] > #toolbar {
+      grid-area: 1 / 1;
+      width: 48px;
+      height: 100%;
+      min-height: 0;
+      flex-direction: column;
+      align-items: stretch;
+      overflow-x: hidden;
+      overflow-y: auto;
+      padding: 6px 3px;
+      border-right: 1px solid var(--vscode-panel-border);
+      border-bottom: 0;
+    }
+    #pdf-reader-layout[data-toolbar-dock="left"] > #viewer-shell { grid-area: 1 / 2; }
+    #pdf-reader-layout[data-toolbar-dock="left"] .toolbar-group { flex-direction: column; align-items: stretch; }
+    #pdf-reader-layout[data-toolbar-dock="left"] .toolbar-separator { width: auto; height: 1px; margin: 3px 0; }
+    #pdf-reader-layout[data-toolbar-dock="left"] .toolbar-number { box-sizing: border-box; width: 100%; height: auto; flex-direction: column; align-items: stretch; padding: 1px 0 2px; }
+    #pdf-reader-layout[data-toolbar-dock="left"] .toolbar-number input { width: 100%; text-align: center; }
+    #pdf-reader-layout[data-toolbar-dock="left"] .toolbar-number span { padding: 0 2px; text-align: center; }
+    #pdf-reader-layout[data-toolbar-dock="left"] #toolbar button { width: 100%; }
+    .pdf-toolbar-drop-target { position: absolute; z-index: 90; display: none; pointer-events: none; box-sizing: border-box; border: 2px solid transparent; background: transparent; }
+    #pdf-reader-layout[data-toolbar-dragging="true"] > .pdf-toolbar-drop-target { display: block; }
+    .pdf-toolbar-drop-target[data-dock="top"] { top: 0; right: 0; left: 0; height: 72px; }
+    .pdf-toolbar-drop-target[data-dock="left"] { top: 0; bottom: 0; left: 0; width: 72px; }
+    .pdf-toolbar-drop-target[data-active="true"] { border-color: var(--vscode-focusBorder, #007fd4); background: color-mix(in srgb, var(--vscode-focusBorder, #007fd4) 18%, transparent); }
     #pdf-sidebar { box-sizing: border-box; flex: 0 0 240px; width: 240px; border-right: 1px solid var(--vscode-panel-border); background: var(--vscode-sideBar-background); color: var(--vscode-editor-foreground); }
     #pdf-sidebar[hidden] { display: none; }
     .pdf-sidebar-header { box-sizing: border-box; display: flex; height: 38px; align-items: stretch; justify-content: space-between; gap: 4px; padding: 0 6px 0 8px; border-bottom: 1px solid var(--vscode-panel-border); }
@@ -1111,6 +1284,7 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
     #thumbnail-list { padding: 10px 8px; }
     #outline-list { padding: 6px 4px 14px; font: 12px var(--vscode-font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif); }
     .pdf-outline-empty { margin: 10px 8px; color: var(--vscode-descriptionForeground); }
+    .pdf-outline-kind { margin: 8px; color: var(--vscode-descriptionForeground); font-size: 11px; font-weight: 600; }
     .pdf-outline-tree { margin: 0; padding: 0; list-style: none; }
     .pdf-outline-tree .pdf-outline-tree { padding-left: 12px; }
     .pdf-outline-row { box-sizing: border-box; display: flex; width: 100%; min-height: 26px; align-items: center; gap: 8px; border: 0; border-radius: 3px; padding: 4px 7px; background: transparent; color: var(--vscode-editor-foreground); font: inherit; text-align: left; cursor: pointer; }
@@ -1237,6 +1411,32 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
       outline: 1px solid var(--vscode-focusBorder, #4dabf7);
       outline-offset: 1px;
       background: rgba(77, 171, 247, .08);
+    }
+    .pdf-link-preview {
+      position: fixed;
+      z-index: 100;
+      box-sizing: border-box;
+      width: min(380px, calc(100vw - 16px));
+      max-height: min(260px, calc(100vh - 16px));
+      overflow: hidden;
+      padding: 10px 12px;
+      border: 1px solid var(--vscode-editorHoverWidget-border, var(--vscode-widget-border, var(--vscode-panel-border)));
+      border-radius: 6px;
+      color: var(--vscode-editorHoverWidget-foreground, var(--vscode-editor-foreground));
+      background: var(--vscode-editorHoverWidget-background, var(--vscode-editorWidget-background, var(--vscode-editor-background)));
+      box-shadow: 0 4px 14px var(--vscode-widget-shadow, rgba(0,0,0,.32));
+      font: 13px/1.42 var(--vscode-font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
+      overflow-wrap: anywhere;
+      pointer-events: none;
+    }
+    .pdf-link-preview-title { font-weight: 600; }
+    .pdf-link-preview-page { margin-top: 3px; color: var(--vscode-descriptionForeground); font-size: 11px; }
+    .pdf-link-preview-excerpt {
+      display: -webkit-box;
+      margin-top: 7px;
+      overflow: hidden;
+      -webkit-box-orient: vertical;
+      -webkit-line-clamp: 8;
     }
     .text-layer .pdf-text-selection-separator {
       left: 100%;
@@ -1407,6 +1607,27 @@ function samePdfFileFingerprint(
   );
 }
 
+function normalizePdfToolbarPreference(
+  value: unknown,
+  fallback: PdfToolbarPreference = DEFAULT_PDF_TOOLBAR_PREFERENCE,
+): PdfToolbarPreference {
+  const base = validPdfToolbarPreference(fallback)
+    ? fallback
+    : DEFAULT_PDF_TOOLBAR_PREFERENCE;
+  if (!validPdfToolbarPreference(value)) return { ...base };
+  return {
+    dock: value.dock,
+    hidden: value.hidden,
+  };
+}
+
+function validPdfToolbarPreference(value: unknown): value is PdfToolbarPreference {
+  if (!value || typeof value !== 'object') return false;
+  const record = value as Partial<PdfToolbarPreference>;
+  return (record.dock === 'top' || record.dock === 'left')
+    && typeof record.hidden === 'boolean';
+}
+
 function normalizePdfSelectionAnchor(anchor: unknown): PdfSelectionAnchor | undefined {
   if (!anchor || typeof anchor !== 'object') return undefined;
   const raw = anchor as Record<string, unknown>;
@@ -1432,21 +1653,25 @@ function normalizePdfSelectionAnchor(anchor: unknown): PdfSelectionAnchor | unde
   };
 }
 
-function pdfSelectionAnchorKey(anchor: unknown): string | undefined {
-  const selection = normalizePdfSelectionAnchor(anchor);
-  if (!selection) return undefined;
-  return JSON.stringify([
-    selection.page,
-    selection.textItemIndex ?? null,
-    selection.charOffset ?? null,
-    selection.endTextItemIndex ?? null,
-    selection.endCharOffset ?? null,
-    selection.length ?? null,
-    selection.rects ?? [],
-    selection.prefix ?? '',
-    selection.suffix ?? '',
-    selection.snippet,
-  ]);
+function normalizePdfAgentClipboardSelection(
+  input: unknown,
+): { selection: PdfAgentClipboardSelection; selectionKey: string } | undefined {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return undefined;
+  const raw = input as Record<string, unknown>;
+  const selectedText = normalizePdfMessageText(raw.selectedText);
+  if (!selectedText) return undefined;
+  const candidate = {
+    startPage: raw.startPage,
+    endPage: raw.endPage,
+    pages: raw.pages,
+    selectedText,
+  } as unknown as PdfAgentClipboardSelection;
+  const selectionKey = pdfAgentClipboardSelectionKey(candidate);
+  if (!selectionKey) return undefined;
+  return {
+    selection: JSON.parse(selectionKey) as PdfAgentClipboardSelection,
+    selectionKey,
+  };
 }
 
 function toPdfDiscussionAnnotationSnapshot(
@@ -1761,7 +1986,6 @@ function normalizePdfPage(value: unknown): number | undefined {
 
 function isPdfSelectionAction(value: unknown): value is PdfSelectionAction {
   return value === 'addToCursorChat'
-    || value === 'sendToAgent'
     || value === 'copyLink'
     || value === 'copyRectEmbed';
 }

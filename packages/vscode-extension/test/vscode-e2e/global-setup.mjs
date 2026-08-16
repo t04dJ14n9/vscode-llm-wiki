@@ -26,6 +26,7 @@ export default async function globalSetup() {
   console.log('\n[global-setup] Downloading VS Code...');
   const downloadedPath = await downloadAndUnzipVSCode(VSCODE_VERSION);
   const electronPath = resolveVsCodeExecutable(downloadedPath);
+  const codeCli = resolveVsCodeCli(downloadedPath, electronPath);
   console.log(`[global-setup] Electron binary: ${electronPath}`);
 
   const userDataDir = resolve(TEST_DIR, 'user-data');
@@ -130,6 +131,7 @@ export default async function globalSetup() {
 
   writeFileSync(resolve(TEST_DIR, 'ws-url'), wsUrl);
   writeFileSync(resolve(TEST_DIR, 'debug-port'), String(debugPort));
+  writeFileSync(resolve(TEST_DIR, 'code-cli'), codeCli);
 
   // Give the extension time to activate
   console.log('[global-setup] Waiting for extension activation...');
@@ -143,6 +145,19 @@ function resolveVsCodeExecutable(downloadedPath) {
   const macCodePath = resolve(dirname(downloadedPath), 'Code');
   if (existsSync(macCodePath)) return macCodePath;
   throw new Error(`VS Code executable does not exist: ${downloadedPath}`);
+}
+
+function resolveVsCodeCli(downloadedPath, electronPath) {
+  const appRoot = process.platform === 'darwin'
+    ? resolve(electronPath, '..', '..')
+    : resolve(downloadedPath, '..');
+  const codeCli = process.platform === 'win32'
+    ? resolve(appRoot, 'resources', 'app', 'bin', 'code.cmd')
+    : resolve(appRoot, 'resources', 'app', 'bin', 'code');
+  if (!existsSync(codeCli)) {
+    throw new Error(`VS Code CLI does not exist: ${codeCli}`);
+  }
+  return codeCli;
 }
 
 async function killExistingTestProcesses(userDataDir) {

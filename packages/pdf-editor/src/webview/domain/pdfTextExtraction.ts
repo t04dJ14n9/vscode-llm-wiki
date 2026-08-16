@@ -313,9 +313,185 @@ function orderPdfTextItems(items: OrderedPdfTextItem[]): any[] {
     previousItem = item;
   }
 
-  return mergeSingleRowPdfTextLanes(lanes, typicalHeight, laneGap)
+  const singleRowMerged = mergeSingleRowPdfTextLanes(lanes, typicalHeight, laneGap);
+  const segmented = singleRowMerged.flatMap(lane => (
+    pdfTextLaneHasDisjointPeer(lane, singleRowMerged, typicalHeight)
+      ? [lane]
+      : splitPdfTextLaneAtVerticalGaps(lane, typicalHeight, laneGap)
+  ));
+  return orderPdfTextLaneRegions(
+    mergeAdjacentPdfTextLanes(segmented, typicalHeight, laneGap, leftAlignmentTolerance),
+  )
     .flatMap(lane => orderSinglePdfTextFlow(lane.items))
     .map(candidate => candidate.item);
+}
+
+function pdfTextLaneHasDisjointPeer(
+  lane: OrderedPdfTextLane,
+  lanes: OrderedPdfTextLane[],
+  typicalHeight: number,
+): boolean {
+  if (pdfTextVisualRowCount(lane.items, typicalHeight) < 2) return false;
+  const bounds = pdfTextLaneBounds(lane);
+  return lanes.some(peer => {
+    if (
+      peer === lane
+      || pdfTextVisualRowCount(peer.items, typicalHeight) < 2
+    ) {
+      return false;
+    }
+    const peerBounds = pdfTextLaneBounds(peer);
+    const verticalOverlap = Math.min(bounds.bottom, peerBounds.bottom)
+      - Math.max(bounds.top, peerBounds.top);
+    const horizontalGap = Math.max(
+      peerBounds.left - bounds.right,
+      bounds.left - peerBounds.right,
+    );
+    return verticalOverlap >= typicalHeight && horizontalGap >= 0;
+  });
+}
+
+function splitPdfTextLaneAtVerticalGaps(
+  lane: OrderedPdfTextLane,
+  typicalHeight: number,
+  laneGap: number,
+): OrderedPdfTextLane[] {
+  const items = orderSinglePdfTextFlow(lane.items);
+  const maximumGap = Math.max(laneGap, typicalHeight * 0.75);
+  const segments: OrderedPdfTextItem[][] = [];
+  let bottom = Number.NEGATIVE_INFINITY;
+  for (const item of items) {
+    if (segments.length === 0 || item.rect.top > bottom + maximumGap) {
+      segments.push([]);
+      bottom = Number.NEGATIVE_INFINITY;
+    }
+    segments[segments.length - 1]!.push(item);
+    bottom = Math.max(bottom, item.rect.top + item.rect.height);
+  }
+  return segments.map(segment => ({
+    items: segment,
+    left: median(segment.map(item => item.rect.left)),
+    coverageBuckets: [],
+  }));
+}
+
+function mergeAdjacentPdfTextLanes(
+  lanes: OrderedPdfTextLane[],
+  typicalHeight: number,
+  laneGap: number,
+  leftAlignmentTolerance: number,
+): OrderedPdfTextLane[] {
+  const result = [...lanes];
+  while (true) {
+    let best: { left: number; right: number; score: number } | undefined;
+    for (let left = 0; left < result.length; left++) {
+      for (let right = left + 1; right < result.length; right++) {
+        const score = pdfTextLaneMergeScore(
+          result[left]!,
+          result[right]!,
+          typicalHeight,
+          laneGap,
+          leftAlignmentTolerance,
+        );
+        if (score !== undefined && (!best || score < best.score)) {
+          best = { left, right, score };
+        }
+      }
+    }
+    if (!best) return result;
+    const target = result[best.left]!;
+    target.items.push(...result[best.right]!.items);
+    target.left = median(target.items.map(item => item.rect.left));
+    result.splice(best.right, 1);
+  }
+}
+
+function pdfTextLaneMergeScore(
+  left: OrderedPdfTextLane,
+  right: OrderedPdfTextLane,
+  typicalHeight: number,
+  laneGap: number,
+  leftAlignmentTolerance: number,
+): number | undefined {
+  const leftBounds = pdfTextLaneBounds(left);
+  const rightBounds = pdfTextLaneBounds(right);
+  const leftHeight = median(left.items.map(item => item.rect.height));
+  const rightHeight = median(right.items.map(item => item.rect.height));
+  const heightRatio = Math.min(leftHeight, rightHeight) / Math.max(leftHeight, rightHeight);
+  if (heightRatio < 0.75) return undefined;
+
+  const verticalOverlap = Math.min(leftBounds.bottom, rightBounds.bottom)
+    - Math.max(leftBounds.top, rightBounds.top);
+  const maximumVerticalDistance = Math.max(laneGap, typicalHeight * 1.5);
+  if (
+    verticalOverlap > Math.max(leftHeight, rightHeight) * 1.1
+    || verticalOverlap < -maximumVerticalDistance
+  ) {
+    return undefined;
+  }
+
+  const leftDistance = Math.abs(left.left - right.left);
+  const horizontalOverlap = Math.min(leftBounds.right, rightBounds.right)
+    - Math.max(leftBounds.left, rightBounds.left);
+  const narrowerWidth = Math.min(
+    leftBounds.right - leftBounds.left,
+    rightBounds.right - rightBounds.left,
+  );
+  const widerWidth = Math.max(
+    leftBounds.right - leftBounds.left,
+    rightBounds.right - rightBounds.left,
+  );
+  const coverageRatio = Math.max(0, horizontalOverlap) / Math.max(1, narrowerWidth);
+  const coverageWidthRatio = narrowerWidth / Math.max(1, widerWidth);
+  if (
+    leftDistance > leftAlignmentTolerance
+    || coverageRatio < 0.5
+    || coverageWidthRatio < 0.5
+  ) {
+    return undefined;
+  }
+
+  return Math.abs(verticalOverlap) * 10 + leftDistance;
+}
+
+function pdfTextLaneBounds(lane: OrderedPdfTextLane): {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+} {
+  return {
+    left: Math.min(...lane.items.map(item => item.rect.left)),
+    top: Math.min(...lane.items.map(item => item.rect.top)),
+    right: Math.max(...lane.items.map(item => item.rect.left + item.rect.width)),
+    bottom: Math.max(...lane.items.map(item => item.rect.top + item.rect.height)),
+  };
+}
+
+function orderPdfTextLaneRegions(lanes: OrderedPdfTextLane[]): OrderedPdfTextLane[] {
+  const entries = lanes.map((lane, sourceOrder) => ({
+    lane,
+    sourceOrder,
+    top: Math.min(...lane.items.map(item => item.rect.top)),
+    bottom: Math.max(...lane.items.map(item => item.rect.top + item.rect.height)),
+  })).sort((left, right) => (
+    left.top - right.top
+    || left.bottom - right.bottom
+    || left.sourceOrder - right.sourceOrder
+  ));
+  const regions: Array<{ bottom: number; entries: typeof entries }> = [];
+  for (const entry of entries) {
+    const region = regions[regions.length - 1];
+    if (region && entry.top < region.bottom) {
+      region.bottom = Math.max(region.bottom, entry.bottom);
+      region.entries.push(entry);
+    } else {
+      regions.push({ bottom: entry.bottom, entries: [entry] });
+    }
+  }
+  return regions.flatMap(region => region.entries
+    .sort((left, right) => left.sourceOrder - right.sourceOrder)
+    .map(entry => entry.lane));
 }
 
 function pdfTextLaneCandidates(

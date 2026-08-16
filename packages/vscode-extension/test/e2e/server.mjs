@@ -89,6 +89,11 @@ const server = createServer((_req, res) => {
     return;
   }
 
+  if (url.pathname === '/fixtures/inferred-outline.pdf') {
+    serveBuffer(inferredOutlinePdfFixture(), 'application/pdf', res);
+    return;
+  }
+
   if (url.pathname === '/fixtures/shifted-contents-links.pdf') {
     serveBuffer(shiftedContentsLinksPdfFixture(), 'application/pdf', res);
     return;
@@ -426,6 +431,37 @@ function internalDestinationsPdfFixture() {
     '<< /Title (Section 12.2) /Parent 15 0 R /Dest (section.12.2) >>',
     '<< /Type /Annot /Subtype /Link /Rect [40 350 174 374] /Border [0 0 0] /Contents (Figure 11.1 detail) /Dest [7 0 R /XYZ 42 302 0] >>',
     '<< /Type /Annot /Subtype /Link /Rect [64 390 132 406] /Border [0 0 0] /Contents (Figure 3-12 source reference) /Dest [9 0 R /XYZ 42 370 0] >>',
+  ];
+  return pdfFixture(objects);
+}
+
+function inferredOutlinePdfFixture() {
+  const objects = [
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R 5 0 R] /Count 2 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 7 0 R /F2 8 0 R >> >> /Contents 4 0 R >>',
+    pdfStream([
+      'BT /F2 16 Tf 72 700 Td (1 Introduction) Tj ET',
+      'BT /F1 10 Tf 72 675 Td (This paragraph establishes the ordinary document body typography.) Tj ET',
+      'BT /F1 10 Tf 72 660 Td (It contains enough text for a conservative document profile.) Tj ET',
+      'BT /F1 10 Tf 72 645 Td (The remaining prose deliberately uses the same body style.) Tj ET',
+      'BT /F1 10 Tf 72 630 Td (A fourth line makes the body median stable and predictable.) Tj ET',
+      'BT /F2 13 Tf 72 580 Td (1.1 Motivation) Tj ET',
+      'BT /F1 10 Tf 72 555 Td (Motivation body text follows the nested section heading.) Tj ET',
+      'BT /F1 10 Tf 72 540 Td (It remains ordinary prose and must not become an outline entry.) Tj ET',
+      'BT /F1 10 Tf 72 525 Td (Figure 1: this caption is intentionally plain body text.) Tj ET',
+      'BT /F1 10 Tf 72 510 Td (Another body line completes the first page fixture.) Tj ET',
+    ].join('\n')),
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 7 0 R /F2 8 0 R >> >> /Contents 6 0 R >>',
+    pdfStream([
+      'BT /F2 16 Tf 72 700 Td (2 Method) Tj ET',
+      'BT /F1 10 Tf 72 675 Td (The method page repeats the same body typography.) Tj ET',
+      'BT /F1 10 Tf 72 660 Td (Inference should navigate here without authored bookmarks.) Tj ET',
+      'BT /F1 10 Tf 72 645 Td (The detector remains local deterministic and conservative.) Tj ET',
+      'BT /F1 10 Tf 72 630 Td (This final body line stabilizes the second page profile.) Tj ET',
+    ].join('\n')),
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>',
   ];
   return pdfFixture(objects);
 }

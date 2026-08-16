@@ -4,7 +4,8 @@
   "private": true,
   "description": "Shared, source-bundled PDF editor webview for LLM Wiki extensions",
   "exports": {
-    "./webview": "./src/webview/pdf-viewer.ts"
+    "./webview": "./src/webview/pdf-viewer.ts",
+    "./toolbar-layout": "./src/webview/domain/pdfToolbarLayout.ts"
   },
   "sideEffects": [
     "./src/webview/pdf-viewer.ts"

@@ -38,6 +38,7 @@ export interface PdfOutlineSource {
   readonly onDidChangePdfOutline: vscode.Event<vscode.Uri>;
   getActivePdfUri(): vscode.Uri | undefined;
   getPdfOutline(uri: vscode.Uri): readonly PdfOutlineEntry[] | undefined;
+  isPdfOutlineInferred?(uri: vscode.Uri): boolean;
 }
 
 class MarkdownOutlineItem extends vscode.TreeItem {
@@ -142,7 +143,12 @@ export class MarkdownOutlineTreeProvider implements vscode.TreeDataProvider<vsco
       if (outline.length === 0) {
         return [new vscode.TreeItem('(no PDF outline)')];
       }
-      return outline.map((item, index) => new PdfOutlineItem(item, activeUri, String(index)));
+      const items = outline.map(
+        (item, index) => new PdfOutlineItem(item, activeUri, String(index)),
+      );
+      return this.pdfOutlineSource.isPdfOutlineInferred?.(activeUri) === true
+        ? [new vscode.TreeItem('Inferred outline'), ...items]
+        : items;
     }
 
     const document = activeUri && isMarkdownUri(activeUri)

@@ -45,7 +45,9 @@ function loadTsModule(relativePath, mocks = {}) {
         },
       };
     }
+    if (request === './agentClipboard') return agentClipboard;
     if (request === './cursorCrop') return cursorCrop;
+    if (request === './pdfAgentClipboardImage') return pdfAgentClipboardImage;
     return originalLoad.call(this, request, parent, isMain);
   };
   try {
@@ -60,6 +62,405 @@ const cursorCrop = loadTsModule('src/cursorCrop.ts', {
   './pdfDiscussionController': {
     PDF_DISCUSSION_MAX_PNG_BYTES: 5 * 1024 * 1024,
   },
+});
+
+const agentClipboard = loadTsModule('src/agentClipboard.ts', {
+  './anchorUris': {
+    llmWikiOpenAnchorUri: target =>
+      `cursor://llm-wiki/open-anchor?target=${encodeURIComponent(target)}`,
+  },
+});
+
+const pdfAgentClipboardImage = loadTsModule('src/pdfAgentClipboardImage.ts');
+
+test('PDF provider correlates multi-page clipboard context to exact selection geometry', async () => {
+  const posted = [];
+  const clipboardWrites = [];
+  const contextCommands = [];
+  let receiveMessage;
+  const vscode = {
+    workspace: {
+      asRelativePath: uri => uri.fsPath.replace('/vault/', ''),
+    },
+    commands: {
+      executeCommand: async (...args) => { contextCommands.push(args); },
+    },
+    env: {
+      clipboard: {
+        writeText: async text => { clipboardWrites.push(text); },
+      },
+    },
+    Uri: {
+      joinPath: (...parts) => ({ parts, toString: () => 'vscode-resource' }),
+    },
+  };
+  const { PdfEditorProvider } = loadTsModule('src/pdfEditorProvider.ts', {
+    vscode,
+    '@llm-wiki/core': { pdfHref: portablePdfHref },
+  });
+  const provider = new PdfEditorProvider(
+    { extensionUri: { fsPath: '/extension' }, subscriptions: [] },
+    '/vault',
+  );
+  const pdfUri = {
+    scheme: 'file',
+    fsPath: '/vault/raw/pdf/paper.pdf',
+    toString: () => 'file:///vault/raw/pdf/paper.pdf',
+  };
+  const webview = {
+    options: {},
+    cspSource: 'vscode-webview:',
+    asWebviewUri: uri => uri,
+    onDidReceiveMessage: listener => {
+      receiveMessage = listener;
+      return { dispose() {} };
+    },
+    postMessage: async message => {
+      posted.push(message);
+      return true;
+    },
+  };
+  await provider.resolveCustomEditor(
+    { uri: pdfUri },
+    {
+      active: true,
+      webview,
+      onDidChangeViewState: () => ({ dispose() {} }),
+      onDidDispose: () => ({ dispose() {} }),
+    },
+    {},
+  );
+  const firstSelection = {
+    startPage: 2,
+    endPage: 4,
+    pages: [
+      { page: 2, rects: [[10, 20, 110, 36]] },
+      { page: 3, rects: [[12, 18, 140, 34]] },
+      { page: 4, rects: [[8, 16, 96, 32]] },
+    ],
+    selectedText: 'complete normalized text across all pages',
+  };
+
+  await receiveMessage({
+    type: 'selectionChanged',
+    anchor: {
+      page: 2,
+      multiPage: true,
+      snippet: 'partial text without the delayed middle page',
+      rects: firstSelection.pages[0].rects,
+    },
+  });
+
+  assert.deepEqual(posted, [{ type: 'agentClipboardContext' }]);
+  assert.equal(provider.webviews.get(pdfUri.toString()).agentClipboardContext, undefined);
+
+  await receiveMessage({
+    type: 'selectionChanged',
+    anchor: {
+      page: 2,
+      multiPage: true,
+      snippet: firstSelection.selectedText,
+      rects: firstSelection.pages[0].rects,
+    },
+    clipboardSelection: firstSelection,
+  });
+
+  const firstKey = agentClipboard.pdfAgentClipboardSelectionKey(firstSelection);
+  const firstContextMessage = posted.at(-1);
+  assert.equal(firstContextMessage.type, 'agentClipboardContext');
+  assert.equal(firstContextMessage.context.selectionKey, firstKey);
+  assert.equal(firstContextMessage.context.sourceLabel, 'raw/pdf/paper.pdf (pages 2–4)');
+  assert.equal(
+    firstContextMessage.context.selectedText,
+    'complete normalized text across all pages',
+  );
+  assert.match(
+    firstContextMessage.context.sourceHref,
+    /raw%2Fpdf%2Fpaper\.pdf%23page%3D2/,
+  );
+  assert.deepEqual(contextCommands.slice(-2), [
+    ['setContext', 'llmWikiPdfHasSelection', false],
+    ['setContext', 'llmWikiPdfHasAgentClipboardSelection', true],
+  ]);
+
+  const nextSelection = {
+    ...firstSelection,
+    pages: [
+      firstSelection.pages[0],
+      firstSelection.pages[1],
+      { page: 4, rects: [[30, 40, 130, 56]] },
+    ],
+  };
+  await receiveMessage({
+    type: 'selectionChanged',
+    anchor: {
+      page: 2,
+      multiPage: true,
+      snippet: nextSelection.selectedText,
+      rects: nextSelection.pages[0].rects,
+    },
+    clipboardSelection: nextSelection,
+  });
+
+  const nextKey = agentClipboard.pdfAgentClipboardSelectionKey(nextSelection);
+  const updatedClipboardMessages = posted.filter(message => message.type === 'agentClipboardContext');
+  assert.equal(updatedClipboardMessages.length, 3);
+  assert.equal(updatedClipboardMessages[2].context.selectionKey, nextKey);
+  assert.equal(provider.webviews.get(pdfUri.toString()).agentClipboardContext.selectionKey, nextKey);
+  assert.notEqual(provider.webviews.get(pdfUri.toString()).agentClipboardContext.selectionKey, firstKey);
+  assert.deepEqual(clipboardWrites, []);
+});
+
+test('clipboard text fallback accepts only the current key and exact precomputed plain text', async () => {
+  const posted = [];
+  const clipboardWrites = [];
+  const informationMessages = [];
+  const warningMessages = [];
+  let receiveMessage;
+  const vscode = {
+    workspace: {
+      asRelativePath: uri => uri.fsPath.replace('/vault/', ''),
+    },
+    commands: {
+      executeCommand: async () => undefined,
+    },
+    env: {
+      clipboard: {
+        writeText: async text => { clipboardWrites.push(text); },
+      },
+    },
+    window: {
+      showInformationMessage: message => { informationMessages.push(message); },
+      showWarningMessage: message => { warningMessages.push(message); },
+    },
+    Uri: {
+      joinPath: (...parts) => ({ parts, toString: () => 'vscode-resource' }),
+    },
+  };
+  const { PdfEditorProvider } = loadTsModule('src/pdfEditorProvider.ts', {
+    vscode,
+    '@llm-wiki/core': { pdfHref: portablePdfHref },
+  });
+  const provider = new PdfEditorProvider(
+    { extensionUri: { fsPath: '/extension' }, subscriptions: [] },
+    '/vault',
+  );
+  const pdfUri = {
+    scheme: 'file',
+    fsPath: '/vault/raw/pdf/paper.pdf',
+    toString: () => 'file:///vault/raw/pdf/paper.pdf',
+  };
+  const webview = {
+    options: {},
+    cspSource: 'vscode-webview:',
+    asWebviewUri: uri => uri,
+    onDidReceiveMessage: listener => {
+      receiveMessage = listener;
+      return { dispose() {} };
+    },
+    postMessage: async message => {
+      posted.push(message);
+      return true;
+    },
+  };
+  await provider.resolveCustomEditor(
+    { uri: pdfUri },
+    {
+      active: true,
+      webview,
+      onDidChangeViewState: () => ({ dispose() {} }),
+      onDidDispose: () => ({ dispose() {} }),
+    },
+    {},
+  );
+
+  const firstSelection = {
+    startPage: 2,
+    endPage: 2,
+    pages: [{ page: 2, rects: [[10, 20, 110, 36]] }],
+    selectedText: 'first selected passage',
+  };
+  await receiveMessage({
+    type: 'selectionChanged',
+    anchor: {
+      page: 2,
+      snippet: firstSelection.selectedText,
+      rects: firstSelection.pages[0].rects,
+    },
+    clipboardSelection: firstSelection,
+  });
+  const firstContext = posted.at(-1).context;
+
+  const currentSelection = {
+    startPage: 2,
+    endPage: 2,
+    pages: [{ page: 2, rects: [[30, 40, 130, 56]] }],
+    selectedText: 'current selected passage',
+  };
+  await receiveMessage({
+    type: 'selectionChanged',
+    anchor: {
+      page: 2,
+      snippet: currentSelection.selectedText,
+      rects: currentSelection.pages[0].rects,
+    },
+    clipboardSelection: currentSelection,
+  });
+  const currentContext = posted.at(-1).context;
+
+  await receiveMessage({
+    type: 'agentClipboardResult',
+    status: 'text-fallback',
+    selectionKey: firstContext.selectionKey,
+    plainText: firstContext.plainText,
+  });
+  await receiveMessage({
+    type: 'agentClipboardResult',
+    status: 'text-fallback',
+    selectionKey: currentContext.selectionKey,
+    plainText: `${currentContext.plainText}\nattacker-controlled suffix`,
+  });
+
+  assert.deepEqual(clipboardWrites, []);
+  assert.deepEqual(warningMessages, []);
+
+  await receiveMessage({
+    type: 'agentClipboardResult',
+    status: 'text-fallback',
+    selectionKey: currentContext.selectionKey,
+    plainText: currentContext.plainText,
+    html: '<img src=x onerror=alert(1)>',
+    pngBytes: [1, 2, 3],
+  });
+
+  assert.deepEqual(clipboardWrites, [currentContext.plainText]);
+  assert.deepEqual(warningMessages, [
+    'Selection text copied, but the image reference could not be saved.',
+  ]);
+
+  await receiveMessage({
+    type: 'agentClipboardResult',
+    status: 'rich',
+    selectionKey: currentContext.selectionKey,
+  });
+  assert.deepEqual(informationMessages, []);
+});
+
+test('PDF clipboard persists a validated crop and copies text with its workspace reference', async () => {
+  const imageFileName = `pdf-selection-${'a'.repeat(64)}.png`;
+  const imageRelativePath = `.llm_wiki/agent/clipboard/${imageFileName}`;
+  const posted = [];
+  const clipboardWrites = [];
+  const informationMessages = [];
+  const warningMessages = [];
+  const persistCalls = [];
+  let receiveMessage;
+  const vscode = {
+    workspace: {
+      asRelativePath: uri => uri.fsPath.replace('/vault/', ''),
+    },
+    commands: {
+      executeCommand: async () => undefined,
+    },
+    env: {
+      clipboard: {
+        writeText: async text => { clipboardWrites.push(text); },
+      },
+    },
+    window: {
+      showInformationMessage: message => { informationMessages.push(message); },
+      showWarningMessage: message => { warningMessages.push(message); },
+    },
+    Uri: {
+      joinPath: (...parts) => ({ parts, toString: () => 'vscode-resource' }),
+    },
+  };
+  const { PdfEditorProvider } = loadTsModule('src/pdfEditorProvider.ts', {
+    vscode,
+    '@llm-wiki/core': { pdfHref: portablePdfHref },
+    './cursorCrop': {
+      decodeCursorCropPngBase64: value =>
+        value === 'canonical-png' ? Uint8Array.from([1, 2, 3]) : undefined,
+    },
+    './pdfAgentClipboardImage': {
+      persistPdfAgentClipboardImage: input => {
+        persistCalls.push(input);
+        return {
+          absolutePath: `/vault/${imageRelativePath}`,
+          relativePath: imageRelativePath,
+        };
+      },
+    },
+  });
+  const provider = new PdfEditorProvider(
+    { extensionUri: { fsPath: '/extension' }, subscriptions: [] },
+    '/vault',
+  );
+  const pdfUri = {
+    scheme: 'file',
+    fsPath: '/vault/raw/pdf/paper.pdf',
+    toString: () => 'file:///vault/raw/pdf/paper.pdf',
+  };
+  const webview = {
+    options: {},
+    cspSource: 'vscode-webview:',
+    asWebviewUri: uri => uri,
+    onDidReceiveMessage: listener => {
+      receiveMessage = listener;
+      return { dispose() {} };
+    },
+    postMessage: async message => {
+      posted.push(message);
+      return true;
+    },
+  };
+  await provider.resolveCustomEditor(
+    { uri: pdfUri },
+    {
+      active: true,
+      webview,
+      onDidChangeViewState: () => ({ dispose() {} }),
+      onDidDispose: () => ({ dispose() {} }),
+    },
+    {},
+  );
+  const selection = {
+    startPage: 2,
+    endPage: 2,
+    pages: [{ page: 2, rects: [[30, 40, 130, 56]] }],
+    selectedText: 'current selected passage',
+  };
+  await receiveMessage({
+    type: 'selectionChanged',
+    anchor: {
+      page: 2,
+      snippet: selection.selectedText,
+      rects: selection.pages[0].rects,
+    },
+    clipboardSelection: selection,
+  });
+  const context = posted.at(-1).context;
+
+  await receiveMessage({
+    type: 'agentClipboardResult',
+    status: 'image-reference',
+    selectionKey: context.selectionKey,
+    pngBase64: 'canonical-png',
+  });
+
+  assert.equal(persistCalls.length, 1);
+  assert.equal(persistCalls[0].rootPath, '/vault');
+  assert.equal(persistCalls[0].sourceIdentity, pdfUri.toString());
+  assert.equal(persistCalls[0].selectionKey, context.selectionKey);
+  assert.deepEqual(Array.from(persistCalls[0].bytes), [1, 2, 3]);
+  assert.deepEqual(clipboardWrites, [
+    `${context.plainText}\n\n`
+      + `Selection image: @${imageRelativePath}`,
+  ]);
+  assert.deepEqual(informationMessages, [
+    'Selection text and image reference copied for agent.',
+  ]);
+  assert.deepEqual(warningMessages, []);
 });
 
 test('PDF editor provider exposes portable database-free agent context with normalized selection context', async () => {
@@ -225,14 +626,14 @@ test('PDF Cursor handoff routes exact selection and an optional validated crop t
   ]);
 });
 
-test('PDF explicit agent handoff routes normalized selection and validated crop only for known agents', async () => {
-  const commands = [];
+test('provider-specific PDF selection routing is absent', async () => {
+  const commandCalls = [];
   const vscode = {
     workspace: {
       asRelativePath: uri => uri.fsPath.replace('/vault/', ''),
     },
     commands: {
-      executeCommand: async (...args) => { commands.push(args); },
+      executeCommand: async (...args) => { commandCalls.push(args); },
     },
     Uri: {
       joinPath: (...parts) => ({ parts }),
@@ -249,479 +650,22 @@ test('PDF explicit agent handoff routes normalized selection and validated crop 
     { extensionUri: { fsPath: '/extension' } },
     '/vault',
   );
-  const pdfUri = { fsPath: '/vault/raw/pdf/paper.pdf' };
-  const anchor = {
-    page: 3,
-    prefix: 'before context',
-    suffix: 'after context',
-    snippet: ' Selected   PDF passage ',
-  };
   const png = Buffer.from(
     'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
     'base64',
   );
 
+  assert.equal(ADD_SELECTION_TO_AGENT_COMMAND, undefined);
+  assert.equal(typeof provider.addSelectionToAgent, 'undefined');
   await provider.handleSelectionAction(
-    pdfUri,
+    { fsPath: '/vault/raw/pdf/paper.pdf' },
     'sendToAgent',
-    anchor,
+    { page: 3, snippet: 'Selected PDF passage' },
     png.toString('base64'),
     'codex',
   );
-  await provider.handleSelectionAction(
-    pdfUri,
-    'sendToAgent',
-    anchor,
-    png.toString('base64'),
-    'unknown',
-  );
 
-  assert.equal(ADD_SELECTION_TO_AGENT_COMMAND, 'llm-wiki.addSelectionToAgent');
-  assert.equal(commands.length, 1);
-  assert.equal(commands[0][0], ADD_SELECTION_TO_AGENT_COMMAND);
-  assert.equal(commands[0][1].agentId, 'codex');
-  assert.equal(commands[0][1].selection.text, 'Selected PDF passage');
-  assert.deepEqual(Buffer.from(commands[0][1].snapshotPng), png);
-});
-
-test('stock VS Code explicit provider capture warns only for a literal crop failure and stays text-only', async () => {
-  const commands = [];
-  const posted = [];
-  const warnings = [];
-  let receiveMessage;
-  const vscode = {
-    workspace: {
-      asRelativePath: uri => uri.fsPath.replace('/vault/', ''),
-    },
-    commands: {
-      executeCommand: async (...args) => { commands.push(args); },
-    },
-    Uri: {
-      joinPath: (...parts) => ({ parts, toString: () => 'vscode-resource' }),
-    },
-    window: {
-      showWarningMessage: message => { warnings.push(message); },
-    },
-  };
-  const {
-    ADD_SELECTION_TO_AGENT_COMMAND,
-    PdfEditorProvider,
-  } = loadTsModule('src/pdfEditorProvider.ts', {
-    vscode,
-    '@llm-wiki/core': { pdfHref: portablePdfHref },
-  });
-  const context = {
-    extensionUri: { fsPath: '/extension' },
-    subscriptions: [],
-  };
-  const provider = new PdfEditorProvider(context, '/vault');
-  const pdfUri = {
-    scheme: 'file',
-    fsPath: '/vault/raw/pdf/paper.pdf',
-    toString: () => 'file:///vault/raw/pdf/paper.pdf',
-  };
-  const webview = {
-    options: {},
-    cspSource: 'vscode-webview:',
-    asWebviewUri: uri => uri,
-    onDidReceiveMessage: listener => {
-      receiveMessage = listener;
-      return { dispose() {} };
-    },
-    postMessage: async message => {
-      posted.push(message);
-      return true;
-    },
-  };
-  const panel = {
-    active: true,
-    webview,
-    onDidChangeViewState: () => ({ dispose() {} }),
-    onDidDispose: () => ({ dispose() {} }),
-  };
-  await provider.resolveCustomEditor({ uri: pdfUri }, panel, {});
-  commands.length = 0;
-
-  await receiveMessage({
-    type: 'selectionChanged',
-    anchor: {
-      page: 3,
-      prefix: 'before context',
-      suffix: 'after context',
-      snippet: 'Selected PDF passage',
-    },
-  });
-  commands.length = 0;
-  await provider.addSelectionToAgent('codex');
-  const requestId = posted.at(-1)?.requestId;
-  assert.equal(typeof requestId, 'string');
-  await receiveMessage({
-    type: 'selectionAction',
-    action: 'addToCursorChat',
-    anchor: {
-      page: 3,
-      prefix: 'before context',
-      suffix: 'after context',
-      snippet: 'Selected PDF passage',
-    },
-    requestId,
-    cropCaptureFailed: true,
-  });
-
-  assert.deepEqual(posted.at(-1), { type: 'captureSelectionForAgent', requestId });
-  assert.equal(commands.length, 1);
-  assert.equal(commands[0][0], ADD_SELECTION_TO_AGENT_COMMAND);
-  assert.equal(commands[0][1].agentId, 'codex');
-  assert.equal(commands[0][1].selection.text, 'Selected PDF passage');
-  assert.equal(Object.prototype.hasOwnProperty.call(commands[0][1], 'snapshotPng'), false);
-  assert.deepEqual(warnings, [
-    'The selection crop could not be captured; the active agent will use text context only.',
-  ]);
-
-  await receiveMessage({
-    type: 'selectionAction',
-    action: 'sendToAgent',
-    agentId: 'codex',
-    anchor: { page: 3, snippet: 'Selected PDF passage' },
-  });
-  await receiveMessage({
-    type: 'selectionAction',
-    action: 'sendToAgent',
-    agentId: 'codex',
-    anchor: { page: 3, snippet: 'Selected PDF passage' },
-    cropCaptureFailed: 'true',
-  });
-
-  assert.equal(commands.length, 3);
-  assert.equal(commands[1][0], ADD_SELECTION_TO_AGENT_COMMAND);
-  assert.equal(commands[2][0], ADD_SELECTION_TO_AGENT_COMMAND);
-  assert.equal(Object.prototype.hasOwnProperty.call(commands[1][1], 'snapshotPng'), false);
-  assert.equal(Object.prototype.hasOwnProperty.call(commands[2][1], 'snapshotPng'), false);
-  assert.equal(warnings.length, 1);
-});
-
-test('concurrent explicit PDF provider captures correlate by request ID without Cursor fallback', async () => {
-  const commands = [];
-  const posted = [];
-  let receiveMessage;
-  const vscode = {
-    workspace: {
-      asRelativePath: uri => uri.fsPath.replace('/vault/', ''),
-    },
-    commands: {
-      executeCommand: async (...args) => { commands.push(args); },
-    },
-    Uri: {
-      joinPath: (...parts) => ({ parts, toString: () => 'vscode-resource' }),
-    },
-  };
-  const {
-    ADD_SELECTION_TO_AGENT_COMMAND,
-    PdfEditorProvider,
-  } = loadTsModule('src/pdfEditorProvider.ts', {
-    vscode,
-    '@llm-wiki/core': { pdfHref: portablePdfHref },
-  });
-  const provider = new PdfEditorProvider(
-    { extensionUri: { fsPath: '/extension' }, subscriptions: [] },
-    '/vault',
-  );
-  const pdfUri = {
-    scheme: 'file',
-    fsPath: '/vault/raw/pdf/paper.pdf',
-    toString: () => 'file:///vault/raw/pdf/paper.pdf',
-  };
-  const webview = {
-    options: {},
-    cspSource: 'vscode-webview:',
-    asWebviewUri: uri => uri,
-    onDidReceiveMessage: listener => {
-      receiveMessage = listener;
-      return { dispose() {} };
-    },
-    postMessage: async message => {
-      posted.push(message);
-      return true;
-    },
-  };
-  await provider.resolveCustomEditor(
-    { uri: pdfUri },
-    {
-      active: true,
-      webview,
-      onDidChangeViewState: () => ({ dispose() {} }),
-      onDidDispose: () => ({ dispose() {} }),
-    },
-    {},
-  );
-  const anchor = {
-    page: 3,
-    prefix: 'before context',
-    suffix: 'after context',
-    snippet: 'Selected PDF passage',
-  };
-  await receiveMessage({ type: 'selectionChanged', anchor });
-  commands.length = 0;
-  posted.length = 0;
-
-  await provider.addSelectionToAgent('codex');
-  await provider.addSelectionToAgent('claude');
-
-  assert.equal(posted.length, 2);
-  assert.equal(posted[0].type, 'captureSelectionForAgent');
-  assert.equal(posted[1].type, 'captureSelectionForAgent');
-  assert.equal(typeof posted[0].requestId, 'string');
-  assert.equal(typeof posted[1].requestId, 'string');
-  assert.notEqual(posted[0].requestId, posted[1].requestId);
-
-  await receiveMessage({
-    type: 'selectionAction',
-    action: 'addToCursorChat',
-    anchor,
-    requestId: posted[1].requestId,
-  });
-  await receiveMessage({
-    type: 'selectionAction',
-    action: 'addToCursorChat',
-    anchor,
-    requestId: posted[0].requestId,
-  });
-
-  assert.deepEqual(
-    commands.map(([command, payload]) => [command, payload.agentId]),
-    [
-      [ADD_SELECTION_TO_AGENT_COMMAND, 'claude'],
-      [ADD_SELECTION_TO_AGENT_COMMAND, 'codex'],
-    ],
-  );
-
-  await receiveMessage({
-    type: 'selectionAction',
-    action: 'addToCursorChat',
-    anchor,
-    requestId: 'unknown-request',
-  });
-  assert.equal(commands.length, 2);
-});
-
-test('no-selection explicit PDF request cannot taint a later ordinary Cursor action', async () => {
-  const commands = [];
-  const posted = [];
-  let receiveMessage;
-  const vscode = {
-    workspace: {
-      asRelativePath: uri => uri.fsPath.replace('/vault/', ''),
-    },
-    commands: {
-      executeCommand: async (...args) => { commands.push(args); },
-    },
-    Uri: {
-      joinPath: (...parts) => ({ parts, toString: () => 'vscode-resource' }),
-    },
-  };
-  const {
-    ADD_SELECTION_TO_CURSOR_CHAT_COMMAND,
-    PdfEditorProvider,
-  } = loadTsModule('src/pdfEditorProvider.ts', {
-    vscode,
-    '@llm-wiki/core': { pdfHref: portablePdfHref },
-  });
-  const provider = new PdfEditorProvider(
-    { extensionUri: { fsPath: '/extension' }, subscriptions: [] },
-    '/vault',
-  );
-  const pdfUri = {
-    scheme: 'file',
-    fsPath: '/vault/raw/pdf/paper.pdf',
-    toString: () => 'file:///vault/raw/pdf/paper.pdf',
-  };
-  const webview = {
-    options: {},
-    cspSource: 'vscode-webview:',
-    asWebviewUri: uri => uri,
-    onDidReceiveMessage: listener => {
-      receiveMessage = listener;
-      return { dispose() {} };
-    },
-    postMessage: async message => {
-      posted.push(message);
-      return true;
-    },
-  };
-  await provider.resolveCustomEditor(
-    { uri: pdfUri },
-    {
-      active: true,
-      webview,
-      onDidChangeViewState: () => ({ dispose() {} }),
-      onDidDispose: () => ({ dispose() {} }),
-    },
-    {},
-  );
-  commands.length = 0;
-
-  await provider.addSelectionToAgent('codex');
-  assert.deepEqual(posted, []);
-  await receiveMessage({
-    type: 'selectionAction',
-    action: 'addToCursorChat',
-    anchor: { page: 4, snippet: 'Later ordinary selection' },
-  });
-
-  assert.equal(commands.length, 1);
-  assert.equal(commands[0][0], ADD_SELECTION_TO_CURSOR_CHAT_COMMAND);
-});
-
-test('selection update clears an unanswered explicit PDF agent request', async () => {
-  const commands = [];
-  let receiveMessage;
-  const vscode = {
-    workspace: {
-      asRelativePath: uri => uri.fsPath.replace('/vault/', ''),
-    },
-    commands: {
-      executeCommand: async (...args) => { commands.push(args); },
-    },
-    Uri: {
-      joinPath: (...parts) => ({ parts, toString: () => 'vscode-resource' }),
-    },
-  };
-  const {
-    ADD_SELECTION_TO_CURSOR_CHAT_COMMAND,
-    PdfEditorProvider,
-  } = loadTsModule('src/pdfEditorProvider.ts', {
-    vscode,
-    '@llm-wiki/core': { pdfHref: portablePdfHref },
-  });
-  const provider = new PdfEditorProvider(
-    { extensionUri: { fsPath: '/extension' }, subscriptions: [] },
-    '/vault',
-  );
-  const pdfUri = {
-    scheme: 'file',
-    fsPath: '/vault/raw/pdf/paper.pdf',
-    toString: () => 'file:///vault/raw/pdf/paper.pdf',
-  };
-  const webview = {
-    options: {},
-    cspSource: 'vscode-webview:',
-    asWebviewUri: uri => uri,
-    onDidReceiveMessage: listener => {
-      receiveMessage = listener;
-      return { dispose() {} };
-    },
-    postMessage: async () => true,
-  };
-  await provider.resolveCustomEditor(
-    { uri: pdfUri },
-    {
-      active: true,
-      webview,
-      onDidChangeViewState: () => ({ dispose() {} }),
-      onDidDispose: () => ({ dispose() {} }),
-    },
-    {},
-  );
-  const anchor = { page: 3, snippet: 'Selected PDF passage' };
-  await receiveMessage({ type: 'selectionChanged', anchor });
-  commands.length = 0;
-
-  await provider.addSelectionToAgent('codex');
-  await receiveMessage({ type: 'selectionChanged', anchor });
-  commands.length = 0;
-  await receiveMessage({
-    type: 'selectionAction',
-    action: 'addToCursorChat',
-    anchor,
-  });
-
-  assert.equal(commands.length, 1);
-  assert.equal(commands[0][0], ADD_SELECTION_TO_CURSOR_CHAT_COMMAND);
-});
-
-test('ordinary Cursor re-request does not consume a pending explicit PDF agent request', async () => {
-  const commands = [];
-  const posted = [];
-  let receiveMessage;
-  const vscode = {
-    workspace: {
-      asRelativePath: uri => uri.fsPath.replace('/vault/', ''),
-    },
-    commands: {
-      executeCommand: async (...args) => { commands.push(args); },
-    },
-    Uri: {
-      joinPath: (...parts) => ({ parts, toString: () => 'vscode-resource' }),
-    },
-  };
-  const {
-    ADD_SELECTION_TO_CURSOR_CHAT_COMMAND,
-    PdfEditorProvider,
-  } = loadTsModule('src/pdfEditorProvider.ts', {
-    vscode,
-    '@llm-wiki/core': { pdfHref: portablePdfHref },
-  });
-  const provider = new PdfEditorProvider(
-    { extensionUri: { fsPath: '/extension' }, subscriptions: [] },
-    '/vault',
-  );
-  const pdfUri = {
-    scheme: 'file',
-    fsPath: '/vault/raw/pdf/paper.pdf',
-    toString: () => 'file:///vault/raw/pdf/paper.pdf',
-  };
-  const webview = {
-    options: {},
-    cspSource: 'vscode-webview:',
-    asWebviewUri: uri => uri,
-    onDidReceiveMessage: listener => {
-      receiveMessage = listener;
-      return { dispose() {} };
-    },
-    postMessage: async message => {
-      posted.push(message);
-      return true;
-    },
-  };
-  await provider.resolveCustomEditor(
-    { uri: pdfUri },
-    {
-      active: true,
-      webview,
-      onDidChangeViewState: () => ({ dispose() {} }),
-      onDidDispose: () => ({ dispose() {} }),
-    },
-    {},
-  );
-  commands.length = 0;
-
-  await receiveMessage({
-    type: 'selectionChanged',
-    anchor: { page: 3, snippet: 'Selected PDF passage' },
-  });
-  commands.length = 0;
-  await provider.addSelectionToAgent('codex');
-  const requestId = posted.at(-1)?.requestId;
-  assert.equal(typeof requestId, 'string');
-  await provider.addSelectionToCursorChat();
-  await receiveMessage({
-    type: 'selectionAction',
-    action: 'addToCursorChat',
-    anchor: { page: 3, snippet: 'Selected PDF passage' },
-  });
-
-  assert.equal(commands.length, 1);
-  assert.equal(commands[0][0], ADD_SELECTION_TO_CURSOR_CHAT_COMMAND);
-
-  await receiveMessage({
-    type: 'selectionAction',
-    action: 'addToCursorChat',
-    anchor: { page: 3, snippet: 'Selected PDF passage' },
-    requestId,
-  });
-  assert.equal(commands.length, 2);
-  assert.equal(commands[1][0], 'llm-wiki.addSelectionToAgent');
-  assert.equal(commands[1][1].agentId, 'codex');
+  assert.deepEqual(commandCalls, []);
 });
 
 test('combined PDF context keys clear on deactivation and restore with its selection', async () => {
@@ -779,6 +723,7 @@ test('combined PDF context keys clear on deactivation and restore with its selec
   assert.deepEqual(commands, [
     ['setContext', 'llmWikiPdfOpen', false],
     ['setContext', 'llmWikiPdfHasSelection', false],
+    ['setContext', 'llmWikiPdfHasAgentClipboardSelection', false],
   ]);
 
   commands.length = 0;
@@ -789,6 +734,7 @@ test('combined PDF context keys clear on deactivation and restore with its selec
   assert.deepEqual(commands, [
     ['setContext', 'llmWikiPdfOpen', true],
     ['setContext', 'llmWikiPdfHasSelection', true],
+    ['setContext', 'llmWikiPdfHasAgentClipboardSelection', false],
   ]);
 });
 
@@ -1120,9 +1066,9 @@ test('PDF provider queues anchor navigation until a newly opened webview is read
 
   assert.deepEqual(
     posted.map(message => message.type),
-    ['agentHandoffCapabilities', 'loadPdf', 'goToAnchor'],
+    ['agentHandoffCapabilities', 'pdfToolbarPreference', 'loadPdf', 'goToAnchor'],
   );
-  assert.deepEqual(posted[2], {
+  assert.deepEqual(posted[3], {
     type: 'goToAnchor',
     anchor: { page: 7, textFragment },
   });
@@ -1206,14 +1152,19 @@ test('agent handoff capabilities precede PDF loading and refresh across live web
 
   await receiveMessage({ type: 'ready' });
 
-  assert.deepEqual(firstPosted.slice(0, 2).map(message => message.type), [
+  assert.deepEqual(firstPosted.slice(0, 3).map(message => message.type), [
     'agentHandoffCapabilities',
+    'pdfToolbarPreference',
     'loadPdf',
   ]);
   assert.deepEqual(firstPosted[0], {
     type: 'agentHandoffCapabilities',
     cursorAgent: true,
     providers: [{ id: 'codex', label: 'Codex' }],
+  });
+  assert.deepEqual(firstPosted[1], {
+    type: 'pdfToolbarPreference',
+    preference: { dock: 'top', hidden: false },
   });
 
   firstPosted.length = 0;
@@ -1562,6 +1513,83 @@ test('PDF outline payloads are bounded, normalized, and reveal the exact destina
     false,
   );
   assert.equal(provider.getPdfOutline(uri), entries);
+  const active = provider.webviews.get(uri.toString());
+  active.outlineInferred = true;
+  assert.equal(provider.isPdfOutlineInferred(uri), true);
+  active.outlineLoading = true;
+  assert.equal(provider.getPdfOutline(uri), undefined);
+  assert.equal(provider.isPdfOutlineInferred(uri), false);
+});
+
+test('PDF toolbar preference persists globally, broadcasts, and restores its last dock', async () => {
+  const updates = [];
+  const posted = [];
+  const context = {
+    extensionUri: { fsPath: '/extension' },
+    subscriptions: [],
+    globalState: {
+      get: key => {
+        assert.equal(key, 'llmWiki.pdf.toolbarPreference.v1');
+        return { dock: 'left', hidden: true };
+      },
+      update: async (key, value) => {
+        updates.push([key, value]);
+      },
+    },
+  };
+  const vscode = {
+    Uri: {
+      joinPath: (...parts) => ({ parts }),
+    },
+  };
+  const { PdfEditorProvider } = loadTsModule('src/pdfEditorProvider.ts', {
+    vscode,
+    '@llm-wiki/core': {},
+  });
+  const provider = new PdfEditorProvider(context, '/vault');
+  assert.deepEqual(provider.getPdfToolbarPreference(), {
+    dock: 'left',
+    hidden: true,
+  });
+  for (const name of ['first', 'second']) {
+    provider.webviews.set(name, {
+      panel: {},
+      pdfUri: { toString: () => name },
+      postMessage: message => posted.push([name, message]),
+    });
+  }
+
+  assert.deepEqual(await provider.setPdfToolbarPreference({
+    dock: 'top',
+    hidden: false,
+    ignored: true,
+  }), {
+    dock: 'top',
+    hidden: false,
+  });
+  assert.deepEqual(updates, [[
+    'llmWiki.pdf.toolbarPreference.v1',
+    { dock: 'top', hidden: false },
+  ]]);
+  assert.deepEqual(posted, [
+    ['first', {
+      type: 'pdfToolbarPreference',
+      preference: { dock: 'top', hidden: false },
+    }],
+    ['second', {
+      type: 'pdfToolbarPreference',
+      preference: { dock: 'top', hidden: false },
+    }],
+  ]);
+
+  assert.deepEqual(await provider.togglePdfToolbar(), {
+    dock: 'top',
+    hidden: true,
+  });
+  assert.deepEqual(provider.getPdfToolbarPreference(), {
+    dock: 'top',
+    hidden: true,
+  });
 });
 
 function portablePdfHref(sourcePath, { page, textFragment } = {}) {
