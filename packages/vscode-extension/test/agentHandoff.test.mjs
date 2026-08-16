@@ -1304,6 +1304,86 @@ test('reuses the active Cursor composer for selection.md and crop without openin
   );
 });
 
+test('adds raw PDF text and only the optional crop to the active Cursor composer', async () => {
+  const calls = [];
+  const pdf = {
+    scheme: 'file',
+    fsPath: '/vault/raw/paper.pdf',
+    path: '/vault/raw/paper.pdf',
+  };
+  const crop = {
+    scheme: 'file',
+    fsPath: '/vault/.llm_wiki/agent/clipboard/pdf-selection-a.png',
+    path: '/vault/.llm_wiki/agent/clipboard/pdf-selection-a.png',
+  };
+  const rawText = [
+    'Source: [raw/paper.pdf (page 7)](<cursor://llm-wiki/open-anchor?target=paper>)',
+    '',
+    'Selected text:',
+    'Exact selected PDF passage.',
+  ].join('\n');
+  const vscode = {
+    commands: {
+      getCommands: async () => [
+        'composer.addsymbolstocomposer',
+        'composer.addfilestocomposer',
+        'composer.getOrderedSelectedComposerIds',
+        'workbench.action.chat.open',
+      ],
+      executeCommand: async (...args) => {
+        calls.push(args);
+        if (args[0] === 'composer.getOrderedSelectedComposerIds') {
+          return ['current-agent-panel'];
+        }
+      },
+    },
+    window: {
+      showWarningMessage: () => undefined,
+    },
+  };
+  const { handoffRawTextToCursor } = loadAgentHandoff(vscode);
+
+  assert.equal(
+    typeof handoffRawTextToCursor,
+    'function',
+    'the Cursor adapter must expose a raw-text handoff',
+  );
+  assert.equal(await handoffRawTextToCursor({
+    uri: pdf,
+    range: { startLine: 7, endLine: 7 },
+    rawText,
+  }, [crop]), true);
+
+  assert.deepEqual(calls, [
+    ['composer.getOrderedSelectedComposerIds'],
+    [
+      'composer.addsymbolstocomposer',
+      {
+        codeSelections: [{
+          uri: pdf,
+          range: {
+            selectionStartLineNumber: 7,
+            selectionStartColumn: 1,
+            positionLineNumber: 10,
+            positionColumn: 28,
+          },
+          text: rawText,
+          rawText,
+        }],
+      },
+    ],
+    ['composer.addfilestocomposer', crop, { useExactResource: true }],
+  ]);
+  assert.equal(
+    JSON.stringify(calls).includes('selection.md'),
+    false,
+  );
+  assert.equal(
+    calls.some(([command]) => /submit|send/i.test(command)),
+    false,
+  );
+});
+
 test('opens Cursor once and attaches when no current composer exists', async () => {
   const calls = [];
   const selection = {

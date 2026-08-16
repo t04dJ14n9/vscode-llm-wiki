@@ -21,6 +21,12 @@ export type AgentHandoffContext =
 
 type HandoffContextInput = AgentHandoffContext | vscode.Uri;
 
+export interface CursorRawTextHandoff {
+  uri: vscode.Uri;
+  range: SourceLineRange;
+  rawText: string;
+}
+
 export interface AgentSurfaceCapabilitySource extends vscode.Disposable {
   readonly onDidChange: vscode.Event<void>;
   read(): AgentSurfaceCapabilities;
@@ -117,6 +123,82 @@ export async function handoffSelectionToCursor(
     attachmentUris,
     commands,
   );
+}
+
+export async function handoffRawTextToCursor(
+  input: CursorRawTextHandoff,
+  attachmentUris: readonly vscode.Uri[] = [],
+): Promise<boolean> {
+  if (
+    input.uri.scheme !== 'file'
+    || !input.uri.fsPath
+    || !input.rawText.trim()
+    || !Number.isSafeInteger(input.range.startLine)
+    || !Number.isSafeInteger(input.range.endLine)
+    || input.range.startLine < 1
+    || input.range.endLine < input.range.startLine
+  ) {
+    vscode.window.showWarningMessage('The selected PDF text could not be added to chat.');
+    return false;
+  }
+
+  const commands = new Set(await vscode.commands.getCommands(true));
+  if (!commands.has(CURSOR_SELECTION_COMMAND)) {
+    vscode.window.showWarningMessage('Cursor chat cannot accept raw selection text.');
+    return false;
+  }
+
+  const hasActiveComposer = await cursorHasActiveComposer(commands);
+  if (hasActiveComposer === false) {
+    if (!commands.has(CURSOR_OPEN_COMMAND)) {
+      vscode.window.showWarningMessage(
+        'Cursor could not find an open Agent composer. Open Cursor Chat and try again.',
+      );
+      return false;
+    }
+    try {
+      await vscode.commands.executeCommand(CURSOR_OPEN_COMMAND, {
+        query: 'Use the selected PDF passage as context.',
+        isPartialQuery: true,
+      });
+    } catch {
+      // Cursor can create the composer before its open command rejects.
+    }
+  }
+
+  const lines = input.rawText.split('\n');
+  const endLine = input.range.startLine + lines.length - 1;
+  try {
+    await vscode.commands.executeCommand(CURSOR_SELECTION_COMMAND, {
+      codeSelections: [{
+        uri: input.uri,
+        range: {
+          selectionStartLineNumber: input.range.startLine,
+          selectionStartColumn: 1,
+          positionLineNumber: endLine,
+          positionColumn: (lines.at(-1)?.length ?? 0) + 1,
+        },
+        text: input.rawText,
+        rawText: input.rawText,
+      }],
+    });
+  } catch {
+    vscode.window.showWarningMessage(
+      'Cursor could not add the selected PDF text. Open Cursor Chat and try again.',
+    );
+    return false;
+  }
+
+  for (const uri of uniqueLocalUris(attachmentUris)) {
+    try {
+      await attachToCursor(uri);
+    } catch {
+      vscode.window.showWarningMessage(
+        'Cursor added the selected PDF text, but could not attach the optional image.',
+      );
+    }
+  }
+  return true;
 }
 
 function computeAgentSurfaceCapabilities(

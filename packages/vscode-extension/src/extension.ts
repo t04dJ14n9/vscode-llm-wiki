@@ -10,6 +10,7 @@ import { registerAnchorFileEditorProvider } from './anchorFileEditorProvider';
 import { llmWikiAnchorTarget } from './anchorUris';
 import {
   createAgentSurfaceCapabilitySource,
+  handoffRawTextToCursor,
   handoffSelectionToAgent,
   handoffSelectionToCursor,
 } from './agentHandoff';
@@ -28,7 +29,11 @@ import { LearningNoteStore } from './learningNoteStore';
 import { registerLinkProvider } from './linkProvider';
 import { MarkdownEditorProvider } from './markdownEditorProvider';
 import { validateCursorCropPng } from './cursorCrop';
-import { formatMarkdownAgentReference } from './agentClipboard';
+import {
+  createPdfAgentClipboardContext,
+  formatMarkdownAgentReference,
+} from './agentClipboard';
+import { persistPdfAgentClipboardImage } from './pdfAgentClipboardImage';
 import {
   type MarkdownOutlineTreeProvider,
   registerMarkdownOutlineProvider,
@@ -566,6 +571,18 @@ async function exportSelectionAndHandoff(
     return handoffMarkdownRange(markdownContext, target);
   }
   if (isMarkdownSelection(resolvedSelection)) return false;
+  if (
+    target.kind === 'cursor'
+    && resolvedSelection
+    && isPdfUri(resolvedSelection.uri)
+  ) {
+    return handoffPdfSelectionToCursor(
+      workspaceRoot,
+      resolvedSelection,
+      snapshotPng,
+      cropFailureMessage,
+    );
+  }
 
   const exported = await exportCurrentSelection(workspaceRoot, resolvedSelection);
   if (!exported) return false;
@@ -588,6 +605,60 @@ async function exportSelectionAndHandoff(
     ? await handoffSelectionToCursor(context, attachments)
     : (await handoffSelectionToAgent(context, attachments)) !== undefined;
   return sent;
+}
+
+async function handoffPdfSelectionToCursor(
+  fallbackWorkspaceRoot: string,
+  selection: SelectionContext,
+  snapshotPng: Uint8Array | undefined,
+  cropFailureMessage: string,
+): Promise<boolean> {
+  const relativePath = vscode.workspace.asRelativePath(selection.uri);
+  const selectionKey = JSON.stringify({
+    anchorUri: selection.anchorUri,
+    startLine: selection.startLine,
+    endLine: selection.endLine,
+    text: selection.text,
+  });
+  const context = createPdfAgentClipboardContext({
+    selectionKey,
+    relativePath,
+    startPage: selection.startLine,
+    endPage: selection.endLine,
+    selectedText: selection.text,
+    anchorUri: selection.anchorUri ?? '',
+  });
+  if (!context) {
+    vscode.window.showWarningMessage('The selected PDF text could not be added to chat.');
+    return false;
+  }
+
+  const attachmentUris: vscode.Uri[] = [];
+  const crop = validateCursorCropPng(snapshotPng);
+  if (crop) {
+    const workspaceRoot = vscode.workspace.getWorkspaceFolder?.(selection.uri)?.uri.fsPath
+      ?? fallbackWorkspaceRoot;
+    try {
+      const image = persistPdfAgentClipboardImage({
+        rootPath: workspaceRoot,
+        sourceIdentity: selection.uri.toString(),
+        selectionKey: context.selectionKey,
+        bytes: crop,
+      });
+      attachmentUris.push(vscode.Uri.file(image.absolutePath));
+    } catch {
+      vscode.window.showWarningMessage(cropFailureMessage);
+    }
+  }
+
+  return handoffRawTextToCursor({
+    uri: selection.uri,
+    range: {
+      startLine: selection.startLine,
+      endLine: selection.endLine,
+    },
+    rawText: context.plainText,
+  }, attachmentUris);
 }
 
 async function markdownRangeHandoffContext(

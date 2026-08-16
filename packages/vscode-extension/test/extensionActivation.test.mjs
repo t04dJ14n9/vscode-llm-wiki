@@ -87,6 +87,13 @@ function loadTsModule(relativePath, mocks = {}) {
           `@${relativePath}#${startLine === endLine ? startLine : `${startLine}-${endLine}`}`,
       };
     }
+    if (request === './pdfAgentClipboardImage') {
+      return mocks[request] ?? {
+        persistPdfAgentClipboardImage: () => {
+          throw new Error('Unexpected PDF agent clipboard image persistence');
+        },
+      };
+    }
     if (Object.prototype.hasOwnProperty.call(mocks, request)) {
       return mocks[request];
     }
@@ -830,9 +837,9 @@ test('empty Markdown copy leaves the clipboard unchanged and shows the select wa
 });
 
 test('Add to Chat stays Cursor-only while provider-specific selection commands are absent', async () => {
-  const exports = [];
-  const cursorCalls = [];
-  const attachmentSyncs = [];
+  const markdownCalls = [];
+  const rawTextCalls = [];
+  const persistedImages = [];
   const markdownSelection = {
     uri: { fsPath: '/vault/notes/attention.md', scheme: 'file' },
     text: 'Markdown passage',
@@ -841,14 +848,25 @@ test('Add to Chat stays Cursor-only while provider-specific selection commands a
     metadata: { kind: 'markdown' },
   };
   const pdfSelection = {
-    uri: { fsPath: '/vault/raw/papers/attention.pdf', scheme: 'file' },
+    uri: {
+      fsPath: '/vault/raw/papers/attention.pdf',
+      scheme: 'file',
+      toString: () => 'file:///vault/raw/papers/attention.pdf',
+    },
     text: 'FlashAttention uses tiling',
     startLine: 2,
     endLine: 2,
     sourceLabel: 'raw/papers/attention.pdf',
     rangeLabel: 'page 2',
+    anchorUri: 'raw/papers/attention.pdf#page=2',
   };
   const snapshotPng = Uint8Array.from([10, 20, 30]);
+  const rawPdfText = [
+    'Source: [raw/papers/attention.pdf (page 2)](<cursor://llm-wiki/open-anchor?target=attention>)',
+    '',
+    'Selected text:',
+    'FlashAttention uses tiling',
+  ].join('\n');
   const vscode = createVscodeMock({
     executeCommandCalls: [],
     activeDocumentUri: undefined,
@@ -857,21 +875,29 @@ test('Add to Chat stays Cursor-only while provider-specific selection commands a
   });
   const mocks = createActivationMocks({ vscode });
   mocks['./agentContext'] = {
-    addSelectionToContext: async (vaultRoot, options) => {
-      exports.push({
-        vaultRoot,
-        selection: await options.getActiveSelectionContext(),
-      });
-      const directoryPath = `/vault/.llm_wiki/agent/exports/export-${exports.length}`;
+    addSelectionToContext: async () =>
+      assert.fail('PDF Add to Chat must not create selection.md'),
+    syncSelectionExportAttachment: async () =>
+      assert.fail('PDF Add to Chat must not create an export crop alias'),
+  };
+  mocks['./agentClipboard'] = {
+    formatMarkdownAgentReference: (relativePath, startLine, endLine) =>
+      `@${relativePath}#${startLine === endLine ? startLine : `${startLine}-${endLine}`}`,
+    createPdfAgentClipboardContext: input => ({
+      selectionKey: input.selectionKey,
+      sourceLabel: 'raw/papers/attention.pdf (page 2)',
+      sourceHref: 'cursor://llm-wiki/open-anchor?target=attention',
+      selectedText: input.selectedText,
+      plainText: rawPdfText,
+    }),
+  };
+  mocks['./pdfAgentClipboardImage'] = {
+    persistPdfAgentClipboardImage: input => {
+      persistedImages.push(input);
       return {
-        directoryPath,
-        markdownPath: `${directoryPath}/selection.md`,
-        jsonPath: `${directoryPath}/selection.json`,
+        absolutePath: '/vault/.llm_wiki/agent/clipboard/pdf-selection-a.png',
+        relativePath: '.llm_wiki/agent/clipboard/pdf-selection-a.png',
       };
-    },
-    syncSelectionExportAttachment: async (exported, fileName, bytes) => {
-      attachmentSyncs.push({ exported, fileName, bytes });
-      return bytes ? `${exported.directoryPath}/${fileName}` : undefined;
     },
   };
   mocks['./cursorCrop'] = {
@@ -881,8 +907,15 @@ test('Add to Chat stays Cursor-only while provider-specific selection commands a
   };
   mocks['./agentHandoff'] = {
     handoffSelectionToCursor: async (context, attachments) => {
-      cursorCalls.push({
-        markdownPath: context.uri.fsPath,
+      markdownCalls.push({
+        context,
+        attachments: attachments.map(uri => uri.fsPath),
+      });
+      return true;
+    },
+    handoffRawTextToCursor: async (input, attachments) => {
+      rawTextCalls.push({
+        input,
         attachments: attachments.map(uri => uri.fsPath),
       });
       return true;
@@ -921,43 +954,58 @@ test('Add to Chat stays Cursor-only while provider-specific selection commands a
     snapshotPng,
   });
 
-  assert.deepEqual(exports, [
-    { vaultRoot: '/vault', selection: pdfSelection },
-    { vaultRoot: '/vault', selection: pdfSelection },
-  ]);
-  assert.deepEqual(cursorCalls, [
+  assert.deepEqual(markdownCalls, [
     {
-      markdownPath: '/vault/notes/attention.md',
+      context: {
+        kind: 'markdown-range',
+        uri: markdownSelection.uri,
+        range: { startLine: 4, endLine: 4 },
+      },
       attachments: [],
     },
+  ]);
+  assert.deepEqual(rawTextCalls, [
     {
-      markdownPath: '/vault/.llm_wiki/agent/exports/export-1/selection.md',
-      attachments: ['/vault/.llm_wiki/agent/exports/export-1/selection.png'],
+      input: {
+        uri: pdfSelection.uri,
+        range: { startLine: 2, endLine: 2 },
+        rawText: rawPdfText,
+      },
+      attachments: ['/vault/.llm_wiki/agent/clipboard/pdf-selection-a.png'],
     },
     {
-      markdownPath: '/vault/.llm_wiki/agent/exports/export-2/selection.md',
-      attachments: ['/vault/.llm_wiki/agent/exports/export-2/selection.png'],
+      input: {
+        uri: pdfSelection.uri,
+        range: { startLine: 2, endLine: 2 },
+        rawText: rawPdfText,
+      },
+      attachments: ['/vault/.llm_wiki/agent/clipboard/pdf-selection-a.png'],
     },
   ]);
-  assert.deepEqual(
-    attachmentSyncs.map(({ exported, fileName, bytes }) => ({
-      directoryPath: exported.directoryPath,
-      fileName,
-      bytes,
-    })),
-    [
-      {
-        directoryPath: '/vault/.llm_wiki/agent/exports/export-1',
-        fileName: 'selection.png',
-        bytes: snapshotPng,
-      },
-      {
-        directoryPath: '/vault/.llm_wiki/agent/exports/export-2',
-        fileName: 'selection.png',
-        bytes: snapshotPng,
-      },
-    ],
-  );
+  assert.deepEqual(persistedImages, [
+    {
+      rootPath: '/vault',
+      sourceIdentity: 'file:///vault/raw/papers/attention.pdf',
+      selectionKey: JSON.stringify({
+        anchorUri: 'raw/papers/attention.pdf#page=2',
+        startLine: 2,
+        endLine: 2,
+        text: 'FlashAttention uses tiling',
+      }),
+      bytes: snapshotPng,
+    },
+    {
+      rootPath: '/vault',
+      sourceIdentity: 'file:///vault/raw/papers/attention.pdf',
+      selectionKey: JSON.stringify({
+        anchorUri: 'raw/papers/attention.pdf#page=2',
+        startLine: 2,
+        endLine: 2,
+        text: 'FlashAttention uses tiling',
+      }),
+      bytes: snapshotPng,
+    },
+  ]);
 });
 
 test('activation provides the Cursor capability to PDF hosts and sets the product context', () => {
@@ -1115,15 +1163,26 @@ test('Cursor handoff marks agent focus and Escape restores the Markdown editor',
   ));
 });
 
-test('Add to Chat falls back to immutable text when crop persistence fails', async () => {
+test('Add to Chat keeps raw PDF text when crop persistence fails', async () => {
   const cursorHandoffs = [];
   const warningMessages = [];
   const selection = {
-    uri: { fsPath: '/vault/raw/papers/attention.pdf', scheme: 'file' },
+    uri: {
+      fsPath: '/vault/raw/papers/attention.pdf',
+      scheme: 'file',
+      toString: () => 'file:///vault/raw/papers/attention.pdf',
+    },
     text: 'FlashAttention uses tiling',
     startLine: 2,
     endLine: 2,
+    anchorUri: 'raw/papers/attention.pdf#page=2',
   };
+  const rawText = [
+    'Source: [raw/papers/attention.pdf (page 2)](<cursor://llm-wiki/open-anchor?target=attention>)',
+    '',
+    'Selected text:',
+    'FlashAttention uses tiling',
+  ].join('\n');
   const vscode = createVscodeMock({
     executeCommandCalls: [],
     activeDocumentUri: undefined,
@@ -1131,12 +1190,23 @@ test('Add to Chat falls back to immutable text when crop persistence fails', asy
   });
   const mocks = createActivationMocks({ vscode });
   mocks['./agentContext'] = {
-    addSelectionToContext: async () => ({
-      directoryPath: '/vault/.llm_wiki/agent/exports/export-1',
-      markdownPath: '/vault/.llm_wiki/agent/exports/export-1/selection.md',
-      jsonPath: '/vault/.llm_wiki/agent/exports/export-1/selection.json',
+    addSelectionToContext: async () =>
+      assert.fail('PDF Add to Chat must not create selection.md'),
+    syncSelectionExportAttachment: async () =>
+      assert.fail('PDF Add to Chat must not create an export crop alias'),
+  };
+  mocks['./agentClipboard'] = {
+    formatMarkdownAgentReference: () => '',
+    createPdfAgentClipboardContext: input => ({
+      selectionKey: input.selectionKey,
+      sourceLabel: 'raw/papers/attention.pdf (page 2)',
+      sourceHref: 'cursor://llm-wiki/open-anchor?target=attention',
+      selectedText: input.selectedText,
+      plainText: rawText,
     }),
-    syncSelectionExportAttachment: async () => {
+  };
+  mocks['./pdfAgentClipboardImage'] = {
+    persistPdfAgentClipboardImage: () => {
       throw new Error('read-only filesystem');
     },
   };
@@ -1144,9 +1214,9 @@ test('Add to Chat falls back to immutable text when crop persistence fails', asy
     validateCursorCropPng: value => value,
   };
   mocks['./agentHandoff'] = {
-    handoffSelectionToCursor: async (context, attachments) => {
+    handoffRawTextToCursor: async (input, attachments) => {
       cursorHandoffs.push({
-        contextPath: context.uri.fsPath,
+        input,
         attachmentPaths: attachments.map(uri => uri.fsPath),
       });
       return true;
@@ -1161,7 +1231,11 @@ test('Add to Chat falls back to immutable text when crop persistence fails', asy
   });
 
   assert.deepEqual(cursorHandoffs, [{
-    contextPath: '/vault/.llm_wiki/agent/exports/export-1/selection.md',
+    input: {
+      uri: selection.uri,
+      range: { startLine: 2, endLine: 2 },
+      rawText,
+    },
     attachmentPaths: [],
   }]);
   assert.ok(warningMessages.includes(
