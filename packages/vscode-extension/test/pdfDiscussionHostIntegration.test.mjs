@@ -28,6 +28,9 @@ function loadTsModule(root, relativePath, mocks = {}) {
     if (Object.prototype.hasOwnProperty.call(mocks, request)) return mocks[request];
     if (request === './agentClipboard' && root === packageRoot) return agentClipboard;
     if (request === './cursorCrop' && root === packageRoot) return cursorCrop;
+    if (request === './pdfAgentClipboardImage' && root === packageRoot) {
+      return pdfAgentClipboardImage;
+    }
     return originalLoad.call(this, request, parent, isMain);
   };
   try {
@@ -49,6 +52,10 @@ const agentClipboard = loadTsModule(packageRoot, 'src/agentClipboard.ts', {
       `cursor://llm-wiki/open-anchor?target=${encodeURIComponent(target)}`,
   },
 });
+const pdfAgentClipboardImage = loadTsModule(
+  packageRoot,
+  'src/pdfAgentClipboardImage.ts',
+);
 
 function uri(fsPath) {
   return {

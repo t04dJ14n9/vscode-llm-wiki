@@ -120,19 +120,6 @@ class FakeCanvas {
   }
 }
 
-class FakeClipboardItem {
-  constructor(items) {
-    this.items = items;
-    this.types = Object.keys(items);
-  }
-
-  async getType(type) {
-    const value = this.items[type];
-    if (!value) throw new TypeError(`Clipboard item does not contain ${type}`);
-    return value;
-  }
-}
-
 function resetCanvasState(overrides = {}) {
   canvasState = {
     blobBytesPerPixel: 0.01,
@@ -179,7 +166,6 @@ function deferred() {
 }
 
 const originalDocument = globalThis.document;
-const originalClipboardItem = globalThis.ClipboardItem;
 globalThis.document = {
   createElement: tagName => {
     assert.equal(tagName, 'canvas');
@@ -194,18 +180,15 @@ const pdfAgentClipboard = compileTsModule(clipboardSource);
 test.after(() => {
   if (originalDocument === undefined) delete globalThis.document;
   else globalThis.document = originalDocument;
-  if (originalClipboardItem === undefined) delete globalThis.ClipboardItem;
-  else globalThis.ClipboardItem = originalClipboardItem;
 });
 
 test.beforeEach(() => {
   resetCanvasState();
-  globalThis.ClipboardItem = FakeClipboardItem;
 });
 
-test('gesture-bound rich PDF clipboard starts write before the PNG promise settles', async () => {
+test('PDF clipboard waits for the crop before posting its validated image payload', async () => {
   const pendingPng = deferred();
-  const writes = [];
+  const posted = [];
   const writeResult = pdfAgentClipboard.writePdfAgentClipboard({
     context: {
       selectionKey: 'gesture-bound-key',
@@ -215,30 +198,57 @@ test('gesture-bound rich PDF clipboard starts write before the PNG promise settl
       plainText: 'host-precomputed plain text',
     },
     pngBlob: pendingPng.promise,
-    host: { postMessage: () => undefined },
-  }, {
-    write: items => {
-      writes.push(items);
-      return Promise.all(items[0].types.map(type => items[0].getType(type)))
-        .then(() => undefined);
+    host: {
+      postMessage: message => {
+        posted.push(message);
+      },
     },
   });
 
-  assert.equal(writes.length, 1);
-  assert.deepEqual(
-    writes[0][0].types.sort(),
-    ['image/png', 'text/html', 'text/plain'],
-  );
+  assert.deepEqual(posted, []);
 
   pendingPng.resolve(new Blob(['png'], { type: 'image/png' }));
-  assert.equal(await writeResult, 'rich');
+  assert.equal(await writeResult, 'image-reference');
+  assert.deepEqual(posted, [{
+    type: 'agentClipboardResult',
+    status: 'image-reference',
+    selectionKey: 'gesture-bound-key',
+    pngBase64: Buffer.from('png').toString('base64'),
+  }]);
 });
 
-test('stale PDF clipboard attempt rejects promised representations without committing or notifying', async () => {
+test('PDF Copy for Agent posts a text-first image reference payload instead of an image clipboard item', async () => {
+  const posted = [];
+  const pngBlob = new Blob(['png bytes'], { type: 'image/png' });
+
+  const result = await pdfAgentClipboard.writePdfAgentClipboard({
+    context: {
+      selectionKey: 'text-first-key',
+      sourceLabel: 'raw/pdf/paper.pdf (page 2)',
+      sourceHref: 'cursor://llm-wiki/open-anchor?target=paper.pdf',
+      selectedText: 'Exact selected passage',
+      plainText: 'host-precomputed plain text',
+    },
+    pngBlob,
+    host: {
+      postMessage: message => {
+        posted.push(message);
+      },
+    },
+  });
+
+  assert.equal(result, 'image-reference');
+  assert.deepEqual(posted, [{
+    type: 'agentClipboardResult',
+    status: 'image-reference',
+    selectionKey: 'text-first-key',
+    pngBase64: Buffer.from('png bytes').toString('base64'),
+  }]);
+});
+
+test('stale PDF clipboard attempts never post image bytes or text', async () => {
   const pendingPng = deferred();
   const posted = [];
-  const committedPlainText = [];
-  const representationResults = [];
   let current = true;
   const writeResult = pdfAgentClipboard.writePdfAgentClipboard({
     context: {
@@ -251,39 +261,17 @@ test('stale PDF clipboard attempt rejects promised representations without commi
     pngBlob: pendingPng.promise,
     isCurrent: () => current,
     host: { postMessage: message => { posted.push(message); } },
-  }, {
-    write: async items => {
-      const item = items[0];
-      const representations = item.types.map(type => item.getType(type));
-      representationResults.push(...representations);
-      const plainText = await item.getType('text/plain');
-      await Promise.all(representations);
-      committedPlainText.push(await plainText.text());
-    },
   });
 
   current = false;
   pendingPng.resolve(new Blob(['stale png'], { type: 'image/png' }));
 
   assert.equal(await writeResult, 'text-fallback');
-  assert.deepEqual(committedPlainText, []);
   assert.deepEqual(posted, []);
-  assert.deepEqual(
-    (await Promise.allSettled(representationResults)).map(result => result.status),
-    ['rejected', 'rejected', 'rejected'],
-  );
 });
 
-test('rich PDF clipboard writes one item with PNG, plain text, and HTML', async () => {
-  const expectedPlainText = [
-    'Source: [raw/pdf/paper.pdf (page 2)](<cursor://llm-wiki/open-anchor?target=raw%2Fpdf%2Fpaper.pdf%23page%3D2>)',
-    '',
-    'Selected text:',
-    'Exact selected passage',
-  ].join('\n');
-  const writes = [];
+test('PDF clipboard posts only canonical PNG bytes for the correlated host context', async () => {
   const posted = [];
-  const events = [];
   const pngBlob = new Blob(['png'], { type: 'image/png' });
   const result = await pdfAgentClipboard.writePdfAgentClipboard({
     context: {
@@ -291,64 +279,28 @@ test('rich PDF clipboard writes one item with PNG, plain text, and HTML', async 
       sourceLabel: 'raw/pdf/paper.pdf (page 2)',
       sourceHref: 'cursor://llm-wiki/open-anchor?target=raw%2Fpdf%2Fpaper.pdf%23page%3D2',
       selectedText: 'Exact selected passage',
-      plainText: expectedPlainText,
+      plainText: 'host-precomputed plain text',
     },
     pngBlob,
     host: {
       postMessage: message => {
-        events.push('host');
         posted.push(message);
       },
     },
-  }, {
-    write: async items => {
-      events.push('clipboard');
-      writes.push(items);
-    },
   });
 
-  assert.equal(result, 'rich');
-  assert.equal(writes.length, 1);
-  assert.equal(writes[0].length, 1);
-  const [item] = writes[0];
-  assert.deepEqual(item.types.sort(), ['image/png', 'text/html', 'text/plain']);
-  assert.equal(await item.getType('image/png'), pngBlob);
-  assert.equal(await (await item.getType('text/plain')).text(), expectedPlainText);
-  assert.match(await (await item.getType('text/html')).text(), /<a href="cursor:/);
-  assert.deepEqual(events, ['clipboard', 'host']);
+  assert.equal(result, 'image-reference');
   assert.deepEqual(posted, [{
     type: 'agentClipboardResult',
-    status: 'rich',
+    status: 'image-reference',
     selectionKey: 'current-selection-key',
+    pngBase64: Buffer.from('png').toString('base64'),
   }]);
 });
 
-test('sanitizes clipboard HTML while preserving the cursor source link', async () => {
-  const writes = [];
-  await pdfAgentClipboard.writePdfAgentClipboard({
-    context: {
-      selectionKey: 'sanitization-key',
-      sourceLabel: 'paper.pdf </a><script>alert(1)</script>',
-      sourceHref: 'cursor://llm-wiki/open-anchor?target=paper.pdf&label=" onerror="alert(1)',
-      selectedText: 'Selected </blockquote><img src=x onerror=alert(1)>',
-      plainText: 'precomputed plain text',
-    },
-    pngBlob: new Blob(['png'], { type: 'image/png' }),
-    host: { postMessage: () => undefined },
-  }, {
-    write: async items => { writes.push(items); },
-  });
-
-  const html = await (await writes[0][0].getType('text/html')).text();
-  assert.match(html, /<a href="cursor:/);
-  assert.match(html, /<img src="data:image\/png;base64,/);
-  assert.doesNotMatch(html, /<script|onerror=/i);
-});
-
-test('clipboard text fallback posts only validated text after rich write rejection', async () => {
+test('clipboard text fallback posts only validated text after PNG capture rejection', async () => {
   const expectedPlainText = 'host-precomputed plain text';
   const posted = [];
-  const events = [];
   const result = await pdfAgentClipboard.writePdfAgentClipboard({
     context: {
       selectionKey: 'current-selection-key',
@@ -360,19 +312,33 @@ test('clipboard text fallback posts only validated text after rich write rejecti
     pngBlob: new Blob(['secret png bytes'], { type: 'image/png' }),
     host: {
       postMessage: message => {
-        events.push('host');
         posted.push(message);
       },
     },
-  }, {
-    write: async () => {
-      events.push('clipboard');
-      throw new Error('clipboard permission denied');
+  });
+
+  assert.equal(result, 'image-reference');
+  assert.equal(posted[0].status, 'image-reference');
+  assert.equal(Object.hasOwn(posted[0], 'plainText'), false);
+
+  posted.length = 0;
+  const fallback = await pdfAgentClipboard.writePdfAgentClipboard({
+    context: {
+      selectionKey: 'current-selection-key',
+      sourceLabel: 'raw/pdf/paper.pdf (page 2)',
+      sourceHref: 'cursor://llm-wiki/open-anchor?target=paper.pdf',
+      selectedText: 'Exact selected passage',
+      plainText: expectedPlainText,
+    },
+    pngBlob: undefined,
+    host: {
+      postMessage: message => {
+        posted.push(message);
+      },
     },
   });
 
-  assert.equal(result, 'text-fallback');
-  assert.deepEqual(events, ['clipboard', 'host']);
+  assert.equal(fallback, 'text-fallback');
   assert.deepEqual(posted, [{
     type: 'agentClipboardResult',
     status: 'text-fallback',

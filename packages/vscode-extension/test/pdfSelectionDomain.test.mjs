@@ -252,7 +252,7 @@ test('gesture-bound PDF copy invokes crop and writer in the click stack', async 
   assert.equal(state.writeInputs.length, 1);
   assert.equal(state.writeInputs[0].pngBlob, state.pngPromise);
 
-  state.pendingWrite.resolve('rich');
+  state.pendingWrite.resolve('image-reference');
   await Promise.resolve();
 });
 
@@ -266,7 +266,7 @@ test('duplicate PDF clipboard clicks share one in-flight attempt', async () => {
   assert.equal(state.captureInputs.length, 1);
   assert.equal(state.writeInputs.length, 1);
 
-  state.pendingWrite.resolve('rich');
+  state.pendingWrite.resolve('image-reference');
   await Promise.resolve();
 });
 
@@ -302,8 +302,9 @@ test('selection change invalidates an in-flight PDF clipboard attempt', async ()
   assert.equal(state.writeInputs[0].isCurrent(), false);
   state.writeInputs[0].host.postMessage({
     type: 'agentClipboardResult',
-    status: 'rich',
+    status: 'image-reference',
     selectionKey: 'stale-key',
+    pngBase64: 'stale-png',
   });
   state.writeInputs[0].host.postMessage({
     type: 'agentClipboardResult',

@@ -30,10 +30,12 @@ import type { LearningNoteResult, LearningNoteStore } from './learningNoteStore'
 import type { SelectionContext } from './selectionContext';
 import {
   createPdfAgentClipboardContext,
+  formatPdfAgentClipboardImageReference,
   pdfAgentClipboardSelectionKey,
   type PdfAgentClipboardContext,
   type PdfAgentClipboardSelection,
 } from './agentClipboard';
+import { persistPdfAgentClipboardImage } from './pdfAgentClipboardImage';
 
 interface PdfSelectionAnchor {
   id?: string;
@@ -403,8 +405,30 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
             || typeof message.selectionKey !== 'string'
             || message.selectionKey !== context.selectionKey
           ) break;
-          if (message.status === 'rich') {
-            vscode.window.showInformationMessage('Selection copied for agent.');
+          if (message.status === 'image-reference') {
+            const png = decodeCursorCropPngBase64(message.pngBase64);
+            if (!png || !this.vaultRoot) {
+              await this.copyPdfAgentClipboardTextFallback(context);
+              break;
+            }
+            try {
+              const image = persistPdfAgentClipboardImage({
+                rootPath: this.vaultRoot,
+                sourceIdentity: active.pdfUri.toString(),
+                selectionKey: context.selectionKey,
+                bytes: png,
+              });
+              const plainText = formatPdfAgentClipboardImageReference(
+                context.plainText,
+                image.relativePath,
+              );
+              await vscode.env.clipboard.writeText(plainText);
+              vscode.window.showInformationMessage(
+                'Selection text and image reference copied for agent.',
+              );
+            } catch {
+              await this.copyPdfAgentClipboardTextFallback(context);
+            }
             break;
           }
           if (
@@ -412,14 +436,7 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
             || typeof message.plainText !== 'string'
             || message.plainText !== context.plainText
           ) break;
-          try {
-            await vscode.env.clipboard.writeText(context.plainText);
-            vscode.window.showWarningMessage(
-              'Selection text copied, but the image could not be copied.',
-            );
-          } catch {
-            vscode.window.showErrorMessage('The selection could not be copied.');
-          }
+          await this.copyPdfAgentClipboardTextFallback(context);
           break;
         }
         case 'lookupSelection':
@@ -1037,6 +1054,19 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
         'llmWikiPdfHasAgentClipboardSelection',
         Boolean(active.agentClipboardContext),
       );
+    }
+  }
+
+  private async copyPdfAgentClipboardTextFallback(
+    context: PdfAgentClipboardContext,
+  ): Promise<void> {
+    try {
+      await vscode.env.clipboard.writeText(context.plainText);
+      vscode.window.showWarningMessage(
+        'Selection text copied, but the image reference could not be saved.',
+      );
+    } catch {
+      vscode.window.showErrorMessage('The selection could not be copied.');
     }
   }
 

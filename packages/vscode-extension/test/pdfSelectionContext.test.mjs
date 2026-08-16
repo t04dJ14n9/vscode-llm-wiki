@@ -47,6 +47,7 @@ function loadTsModule(relativePath, mocks = {}) {
     }
     if (request === './agentClipboard') return agentClipboard;
     if (request === './cursorCrop') return cursorCrop;
+    if (request === './pdfAgentClipboardImage') return pdfAgentClipboardImage;
     return originalLoad.call(this, request, parent, isMain);
   };
   try {
@@ -69,6 +70,8 @@ const agentClipboard = loadTsModule('src/agentClipboard.ts', {
       `cursor://llm-wiki/open-anchor?target=${encodeURIComponent(target)}`,
   },
 });
+
+const pdfAgentClipboardImage = loadTsModule('src/pdfAgentClipboardImage.ts');
 
 test('PDF provider correlates multi-page clipboard context to exact selection geometry', async () => {
   const posted = [];
@@ -332,7 +335,7 @@ test('clipboard text fallback accepts only the current key and exact precomputed
 
   assert.deepEqual(clipboardWrites, [currentContext.plainText]);
   assert.deepEqual(warningMessages, [
-    'Selection text copied, but the image could not be copied.',
+    'Selection text copied, but the image reference could not be saved.',
   ]);
 
   await receiveMessage({
@@ -340,7 +343,124 @@ test('clipboard text fallback accepts only the current key and exact precomputed
     status: 'rich',
     selectionKey: currentContext.selectionKey,
   });
-  assert.deepEqual(informationMessages, ['Selection copied for agent.']);
+  assert.deepEqual(informationMessages, []);
+});
+
+test('PDF clipboard persists a validated crop and copies text with its workspace reference', async () => {
+  const imageFileName = `pdf-selection-${'a'.repeat(64)}.png`;
+  const imageRelativePath = `.llm_wiki/agent/clipboard/${imageFileName}`;
+  const posted = [];
+  const clipboardWrites = [];
+  const informationMessages = [];
+  const warningMessages = [];
+  const persistCalls = [];
+  let receiveMessage;
+  const vscode = {
+    workspace: {
+      asRelativePath: uri => uri.fsPath.replace('/vault/', ''),
+    },
+    commands: {
+      executeCommand: async () => undefined,
+    },
+    env: {
+      clipboard: {
+        writeText: async text => { clipboardWrites.push(text); },
+      },
+    },
+    window: {
+      showInformationMessage: message => { informationMessages.push(message); },
+      showWarningMessage: message => { warningMessages.push(message); },
+    },
+    Uri: {
+      joinPath: (...parts) => ({ parts, toString: () => 'vscode-resource' }),
+    },
+  };
+  const { PdfEditorProvider } = loadTsModule('src/pdfEditorProvider.ts', {
+    vscode,
+    '@llm-wiki/core': { pdfHref: portablePdfHref },
+    './cursorCrop': {
+      decodeCursorCropPngBase64: value =>
+        value === 'canonical-png' ? Uint8Array.from([1, 2, 3]) : undefined,
+    },
+    './pdfAgentClipboardImage': {
+      persistPdfAgentClipboardImage: input => {
+        persistCalls.push(input);
+        return {
+          absolutePath: `/vault/${imageRelativePath}`,
+          relativePath: imageRelativePath,
+        };
+      },
+    },
+  });
+  const provider = new PdfEditorProvider(
+    { extensionUri: { fsPath: '/extension' }, subscriptions: [] },
+    '/vault',
+  );
+  const pdfUri = {
+    scheme: 'file',
+    fsPath: '/vault/raw/pdf/paper.pdf',
+    toString: () => 'file:///vault/raw/pdf/paper.pdf',
+  };
+  const webview = {
+    options: {},
+    cspSource: 'vscode-webview:',
+    asWebviewUri: uri => uri,
+    onDidReceiveMessage: listener => {
+      receiveMessage = listener;
+      return { dispose() {} };
+    },
+    postMessage: async message => {
+      posted.push(message);
+      return true;
+    },
+  };
+  await provider.resolveCustomEditor(
+    { uri: pdfUri },
+    {
+      active: true,
+      webview,
+      onDidChangeViewState: () => ({ dispose() {} }),
+      onDidDispose: () => ({ dispose() {} }),
+    },
+    {},
+  );
+  const selection = {
+    startPage: 2,
+    endPage: 2,
+    pages: [{ page: 2, rects: [[30, 40, 130, 56]] }],
+    selectedText: 'current selected passage',
+  };
+  await receiveMessage({
+    type: 'selectionChanged',
+    anchor: {
+      page: 2,
+      snippet: selection.selectedText,
+      rects: selection.pages[0].rects,
+    },
+    clipboardSelection: selection,
+  });
+  const context = posted.at(-1).context;
+
+  await receiveMessage({
+    type: 'agentClipboardResult',
+    status: 'image-reference',
+    selectionKey: context.selectionKey,
+    pngBase64: 'canonical-png',
+  });
+
+  assert.equal(persistCalls.length, 1);
+  assert.equal(persistCalls[0].rootPath, '/vault');
+  assert.equal(persistCalls[0].sourceIdentity, pdfUri.toString());
+  assert.equal(persistCalls[0].selectionKey, context.selectionKey);
+  assert.deepEqual(Array.from(persistCalls[0].bytes), [1, 2, 3]);
+  assert.deepEqual(clipboardWrites, [
+    `${context.plainText}\n\n`
+      + `Selection image: @${imageRelativePath}`,
+  ]);
+  assert.deepEqual(informationMessages, [
+    'Selection text and image reference copied for agent.',
+  ]);
+  assert.deepEqual(warningMessages, []);
 });
 
 test('PDF editor provider exposes portable database-free agent context with normalized selection context', async () => {

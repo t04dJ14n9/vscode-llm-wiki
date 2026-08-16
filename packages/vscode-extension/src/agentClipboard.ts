@@ -6,6 +6,8 @@ const MAX_AGENT_CLIPBOARD_PATH_CHARACTERS = 32 * 1024;
 const MAX_AGENT_CLIPBOARD_KEY_CHARACTERS = 256 * 1024;
 const MAX_AGENT_CLIPBOARD_PAGES = 256;
 const MAX_AGENT_CLIPBOARD_RECTS_PER_PAGE = 256;
+const PDF_AGENT_CLIPBOARD_IMAGE_PATH_PATTERN =
+  /^\.llm_wiki\/agent\/clipboard\/pdf-selection-[a-f0-9]{64}\.png$/u;
 
 export interface PdfAgentClipboardContextInput {
   selectionKey: string;
@@ -101,6 +103,24 @@ export function createPdfAgentClipboardContext(
     selectedText,
     plainText,
   };
+}
+
+export function formatPdfAgentClipboardImageReference(
+  plainText: string,
+  relativeImagePath: string,
+): string {
+  const normalizedText = boundedNonEmptyString(
+    plainText,
+    MAX_AGENT_CLIPBOARD_TEXT_CHARACTERS + MAX_AGENT_CLIPBOARD_PATH_CHARACTERS,
+  );
+  const normalizedPath = relativeImagePath.replaceAll('\\', '/');
+  if (
+    !normalizedText
+    || !PDF_AGENT_CLIPBOARD_IMAGE_PATH_PATTERN.test(normalizedPath)
+  ) {
+    throw new TypeError('PDF agent clipboard image must be workspace-local.');
+  }
+  return `${normalizedText}\n\nSelection image: @${normalizedPath}`;
 }
 
 function escapeMarkdownLinkLabel(value: string): string {
