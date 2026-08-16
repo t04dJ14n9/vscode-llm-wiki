@@ -52,8 +52,9 @@ export interface PdfAgentClipboardHost {
 
 export interface PdfAgentClipboardWriteInput {
   context: PdfAgentClipboardContext;
-  pngBlob: Blob;
   host: PdfAgentClipboardHost;
+  isCurrent?: () => boolean;
+  pngBlob: Blob | PromiseLike<Blob | undefined>;
 }
 
 export interface PdfSelectionCrop {
@@ -85,17 +86,40 @@ export async function writePdfAgentClipboard(
   input: PdfAgentClipboardWriteInput,
   clipboard: Clipboard = navigator.clipboard,
 ): Promise<'rich' | 'text-fallback'> {
-  const { context, host, pngBlob } = input;
+  const { context, host } = input;
+  const payload = resolvePdfAgentClipboardPayload(input);
+  let write: Promise<void>;
+  let representations: Array<Promise<Blob>>;
   try {
-    const html = await pdfAgentClipboardHtml(context, pngBlob);
-    await clipboard.write([
+    const representation = <T extends Blob>(select: (value: {
+      html: string;
+      pngBlob: Blob;
+    }) => T): Promise<T> => {
+      const value = payload.then(resolved => {
+        assertPdfAgentClipboardCurrent(input);
+        return select(resolved);
+      });
+      void value.catch(() => undefined);
+      return value;
+    };
+    representations = [
+      representation(value => value.pngBlob),
+      representation(
+        () => new Blob([context.plainText], { type: 'text/plain' }),
+      ),
+      representation(
+        value => new Blob([value.html], { type: 'text/html' }),
+      ),
+    ];
+    write = clipboard.write([
       new ClipboardItem({
-        'image/png': pngBlob,
-        'text/plain': new Blob([context.plainText], { type: 'text/plain' }),
-        'text/html': new Blob([html], { type: 'text/html' }),
+        'image/png': representations[0]!,
+        'text/plain': representations[1]!,
+        'text/html': representations[2]!,
       }),
     ]);
   } catch {
+    if (!pdfAgentClipboardAttemptIsCurrent(input)) return 'text-fallback';
     host.postMessage({
       type: 'agentClipboardResult',
       status: 'text-fallback',
@@ -105,12 +129,54 @@ export async function writePdfAgentClipboard(
     return 'text-fallback';
   }
 
+  try {
+    await Promise.all([write, payload, ...representations]);
+  } catch {
+    if (!pdfAgentClipboardAttemptIsCurrent(input)) return 'text-fallback';
+    host.postMessage({
+      type: 'agentClipboardResult',
+      status: 'text-fallback',
+      selectionKey: context.selectionKey,
+      plainText: context.plainText,
+    });
+    return 'text-fallback';
+  }
+  if (!pdfAgentClipboardAttemptIsCurrent(input)) return 'text-fallback';
   host.postMessage({
     type: 'agentClipboardResult',
     status: 'rich',
     selectionKey: context.selectionKey,
   });
   return 'rich';
+}
+
+async function resolvePdfAgentClipboardPayload(
+  input: PdfAgentClipboardWriteInput,
+): Promise<{ html: string; pngBlob: Blob }> {
+  const pngBlob = await input.pngBlob;
+  assertPdfAgentClipboardCurrent(input);
+  if (!(pngBlob instanceof Blob) || pngBlob.type !== 'image/png') {
+    throw new TypeError('PDF agent clipboard capture must be an image/png Blob.');
+  }
+  const html = await pdfAgentClipboardHtml(input.context, pngBlob);
+  assertPdfAgentClipboardCurrent(input);
+  return { html, pngBlob };
+}
+
+function assertPdfAgentClipboardCurrent(input: PdfAgentClipboardWriteInput): void {
+  if (!pdfAgentClipboardAttemptIsCurrent(input)) {
+    throw new Error('Stale PDF agent clipboard attempt.');
+  }
+}
+
+function pdfAgentClipboardAttemptIsCurrent(
+  input: PdfAgentClipboardWriteInput,
+): boolean {
+  try {
+    return input.isCurrent?.() ?? true;
+  } catch {
+    return false;
+  }
 }
 
 export function capturePdfSelectionCrop(

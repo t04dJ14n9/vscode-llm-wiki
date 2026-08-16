@@ -164,6 +164,20 @@ function singlePageCropInput(canvas = sourceCanvas(2)) {
   };
 }
 
+function deferred() {
+  let resolvePromise;
+  let rejectPromise;
+  const promise = new Promise((resolve, reject) => {
+    resolvePromise = resolve;
+    rejectPromise = reject;
+  });
+  return {
+    promise,
+    resolve: resolvePromise,
+    reject: rejectPromise,
+  };
+}
+
 const originalDocument = globalThis.document;
 const originalClipboardItem = globalThis.ClipboardItem;
 globalThis.document = {
@@ -187,6 +201,77 @@ test.after(() => {
 test.beforeEach(() => {
   resetCanvasState();
   globalThis.ClipboardItem = FakeClipboardItem;
+});
+
+test('gesture-bound rich PDF clipboard starts write before the PNG promise settles', async () => {
+  const pendingPng = deferred();
+  const writes = [];
+  const writeResult = pdfAgentClipboard.writePdfAgentClipboard({
+    context: {
+      selectionKey: 'gesture-bound-key',
+      sourceLabel: 'raw/pdf/paper.pdf (page 2)',
+      sourceHref: 'cursor://llm-wiki/open-anchor?target=paper.pdf',
+      selectedText: 'Exact selected passage',
+      plainText: 'host-precomputed plain text',
+    },
+    pngBlob: pendingPng.promise,
+    host: { postMessage: () => undefined },
+  }, {
+    write: items => {
+      writes.push(items);
+      return Promise.all(items[0].types.map(type => items[0].getType(type)))
+        .then(() => undefined);
+    },
+  });
+
+  assert.equal(writes.length, 1);
+  assert.deepEqual(
+    writes[0][0].types.sort(),
+    ['image/png', 'text/html', 'text/plain'],
+  );
+
+  pendingPng.resolve(new Blob(['png'], { type: 'image/png' }));
+  assert.equal(await writeResult, 'rich');
+});
+
+test('stale PDF clipboard attempt rejects promised representations without committing or notifying', async () => {
+  const pendingPng = deferred();
+  const posted = [];
+  const committedPlainText = [];
+  const representationResults = [];
+  let current = true;
+  const writeResult = pdfAgentClipboard.writePdfAgentClipboard({
+    context: {
+      selectionKey: 'stale-key',
+      sourceLabel: 'raw/pdf/paper.pdf (page 2)',
+      sourceHref: 'cursor://llm-wiki/open-anchor?target=paper.pdf',
+      selectedText: 'stale selected passage',
+      plainText: 'stale precomputed plain text',
+    },
+    pngBlob: pendingPng.promise,
+    isCurrent: () => current,
+    host: { postMessage: message => { posted.push(message); } },
+  }, {
+    write: async items => {
+      const item = items[0];
+      const representations = item.types.map(type => item.getType(type));
+      representationResults.push(...representations);
+      const plainText = await item.getType('text/plain');
+      await Promise.all(representations);
+      committedPlainText.push(await plainText.text());
+    },
+  });
+
+  current = false;
+  pendingPng.resolve(new Blob(['stale png'], { type: 'image/png' }));
+
+  assert.equal(await writeResult, 'text-fallback');
+  assert.deepEqual(committedPlainText, []);
+  assert.deepEqual(posted, []);
+  assert.deepEqual(
+    (await Promise.allSettled(representationResults)).map(result => result.status),
+    ['rejected', 'rejected', 'rejected'],
+  );
 });
 
 test('rich PDF clipboard writes one item with PNG, plain text, and HTML', async () => {

@@ -56,6 +56,17 @@ const pdfSelection = compileTsModule(selectionSource, {
   './pdfSearch': pdfSearch,
   './pdfTextExtraction': pdfTextExtraction,
 });
+let pdfAgentClipboardState;
+const pdfAgentClipboardMock = {
+  capturePdfAgentClipboardPng: input => {
+    pdfAgentClipboardState.captureInputs.push(input);
+    return pdfAgentClipboardState.pngPromise;
+  },
+  writePdfAgentClipboard: input => {
+    pdfAgentClipboardState.writeInputs.push(input);
+    return pdfAgentClipboardState.writePromise;
+  },
+};
 const originalWindow = globalThis.window;
 const originalAcquireVsCodeApi = globalThis.acquireVsCodeApi;
 const postedViewerMessages = [];
@@ -75,6 +86,7 @@ const pdfViewer = compileTsModule(viewerSource, {
   './domain/pdfSelection': pdfSelection,
   './domain/pdfTextExtraction': pdfTextExtraction,
   './domain/pdfOutline': {},
+  './pdfAgentClipboard': pdfAgentClipboardMock,
   './pdfLayout': {},
   './pdfTextLayer': {},
   './obsidianContextMenu': {},
@@ -85,6 +97,63 @@ if (originalWindow === undefined) delete globalThis.window;
 else globalThis.window = originalWindow;
 if (originalAcquireVsCodeApi === undefined) delete globalThis.acquireVsCodeApi;
 else globalThis.acquireVsCodeApi = originalAcquireVsCodeApi;
+
+function deferred() {
+  let resolvePromise;
+  let rejectPromise;
+  const promise = new Promise((resolve, reject) => {
+    resolvePromise = resolve;
+    rejectPromise = reject;
+  });
+  return {
+    promise,
+    resolve: resolvePromise,
+    reject: rejectPromise,
+  };
+}
+
+function resetPdfAgentClipboardState() {
+  const pendingPng = deferred();
+  const pendingWrite = deferred();
+  pdfAgentClipboardState = {
+    captureInputs: [],
+    pngPromise: pendingPng.promise,
+    pendingPng,
+    pendingWrite,
+    writeInputs: [],
+    writePromise: pendingWrite.promise,
+  };
+  return pdfAgentClipboardState;
+}
+
+function agentClipboardCopyViewer() {
+  const selection = {
+    startPage: 2,
+    endPage: 2,
+    pages: [{ page: 2, rects: [[10, 20, 110, 36]] }],
+    selectedText: 'selected passage',
+  };
+  const selectionKey = JSON.stringify(selection);
+  const context = {
+    selectionKey,
+    sourceLabel: 'raw/pdf/paper.pdf (page 2)',
+    sourceHref: 'cursor://llm-wiki/open-anchor?target=paper.pdf',
+    selectedText: selection.selectedText,
+    plainText: 'host-precomputed plain text',
+  };
+  const viewer = Object.create(pdfViewer.PdfViewer.prototype);
+  viewer.agentClipboardSelection = selection;
+  viewer.agentClipboardContexts = new Map([[selectionKey, context]]);
+  viewer.pages = new Map([[
+    2,
+    {
+      canvas: { width: 100, height: 100 },
+      pageObj: { size: { width: 612, height: 792 } },
+    },
+  ]]);
+  viewer.updateAgentClipboardCopyControl = () => undefined;
+  return { context, selection, viewer };
+}
 
 function textItem(content, left = 0, top = 0, width = 20, height = 10) {
   return {
@@ -122,6 +191,7 @@ function pendingClipboardViewer(
   viewer.drawSelectionOverlay = () => undefined;
   viewer.drawSelectionOverlays = () => undefined;
   viewer.selectionAnchorFromState = () => snapshot;
+  viewer.selectionToolbarViewportRect = () => undefined;
   return viewer;
 }
 
@@ -171,6 +241,180 @@ function selectionSnapshotWithMiddlePage(selection, middlePageReady) {
     else globalThis.window = previousWindow;
   }
 }
+
+test('gesture-bound PDF copy invokes crop and writer in the click stack', async () => {
+  const state = resetPdfAgentClipboardState();
+  const { viewer } = agentClipboardCopyViewer();
+
+  viewer.copySelectionForAgent();
+
+  assert.equal(state.captureInputs.length, 1);
+  assert.equal(state.writeInputs.length, 1);
+  assert.equal(state.writeInputs[0].pngBlob, state.pngPromise);
+
+  state.pendingWrite.resolve('rich');
+  await Promise.resolve();
+});
+
+test('duplicate PDF clipboard clicks share one in-flight attempt', async () => {
+  const state = resetPdfAgentClipboardState();
+  const { viewer } = agentClipboardCopyViewer();
+
+  viewer.copySelectionForAgent();
+  viewer.copySelectionForAgent();
+
+  assert.equal(state.captureInputs.length, 1);
+  assert.equal(state.writeInputs.length, 1);
+
+  state.pendingWrite.resolve('rich');
+  await Promise.resolve();
+});
+
+test('selection change invalidates an in-flight PDF clipboard attempt', async () => {
+  const state = resetPdfAgentClipboardState();
+  const { viewer } = agentClipboardCopyViewer();
+  viewer.copySelectionForAgent();
+  assert.equal(state.writeInputs.length, 1);
+  assert.equal(state.writeInputs[0].isCurrent(), true);
+
+  const nextSelection = {
+    startPage: 3,
+    endPage: 3,
+    pages: [{ page: 3, rects: [[20, 30, 120, 46]] }],
+    selectedText: 'new selected passage',
+  };
+  viewer.selectionState = null;
+  viewer.selectionAnchorFromNativeRange = () => ({
+    anchor: {
+      page: 3,
+      snippet: nextSelection.selectedText,
+      rects: nextSelection.pages[0].rects,
+    },
+    clipboardSelection: nextSelection,
+    range: { getBoundingClientRect: () => ({ page: 3 }) },
+  });
+  viewer.selectionViewportRect = () => ({ page: 3 });
+  viewer.showSelectionToolbar = () => undefined;
+
+  postedViewerMessages.length = 0;
+  viewer.handleSelection();
+
+  assert.equal(state.writeInputs[0].isCurrent(), false);
+  state.writeInputs[0].host.postMessage({
+    type: 'agentClipboardResult',
+    status: 'rich',
+    selectionKey: 'stale-key',
+  });
+  state.writeInputs[0].host.postMessage({
+    type: 'agentClipboardResult',
+    status: 'text-fallback',
+    selectionKey: 'stale-key',
+    plainText: 'stale text',
+  });
+  assert.equal(
+    postedViewerMessages.filter(message => message.type === 'agentClipboardResult').length,
+    0,
+  );
+  state.pendingWrite.resolve('text-fallback');
+  await Promise.resolve();
+});
+
+test('selection clear invalidates an in-flight PDF clipboard attempt', async () => {
+  const state = resetPdfAgentClipboardState();
+  const { viewer } = agentClipboardCopyViewer();
+  viewer.copySelectionForAgent();
+  assert.equal(state.writeInputs.length, 1);
+  assert.equal(state.writeInputs[0].isCurrent(), true);
+
+  viewer.cancelSelectionUpdate = () => undefined;
+  viewer.stopSelectionAutoScroll = () => undefined;
+  viewer.pages = new Map();
+  const previousDocument = globalThis.document;
+  globalThis.document = { getElementById: () => null };
+  try {
+    viewer.clearSelection();
+  } finally {
+    if (previousDocument === undefined) delete globalThis.document;
+    else globalThis.document = previousDocument;
+  }
+
+  assert.equal(state.writeInputs[0].isCurrent(), false);
+  state.pendingWrite.resolve('text-fallback');
+  await Promise.resolve();
+});
+
+function multiPageToolbarViewer(anchorCaret, focusCaret) {
+  const viewer = Object.create(pdfViewer.PdfViewer.prototype);
+  viewer.selectionState = {
+    page: anchorCaret.page,
+    anchor: anchorCaret,
+    focus: focusCaret,
+  };
+  viewer.pendingAgentClipboardSelection = null;
+  viewer.agentClipboardContexts = new Map();
+  viewer.agentClipboardSelection = null;
+  viewer.selectionRectsForState = (_selection, page) => [[page, 10, page + 20, 30]];
+  viewer.selectionViewportRect = anchor => ({ page: anchor.page });
+  return viewer;
+}
+
+test('forward multi-page toolbar is positioned at the visible focus endpoint', () => {
+  const viewer = multiPageToolbarViewer(
+    { page: 2, itemIndex: 4, offset: 2 },
+    { page: 4, itemIndex: 1, offset: 5 },
+  );
+  let toolbarRect;
+  viewer.selectionAnchorFromNativeRange = () => ({
+    anchor: {
+      page: 2,
+      multiPage: true,
+      snippet: 'page two page three page four',
+      rects: [[10, 20, 110, 36]],
+    },
+    clipboardSelection: {
+      startPage: 2,
+      endPage: 4,
+      pages: [
+        { page: 2, rects: [[10, 20, 110, 36]] },
+        { page: 3, rects: [[12, 18, 140, 34]] },
+        { page: 4, rects: [[8, 16, 96, 32]] },
+      ],
+      selectedText: 'page two page three page four',
+    },
+    range: { getBoundingClientRect: () => ({ page: 'range' }) },
+  });
+  viewer.showSelectionToolbar = (_anchor, rect) => { toolbarRect = rect; };
+
+  viewer.handleSelection();
+
+  assert.equal(toolbarRect.page, 4);
+});
+
+test('reverse multi-page toolbar returns at the visible focus endpoint after rerender', () => {
+  const viewer = multiPageToolbarViewer(
+    { page: 4, itemIndex: 1, offset: 5 },
+    { page: 2, itemIndex: 4, offset: 2 },
+  );
+  const anchor = {
+    page: 2,
+    multiPage: true,
+    snippet: 'page two page three page four',
+    rects: [[10, 20, 110, 36]],
+  };
+  const shown = [];
+  viewer.applyNativeSelection = () => ({});
+  viewer.drawSelectionOverlays = () => undefined;
+  viewer.retryPendingAgentClipboardSelection = () => false;
+  viewer.selectionAnchorFromState = () => ({
+    anchor,
+    range: { getBoundingClientRect: () => ({ page: 'range' }) },
+  });
+  viewer.showSelectionToolbar = (_anchor, rect) => { shown.push(rect); };
+
+  viewer.refreshSelectionAfterRender();
+
+  assert.deepEqual(shown, [{ page: 2 }]);
+});
 
 test('multi-page PDF clipboard selection includes every page and complete normalized text', () => {
   assert.equal(typeof pdfViewer.pdfAgentClipboardSelectionForState, 'function');

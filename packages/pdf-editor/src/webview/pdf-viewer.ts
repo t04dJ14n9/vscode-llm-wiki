@@ -64,7 +64,12 @@ import {
   pdfBookmarksToOutlineEntries,
   type PdfOutlineEntry,
 } from './domain/pdfOutline';
-import type { PdfAgentClipboardContext } from './pdfAgentClipboard';
+import {
+  capturePdfAgentClipboardPng,
+  writePdfAgentClipboard,
+  type PdfAgentClipboardContext,
+  type PdfAgentClipboardResultMessage,
+} from './pdfAgentClipboard';
 import { createPdfPageLayout, formatCssPx, type PdfPageLayout } from './pdfLayout';
 import {
   closestPdfTextSpan,
@@ -155,6 +160,11 @@ interface PdfSelectionSnapshot {
   anchor: PdfAnchor;
   range: Range;
   clipboardSelection?: PdfAgentClipboardSelection;
+}
+
+interface PdfAgentClipboardWriteAttempt {
+  context: PdfAgentClipboardContext;
+  valid: boolean;
 }
 
 export function pdfAgentClipboardSelectionForState(
@@ -475,6 +485,7 @@ export class PdfViewer {
   private pendingAgentClipboardSelection: PdfSelectionState | null = null;
   private agentClipboardSelection: PdfAgentClipboardSelection | null = null;
   private readonly agentClipboardContexts = new Map<string, PdfAgentClipboardContext>();
+  private agentClipboardWriteAttempt: PdfAgentClipboardWriteAttempt | undefined;
   private agentCapabilities: AgentSurfaceCapabilities = {
     cursorAgent: false,
     providers: [],
@@ -688,7 +699,7 @@ export class PdfViewer {
   private updateAgentHandoffCapabilities(message: unknown): void {
     this.agentCapabilities = normalizeAgentSurfaceCapabilities(message);
     if (!document.getElementById('selection-toolbar') || !this.latestSelectionAnchor) return;
-    const rect = this.selectionViewportRect(this.latestSelectionAnchor);
+    const rect = this.selectionToolbarViewportRect(this.latestSelectionAnchor);
     if (rect) this.showSelectionToolbar(this.latestSelectionAnchor, rect);
   }
 
@@ -1306,6 +1317,7 @@ export class PdfViewer {
     if (!message) return false;
     this.pendingAgentClipboardSelection = null;
     this.latestSelectionAnchor = message.anchor;
+    this.invalidateAgentClipboardWriteAttempt(message.clipboardSelection);
     this.agentClipboardSelection = message.clipboardSelection;
     this.agentClipboardContexts.clear();
     vscode.postMessage(message);
@@ -2453,6 +2465,7 @@ export class PdfViewer {
     }
 
     const { anchor, range } = current;
+    this.invalidateAgentClipboardWriteAttempt(current.clipboardSelection);
     this.latestSelectionAnchor = anchor;
     this.pendingAgentClipboardSelection = this.selectionState && !current.clipboardSelection
       ? {
@@ -2473,11 +2486,20 @@ export class PdfViewer {
     if (anchor.multiPage) {
       this.showSelectionToolbar(
         anchor,
-        this.selectionViewportRect(anchor) ?? range.getBoundingClientRect(),
+        this.selectionToolbarViewportRect(
+          anchor,
+          () => range.getBoundingClientRect(),
+        )!,
       );
       return;
     }
-    this.showSelectionToolbar(anchor, this.selectionViewportRect(anchor) ?? range.getBoundingClientRect());
+    this.showSelectionToolbar(
+      anchor,
+      this.selectionToolbarViewportRect(
+        anchor,
+        () => range.getBoundingClientRect(),
+      )!,
+    );
   }
 
   private selectionAnchorFromNativeRange(): PdfSelectionSnapshot | undefined {
@@ -2689,6 +2711,21 @@ export class PdfViewer {
     return new DOMRect(left, top, right - left, bottom - top);
   }
 
+  private selectionToolbarViewportRect(
+    anchor: PdfAnchor,
+    fallback?: () => DOMRect,
+  ): DOMRect | undefined {
+    if (anchor.multiPage && this.selectionState) {
+      const focusPage = this.selectionState.focus.page;
+      const focusRect = this.selectionViewportRect({
+        page: focusPage,
+        rects: this.selectionRectsForState(this.selectionState, focusPage),
+      });
+      if (focusRect) return focusRect;
+    }
+    return this.selectionViewportRect(anchor) ?? fallback?.();
+  }
+
   private copyNativeSelection(event: ClipboardEvent): void {
     const current = this.selectionAnchorFromNativeRange();
     const text = current?.anchor.snippet?.trim();
@@ -2698,6 +2735,7 @@ export class PdfViewer {
   }
 
   private clearSelection(): void {
+    this.invalidateAgentClipboardWriteAttempt();
     this.cancelSelectionUpdate();
     this.stopSelectionAutoScroll();
     if (this.selectionPaintFrame !== undefined) {
@@ -2736,6 +2774,7 @@ export class PdfViewer {
       && this.contextMenuTargetsSelection(event, current.range)
     ) {
       if (!samePdfSelectionRange(this.latestSelectionAnchor, current.anchor)) {
+        this.invalidateAgentClipboardWriteAttempt(current.clipboardSelection);
         this.pendingAgentClipboardSelection = null;
         this.agentClipboardSelection = current.clipboardSelection ?? null;
         this.agentClipboardContexts.clear();
@@ -2850,7 +2889,8 @@ export class PdfViewer {
       '#selection-toolbar [data-pdf-action="copy-for-agent"]',
     );
     if (!button) return;
-    const disabled = !this.currentAgentClipboardContext();
+    const disabled = Boolean(this.agentClipboardWriteAttempt)
+      || !this.currentAgentClipboardContext();
     button.disabled = disabled;
     if (disabled) button.setAttribute('aria-disabled', 'true');
     else button.removeAttribute('aria-disabled');
@@ -2865,47 +2905,88 @@ export class PdfViewer {
     });
   }
 
-  private async copySelectionForAgent(): Promise<void> {
+  private invalidateAgentClipboardWriteAttempt(
+    nextSelection?: PdfAgentClipboardSelection | null,
+  ): void {
+    const attempt = this.agentClipboardWriteAttempt;
+    if (
+      !attempt
+      || (
+        nextSelection
+        && correlatePdfAgentClipboardContext(nextSelection, attempt.context)
+      )
+    ) return;
+    attempt.valid = false;
+  }
+
+  private copySelectionForAgent(): void {
+    if (this.agentClipboardWriteAttempt) return;
     const selection = this.agentClipboardSelection;
     const context = this.currentAgentClipboardContext();
     if (!selection || !context) return;
 
-    try {
-      const {
-        capturePdfAgentClipboardPng,
-        writePdfAgentClipboard,
-      } = await import('./pdfAgentClipboard');
-      const pages = [];
-      for (const selectedPage of selection.pages) {
-        const page = this.pages.get(selectedPage.page);
-        if (!page) {
-          this.postAgentClipboardTextFallback(context);
-          return;
-        }
-        pages.push({
-          page: selectedPage.page,
-          canvas: page.canvas,
-          pageWidth: Number(page.pageObj.size.width),
-          pageHeight: Number(page.pageObj.size.height),
-          rects: selectedPage.rects,
-        });
-      }
-      const pngBlob = await capturePdfAgentClipboardPng({ pages });
-      if (!pngBlob) {
+    const pages = [];
+    for (const selectedPage of selection.pages) {
+      const page = this.pages.get(selectedPage.page);
+      if (!page) {
         this.postAgentClipboardTextFallback(context);
         return;
       }
-      await writePdfAgentClipboard({ context, pngBlob, host: vscode });
-    } catch {
-      this.postAgentClipboardTextFallback(context);
+      pages.push({
+        page: selectedPage.page,
+        canvas: page.canvas,
+        pageWidth: Number(page.pageObj.size.width),
+        pageHeight: Number(page.pageObj.size.height),
+        rects: selectedPage.rects,
+      });
     }
+
+    const attempt: PdfAgentClipboardWriteAttempt = {
+      context,
+      valid: true,
+    };
+    this.agentClipboardWriteAttempt = attempt;
+    this.updateAgentClipboardCopyControl();
+    const isCurrent = (): boolean => (
+      attempt.valid
+      && this.agentClipboardWriteAttempt === attempt
+      && this.currentAgentClipboardContext()?.selectionKey === context.selectionKey
+    );
+    const host = {
+      postMessage: (message: PdfAgentClipboardResultMessage): void => {
+        if (isCurrent()) vscode.postMessage(message);
+      },
+    };
+    const finish = (): void => {
+      if (this.agentClipboardWriteAttempt !== attempt) return;
+      this.agentClipboardWriteAttempt = undefined;
+      this.updateAgentClipboardCopyControl();
+    };
+
+    const pngBlob = capturePdfAgentClipboardPng({ pages });
+    const write = writePdfAgentClipboard({
+      context,
+      host,
+      isCurrent,
+      pngBlob,
+    });
+    void write.then(
+      () => finish(),
+      () => {
+        if (isCurrent()) {
+          this.postAgentClipboardTextFallback(context);
+        }
+        finish();
+      }
+    );
   }
 
   private showSelectionContextMenu(clientX: number, clientY: number, anchor: PdfAnchor): void {
     const copyForAgent = {
       id: 'copy-for-agent',
       label: 'Copy for Agent',
-      disabled: !this.currentAgentClipboardContext(),
+      disabled: Boolean(this.agentClipboardWriteAttempt)
+        || !this.currentAgentClipboardContext(),
       onSelect: () => { void this.copySelectionForAgent(); },
     };
     if (anchor.multiPage) {
@@ -3055,7 +3136,8 @@ export class PdfViewer {
       button.className = 'secondary copy-for-agent-action';
       button.dataset.pdfAction = 'copy-for-agent';
       button.setAttribute('aria-label', 'Copy for Agent');
-      button.disabled = !this.currentAgentClipboardContext();
+      button.disabled = Boolean(this.agentClipboardWriteAttempt)
+        || !this.currentAgentClipboardContext();
       if (button.disabled) button.setAttribute('aria-disabled', 'true');
       button.addEventListener('click', event => {
         event.preventDefault();
@@ -3114,7 +3196,10 @@ export class PdfViewer {
       const selection = this.selectionState;
       if (!toolbar || !selection) return;
       const current = this.selectionAnchorFromState();
-      const rect = current && this.selectionViewportRect(current.anchor);
+      const rect = current && this.selectionToolbarViewportRect(
+        current.anchor,
+        () => current.range.getBoundingClientRect(),
+      );
       if (!rect) {
         toolbar.remove();
         return;
@@ -4458,12 +4543,11 @@ export class PdfViewer {
     if (!current) return;
     this.retryPendingAgentClipboardSelection(current);
     this.latestSelectionAnchor = current.anchor;
-    if (!current.anchor.multiPage) {
-      this.showSelectionToolbar(
-        current.anchor,
-        this.selectionViewportRect(current.anchor) ?? current.range.getBoundingClientRect(),
-      );
-    }
+    const rect = this.selectionToolbarViewportRect(
+      current.anchor,
+      () => current.range.getBoundingClientRect(),
+    );
+    if (rect) this.showSelectionToolbar(current.anchor, rect);
   }
 
   private updatePageInfo(): void {
