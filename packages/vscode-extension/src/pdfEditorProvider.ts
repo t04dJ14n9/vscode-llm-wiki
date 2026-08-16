@@ -1245,6 +1245,32 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
       outline-offset: 1px;
       background: rgba(77, 171, 247, .08);
     }
+    .pdf-link-preview {
+      position: fixed;
+      z-index: 100;
+      box-sizing: border-box;
+      width: min(380px, calc(100vw - 16px));
+      max-height: min(260px, calc(100vh - 16px));
+      overflow: hidden;
+      padding: 10px 12px;
+      border: 1px solid var(--vscode-editorHoverWidget-border, var(--vscode-widget-border, var(--vscode-panel-border)));
+      border-radius: 6px;
+      color: var(--vscode-editorHoverWidget-foreground, var(--vscode-editor-foreground));
+      background: var(--vscode-editorHoverWidget-background, var(--vscode-editorWidget-background, var(--vscode-editor-background)));
+      box-shadow: 0 4px 14px var(--vscode-widget-shadow, rgba(0,0,0,.32));
+      font: 13px/1.42 var(--vscode-font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
+      overflow-wrap: anywhere;
+      pointer-events: none;
+    }
+    .pdf-link-preview-title { font-weight: 600; }
+    .pdf-link-preview-page { margin-top: 3px; color: var(--vscode-descriptionForeground); font-size: 11px; }
+    .pdf-link-preview-excerpt {
+      display: -webkit-box;
+      margin-top: 7px;
+      overflow: hidden;
+      -webkit-box-orient: vertical;
+      -webkit-line-clamp: 8;
+    }
     .text-layer .pdf-text-selection-separator {
       left: 100%;
       top: 0;

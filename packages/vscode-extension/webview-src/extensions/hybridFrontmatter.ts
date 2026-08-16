@@ -189,8 +189,26 @@ export class FrontmatterPropertiesWidget extends WidgetType {
         const display = document.createElement('button');
         display.type = 'button';
         display.className = 'cm-hybrid-property-scalar-display';
-        display.ariaLabel = `${property.name} property display`;
         display.textContent = property.value;
+        const linkLikeValue = isLinkLikePropertyValue(property.name, property.value);
+        const displayControl = linkLikeValue
+          ? document.createElement('span')
+          : display;
+        let edit: HTMLButtonElement | undefined;
+        if (linkLikeValue) {
+          displayControl.className = 'cm-hybrid-property-scalar-controls';
+          display.classList.add('cm-hybrid-property-link');
+          display.ariaLabel = `Open ${property.name} property`;
+          configureFrontmatterLink(display, property.value, property.value);
+          edit = document.createElement('button');
+          edit.type = 'button';
+          edit.className = 'cm-hybrid-property-edit';
+          edit.ariaLabel = `Edit ${property.name} property`;
+          edit.textContent = property.value;
+          displayControl.append(display, edit);
+        } else {
+          display.ariaLabel = `${property.name} property display`;
+        }
         const input = document.createElement('input');
         input.className = 'cm-hybrid-property-value-input';
         input.type = 'text';
@@ -204,24 +222,30 @@ export class FrontmatterPropertiesWidget extends WidgetType {
 
         const hideInput = () => {
           input.hidden = true;
-          display.hidden = false;
+          displayControl.hidden = false;
         };
         const showInput = () => {
           skipBlurCommit = false;
-          display.hidden = true;
+          displayControl.hidden = true;
           input.hidden = false;
           input.focus({ preventScroll: true });
           input.select();
         };
-        display.addEventListener('mousedown', event => {
-          event.preventDefault();
-          event.stopPropagation();
-        });
-        display.addEventListener('click', event => {
-          event.preventDefault();
-          event.stopPropagation();
-          showInput();
-        });
+        if (linkLikeValue) {
+          edit!.addEventListener('mousedown', stopFrontmatterPointer);
+          edit!.addEventListener('click', event => {
+            event.preventDefault();
+            event.stopPropagation();
+            showInput();
+          });
+        } else {
+          display.addEventListener('mousedown', stopFrontmatterPointer);
+          display.addEventListener('click', event => {
+            event.preventDefault();
+            event.stopPropagation();
+            showInput();
+          });
+        }
 
         const commitInputValue = () => {
           const nextValue = input.value;
@@ -260,7 +284,7 @@ export class FrontmatterPropertiesWidget extends WidgetType {
           commitInputValue();
           hideInput();
         });
-        value.append(display, input);
+        value.append(displayControl, input);
       }
 
       row.append(nameCell, value);
@@ -853,18 +877,36 @@ function renderFrontmatterTable(
       display.type = 'button';
       display.className = 'cm-hybrid-property-structured-cell';
       const cellLabel = structuredCellLabel(property.name, path);
-      display.ariaLabel = `Edit ${cellLabel}`;
       display.textContent = cellValue;
-      display.addEventListener('mousedown', event => {
-        event.preventDefault();
-        event.stopPropagation();
-      });
-      display.addEventListener('click', event => {
-        event.preventDefault();
-        event.stopPropagation();
-        showStructuredCellInput(view, property, path, display);
-      });
-      cell.appendChild(display);
+      if (isStructuredResourceLink(property.name, path, cellValue)) {
+        const controls = document.createElement('span');
+        controls.className = 'cm-hybrid-property-structured-cell-controls';
+        display.classList.add('cm-hybrid-property-link');
+        display.ariaLabel = `Open ${cellLabel}`;
+        configureFrontmatterLink(display, cellValue, cellValue);
+        const edit = document.createElement('button');
+        edit.type = 'button';
+        edit.className = 'cm-hybrid-property-structured-cell-edit cm-hybrid-property-edit';
+        edit.ariaLabel = `Edit ${cellLabel}`;
+        edit.textContent = cellValue;
+        edit.addEventListener('mousedown', stopFrontmatterPointer);
+        edit.addEventListener('click', event => {
+          event.preventDefault();
+          event.stopPropagation();
+          showStructuredCellInput(view, property, path, display, controls);
+        });
+        controls.append(display, edit);
+        cell.appendChild(controls);
+      } else {
+        display.ariaLabel = `Edit ${cellLabel}`;
+        display.addEventListener('mousedown', stopFrontmatterPointer);
+        display.addEventListener('click', event => {
+          event.preventDefault();
+          event.stopPropagation();
+          showStructuredCellInput(view, property, path, display);
+        });
+        cell.appendChild(display);
+      }
       rowElement.appendChild(cell);
     }
     body.appendChild(rowElement);
@@ -879,6 +921,7 @@ function showStructuredCellInput(
   property: FrontmatterProperty,
   path: Array<string | number>,
   display: HTMLButtonElement,
+  displayControl: HTMLElement = display,
 ): void {
   const input = document.createElement('input');
   input.className = 'cm-hybrid-property-structured-cell-input';
@@ -887,8 +930,9 @@ function showStructuredCellInput(
   input.ariaLabel = structuredCellLabel(property.name, path);
   input.spellcheck = false;
   isolateFrontmatterInput(input);
-  display.hidden = true;
-  display.parentElement?.appendChild(input);
+  const inputHost = displayControl.parentElement ?? display.parentElement;
+  displayControl.hidden = true;
+  inputHost?.appendChild(input);
   input.focus({ preventScroll: true });
   input.select();
 
@@ -901,7 +945,7 @@ function showStructuredCellInput(
       return;
     }
     input.remove();
-    display.hidden = false;
+    displayControl.hidden = false;
     view.focus();
   };
   input.addEventListener('keydown', event => {
@@ -955,6 +999,60 @@ function structuredCellLabel(propertyName: string, path: Array<string | number>)
   return `${propertyName}${typeof path[0] === 'number' ? `[${path[0]}]` : `.${String(path[0] ?? 'value')}`}${
     typeof path[0] === 'number' && typeof path[1] === 'string' ? `.${path[1]}` : ''
   }`;
+}
+
+function isStructuredResourceLink(
+  propertyName: string,
+  path: Array<string | number>,
+  value: string,
+): boolean {
+  return propertyName.trim().toLowerCase() === 'sources'
+    && String(path.at(-1) ?? '').trim().toLowerCase() === 'resource'
+    && value.trim().length > 0;
+}
+
+function isLinkLikePropertyValue(propertyName: string, value: string): boolean {
+  if (!value.trim()) return false;
+  const name = propertyName.trim().toLowerCase();
+  if (['resource', 'source', 'url', 'uri', 'href', 'link'].includes(name)) return true;
+  return /^(?:https?:|mailto:|llm-wiki:)/i.test(value)
+    || /(?:^|[/\\])[^/\\]+\.(?:md|markdown|txt|text|pdf)(?:[?#].*)?$/i.test(value);
+}
+
+function configureFrontmatterLink(
+  button: HTMLButtonElement,
+  uri: string,
+  label: string,
+): void {
+  button.dataset.linkPreviewTarget = uri;
+  button.dataset.linkPreviewLabel = label;
+  if (isDocumentRelativeUri(uri)) {
+    button.dataset.linkPreviewRelativeToDocument = 'true';
+  }
+  button.addEventListener('mousedown', stopFrontmatterPointer);
+  button.addEventListener('click', event => {
+    event.preventDefault();
+    event.stopPropagation();
+    button.dispatchEvent(new CustomEvent('llm-wiki-open-uri', {
+      bubbles: true,
+      detail: {
+        uri,
+        ...(isDocumentRelativeUri(uri) ? { relativeToDocument: true } : {}),
+      },
+    }));
+  });
+}
+
+function isDocumentRelativeUri(uri: string): boolean {
+  return Boolean(uri)
+    && !uri.startsWith('#')
+    && !uri.startsWith('/')
+    && !/^[a-z][a-z0-9+.-]*:/i.test(uri);
+}
+
+function stopFrontmatterPointer(event: Event): void {
+  event.preventDefault();
+  event.stopPropagation();
 }
 
 function serializeStructuredPropertyValue(name: string, value: unknown): string {

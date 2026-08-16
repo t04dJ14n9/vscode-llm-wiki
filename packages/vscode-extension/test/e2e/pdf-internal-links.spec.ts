@@ -18,6 +18,44 @@ test('embedded figure and section destinations become accessible link overlays',
   await expect(figureLink.locator('.pdf-link-hit-fragment').first()).toHaveCSS('cursor', 'pointer');
 });
 
+test('internal link previews show destination text without navigating or changing selection', async ({ page }) => {
+  await openInternalDestinationsFixture(page);
+  const selectedText = await page.evaluate(() => {
+    const text = Array.from(document.querySelectorAll<HTMLElement>(
+      '#page-1 .text-layer span[data-item-index]',
+    )).find(element => element.textContent?.includes('Internal destinations'));
+    if (!text) throw new Error('Missing selectable source text');
+    const range = document.createRange();
+    range.selectNodeContents(text);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    return selection?.toString() ?? '';
+  });
+  expect(selectedText).toContain('Internal destinations');
+
+  const figureLink = page.locator('#page-1 .pdf-link-overlay[data-target-page="2"]');
+  await figureLink.locator('.pdf-link-hit-fragment').first().hover();
+  const preview = page.locator('.pdf-link-preview');
+  await expect(preview).toBeVisible();
+  await expect(preview).toContainText('Figure 11.1');
+  await expect(preview).toContainText('Page 2');
+  await expect(preview).toContainText('Figure 11.1 target');
+  await expectCurrentPage(page, 1, 3);
+  await expect.poll(() => page.evaluate(() => window.getSelection()?.toString() ?? ''))
+    .toBe(selectedText);
+
+  await page.keyboard.press('Escape');
+  await expect(preview).toHaveCount(0);
+  await figureLink.focus();
+  await expect(preview).toBeVisible();
+  await page.locator('#viewer-container').focus();
+  await expect(preview).toHaveCount(0);
+  await expectCurrentPage(page, 1, 3);
+  await expect.poll(() => page.evaluate(() => window.getSelection()?.toString() ?? ''))
+    .toBe(selectedText);
+});
+
 test('PDF navigation sidebar renders nested bookmarks and jumps to their exact destinations', async ({ page }) => {
   await page.setViewportSize({ width: 1000, height: 720 });
   await openInternalDestinationsFixture(page);

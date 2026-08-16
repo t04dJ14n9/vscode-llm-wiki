@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+let linkPreviewResolver;
 
 function loadTsModule(relativePath, mocks = {}) {
   const filename = join(packageRoot, relativePath);
@@ -36,6 +37,7 @@ function loadTsModule(relativePath, mocks = {}) {
       };
     }
     if (request === './cursorCrop') return cursorCrop;
+    if (request === './linkPreviewResolver') return linkPreviewResolver;
     return originalLoad.call(this, request, parent, isMain);
   };
   try {
@@ -51,6 +53,7 @@ const cursorCrop = loadTsModule('src/cursorCrop.ts', {
     PDF_DISCUSSION_MAX_PNG_BYTES: 5 * 1024 * 1024,
   },
 });
+linkPreviewResolver = loadTsModule('src/linkPreviewResolver.ts');
 
 test('insert helper replaces selections and returns cursor positions', () => {
   const { applyInsertText } = loadTsModule('webview-src/insertText.ts');
@@ -968,6 +971,67 @@ test('markdown editor provider routes openUri messages through the host link tar
     'https://example.com/docs',
     document.uri,
   ]);
+});
+
+test('markdown editor provider resolves previews without opening or focusing the target', async () => {
+  const messages = [];
+  const executeCommandCalls = [];
+  const resolverCalls = [];
+  const preview = {
+    kind: 'markdown',
+    target: '../raw/source.md',
+    title: 'Source',
+    path: 'raw/source.md',
+    excerpt: 'Bounded source evidence.',
+  };
+  const vscode = createVscodeMock({
+    executeCommandCalls,
+    workspaceFolder: { uri: createUri('/vault') },
+  });
+  const { MarkdownEditorProvider } = loadTsModule('src/markdownEditorProvider.ts', {
+    vscode,
+    './linkPreviewResolver': {
+      resolveLinkPreviewTarget: async input => {
+        resolverCalls.push(input);
+        return preview;
+      },
+    },
+  });
+  const provider = new MarkdownEditorProvider({
+    extensionUri: { scheme: 'file', path: '/extension' },
+    workspaceState: createStorageMock(),
+  });
+  const panel = createPanelMock(messages);
+  const document = createDocumentMock({ uri: 'file:///vault/notes/Concepts/Note.md' });
+
+  await provider.resolveCustomTextEditor(document, panel, {});
+  messages.length = 0;
+  await panel.fireMessage({
+    type: 'resolveLinkPreview',
+    requestId: 'preview-1',
+    uri: '../raw/source.md',
+    relativeToDocument: true,
+  });
+
+  assert.deepEqual(resolverCalls, [{
+    workspaceRoot: '/vault',
+    documentPath: '/vault/notes/Concepts/Note.md',
+    target: '../raw/source.md',
+    relativeToDocument: true,
+  }]);
+  assert.deepEqual(messages, [{
+    type: 'linkPreview',
+    requestId: 'preview-1',
+    preview,
+  }]);
+  assert.equal(
+    executeCommandCalls.some(([command]) => command === 'llm-wiki.openLinkTarget'),
+    false,
+  );
+  assert.equal(
+    executeCommandCalls.some(([command]) => command === 'vscode.open'),
+    false,
+  );
 });
 
 test('markdown editor provider resolves ordinary relative links from nested index notes', async () => {

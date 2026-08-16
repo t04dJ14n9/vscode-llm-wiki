@@ -114,6 +114,15 @@ const structuredPropertyStyles = {
     textAlign: 'left',
     cursor: 'text',
   },
+  '.cm-hybrid-property-structured-cell-controls': {
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: '4px',
+  },
+  '.cm-hybrid-property-structured-cell-controls .cm-hybrid-property-structured-cell': {
+    flex: '1 1 auto',
+    minWidth: '0',
+  },
   // The cell display is a block-level button, so the browser's default
   // `[hidden] { display: none }` rule is overridden by the class rule above.
   // Restore the hidden state while its inline editor is active; otherwise the
@@ -139,6 +148,76 @@ const structuredPropertyStyles = {
     color: 'var(--vscode-input-foreground, var(--vscode-editor-foreground))',
     backgroundColor: 'var(--vscode-input-background, var(--vscode-editor-background))',
     font: 'inherit',
+  },
+};
+
+const frontmatterLinkStyles = {
+  '.cm-hybrid-property-scalar-controls': {
+    display: 'inline-flex',
+    maxWidth: '100%',
+    alignItems: 'center',
+    gap: '4px',
+  },
+  '.cm-hybrid-property-link.cm-hybrid-property-link': {
+    minWidth: '0',
+    overflow: 'hidden',
+    color: 'var(--vscode-textLink-foreground)',
+    cursor: 'pointer',
+    textDecoration: 'underline',
+    textDecorationThickness: '1.5px',
+    textOverflow: 'ellipsis',
+    textUnderlineOffset: '2px',
+    whiteSpace: 'nowrap',
+  },
+  '.cm-hybrid-property-edit': {
+    flex: '0 0 auto',
+    width: '22px',
+    minWidth: '22px',
+    height: '22px',
+    border: '0',
+    borderRadius: '3px',
+    padding: '0',
+    overflow: 'hidden',
+    color: 'var(--vscode-descriptionForeground)',
+    backgroundColor: 'transparent',
+    cursor: 'pointer',
+    fontSize: '0',
+  },
+  '.cm-hybrid-property-edit::before': {
+    content: '"✎"',
+    fontSize: '13px',
+    lineHeight: '1',
+  },
+  '.cm-hybrid-property-edit:hover': {
+    color: 'var(--vscode-editor-foreground)',
+    backgroundColor: 'var(--vscode-toolbar-hoverBackground, rgba(127,127,127,.16))',
+  },
+  '.cm-hybrid-property-link:focus-visible, .cm-hybrid-property-edit:focus-visible': {
+    outline: '1px solid var(--vscode-focusBorder)',
+    outlineOffset: '1px',
+  },
+};
+
+const footnoteInteractionStyles = {
+  '.cm-hybrid-footnote-ref': {
+    color: 'var(--vscode-textLink-foreground)',
+    fontSize: '0.78em',
+    verticalAlign: 'super',
+    lineHeight: '0',
+    fontWeight: '600',
+    cursor: 'pointer',
+  },
+  '.cm-hybrid-footnote-def-label': {
+    color: 'var(--vscode-textLink-foreground)',
+    fontSize: '0.85em',
+    verticalAlign: 'super',
+    lineHeight: '0',
+    fontWeight: '600',
+    cursor: 'pointer',
+  },
+  '.cm-hybrid-footnote-ref:focus-visible, .cm-hybrid-footnote-def-label:focus-visible': {
+    outline: '1px solid var(--vscode-focusBorder, currentColor)',
+    outlineOffset: '2px',
   },
 };
 
@@ -509,10 +588,11 @@ export function hybridStyles() {
       textAlign: 'left',
       cursor: 'text',
     },
+    ...frontmatterLinkStyles,
     '.cm-hybrid-property-chip-display:hover, .cm-hybrid-property-scalar-display:hover': {
       backgroundColor: 'color-mix(in srgb, var(--vscode-editor-foreground) 6%, transparent)',
     },
-    '.cm-hybrid-properties-rows[hidden], .cm-hybrid-property-list-input[hidden], .cm-hybrid-property-value-input[hidden], .cm-hybrid-property-chip-display[hidden], .cm-hybrid-property-scalar-display[hidden]': {
+    '.cm-hybrid-properties-rows[hidden], .cm-hybrid-property-list-input[hidden], .cm-hybrid-property-value-input[hidden], .cm-hybrid-property-chip-display[hidden], .cm-hybrid-property-scalar-display[hidden], .cm-hybrid-property-scalar-controls[hidden], .cm-hybrid-property-structured-cell-controls[hidden]': {
       display: 'none',
     },
     '.cm-hybrid-property-value-input': {
@@ -1009,20 +1089,7 @@ export function hybridStyles() {
       borderBottomRightRadius: '4px',
     },
     '.cm-hybrid-codeblock-footer::before': codeSurfaceBackdrop,
-    '.cm-hybrid-footnote-ref': {
-      color: 'var(--vscode-textLink-foreground)',
-      fontSize: '0.78em',
-      verticalAlign: 'super',
-      lineHeight: '0',
-      fontWeight: '600',
-    },
-    '.cm-hybrid-footnote-def-label': {
-      color: 'var(--vscode-textLink-foreground)',
-      fontSize: '0.85em',
-      verticalAlign: 'super',
-      lineHeight: '0',
-      fontWeight: '600',
-    },
+    ...footnoteInteractionStyles,
     '.cm-hybrid-footnote-def-separator': {
       color: 'var(--vscode-descriptionForeground)',
       fontSize: '0.85em',

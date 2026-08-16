@@ -920,6 +920,11 @@ function calloutInlineElement(
     const element = document.createElement('span');
     element.className = 'cm-hybrid-footnote-ref';
     element.textContent = match.text;
+    element.tabIndex = 0;
+    element.setAttribute('role', 'link');
+    element.ariaLabel = `Footnote ${match.text}`;
+    element.dataset.footnoteId = match.text;
+    element.dataset.footnoteKind = 'reference';
     return element;
   }
   if (match.kind === 'markdown-link' || match.kind === 'wiki-link') {
@@ -939,6 +944,11 @@ function calloutInlineLinkElement(match: InlineLinkMatch, classPrefix = 'cm-hybr
   button.className = `${classPrefix}-link`;
   button.textContent = match.text || match.uri;
   button.title = match.uri;
+  button.dataset.linkPreviewTarget = match.uri;
+  button.dataset.linkPreviewLabel = match.text || match.uri;
+  if (match.kind === 'markdown-link' && isDocumentRelativeUri(match.uri)) {
+    button.dataset.linkPreviewRelativeToDocument = 'true';
+  }
 
   const stopEditorSelection = (event: Event) => {
     event.preventDefault();
@@ -1185,8 +1195,6 @@ const highlightMark = Decoration.mark({ class: 'cm-hybrid-highlight' });
 const inlineCodeMark = Decoration.mark({ class: 'cm-hybrid-inline-code' });
 const linkTextMark = Decoration.mark({ class: 'cm-hybrid-link-text' });
 const tagMark = Decoration.mark({ class: 'cm-hybrid-tag' });
-const footnoteRefMark = Decoration.mark({ class: 'cm-hybrid-footnote-ref' });
-const footnoteDefLabelMark = Decoration.mark({ class: 'cm-hybrid-footnote-def-label' });
 const sourceLine = Decoration.line({ class: 'cm-hybrid-source-line' });
 const blockquoteLine = Decoration.line({ class: 'cm-hybrid-blockquote-line' });
 const listLine = Decoration.line({ class: 'cm-hybrid-list-line' });
@@ -2160,7 +2168,13 @@ function renderFootnotes(
     const idTo = idFrom + id.length;
     const markerTo = lineFrom + definition[0].length;
     addReplace(decorations, reserved, lineFrom + markerStart, idFrom);
-    addMark(decorations, reserved, idFrom, idTo, footnoteDefLabelMark);
+    addMark(
+      decorations,
+      reserved,
+      idFrom,
+      idTo,
+      interactiveFootnoteMark('definition', id),
+    );
     reserved.push({ from: idFrom, to: idTo });
     addReplace(decorations, reserved, idTo, markerTo, footnoteDefinitionSeparatorWidget);
   }
@@ -2175,10 +2189,36 @@ function renderFootnotes(
     const idFrom = sourceFrom + 2;
     const idTo = idFrom + id.length;
     addReplace(decorations, reserved, sourceFrom, idFrom);
-    addMark(decorations, reserved, idFrom, idTo, footnoteRefMark);
+    addMark(
+      decorations,
+      reserved,
+      idFrom,
+      idTo,
+      interactiveFootnoteMark('reference', id),
+    );
     reserved.push({ from: idFrom, to: idTo });
     addReplace(decorations, reserved, idTo, sourceTo);
   }
+}
+
+function interactiveFootnoteMark(
+  kind: 'reference' | 'definition',
+  id: string,
+): Decoration {
+  return Decoration.mark({
+    class: kind === 'reference'
+      ? 'cm-hybrid-footnote-ref'
+      : 'cm-hybrid-footnote-def-label',
+    attributes: {
+      role: 'link',
+      tabindex: '0',
+      'aria-label': kind === 'reference'
+        ? `Footnote ${id}`
+        : `Back to first reference for footnote ${id}`,
+      'data-footnote-id': id,
+      'data-footnote-kind': kind,
+    },
+  });
 }
 
 function renderObsidianComments(

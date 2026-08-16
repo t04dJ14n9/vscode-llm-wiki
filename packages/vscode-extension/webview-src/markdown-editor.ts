@@ -75,6 +75,12 @@ class HlLinkWidget extends WidgetType {
     button.className = 'cm-llm-wiki-link';
     button.dataset.sourceFrom = String(this.sourceFrom);
     button.dataset.sourceTo = String(this.sourceTo);
+    button.dataset.linkPreviewTarget = this.uri;
+    button.dataset.linkPreviewLabel = this.label || this.uri;
+    button.ariaLabel = this.label || this.uri;
+    if (this.relativeToDocument) {
+      button.dataset.linkPreviewRelativeToDocument = 'true';
+    }
     if (isExternalUri(this.uri)) {
       button.classList.add('cm-external-link');
     }
@@ -562,6 +568,13 @@ let applyingHostUpdate = false;
 let vimModeEnabled = false;
 let currentNotePath: string | undefined;
 let knownNotePaths: string[] = [];
+let linkPreviewSequence = 0;
+let activeLinkPreview: {
+  anchor: HTMLElement;
+  card: HTMLElement;
+  requestId?: string;
+  previousDescribedBy: string | null;
+} | undefined;
 interface AgentSurfaceCapabilities {
   cursorAgent: boolean;
 }
@@ -977,6 +990,40 @@ function createView(text: string, title?: string): EditorView {
             marginTop: '8px',
             color: 'var(--vscode-descriptionForeground)',
             fontSize: '11px',
+          },
+          '.llm-wiki-link-preview': {
+            position: 'fixed',
+            zIndex: '1100',
+            boxSizing: 'border-box',
+            width: 'min(380px, calc(100vw - 16px))',
+            maxHeight: 'min(260px, calc(100vh - 16px))',
+            padding: '10px 12px',
+            overflow: 'hidden',
+            border: '1px solid var(--vscode-editorHoverWidget-border, var(--vscode-widget-border, var(--vscode-panel-border)))',
+            borderRadius: '6px',
+            color: 'var(--vscode-editorHoverWidget-foreground, var(--vscode-editor-foreground))',
+            backgroundColor: 'var(--vscode-editorHoverWidget-background, var(--vscode-editorWidget-background, var(--vscode-editor-background)))',
+            boxShadow: '0 4px 14px var(--vscode-widget-shadow, rgba(0, 0, 0, .32))',
+            font: '13px/1.42 var(--vscode-font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif)',
+            overflowWrap: 'anywhere',
+            pointerEvents: 'none',
+            whiteSpace: 'normal',
+          },
+          '.llm-wiki-link-preview-title': {
+            fontWeight: '600',
+          },
+          '.llm-wiki-link-preview-path': {
+            marginTop: '3px',
+            color: 'var(--vscode-descriptionForeground)',
+            fontSize: '11px',
+          },
+          '.llm-wiki-link-preview-excerpt': {
+            display: '-webkit-box',
+            marginTop: '7px',
+            overflow: 'hidden',
+            color: 'var(--vscode-editorHoverWidget-foreground, var(--vscode-editor-foreground))',
+            WebkitBoxOrient: 'vertical',
+            WebkitLineClamp: '8',
           },
         }),
         Prec.highest(keymap.of([
@@ -1527,6 +1574,7 @@ function createView(text: string, title?: string): EditorView {
       vscode.postMessage({ type: 'copyText', text });
     }
   });
+  setupLinkPreviewInteractions(editorView);
   editorView.dom.addEventListener('webkitmouseforcedown', event => {
     handleForceLookup(event as MouseEvent, editorView);
   }, true);
@@ -2688,6 +2736,282 @@ function findLinkTarget(
   return null;
 }
 
+interface LinkPreviewPayload {
+  kind: string;
+  target: string;
+  title: string;
+  path?: string;
+  page?: number;
+  excerpt?: string;
+}
+
+function setupLinkPreviewInteractions(editorView: EditorView): void {
+  const root = editorView.dom;
+  root.addEventListener('pointerover', event => {
+    const anchor = linkPreviewAnchor(event.target);
+    if (!anchor || linkPreviewContains(anchor, event.relatedTarget)) return;
+    showLinkPreview(editorView, anchor);
+  });
+  root.addEventListener('pointerout', event => {
+    const anchor = linkPreviewAnchor(event.target);
+    if (
+      !anchor
+      || linkPreviewContains(anchor, event.relatedTarget)
+      || activeLinkPreview?.anchor !== anchor
+    ) return;
+    dismissLinkPreview();
+  });
+  root.addEventListener('focusin', event => {
+    const anchor = linkPreviewAnchor(event.target);
+    if (anchor) showLinkPreview(editorView, anchor);
+  });
+  root.addEventListener('focusout', event => {
+    const anchor = linkPreviewAnchor(event.target);
+    if (
+      !anchor
+      || linkPreviewContains(anchor, event.relatedTarget)
+      || activeLinkPreview?.anchor !== anchor
+    ) return;
+    dismissLinkPreview();
+  });
+  root.addEventListener('pointerdown', event => {
+    if (!footnoteAnchor(event.target)) return;
+    event.preventDefault();
+    event.stopPropagation();
+  }, true);
+  root.addEventListener('click', event => {
+    const anchor = footnoteAnchor(event.target);
+    if (!anchor) return;
+    event.preventDefault();
+    event.stopPropagation();
+    navigateFootnote(editorView, anchor);
+  });
+  root.addEventListener('keydown', event => {
+    const anchor = footnoteAnchor(event.target);
+    if (!anchor || (event.key !== 'Enter' && event.key !== ' ')) return;
+    event.preventDefault();
+    event.stopPropagation();
+    navigateFootnote(editorView, anchor);
+  }, true);
+  document.addEventListener('keydown', event => {
+    if (event.key !== 'Escape' || !activeLinkPreview) return;
+    event.preventDefault();
+    event.stopPropagation();
+    dismissLinkPreview();
+  }, true);
+}
+
+function linkPreviewContains(anchor: HTMLElement, target: EventTarget | null): boolean {
+  return target instanceof Node && anchor.contains(target);
+}
+
+function linkPreviewAnchor(target: EventTarget | null): HTMLElement | null {
+  if (!(target instanceof Element)) return null;
+  return target.closest<HTMLElement>(
+    '[data-link-preview-target], [data-footnote-id][data-footnote-kind]',
+  );
+}
+
+function footnoteAnchor(target: EventTarget | null): HTMLElement | null {
+  const anchor = linkPreviewAnchor(target);
+  return anchor?.dataset.footnoteId && anchor.dataset.footnoteKind ? anchor : null;
+}
+
+function showLinkPreview(editorView: EditorView, anchor: HTMLElement): void {
+  dismissLinkPreview();
+  const footnoteId = anchor.dataset.footnoteId;
+  const target = anchor.dataset.linkPreviewTarget;
+  if (!footnoteId && !target) return;
+
+  const previousDescribedBy = anchor.getAttribute('aria-describedby');
+  const card = document.createElement('div');
+  card.className = 'llm-wiki-link-preview';
+  card.id = `llm-wiki-link-preview-${++linkPreviewSequence}`;
+  card.setAttribute('role', 'tooltip');
+  anchor.setAttribute(
+    'aria-describedby',
+    [previousDescribedBy, card.id].filter(Boolean).join(' '),
+  );
+
+  let requestId: string | undefined;
+  if (footnoteId) {
+    const definition = findFootnoteDefinition(editorView.state.doc, footnoteId);
+    populateLinkPreview(card, {
+      kind: 'footnote',
+      target: `[^${footnoteId}]`,
+      title: `Footnote ${footnoteId}`,
+      path: 'This document',
+      excerpt: definition?.text || 'No matching footnote definition.',
+    });
+  } else {
+    const label = anchor.dataset.linkPreviewLabel?.trim() || target!;
+    populateLinkPreview(card, {
+      kind: 'unavailable',
+      target: target!,
+      title: label,
+      path: target!,
+    });
+    requestId = `link-preview-${linkPreviewSequence}`;
+  }
+
+  editorView.dom.appendChild(card);
+  activeLinkPreview = { anchor, card, requestId, previousDescribedBy };
+  positionLinkPreview(anchor, card);
+
+  if (target && requestId) {
+    vscode.postMessage({
+      type: 'resolveLinkPreview',
+      requestId,
+      uri: target,
+      ...(anchor.dataset.linkPreviewRelativeToDocument === 'true'
+        ? { relativeToDocument: true }
+        : {}),
+    });
+  }
+}
+
+function applyResolvedLinkPreview(message: unknown): void {
+  if (!message || typeof message !== 'object') return;
+  const raw = message as Record<string, unknown>;
+  const active = activeLinkPreview;
+  if (
+    !active
+    || typeof raw.requestId !== 'string'
+    || raw.requestId !== active.requestId
+    || !active.anchor.isConnected
+  ) return;
+  const preview = normalizedLinkPreview(raw.preview);
+  if (!preview) return;
+  populateLinkPreview(active.card, preview);
+  positionLinkPreview(active.anchor, active.card);
+}
+
+function normalizedLinkPreview(value: unknown): LinkPreviewPayload | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const raw = value as Record<string, unknown>;
+  if (
+    typeof raw.kind !== 'string'
+    || typeof raw.target !== 'string'
+    || typeof raw.title !== 'string'
+  ) return null;
+  return {
+    kind: raw.kind,
+    target: raw.target.slice(0, 2048),
+    title: raw.title.slice(0, 512),
+    ...(typeof raw.path === 'string' ? { path: raw.path.slice(0, 1024) } : {}),
+    ...(Number.isSafeInteger(raw.page) && Number(raw.page) > 0
+      ? { page: Number(raw.page) }
+      : {}),
+    ...(typeof raw.excerpt === 'string' ? { excerpt: raw.excerpt.slice(0, 480) } : {}),
+  };
+}
+
+function populateLinkPreview(card: HTMLElement, preview: LinkPreviewPayload): void {
+  card.replaceChildren();
+  const title = document.createElement('div');
+  title.className = 'llm-wiki-link-preview-title';
+  title.textContent = preview.title;
+  card.appendChild(title);
+  const pathLabel = preview.path
+    ?? (preview.page ? `Page ${preview.page}` : preview.target);
+  if (pathLabel) {
+    const pathElement = document.createElement('div');
+    pathElement.className = 'llm-wiki-link-preview-path';
+    pathElement.textContent = preview.page && preview.path
+      ? `${preview.path} · Page ${preview.page}`
+      : pathLabel;
+    card.appendChild(pathElement);
+  }
+  if (preview.excerpt) {
+    const excerpt = document.createElement('div');
+    excerpt.className = 'llm-wiki-link-preview-excerpt';
+    excerpt.textContent = preview.excerpt.slice(0, 480);
+    card.appendChild(excerpt);
+  }
+}
+
+function positionLinkPreview(anchor: HTMLElement, card: HTMLElement): void {
+  const anchorRect = anchor.getBoundingClientRect();
+  const margin = 8;
+  const width = card.offsetWidth || Math.min(380, window.innerWidth - margin * 2);
+  const height = card.offsetHeight || 80;
+  const left = Math.min(
+    Math.max(margin, anchorRect.left),
+    Math.max(margin, window.innerWidth - width - margin),
+  );
+  const below = anchorRect.bottom + margin;
+  const top = below + height <= window.innerHeight - margin
+    ? below
+    : Math.max(margin, anchorRect.top - height - margin);
+  card.style.left = `${Math.round(left)}px`;
+  card.style.top = `${Math.round(top)}px`;
+}
+
+function dismissLinkPreview(): void {
+  const active = activeLinkPreview;
+  if (!active) return;
+  activeLinkPreview = undefined;
+  active.card.remove();
+  if (!active.anchor.isConnected) return;
+  if (active.previousDescribedBy) {
+    active.anchor.setAttribute('aria-describedby', active.previousDescribedBy);
+  } else {
+    active.anchor.removeAttribute('aria-describedby');
+  }
+}
+
+function navigateFootnote(editorView: EditorView, anchor: HTMLElement): void {
+  const id = anchor.dataset.footnoteId;
+  const kind = anchor.dataset.footnoteKind;
+  if (!id || (kind !== 'reference' && kind !== 'definition')) return;
+  const destination = kind === 'reference'
+    ? findFootnoteDefinition(editorView.state.doc, id)?.position
+    : findFirstFootnoteReference(editorView.state.doc, id);
+  if (destination === undefined) return;
+  dismissLinkPreview();
+  editorView.dispatch({
+    selection: { anchor: destination },
+    scrollIntoView: true,
+  });
+  editorView.focus();
+}
+
+function findFootnoteDefinition(
+  doc: Text,
+  id: string,
+): { position: number; text: string } | undefined {
+  for (let lineNumber = 1; lineNumber <= doc.lines; lineNumber++) {
+    const line = doc.line(lineNumber);
+    const match = line.text.match(/^(\s*)\[\^([^\]\s]+)\]:\s*(.*)$/);
+    if (!match || match[2] !== id || isEscapedAt(line.text, match[1]!.length)) continue;
+    const text = [match[3] ?? ''];
+    for (let continuation = lineNumber + 1; continuation <= doc.lines; continuation++) {
+      const next = doc.line(continuation).text;
+      if (!/^(?: {2,}|\t)\S/.test(next)) break;
+      text.push(next.trim());
+    }
+    return {
+      position: line.from + match[1]!.length,
+      text: text.join(' ').replace(/\s+/gu, ' ').trim().slice(0, 480),
+    };
+  }
+  return undefined;
+}
+
+function findFirstFootnoteReference(doc: Text, id: string): number | undefined {
+  for (let lineNumber = 1; lineNumber <= doc.lines; lineNumber++) {
+    const line = doc.line(lineNumber);
+    const definition = line.text.match(/^(\s*)\[\^([^\]\s]+)\]:/);
+    for (const match of line.text.matchAll(/\[\^([^\]\s]+)\]/g)) {
+      const index = match.index ?? 0;
+      if (match[1] !== id || isEscapedAt(line.text, index)) continue;
+      if (definition && definition[2] === id && index === definition[1]!.length) continue;
+      return line.from + index;
+    }
+  }
+  return undefined;
+}
+
 window.addEventListener('message', event => {
   const message = event.data;
   switch (message?.type) {
@@ -2730,6 +3054,10 @@ window.addEventListener('message', event => {
       applyingHostUpdate = false;
       break;
     }
+
+    case 'linkPreview':
+      applyResolvedLinkPreview(message);
+      break;
 
     case 'insertText': {
       const requestId = typeof message.requestId === 'string' ? message.requestId : undefined;

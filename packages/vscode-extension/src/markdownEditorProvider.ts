@@ -8,6 +8,7 @@ import type {
   AgentSurfaceCapabilities,
   ExternalAgentId,
 } from './agentHandoff';
+import { resolveLinkPreviewTarget } from './linkPreviewResolver';
 
 interface ActiveMarkdownWebview {
   panel: vscode.WebviewPanel;
@@ -522,6 +523,30 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
               target,
               document.uri,
             );
+          }
+          break;
+        case 'resolveLinkPreview':
+          if (
+            typeof message.requestId === 'string'
+            && typeof message.uri === 'string'
+          ) {
+            const fileUri = pathCalculationUri(document.uri);
+            let preview = null;
+            try {
+              preview = await resolveLinkPreviewTarget({
+                workspaceRoot: workspaceRootUri(document.uri)?.fsPath,
+                documentPath: fileUri?.fsPath,
+                target: message.uri,
+                relativeToDocument: message.relativeToDocument === true,
+              });
+            } catch {
+              // A preview is optional and must never interfere with navigation.
+            }
+            await webviewPanel.webview.postMessage({
+              type: 'linkPreview',
+              requestId: message.requestId,
+              preview,
+            });
           }
           break;
         case 'openLearningNote':

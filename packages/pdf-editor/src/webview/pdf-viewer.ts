@@ -474,6 +474,13 @@ export class PdfViewer {
   private pdfDestinationRunId = 0;
   private pendingPdfDestinationOrigin: PdfViewLocation | undefined;
   private pdfDestinationFocus: PdfDestinationFocusState | undefined;
+  private pdfLinkPreviewSequence = 0;
+  private pdfLinkPreview: {
+    anchor: HTMLElement;
+    card: HTMLElement;
+    sequence: number;
+    previousDescribedBy: string | null;
+  } | undefined;
   private readonly viewerResizeObserver: ResizeObserver | null;
   private readonly askPanel?: PdfAskPanel;
 
@@ -548,10 +555,17 @@ export class PdfViewer {
       this.scheduleSelectionUpdate();
     });
     document.addEventListener('copy', event => this.copyNativeSelection(event), true);
+    document.addEventListener('keydown', event => {
+      if (event.key !== 'Escape' || !this.pdfLinkPreview) return;
+      event.preventDefault();
+      event.stopPropagation();
+      this.dismissPdfLinkPreview();
+    }, true);
     this.container.addEventListener('scroll', () => {
       // Preview dismisses the transient selection controls when the document
       // moves; leaving a toolbar behind makes it appear detached from the text.
       document.getElementById('selection-toolbar')?.remove();
+      this.dismissPdfLinkPreview();
     }, { passive: true });
     this.container.addEventListener('wheel', event => this.handlePaginatedWheel(event), { passive: false });
     this.pageContainer.addEventListener('contextmenu', event => this.handleContextMenu(event));
@@ -2262,8 +2276,127 @@ export class PdfViewer {
         event.stopPropagation();
         void this.followPdfDestination(state.pageNum, destination, linkText);
       });
+      button.addEventListener('pointerenter', () => {
+        void this.showPdfLinkPreview(button, targetPage, linkText);
+      });
+      button.addEventListener('pointerleave', () => {
+        if (this.pdfLinkPreview?.anchor === button) this.dismissPdfLinkPreview();
+      });
+      button.addEventListener('focus', () => {
+        void this.showPdfLinkPreview(button, targetPage, linkText);
+      });
+      button.addEventListener('blur', () => {
+        if (this.pdfLinkPreview?.anchor === button) this.dismissPdfLinkPreview();
+      });
       state.textLayer.appendChild(button);
     });
+  }
+
+  private async showPdfLinkPreview(
+    anchor: HTMLElement,
+    targetPage: number,
+    label: string,
+  ): Promise<void> {
+    this.dismissPdfLinkPreview();
+    const sequence = ++this.pdfLinkPreviewSequence;
+    const previousDescribedBy = anchor.getAttribute('aria-describedby');
+    const card = document.createElement('div');
+    card.className = 'pdf-link-preview';
+    card.id = `pdf-link-preview-${sequence}`;
+    card.setAttribute('role', 'tooltip');
+    anchor.setAttribute(
+      'aria-describedby',
+      [previousDescribedBy, card.id].filter(Boolean).join(' '),
+    );
+    this.populatePdfLinkPreview(card, {
+      label: label || `Internal PDF link`,
+      targetPage,
+      excerpt: 'Loading destination preview…',
+    });
+    document.body.appendChild(card);
+    this.pdfLinkPreview = {
+      anchor,
+      card,
+      sequence,
+      previousDescribedBy,
+    };
+    this.positionPdfLinkPreview(anchor, card);
+
+    const target = this.pages.get(targetPage);
+    let excerpt = '';
+    if (target) {
+      try {
+        const rects = await this.loadTextRects(target);
+        excerpt = buildPdfSearchIndex(rects, 'geometry', false, true, true)
+          .map(character => character.value)
+          .join('')
+          .replace(/\s+/gu, ' ')
+          .trim()
+          .slice(0, 480);
+      } catch {
+        // The page label remains useful when text extraction is unavailable.
+      }
+    }
+    const active = this.pdfLinkPreview;
+    if (
+      !active
+      || active.sequence !== sequence
+      || active.anchor !== anchor
+      || !anchor.isConnected
+    ) return;
+    this.populatePdfLinkPreview(card, {
+      label: label || `Internal PDF link`,
+      targetPage,
+      excerpt: excerpt || 'Destination text is unavailable.',
+    });
+    this.positionPdfLinkPreview(anchor, card);
+  }
+
+  private populatePdfLinkPreview(
+    card: HTMLElement,
+    preview: { label: string; targetPage: number; excerpt: string },
+  ): void {
+    card.replaceChildren();
+    const title = document.createElement('div');
+    title.className = 'pdf-link-preview-title';
+    title.textContent = preview.label.slice(0, 160);
+    const page = document.createElement('div');
+    page.className = 'pdf-link-preview-page';
+    page.textContent = `Page ${preview.targetPage}`;
+    const excerpt = document.createElement('div');
+    excerpt.className = 'pdf-link-preview-excerpt';
+    excerpt.textContent = preview.excerpt.slice(0, 480);
+    card.append(title, page, excerpt);
+  }
+
+  private positionPdfLinkPreview(anchor: HTMLElement, card: HTMLElement): void {
+    const anchorRect = anchor.getBoundingClientRect();
+    const margin = 8;
+    const width = card.offsetWidth || Math.min(380, window.innerWidth - margin * 2);
+    const height = card.offsetHeight || 96;
+    const left = Math.min(
+      Math.max(margin, anchorRect.left),
+      Math.max(margin, window.innerWidth - width - margin),
+    );
+    const below = anchorRect.bottom + margin;
+    const top = below + height <= window.innerHeight - margin
+      ? below
+      : Math.max(margin, anchorRect.top - height - margin);
+    card.style.left = `${Math.round(left)}px`;
+    card.style.top = `${Math.round(top)}px`;
+  }
+
+  private dismissPdfLinkPreview(): void {
+    const active = this.pdfLinkPreview;
+    if (!active) return;
+    this.pdfLinkPreview = undefined;
+    active.card.remove();
+    if (!active.anchor.isConnected) return;
+    if (active.previousDescribedBy) {
+      active.anchor.setAttribute('aria-describedby', active.previousDescribedBy);
+    } else {
+      active.anchor.removeAttribute('aria-describedby');
+    }
   }
 
   private pdfLinkText(
