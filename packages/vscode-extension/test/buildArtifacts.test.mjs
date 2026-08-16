@@ -240,6 +240,14 @@ test('manifest contributes a command palette toggle for markdown Vim mode', () =
   assert.equal(toggleVimCommand.title, 'LLM Wiki: Toggle Vim Mode');
 });
 
+test('manifest contributes a PDF toolbar recovery command', () => {
+  const command = manifest.contributes.commands.find(
+    candidate => candidate.command === 'llm-wiki.togglePdfToolbar',
+  );
+  assert.ok(command, 'missing PDF toolbar toggle command');
+  assert.equal(command.title, 'LLM Wiki: Toggle PDF Toolbar');
+});
+
 test('manifest contributes context-aware Markdown and PDF outlines to the main Explorer sidebar', () => {
   const llmWikiViews = manifest.contributes.views['llm-wiki'] ?? [];
   const explorerViews = manifest.contributes.views.explorer ?? [];

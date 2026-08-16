@@ -400,6 +400,9 @@ function registerCommands(
     vscode.commands.registerCommand('llm-wiki.pdfToggleTwoPageView', () => {
       pdfEditorProvider?.getActiveWebview()?.postMessage({ type: 'toggleTwoPageView' });
     }),
+    vscode.commands.registerCommand('llm-wiki.togglePdfToolbar', async () => {
+      await pdfEditorProvider?.togglePdfToolbar();
+    }),
     vscode.commands.registerCommand('llm-wiki.openPdfMarkdownColumns', async () => {
       const pdfUri = getActivePdfUri();
       const markdownUri = getActiveMarkdownUri();

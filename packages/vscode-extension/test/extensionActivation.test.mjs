@@ -1816,6 +1816,33 @@ test('activation registers PDF view mode toggle commands', async () => {
   ]);
 });
 
+test('activation registers the PDF toolbar recovery command', async () => {
+  let toggleCalls = 0;
+  const vscode = createVscodeMock({
+    executeCommandCalls: [],
+    activeDocumentUri: undefined,
+  });
+  const mocks = createActivationMocks({ vscode });
+  mocks['./pdfEditorProvider'] = {
+    PdfEditorProvider: class {
+      static viewType = 'llm-wiki.pdfViewer';
+      async togglePdfToolbar() {
+        toggleCalls += 1;
+      }
+      getActiveWebview() {
+        return undefined;
+      }
+    },
+  };
+
+  const { activate } = loadTsModule('src/extension.ts', mocks);
+
+  activate({ subscriptions: [] });
+  assert.ok(vscode.__registeredCommands['llm-wiki.togglePdfToolbar']);
+  await vscode.__registeredCommands['llm-wiki.togglePdfToolbar']();
+  assert.equal(toggleCalls, 1);
+});
+
 test('openPdfMarkdownColumns command opens the active PDF beside an available markdown note', async () => {
   const executeCommandCalls = [];
   const pdfUri = { fsPath: '/vault/raw/pdf/ddia.pdf', scheme: 'file' };

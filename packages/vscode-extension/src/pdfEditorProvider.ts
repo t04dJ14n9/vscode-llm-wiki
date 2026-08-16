@@ -107,6 +107,13 @@ interface PdfFileFingerprint {
   birthtimeNs: bigint;
 }
 
+export type PdfToolbarDock = 'top' | 'left';
+
+export interface PdfToolbarPreference {
+  dock: PdfToolbarDock;
+  hidden: boolean;
+}
+
 export interface PdfEditorProviderOptions {
   vaultRoot?: string;
   documentRoot?: string;
@@ -121,6 +128,11 @@ export const ADD_SELECTION_TO_CURSOR_CHAT_COMMAND =
   'llm-wiki.addSelectionToCursorChat';
 
 const PDF_DISCUSSION_CONSENT_KEY = 'llmWiki.pdf.askPdfConsent';
+const PDF_TOOLBAR_PREFERENCE_KEY = 'llmWiki.pdf.toolbarPreference.v1';
+const DEFAULT_PDF_TOOLBAR_PREFERENCE: PdfToolbarPreference = {
+  dock: 'top',
+  hidden: false,
+};
 
 export interface OpenCodexThreadResult {
   threadId: string;
@@ -161,6 +173,7 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
   private readonly learningNoteStore?: LearningNoteStore;
   private readonly agentCapabilities: () => AgentSurfaceCapabilities;
   private readonly pdfOutlineListeners = new Set<(uri: vscode.Uri) => unknown>();
+  private pdfToolbarPreference: PdfToolbarPreference;
   readonly onDidChangePdfOutline: vscode.Event<vscode.Uri> = (listener, thisArgs, disposables) => {
     const wrapped = thisArgs
       ? (uri: vscode.Uri) => listener.call(thisArgs, uri)
@@ -199,6 +212,9 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
       cursorAgent: false,
       providers: [],
     }));
+    this.pdfToolbarPreference = normalizePdfToolbarPreference(
+      context.globalState?.get(PDF_TOOLBAR_PREFERENCE_KEY),
+    );
     if (options.onDidChangeAgentCapabilities) {
       context.subscriptions.push(
         options.onDidChangeAgentCapabilities(
@@ -240,6 +256,34 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
     return active?.outlineLoading !== true
       && active?.outlineInferred === true
       && Boolean(active.outline?.length);
+  }
+
+  getPdfToolbarPreference(): PdfToolbarPreference {
+    return { ...this.pdfToolbarPreference };
+  }
+
+  async setPdfToolbarPreference(value: unknown): Promise<PdfToolbarPreference> {
+    if (!validPdfToolbarPreference(value)) return this.getPdfToolbarPreference();
+    const next = normalizePdfToolbarPreference(value, this.pdfToolbarPreference);
+    if (
+      next.dock === this.pdfToolbarPreference.dock
+      && next.hidden === this.pdfToolbarPreference.hidden
+    ) return this.getPdfToolbarPreference();
+    this.pdfToolbarPreference = next;
+    this.broadcastPdfToolbarPreference();
+    try {
+      await this.context.globalState?.update(PDF_TOOLBAR_PREFERENCE_KEY, next);
+    } catch {
+      // The live preference remains usable even when persistence is unavailable.
+    }
+    return this.getPdfToolbarPreference();
+  }
+
+  async togglePdfToolbar(): Promise<PdfToolbarPreference> {
+    return this.setPdfToolbarPreference({
+      dock: this.pdfToolbarPreference.dock,
+      hidden: !this.pdfToolbarPreference.hidden,
+    });
   }
 
   async revealPdfOutlineDestination(
@@ -389,10 +433,14 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
         case 'ready': {
           active.ready = true;
           this.postAgentHandoffCapabilities(webview);
+          this.postPdfToolbarPreference(active);
           await this.loadPdf(webview, pdfUri);
           this.flushPendingAnchor(active);
           break;
         }
+        case 'pdfToolbarPreferenceChanged':
+          await this.setPdfToolbarPreference(message.preference);
+          break;
         case 'selectionAction': {
           await this.handleSelectionAction(
             pdfUri,
@@ -556,6 +604,19 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
     const message = this.agentHandoffCapabilitiesMessage();
     for (const active of this.webviews.values()) {
       active.postMessage(message);
+    }
+  }
+
+  private postPdfToolbarPreference(active: ActivePdfWebview): void {
+    active.postMessage({
+      type: 'pdfToolbarPreference',
+      preference: this.getPdfToolbarPreference(),
+    });
+  }
+
+  private broadcastPdfToolbarPreference(): void {
+    for (const active of this.webviews.values()) {
+      this.postPdfToolbarPreference(active);
     }
   }
 
@@ -1510,6 +1571,27 @@ function samePdfFileFingerprint(
     && left.ctimeNs === right.ctimeNs
     && left.birthtimeNs === right.birthtimeNs,
   );
+}
+
+function normalizePdfToolbarPreference(
+  value: unknown,
+  fallback: PdfToolbarPreference = DEFAULT_PDF_TOOLBAR_PREFERENCE,
+): PdfToolbarPreference {
+  const base = validPdfToolbarPreference(fallback)
+    ? fallback
+    : DEFAULT_PDF_TOOLBAR_PREFERENCE;
+  if (!validPdfToolbarPreference(value)) return { ...base };
+  return {
+    dock: value.dock,
+    hidden: value.hidden,
+  };
+}
+
+function validPdfToolbarPreference(value: unknown): value is PdfToolbarPreference {
+  if (!value || typeof value !== 'object') return false;
+  const record = value as Partial<PdfToolbarPreference>;
+  return (record.dock === 'top' || record.dock === 'left')
+    && typeof record.hidden === 'boolean';
 }
 
 function normalizePdfSelectionAnchor(anchor: unknown): PdfSelectionAnchor | undefined {

@@ -1066,9 +1066,9 @@ test('PDF provider queues anchor navigation until a newly opened webview is read
 
   assert.deepEqual(
     posted.map(message => message.type),
-    ['agentHandoffCapabilities', 'loadPdf', 'goToAnchor'],
+    ['agentHandoffCapabilities', 'pdfToolbarPreference', 'loadPdf', 'goToAnchor'],
   );
-  assert.deepEqual(posted[2], {
+  assert.deepEqual(posted[3], {
     type: 'goToAnchor',
     anchor: { page: 7, textFragment },
   });
@@ -1152,14 +1152,19 @@ test('agent handoff capabilities precede PDF loading and refresh across live web
 
   await receiveMessage({ type: 'ready' });
 
-  assert.deepEqual(firstPosted.slice(0, 2).map(message => message.type), [
+  assert.deepEqual(firstPosted.slice(0, 3).map(message => message.type), [
     'agentHandoffCapabilities',
+    'pdfToolbarPreference',
     'loadPdf',
   ]);
   assert.deepEqual(firstPosted[0], {
     type: 'agentHandoffCapabilities',
     cursorAgent: true,
     providers: [{ id: 'codex', label: 'Codex' }],
+  });
+  assert.deepEqual(firstPosted[1], {
+    type: 'pdfToolbarPreference',
+    preference: { dock: 'top', hidden: false },
   });
 
   firstPosted.length = 0;
@@ -1514,6 +1519,77 @@ test('PDF outline payloads are bounded, normalized, and reveal the exact destina
   active.outlineLoading = true;
   assert.equal(provider.getPdfOutline(uri), undefined);
   assert.equal(provider.isPdfOutlineInferred(uri), false);
+});
+
+test('PDF toolbar preference persists globally, broadcasts, and restores its last dock', async () => {
+  const updates = [];
+  const posted = [];
+  const context = {
+    extensionUri: { fsPath: '/extension' },
+    subscriptions: [],
+    globalState: {
+      get: key => {
+        assert.equal(key, 'llmWiki.pdf.toolbarPreference.v1');
+        return { dock: 'left', hidden: true };
+      },
+      update: async (key, value) => {
+        updates.push([key, value]);
+      },
+    },
+  };
+  const vscode = {
+    Uri: {
+      joinPath: (...parts) => ({ parts }),
+    },
+  };
+  const { PdfEditorProvider } = loadTsModule('src/pdfEditorProvider.ts', {
+    vscode,
+    '@llm-wiki/core': {},
+  });
+  const provider = new PdfEditorProvider(context, '/vault');
+  assert.deepEqual(provider.getPdfToolbarPreference(), {
+    dock: 'left',
+    hidden: true,
+  });
+  for (const name of ['first', 'second']) {
+    provider.webviews.set(name, {
+      panel: {},
+      pdfUri: { toString: () => name },
+      postMessage: message => posted.push([name, message]),
+    });
+  }
+
+  assert.deepEqual(await provider.setPdfToolbarPreference({
+    dock: 'top',
+    hidden: false,
+    ignored: true,
+  }), {
+    dock: 'top',
+    hidden: false,
+  });
+  assert.deepEqual(updates, [[
+    'llmWiki.pdf.toolbarPreference.v1',
+    { dock: 'top', hidden: false },
+  ]]);
+  assert.deepEqual(posted, [
+    ['first', {
+      type: 'pdfToolbarPreference',
+      preference: { dock: 'top', hidden: false },
+    }],
+    ['second', {
+      type: 'pdfToolbarPreference',
+      preference: { dock: 'top', hidden: false },
+    }],
+  ]);
+
+  assert.deepEqual(await provider.togglePdfToolbar(), {
+    dock: 'top',
+    hidden: true,
+  });
+  assert.deepEqual(provider.getPdfToolbarPreference(), {
+    dock: 'top',
+    hidden: true,
+  });
 });
 
 function portablePdfHref(sourcePath, { page, textFragment } = {}) {

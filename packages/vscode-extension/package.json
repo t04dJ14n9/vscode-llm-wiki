@@ -167,6 +167,10 @@
         "icon": "$(split-horizontal)"
       },
       {
+        "command": "llm-wiki.togglePdfToolbar",
+        "title": "LLM Wiki: Toggle PDF Toolbar"
+      },
+      {
         "command": "llm-wiki.openPdfMarkdownColumns",
         "title": "LLM Wiki: Open PDF and Markdown Columns",
         "icon": "$(layout-sidebar-right)"
