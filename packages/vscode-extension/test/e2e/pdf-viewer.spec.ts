@@ -939,7 +939,7 @@ test('provider arrays never add Send controls', async ({ page }) => {
 });
 
 test('pdf viewer automatically selects a retained PDF page region away from text', async ({ page }) => {
-  await page.goto('http://localhost:8979/pdf-viewer.html');
+  await page.goto('http://localhost:8979/pdf-viewer.html?host=cursor');
   await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 1/, { timeout: 10_000 });
 
   const wrapper = page.locator('#page-1');
@@ -958,6 +958,10 @@ test('pdf viewer automatically selects a retained PDF page region away from text
 
   await expect(page.locator('#page-1 .pdf-area-selection')).toBeVisible();
   await expect(page.locator('#page-1 .pdf-selection-rect')).toHaveCount(0);
+  expect(await visibleSelectionToolbarLabels(page)).toEqual([
+    'Add to Chat',
+    'Copy for Agent',
+  ]);
   const changes = await page.evaluate(() =>
     window.__mockMessages?.filter(message => message.type === 'selectionChanged' && message.clipboardSelection?.kind === 'area')
   );
