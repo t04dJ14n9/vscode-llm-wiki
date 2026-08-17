@@ -69,33 +69,81 @@ test('rejects URI schemes and all Windows drive-prefixed Markdown paths', () => 
   }
 });
 
-test('builds single- and multi-page PDF clipboard context', () => {
+test('builds portable single- and multi-page PDF text context', () => {
+  const sourceSha256 = 'a'.repeat(64);
   const single = createPdfAgentClipboardContext({
     selectionKey: 'single-key',
     relativePath: 'raw/paper.pdf',
-    startPage: 3,
-    endPage: 3,
-    selectedText: 'Exact passage',
-    anchorUri: 'raw/paper.pdf#page=3',
+    sourceSha256,
+    selection: {
+      kind: 'text',
+      startPage: 3,
+      endPage: 3,
+      pages: [{ page: 3, rects: [[90, 45, 522, 185]] }],
+      selectedText: 'Exact passage',
+    },
   });
+  assert.ok(single);
   assert.equal(single.sourceLabel, 'raw/paper.pdf (page 3)');
-  assert.equal(single.sourceHref, 'cursor://llm-wiki/open-anchor?target=raw%2Fpaper.pdf%23page%3D3');
+  assert.equal(single.sourceHref, 'raw/paper.pdf#page=3&viewrect=90%2C45%2C432%2C140');
   assert.equal(
     single.plainText,
-    'Source: [raw/paper.pdf (page 3)](<cursor://llm-wiki/open-anchor?target=raw%2Fpaper.pdf%23page%3D3>)\n\n'
+    'Source: [raw/paper.pdf (page 3)](<raw/paper.pdf#page=3&viewrect=90%2C45%2C432%2C140>)\n'
+      + `PDF source SHA-256: \`${sourceSha256}\`\n\n`
       + 'Selected text:\nExact passage',
   );
 
   const multiple = createPdfAgentClipboardContext({
     selectionKey: 'multi-key',
     relativePath: 'raw\\paper.pdf',
-    startPage: 3,
-    endPage: 5,
-    selectedText: 'Cross page passage',
-    anchorUri: 'raw/paper.pdf#page=3',
+    sourceSha256,
+    selection: {
+      kind: 'text',
+      startPage: 3,
+      endPage: 5,
+      pages: [
+        { page: 3, rects: [[10, 20, 110, 36]] },
+        { page: 4, rects: [[12, 18, 140, 54]] },
+        { page: 5, rects: [[8, 16, 96, 32]] },
+      ],
+      selectedText: 'Cross page passage',
+    },
   });
+  assert.ok(multiple);
   assert.equal(multiple.sourceLabel, 'raw/paper.pdf (pages 3–5)');
-  assert.match(multiple.plainText, /^Source: \[raw\/paper\.pdf \(pages 3–5\)\]/);
+  assert.equal(multiple.plainText, [
+    'Sources:',
+    '- [raw/paper.pdf (page 3)](<raw/paper.pdf#page=3&viewrect=10%2C20%2C100%2C16>)',
+    '- [raw/paper.pdf (page 4)](<raw/paper.pdf#page=4&viewrect=12%2C18%2C128%2C36>)',
+    '- [raw/paper.pdf (page 5)](<raw/paper.pdf#page=5&viewrect=8%2C16%2C88%2C16>)',
+    `PDF source SHA-256: \`${sourceSha256}\``,
+    '',
+    'Selected text:',
+    'Cross page passage',
+  ].join('\n'));
+});
+
+test('builds portable area context without inventing selected text', () => {
+  const sourceSha256 = 'b'.repeat(64);
+  const context = createPdfAgentClipboardContext({
+    selectionKey: 'area-key',
+    relativePath: 'raw/paper.pdf',
+    sourceSha256,
+    selection: {
+      kind: 'area',
+      startPage: 2,
+      endPage: 2,
+      pages: [{ page: 2, rects: [[90, 45, 522, 185]] }],
+    },
+  });
+  assert.ok(context);
+  assert.equal(context.selectedText, undefined);
+  assert.equal(context.plainText, [
+    'Source: [raw/paper.pdf (page 2 region)](<raw/paper.pdf#page=2&viewrect=90%2C45%2C432%2C140>)',
+    `PDF source SHA-256: \`${sourceSha256}\``,
+    '',
+    'Selected PDF region. Use the vault PDF skill to extract its text and inspect its visual content.',
+  ].join('\n'));
 });
 
 test('adds a workspace-local PDF crop reference without replacing source text', () => {
@@ -126,25 +174,32 @@ test('adds a workspace-local PDF crop reference without replacing source text', 
 });
 
 test('escapes PDF workspace filenames only in the plain-text Markdown link label', () => {
+  const sourceSha256 = 'c'.repeat(64);
   const context = createPdfAgentClipboardContext({
     selectionKey: 'metacharacter-key',
     relativePath: 'raw/[draft]*paper*_v1&2.pdf',
-    startPage: 3,
-    endPage: 3,
-    selectedText: 'Exact passage',
-    anchorUri: 'raw/[draft]*paper*_v1&2.pdf#page=3',
+    sourceSha256,
+    selection: {
+      kind: 'text',
+      startPage: 3,
+      endPage: 3,
+      pages: [{ page: 3, rects: [[10, 20, 110, 36]] }],
+      selectedText: 'Exact passage',
+    },
   });
+  assert.ok(context);
 
   assert.equal(context.sourceLabel, 'raw/[draft]*paper*_v1&2.pdf (page 3)');
   assert.equal(
     context.plainText,
     'Source: [raw/\\[draft\\]\\*paper\\*\\_v1\\&2.pdf (page 3)]'
-      + '(<cursor://llm-wiki/open-anchor?target=raw%2F%5Bdraft%5D*paper*_v1%262.pdf%23page%3D3>)\n\n'
+      + '(<raw/[draft]*paper*_v1&2.pdf#page=3&viewrect=10%2C20%2C100%2C16>)\n'
+      + `PDF source SHA-256: \`${sourceSha256}\`\n\n`
       + 'Selected text:\nExact passage',
   );
   assert.equal(
     context.sourceHref,
-    'cursor://llm-wiki/open-anchor?target=raw%2F%5Bdraft%5D*paper*_v1%262.pdf%23page%3D3',
+    'raw/[draft]*paper*_v1&2.pdf#page=3&viewrect=10%2C20%2C100%2C16',
   );
 });
 
@@ -152,49 +207,61 @@ test('rejects malformed clipboard inputs', () => {
   assert.equal(createPdfAgentClipboardContext({
     selectionKey: '',
     relativePath: '/absolute/paper.pdf',
-    startPage: 5,
-    endPage: 3,
-    selectedText: '',
-    anchorUri: 'raw/paper.pdf#page=5',
+    sourceSha256: 'x',
+    selection: {},
   }), undefined);
   assert.equal(createPdfAgentClipboardContext({
     selectionKey: 'key',
     relativePath: 'raw/paper.pdf',
-    startPage: 1,
-    endPage: 1,
-    selectedText: '   ',
-    anchorUri: 'raw/paper.pdf#page=1',
+    sourceSha256: 'a'.repeat(64),
+    selection: {
+      kind: 'text',
+      startPage: 1,
+      endPage: 1,
+      pages: [{ page: 1, rects: [[0, 0, 10, 10]] }],
+      selectedText: '   ',
+    },
   }), undefined);
   assert.equal(createPdfAgentClipboardContext({
     selectionKey: 'key',
     relativePath: 'raw/paper.pdf',
-    startPage: 1,
-    endPage: 1,
-    selectedText: 'text',
-    anchorUri: '',
+    sourceSha256: 'a'.repeat(64),
+    selection: {
+      kind: 'area',
+      startPage: 1,
+      endPage: 2,
+      pages: [
+        { page: 1, rects: [[0, 0, 10, 10]] },
+        { page: 2, rects: [[0, 0, 10, 10]] },
+      ],
+    },
   }), undefined);
 });
 
-test('rejects absolute, URI, and anchor-bridge PDF targets', () => {
-  for (const anchorUri of [
+test('rejects absolute and URI PDF source paths', () => {
+  for (const relativePath of [
     '/tmp/paper.pdf#page=3',
     'C:/tmp/paper.pdf#page=3',
     'file:///tmp/paper.pdf#page=3',
-    'raw/source.llm_wiki_anchor',
   ]) {
     assert.equal(createPdfAgentClipboardContext({
       selectionKey: 'key',
-      relativePath: 'raw/paper.pdf',
-      startPage: 3,
-      endPage: 3,
-      selectedText: 'Exact passage',
-      anchorUri,
-    }), undefined, anchorUri);
+      relativePath,
+      sourceSha256: 'a'.repeat(64),
+      selection: {
+        kind: 'text',
+        startPage: 3,
+        endPage: 3,
+        pages: [{ page: 3, rects: [[0, 0, 10, 10]] }],
+        selectedText: 'Exact passage',
+      },
+    }), undefined, relativePath);
   }
 });
 
 test('uses a stable normalized JSON key for PDF selection geometry', () => {
   const first = pdfAgentClipboardSelectionKey({
+    kind: 'text',
     startPage: 2,
     endPage: 3,
     pages: [
@@ -204,6 +271,7 @@ test('uses a stable normalized JSON key for PDF selection geometry', () => {
     selectedText: 'Selected passage',
   });
   const second = pdfAgentClipboardSelectionKey({
+    kind: 'text',
     startPage: 2,
     endPage: 3,
     pages: [
@@ -214,6 +282,7 @@ test('uses a stable normalized JSON key for PDF selection geometry', () => {
   });
   assert.equal(first, second);
   assert.equal(pdfAgentClipboardSelectionKey({
+    kind: 'text',
     startPage: 3,
     endPage: 2,
     pages: [],
@@ -227,6 +296,7 @@ test('rejects rectangles that become non-finite or zero-area after normalization
     [0, 0, 0.0004, 1],
   ]) {
     assert.equal(pdfAgentClipboardSelectionKey({
+      kind: 'text',
       startPage: 1,
       endPage: 1,
       pages: [{ page: 1, rects: [rect] }],

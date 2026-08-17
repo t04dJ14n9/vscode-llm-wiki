@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import { statSync } from 'fs';
+import { createHash } from 'node:crypto';
 import {
   pdfHref,
   type PdfDiscussionAnchorV1,
@@ -78,6 +79,7 @@ export interface PdfOutlineEntry {
 interface ActivePdfWebview {
   panel: vscode.WebviewPanel;
   pdfUri: vscode.Uri;
+  pdfSha256?: string;
   ready: boolean;
   pendingAnchor?: PdfAnchorNavigation;
   agentClipboardContext?: PdfAgentClipboardContext;
@@ -332,12 +334,19 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
 
   async getActiveSelectionContext(): Promise<SelectionContext | undefined> {
     const active = this.getActiveWebview();
-    return active ? this.toSelectionContext(active.pdfUri, active.selection) : undefined;
+    return active
+      ? this.toSelectionContext(
+          active.pdfUri,
+          active.selection,
+          active.agentClipboardContext?.plainText,
+        )
+      : undefined;
   }
 
   private toSelectionContext(
     pdfUri: vscode.Uri,
     rawSelection: unknown,
+    agentText?: string,
   ): SelectionContext | undefined {
     const selection = normalizePdfSelectionAnchor(rawSelection);
     if (!selection) return undefined;
@@ -356,6 +365,7 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
         kind: 'pdf',
         page: selection.page,
         textFragment,
+        ...(agentText ? { agentText } : {}),
       },
     };
   }
@@ -434,7 +444,7 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
           active.ready = true;
           this.postAgentHandoffCapabilities(webview);
           this.postPdfToolbarPreference(active);
-          await this.loadPdf(webview, pdfUri);
+          await this.loadPdf(active);
           this.flushPendingAnchor(active);
           break;
         }
@@ -583,14 +593,15 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
     }
   }
 
-  private async loadPdf(webview: vscode.Webview, pdfUri: vscode.Uri): Promise<void> {
+  private async loadPdf(active: ActivePdfWebview): Promise<void> {
     try {
-      const bytes = await vscode.workspace.fs.readFile(pdfUri);
-      webview.postMessage({
+      const bytes = await vscode.workspace.fs.readFile(active.pdfUri);
+      active.pdfSha256 = createHash('sha256').update(bytes).digest('hex');
+      active.postMessage({
         type: 'loadPdf',
         data: Buffer.from(bytes).toString('base64'),
       });
-      await this.sendPdfDiscussionState(webview, pdfUri);
+      await this.sendPdfDiscussionState(active.panel.webview, active.pdfUri);
     } catch (error) {
       vscode.window.showErrorMessage(`Failed to load PDF: ${String(error)}`);
     }
@@ -1056,7 +1067,12 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
   ): Promise<void> {
     if (!isPdfSelectionAction(action)) return;
     if (action === 'addToCursorChat') {
-      const selection = this.toSelectionContext(pdfUri, anchor);
+      const active = this.webviews.get(pdfUri.toString());
+      const selection = this.toSelectionContext(
+        pdfUri,
+        anchor,
+        active?.agentClipboardContext?.plainText,
+      );
       if (!selection) throw new Error('Cannot add an empty PDF selection to chat');
       const snapshotPng = decodeCursorCropPngBase64(rawSnapshotPngBase64);
       if (rawCropCaptureFailed === true) {
@@ -1106,17 +1122,13 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
     active.selection = normalizePdfSelectionAnchor(anchor);
     const normalizedClipboardSelection = normalizePdfAgentClipboardSelection(clipboardSelection);
     let context: PdfAgentClipboardContext | undefined;
-    if (normalizedClipboardSelection) {
+    if (normalizedClipboardSelection && active.pdfSha256) {
       const relativePath = vscode.workspace.asRelativePath(active.pdfUri);
       context = createPdfAgentClipboardContext({
         selectionKey: normalizedClipboardSelection.selectionKey,
         relativePath,
-        startPage: normalizedClipboardSelection.selection.startPage,
-        endPage: normalizedClipboardSelection.selection.endPage,
-        selectedText: normalizedClipboardSelection.selection.selectedText,
-        anchorUri: pdfHref(relativePath, {
-          page: normalizedClipboardSelection.selection.startPage,
-        }),
+        sourceSha256: active.pdfSha256,
+        selection: normalizedClipboardSelection.selection,
       });
     }
     active.agentClipboardContext = context;
@@ -1658,13 +1670,14 @@ function normalizePdfAgentClipboardSelection(
 ): { selection: PdfAgentClipboardSelection; selectionKey: string } | undefined {
   if (!input || typeof input !== 'object' || Array.isArray(input)) return undefined;
   const raw = input as Record<string, unknown>;
-  const selectedText = normalizePdfMessageText(raw.selectedText);
-  if (!selectedText) return undefined;
   const candidate = {
+    kind: raw.kind,
     startPage: raw.startPage,
     endPage: raw.endPage,
     pages: raw.pages,
-    selectedText,
+    ...(raw.kind === 'text'
+      ? { selectedText: normalizePdfMessageText(raw.selectedText) }
+      : {}),
   } as unknown as PdfAgentClipboardSelection;
   const selectionKey = pdfAgentClipboardSelectionKey(candidate);
   if (!selectionKey) return undefined;

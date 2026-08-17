@@ -130,7 +130,10 @@ test('PDF provider correlates multi-page clipboard context to exact selection ge
     },
     {},
   );
+  provider.webviews.get(pdfUri.toString()).pdfSha256 =
+    '29d1283686193dc1461a7deac4f53d9bc5402a28b95d854f69e94986756fd0a9';
   const firstSelection = {
+    kind: 'text',
     startPage: 2,
     endPage: 4,
     pages: [
@@ -168,6 +171,7 @@ test('PDF provider correlates multi-page clipboard context to exact selection ge
   const firstKey = agentClipboard.pdfAgentClipboardSelectionKey(firstSelection);
   const firstContextMessage = posted.at(-1);
   assert.equal(firstContextMessage.type, 'agentClipboardContext');
+  assert.ok(firstContextMessage.context);
   assert.equal(firstContextMessage.context.selectionKey, firstKey);
   assert.equal(firstContextMessage.context.sourceLabel, 'raw/pdf/paper.pdf (pages 2–4)');
   assert.equal(
@@ -176,7 +180,11 @@ test('PDF provider correlates multi-page clipboard context to exact selection ge
   );
   assert.match(
     firstContextMessage.context.sourceHref,
-    /raw%2Fpdf%2Fpaper\.pdf%23page%3D2/,
+    /^raw\/pdf\/paper\.pdf#page=2&viewrect=/,
+  );
+  assert.match(
+    firstContextMessage.context.plainText,
+    /PDF source SHA-256: `29d1283686193dc1461a7deac4f53d9bc5402a28b95d854f69e94986756fd0a9`/,
   );
   assert.deepEqual(contextCommands.slice(-2), [
     ['setContext', 'llmWikiPdfHasSelection', false],
@@ -273,8 +281,10 @@ test('clipboard text fallback accepts only the current key and exact precomputed
     },
     {},
   );
+  provider.webviews.get(pdfUri.toString()).pdfSha256 = 'd'.repeat(64);
 
   const firstSelection = {
+    kind: 'text',
     startPage: 2,
     endPage: 2,
     pages: [{ page: 2, rects: [[10, 20, 110, 36]] }],
@@ -292,6 +302,7 @@ test('clipboard text fallback accepts only the current key and exact precomputed
   const firstContext = posted.at(-1).context;
 
   const currentSelection = {
+    kind: 'text',
     startPage: 2,
     endPage: 2,
     pages: [{ page: 2, rects: [[30, 40, 130, 56]] }],
@@ -424,7 +435,9 @@ test('PDF clipboard persists a validated crop and copies text with its workspace
     },
     {},
   );
+  provider.webviews.get(pdfUri.toString()).pdfSha256 = 'e'.repeat(64);
   const selection = {
+    kind: 'text',
     startPage: 2,
     endPage: 2,
     pages: [{ page: 2, rects: [[30, 40, 130, 56]] }],
@@ -1166,6 +1179,10 @@ test('agent handoff capabilities precede PDF loading and refresh across live web
     type: 'pdfToolbarPreference',
     preference: { dock: 'top', hidden: false },
   });
+  assert.equal(
+    provider.webviews.get(pdfUri.toString()).pdfSha256,
+    '039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81',
+  );
 
   firstPosted.length = 0;
   fireCapabilityChange();
@@ -1338,7 +1355,7 @@ test('combined PDF provider loads global Ask PDF state outside a vault', async (
   });
   provider.activeKey = pdfUri.toString();
 
-  await provider.loadPdf(webview, pdfUri);
+  await provider.loadPdf(provider.webviews.get(pdfUri.toString()));
 
   assert.equal(discussionRoutes.length, 1);
   assert.equal(discussionRoutes[0].vaultRoot, undefined);
