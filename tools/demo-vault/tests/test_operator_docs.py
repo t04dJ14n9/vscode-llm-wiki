@@ -7,6 +7,7 @@ TOOLS = Path(__file__).resolve().parents[1]
 REPOSITORY = Path(__file__).resolve().parents[3]
 VAULT = REPOSITORY / "demo-vault"
 SKILL = REPOSITORY / ".agents/skills/llm-wiki"
+PDF_SKILL = REPOSITORY / ".agents/skills/pdf"
 SKILL_VALIDATOR = (
     Path.home()
     / ".codex/skills/.system/skill-creator/scripts/quick_validate.py"
@@ -42,22 +43,32 @@ class OperatorDocumentationTests(unittest.TestCase):
         if not SKILL_VALIDATOR.is_file():
             self.skipTest("official Codex skill validator is not installed")
 
-        result = subprocess.run(
-            [
-                "uv",
-                "run",
-                "--with",
-                "pyyaml",
-                "python",
-                SKILL_VALIDATOR,
-                SKILL,
-            ],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+        for skill in (SKILL, PDF_SKILL):
+            result = subprocess.run(
+                [
+                    "uv",
+                    "run",
+                    "--with",
+                    "pyyaml",
+                    "python",
+                    SKILL_VALIDATOR,
+                    skill,
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+    def test_pdf_skill_is_installed_as_hidden_operational_metadata(self) -> None:
+        installed = VAULT / ".agents/skills/pdf"
+        self.assertTrue(installed.is_dir())
+        self.assertFalse(any(installed.rglob("_index.md")))
+        for relative in ("SKILL.md", "scripts/extract_selection.py"):
+            self.assertEqual(
+                (installed / relative).read_bytes(),
+                (PDF_SKILL / relative).read_bytes(),
+            )
 
     def test_skill_routes_to_each_direct_reference(self) -> None:
         path = SKILL / "SKILL.md"
@@ -88,6 +99,7 @@ class OperatorDocumentationTests(unittest.TestCase):
 
     def test_documented_producer_clis_are_runnable(self) -> None:
         for script in (
+            "install_agent_skills.py",
             "ingest_arxiv.py",
             "rebuild_indexes.py",
             "validate_vault.py",

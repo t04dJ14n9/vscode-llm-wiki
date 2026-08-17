@@ -29,7 +29,7 @@ export interface PdfAgentClipboardContext {
   selectionKey: string;
   sourceLabel: string;
   sourceHref: string;
-  selectedText: string;
+  selectedText?: string;
   plainText: string;
 }
 

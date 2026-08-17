@@ -11,7 +11,8 @@ generated: {"by": "codex/gpt-5.6", "at": "2026-08-13T00:00:00Z"}
 
 Run commands from this bundle root unless a command says otherwise. Producer
 tools live in `../tools/demo-vault/`; the reusable workflow is in
-`../.agents/skills/llm-wiki/`.
+`../.agents/skills/llm-wiki/`. The vault-local `.agents/skills/pdf/` skill
+extracts and renders portable PDF selections without retaining screenshots.
 
 ## Initialize or audit a vault
 
@@ -27,8 +28,9 @@ python3 ../tools/demo-vault/validate_vault.py --vault .
 ```
 
 For a new vault, establish the root, reserved files, evidence/project layers,
-compiled categories, and one local index per visible directory. Keep skills
-and producer tools outside the bundle.
+compiled categories, and one local index per visible directory. Keep producer
+tools outside the bundle; install default agent skills as hidden operational
+metadata with `python3 ../tools/demo-vault/install_agent_skills.py --vault .`.
 
 ## Orientation
 

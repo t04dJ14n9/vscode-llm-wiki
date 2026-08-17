@@ -23,6 +23,10 @@ const toolbarLayoutSource = join(
   packageRoot,
   '../pdf-editor/src/webview/domain/pdfToolbarLayout.ts',
 );
+const areaSelectionSource = join(
+  packageRoot,
+  '../pdf-editor/src/webview/pdfAreaSelection.ts',
+);
 const viewerSource = join(
   packageRoot,
   '../pdf-editor/src/webview/pdf-viewer.ts',
@@ -56,6 +60,7 @@ function compileTsModule(filename, mocks = {}) {
 
 const pdfSearch = compileTsModule(searchSource);
 const pdfToolbarLayout = compileTsModule(toolbarLayoutSource);
+const pdfAreaSelection = compileTsModule(areaSelectionSource);
 const pdfTextExtraction = compileTsModule(extractionSource);
 const pdfSelection = compileTsModule(selectionSource, {
   './pdfSearch': pdfSearch,
@@ -95,6 +100,7 @@ const pdfViewer = compileTsModule(viewerSource, {
   './domain/pdfToolbarLayout': pdfToolbarLayout,
   './pdfToolbarDom': {},
   './pdfAgentClipboard': pdfAgentClipboardMock,
+  './pdfAreaSelection': pdfAreaSelection,
   './pdfLayout': {},
   './pdfTextLayer': {},
   './obsidianContextMenu': {},
@@ -136,6 +142,7 @@ function resetPdfAgentClipboardState() {
 
 function agentClipboardCopyViewer() {
   const selection = {
+    kind: 'text',
     startPage: 2,
     endPage: 2,
     pages: [{ page: 2, rects: [[10, 20, 110, 36]] }],
@@ -250,106 +257,21 @@ function selectionSnapshotWithMiddlePage(selection, middlePageReady) {
   }
 }
 
-test('gesture-bound PDF copy invokes crop and writer in the click stack', async () => {
+test('PDF copy for agent posts only the host-precomputed portable text', () => {
   const state = resetPdfAgentClipboardState();
-  const { viewer } = agentClipboardCopyViewer();
-
-  viewer.copySelectionForAgent();
-
-  assert.equal(state.captureInputs.length, 1);
-  assert.equal(state.writeInputs.length, 1);
-  assert.equal(state.writeInputs[0].pngBlob, state.pngPromise);
-
-  state.pendingWrite.resolve('image-reference');
-  await Promise.resolve();
-});
-
-test('duplicate PDF clipboard clicks share one in-flight attempt', async () => {
-  const state = resetPdfAgentClipboardState();
-  const { viewer } = agentClipboardCopyViewer();
-
-  viewer.copySelectionForAgent();
-  viewer.copySelectionForAgent();
-
-  assert.equal(state.captureInputs.length, 1);
-  assert.equal(state.writeInputs.length, 1);
-
-  state.pendingWrite.resolve('image-reference');
-  await Promise.resolve();
-});
-
-test('selection change invalidates an in-flight PDF clipboard attempt', async () => {
-  const state = resetPdfAgentClipboardState();
-  const { viewer } = agentClipboardCopyViewer();
-  viewer.copySelectionForAgent();
-  assert.equal(state.writeInputs.length, 1);
-  assert.equal(state.writeInputs[0].isCurrent(), true);
-
-  const nextSelection = {
-    startPage: 3,
-    endPage: 3,
-    pages: [{ page: 3, rects: [[20, 30, 120, 46]] }],
-    selectedText: 'new selected passage',
-  };
-  viewer.selectionState = null;
-  viewer.selectionAnchorFromNativeRange = () => ({
-    anchor: {
-      page: 3,
-      snippet: nextSelection.selectedText,
-      rects: nextSelection.pages[0].rects,
-    },
-    clipboardSelection: nextSelection,
-    range: { getBoundingClientRect: () => ({ page: 3 }) },
-  });
-  viewer.selectionViewportRect = () => ({ page: 3 });
-  viewer.showSelectionToolbar = () => undefined;
-
+  const { context, viewer } = agentClipboardCopyViewer();
   postedViewerMessages.length = 0;
-  viewer.handleSelection();
 
-  assert.equal(state.writeInputs[0].isCurrent(), false);
-  state.writeInputs[0].host.postMessage({
-    type: 'agentClipboardResult',
-    status: 'image-reference',
-    selectionKey: 'stale-key',
-    pngBase64: 'stale-png',
-  });
-  state.writeInputs[0].host.postMessage({
+  viewer.copySelectionForAgent();
+
+  assert.deepEqual(postedViewerMessages, [{
     type: 'agentClipboardResult',
     status: 'text-fallback',
-    selectionKey: 'stale-key',
-    plainText: 'stale text',
-  });
-  assert.equal(
-    postedViewerMessages.filter(message => message.type === 'agentClipboardResult').length,
-    0,
-  );
-  state.pendingWrite.resolve('text-fallback');
-  await Promise.resolve();
-});
-
-test('selection clear invalidates an in-flight PDF clipboard attempt', async () => {
-  const state = resetPdfAgentClipboardState();
-  const { viewer } = agentClipboardCopyViewer();
-  viewer.copySelectionForAgent();
-  assert.equal(state.writeInputs.length, 1);
-  assert.equal(state.writeInputs[0].isCurrent(), true);
-
-  viewer.cancelSelectionUpdate = () => undefined;
-  viewer.stopSelectionAutoScroll = () => undefined;
-  viewer.pages = new Map();
-  const previousDocument = globalThis.document;
-  globalThis.document = { getElementById: () => null };
-  try {
-    viewer.clearSelection();
-  } finally {
-    if (previousDocument === undefined) delete globalThis.document;
-    else globalThis.document = previousDocument;
-  }
-
-  assert.equal(state.writeInputs[0].isCurrent(), false);
-  state.pendingWrite.resolve('text-fallback');
-  await Promise.resolve();
+    selectionKey: context.selectionKey,
+    plainText: context.plainText,
+  }]);
+  assert.equal(state.captureInputs.length, 0);
+  assert.equal(state.writeInputs.length, 0);
 });
 
 function multiPageToolbarViewer(anchorCaret, focusCaret) {
@@ -445,6 +367,7 @@ test('multi-page PDF clipboard selection includes every page and complete normal
       page => rectsByPage.get(page) ?? [],
     ),
     {
+      kind: 'text',
       startPage: 2,
       endPage: 4,
       pages: [
@@ -483,6 +406,7 @@ function assertDelayedMiddlePageRepublish(selection, changedSelection) {
     page => rectsByPage.get(page),
   );
   assert.deepEqual(clipboardSelection, {
+    kind: 'text',
     startPage: 2,
     endPage: 4,
     pages: [
@@ -678,6 +602,7 @@ test('PDF selection refresh retries current pending context but rejects stale ca
 test('stale PDF clipboard context is rejected before webview caching', () => {
   assert.equal(typeof pdfViewer.correlatePdfAgentClipboardContext, 'function');
   const currentSelection = {
+    kind: 'text',
     startPage: 4,
     endPage: 4,
     pages: [{ page: 4, rects: [[30, 40, 130, 56]] }],
@@ -685,6 +610,7 @@ test('stale PDF clipboard context is rejected before webview caching', () => {
   };
   const staleContext = {
     selectionKey: JSON.stringify({
+      kind: 'text',
       startPage: 4,
       endPage: 4,
       selectedText: currentSelection.selectedText,
@@ -728,6 +654,66 @@ test('PDF carets have stable page, item, and character ordering', () => {
   assert.equal(pdfSelection.pdfSelectionContainsPage(backwardsSelection, 1), true);
   assert.equal(pdfSelection.pdfSelectionContainsPage(backwardsSelection, 2), true);
   assert.equal(pdfSelection.pdfSelectionContainsPage(backwardsSelection, 3), false);
+});
+
+test('pointer selection intent uses text only near a glyph unless area is forced', () => {
+  assert.equal(pdfSelection.pdfPointerSelectionIntent({
+    horizontalDistance: 0,
+    verticalDistance: 0,
+  }, 12, false), 'text');
+  assert.equal(pdfSelection.pdfPointerSelectionIntent({
+    horizontalDistance: 80,
+    verticalDistance: 44,
+  }, 12, false), 'area');
+  assert.equal(pdfSelection.pdfPointerSelectionIntent({
+    horizontalDistance: 0,
+    verticalDistance: 0,
+  }, 12, true), 'area');
+});
+
+test('area page intersections clip one marquee into ordered page-local rectangles', () => {
+  assert.deepEqual(pdfAreaSelection.pdfAreaPageIntersections(
+    { left: 40, top: 80, right: 240, bottom: 760 },
+    [
+      { page: 1, left: 20, top: 20, right: 620, bottom: 400 },
+      { page: 2, left: 20, top: 420, right: 620, bottom: 800 },
+    ],
+  ), [
+    { page: 1, rect: [20, 60, 220, 380] },
+    { page: 2, rect: [20, 0, 220, 340] },
+  ]);
+
+  assert.deepEqual(pdfAreaSelection.pdfAreaPageIntersections(
+    { left: 510, top: 260, right: 110, bottom: 40 },
+    [
+      { page: 2, left: 330, top: 20, right: 630, bottom: 300 },
+      { page: 1, left: 10, top: 20, right: 310, bottom: 300 },
+    ],
+  ), [
+    { page: 1, rect: [100, 20, 300, 240] },
+    { page: 2, rect: [0, 20, 180, 240] },
+  ]);
+
+  assert.deepEqual(pdfAreaSelection.pdfAreaPageIntersections(
+    { left: 40, top: 405, right: 240, bottom: 415 },
+    [
+      { page: 1, left: 20, top: 20, right: 620, bottom: 400 },
+      { page: 2, left: 20, top: 420, right: 620, bottom: 800 },
+    ],
+  ), []);
+});
+
+test('merge area page selections unions touching rectangles and preserves disjoint regions', () => {
+  assert.deepEqual(pdfAreaSelection.mergePdfAreaPageSelections(
+    [{ page: 2, rects: [[10, 10, 40, 40], [100, 100, 120, 120]] }],
+    [
+      { page: 1, rects: [[5, 5, 20, 20]] },
+      { page: 2, rects: [[35, 35, 60, 60], [160, 10, 180, 30]] },
+    ],
+  ), [
+    { page: 1, rects: [[5, 5, 20, 20]] },
+    { page: 2, rects: [[10, 10, 60, 60], [160, 10, 180, 30], [100, 100, 120, 120]] },
+  ]);
 });
 
 test('selection glyphs are grouped into visual lines independent of item order', () => {

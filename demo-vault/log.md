@@ -7,6 +7,9 @@ title: "Nanochat LLM Wiki bundle history"
 
 ## 2026-08-17
 
+* **Portable PDF selections**: Added a vault-local PDF skill that verifies
+  source hashes and extracts exact page regions from portable `page` and
+  `viewrect` links; agent handoff no longer needs retained screenshots.
 * **Index migration**: Renamed every hierarchical index to `_index.md`; the
   producer, validator, extension, skill, and operator documentation no longer
   recognize `index.md` as an index.

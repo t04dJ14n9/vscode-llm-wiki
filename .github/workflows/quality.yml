@@ -53,6 +53,9 @@ jobs:
           lfs: true
           submodules: recursive
 
+      - name: Install PDF skill test dependency
+        run: python3 -m pip install 'pdfplumber>=0.11,<0.12'
+
       - name: Run demo-vault producer tests
         run: python3 -m unittest discover -s tools/demo-vault/tests -v
 

@@ -26,6 +26,10 @@ the collection inspectable by tools and agents.
 The best first page is the end-to-end Nanochat training summary. From there,
 follow focused concepts only when you need mechanism-level detail.
 
+Hidden `.agents/skills/` files are portable operational metadata for agents.
+They are distributed with the vault but are deliberately excluded from OKF
+indexes and compiled knowledge.
+
 ## Repository prerequisites
 
 Clone with Git LFS and initialize the project source:

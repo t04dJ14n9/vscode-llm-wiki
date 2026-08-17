@@ -30,10 +30,8 @@ import { registerLinkProvider } from './linkProvider';
 import { MarkdownEditorProvider } from './markdownEditorProvider';
 import { validateCursorCropPng } from './cursorCrop';
 import {
-  createPdfAgentClipboardContext,
   formatMarkdownAgentReference,
 } from './agentClipboard';
-import { persistPdfAgentClipboardImage } from './pdfAgentClipboardImage';
 import {
   type MarkdownOutlineTreeProvider,
   registerMarkdownOutlineProvider,
@@ -577,10 +575,7 @@ async function exportSelectionAndHandoff(
     && isPdfUri(resolvedSelection.uri)
   ) {
     return handoffPdfSelectionToCursor(
-      workspaceRoot,
       resolvedSelection,
-      snapshotPng,
-      cropFailureMessage,
     );
   }
 
@@ -608,47 +603,12 @@ async function exportSelectionAndHandoff(
 }
 
 async function handoffPdfSelectionToCursor(
-  fallbackWorkspaceRoot: string,
   selection: SelectionContext,
-  snapshotPng: Uint8Array | undefined,
-  cropFailureMessage: string,
 ): Promise<boolean> {
-  const relativePath = vscode.workspace.asRelativePath(selection.uri);
-  const selectionKey = JSON.stringify({
-    anchorUri: selection.anchorUri,
-    startLine: selection.startLine,
-    endLine: selection.endLine,
-    text: selection.text,
-  });
-  const context = createPdfAgentClipboardContext({
-    selectionKey,
-    relativePath,
-    startPage: selection.startLine,
-    endPage: selection.endLine,
-    selectedText: selection.text,
-    anchorUri: selection.anchorUri ?? '',
-  });
-  if (!context) {
+  const agentText = selection.metadata?.agentText;
+  if (typeof agentText !== 'string' || !agentText.trim()) {
     vscode.window.showWarningMessage('The selected PDF text could not be added to chat.');
     return false;
-  }
-
-  const attachmentUris: vscode.Uri[] = [];
-  const crop = validateCursorCropPng(snapshotPng);
-  if (crop) {
-    const workspaceRoot = vscode.workspace.getWorkspaceFolder?.(selection.uri)?.uri.fsPath
-      ?? fallbackWorkspaceRoot;
-    try {
-      const image = persistPdfAgentClipboardImage({
-        rootPath: workspaceRoot,
-        sourceIdentity: selection.uri.toString(),
-        selectionKey: context.selectionKey,
-        bytes: crop,
-      });
-      attachmentUris.push(vscode.Uri.file(image.absolutePath));
-    } catch {
-      vscode.window.showWarningMessage(cropFailureMessage);
-    }
   }
 
   return handoffRawTextToCursor({
@@ -657,8 +617,8 @@ async function handoffPdfSelectionToCursor(
       startLine: selection.startLine,
       endLine: selection.endLine,
     },
-    rawText: context.plainText,
-  }, attachmentUris);
+    rawText: agentText,
+  }, []);
 }
 
 async function markdownRangeHandoffContext(

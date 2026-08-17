@@ -297,7 +297,8 @@
   #page-container.two-page { display: grid; grid-template-columns: repeat(2, max-content); align-items: start; justify-content: safe center; }
   #page-container.two-page.paginated { gap: 0; }
   #page-container.paginated { min-height: calc(100% - 76px); padding: 38px 12px; justify-content: safe center; align-content: safe center; }
-  .page-wrapper { position: relative; background: white; box-shadow: 0 1px 8px rgba(0,0,0,.24); }
+  .page-wrapper { position: relative; background: white; box-shadow: 0 1px 8px rgba(0,0,0,.24); cursor: crosshair; }
+  .page-wrapper.pdf-text-selection-intent { cursor: text; }
   .page-wrapper.page-turn-staging { position: absolute; opacity: 0; pointer-events: none; will-change: opacity; }
   .pdf-canvas, .text-layer, .highlight-layer { position: absolute; left: 0; top: 0; }
   .text-layer {
@@ -393,8 +394,7 @@
     outline: none;
     pointer-events: none;
   }
-  #page-container.rectangle-mode .page-wrapper { cursor: crosshair; }
-  #page-container.rectangle-mode .text-layer { pointer-events: none; user-select: none; }
+  .pdf-area-selection { position: absolute; z-index: 14; box-sizing: border-box; border: 1px solid var(--vscode-focusBorder); background: rgba(0, 127, 212, .16); pointer-events: none; }
   .rectangle-selection-overlay { position: absolute; z-index: 15; box-sizing: border-box; border: 1px dashed var(--vscode-focusBorder); background: rgba(0, 127, 212, .16); pointer-events: none; }
   .pdf-destination-focus {
     position: absolute;
@@ -513,7 +513,6 @@
       <button id="next" type="button" aria-label="Next page">›</button>
     </div>
     <span class="toolbar-spacer"></span>
-    <button id="rectangle-selection" type="button" aria-label="Copy embed link to rectangular selection" title="Copy embed link to rectangular selection" aria-pressed="false">▱</button>
     <span id="page-info" class="sr-only" aria-live="polite"></span>
   </div>
   <div id="display-menu" class="toolbar-menu hidden" role="menu" aria-label="Display options">

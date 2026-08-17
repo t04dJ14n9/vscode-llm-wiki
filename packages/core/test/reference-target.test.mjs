@@ -36,6 +36,34 @@ test('serializes portable PDF destinations with page and text fragments', () => 
   );
 });
 
+test('serializes and parses RFC 8118 PDF view rectangles', () => {
+  const uri = pdfHref('raw/assets/paper.pdf', {
+    page: 2,
+    viewRect: { left: 90, top: 45, width: 432, height: 140 },
+  });
+  assert.equal(
+    uri,
+    'raw/assets/paper.pdf#page=2&viewrect=90%2C45%2C432%2C140',
+  );
+  assert.deepEqual(classifyReferenceTarget(uri), {
+    kind: 'pdf',
+    uri,
+    path: 'raw/assets/paper.pdf',
+    page: 2,
+    viewRect: { left: 90, top: 45, width: 432, height: 140 },
+  });
+});
+
+test('rejects invalid PDF view rectangles instead of emitting empty regions', () => {
+  assert.throws(
+    () => pdfHref('raw/assets/paper.pdf', {
+      page: 2,
+      viewRect: { left: 90, top: 45, width: 0, height: 140 },
+    }),
+    /view rectangle/i,
+  );
+});
+
 test('parses page-scoped Chrome range selectors and reserved characters', () => {
   const uri = 'raw/pdf/paper.pdf#page=7:~:text=prefix%2D%2C%20%26%20context-,selected%2D%2C%20%26%20text,through%2D%2C%20%26%20end,-suffix%2D%2C%20%26%20context';
   assert.deepEqual(classifyReferenceTarget(uri), {

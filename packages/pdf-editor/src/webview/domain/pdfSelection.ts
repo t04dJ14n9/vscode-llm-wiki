@@ -64,6 +64,18 @@ export function samePdfCaret(left: PdfSelectionCaret, right: PdfSelectionCaret):
     && left.offset === right.offset;
 }
 
+export function pdfPointerSelectionIntent(
+  hit: { horizontalDistance: number; verticalDistance: number } | undefined,
+  lineHeight: number,
+  forceArea: boolean,
+): 'text' | 'area' {
+  if (forceArea || !hit || !Number.isFinite(lineHeight) || lineHeight <= 0) return 'area';
+  const tolerance = Math.max(2, Math.min(8, lineHeight * 0.45));
+  return hit.horizontalDistance <= tolerance && hit.verticalDistance <= tolerance
+    ? 'text'
+    : 'area';
+}
+
 export function pdfSelectionContainsPage(selection: PdfSelectionState, page: number): boolean {
   const [start, end] = orderedPdfCarets(selection.anchor, selection.focus);
   return page >= start.page && page <= end.page;

@@ -1,4 +1,4 @@
-import { llmWikiOpenAnchorUri } from './anchorUris';
+import { pdfHref } from '@llm-wiki/core';
 import type { SelectionContext } from './selectionContext';
 
 const MAX_AGENT_CLIPBOARD_TEXT_CHARACTERS = 65_536;
@@ -6,23 +6,19 @@ const MAX_AGENT_CLIPBOARD_PATH_CHARACTERS = 32 * 1024;
 const MAX_AGENT_CLIPBOARD_KEY_CHARACTERS = 256 * 1024;
 const MAX_AGENT_CLIPBOARD_PAGES = 256;
 const MAX_AGENT_CLIPBOARD_RECTS_PER_PAGE = 256;
-const PDF_AGENT_CLIPBOARD_IMAGE_PATH_PATTERN =
-  /^\.llm_wiki\/agent\/clipboard\/pdf-selection-[a-f0-9]{64}\.png$/u;
 
 export interface PdfAgentClipboardContextInput {
   selectionKey: string;
   relativePath: string;
-  startPage: number;
-  endPage: number;
-  selectedText: SelectionContext['text'];
-  anchorUri: string;
+  sourceSha256: string;
+  selection: PdfAgentClipboardSelection;
 }
 
 export interface PdfAgentClipboardContext {
   selectionKey: string;
   sourceLabel: string;
   sourceHref: string;
-  selectedText: SelectionContext['text'];
+  selectedText?: SelectionContext['text'];
   plainText: string;
 }
 
@@ -31,12 +27,20 @@ export interface PdfAgentClipboardPageSelection {
   rects: ReadonlyArray<readonly [number, number, number, number]>;
 }
 
-export interface PdfAgentClipboardSelection {
-  startPage: number;
-  endPage: number;
-  pages: readonly PdfAgentClipboardPageSelection[];
-  selectedText: SelectionContext['text'];
-}
+export type PdfAgentClipboardSelection =
+  | {
+      kind: 'text';
+      startPage: number;
+      endPage: number;
+      pages: readonly PdfAgentClipboardPageSelection[];
+      selectedText: SelectionContext['text'];
+    }
+  | {
+      kind: 'area';
+      startPage: number;
+      endPage: number;
+      pages: readonly PdfAgentClipboardPageSelection[];
+    };
 
 /**
  * Format the provider-neutral Markdown reference copied to an agent's input.
@@ -69,58 +73,48 @@ export function createPdfAgentClipboardContext(
   if (!isRecord(input)) return undefined;
   const selectionKey = boundedNonEmptyString(input.selectionKey, MAX_AGENT_CLIPBOARD_KEY_CHARACTERS);
   const relativePath = normalizeWorkspaceRelativePath(input.relativePath);
-  const selectedText = boundedNonEmptyString(
-    input.selectedText,
-    MAX_AGENT_CLIPBOARD_TEXT_CHARACTERS,
-  );
-  if (
-    !selectionKey
-    || !relativePath
-    || !selectedText
-    || !isPositiveSafeInteger(input.startPage)
-    || !isPositiveSafeInteger(input.endPage)
-    || input.endPage < input.startPage
-  ) return undefined;
+  const sourceSha256 = normalizeSha256(input.sourceSha256);
+  const selection = normalizePdfAgentClipboardSelection(input.selection);
+  if (!selectionKey || !relativePath || !sourceSha256 || !selection) return undefined;
 
-  const sourceHref = openAnchorHref(input.anchorUri);
-  if (!sourceHref) return undefined;
-
-  const sourceLabel = input.startPage === input.endPage
-    ? `${relativePath} (page ${input.startPage})`
-    : `${relativePath} (pages ${input.startPage}–${input.endPage})`;
-  const plainTextSourceLabel = escapeMarkdownLinkLabel(sourceLabel);
+  const links = selection.pages.map(pageSelection => {
+    const viewRect = unionPdfAgentClipboardRects(pageSelection.rects);
+    const sourceHref = pdfHref(relativePath, {
+      page: pageSelection.page,
+      viewRect,
+    });
+    const suffix = selection.kind === 'area' ? ' region' : '';
+    const label = escapeMarkdownLinkLabel(
+      `${relativePath} (page ${pageSelection.page}${suffix})`,
+    );
+    return { sourceHref, markdown: `[${label}](<${sourceHref}>)` };
+  });
+  const sourceHref = links[0]!.sourceHref;
+  const sourceLabel = selection.startPage === selection.endPage
+    ? `${relativePath} (page ${selection.startPage})`
+    : `${relativePath} (pages ${selection.startPage}–${selection.endPage})`;
+  const sourceLines = links.length === 1
+    ? [`Source: ${links[0]!.markdown}`]
+    : ['Sources:', ...links.map(link => `- ${link.markdown}`)];
+  const selectedText = selection.kind === 'text' ? selection.selectedText : undefined;
   const plainText = [
-    `Source: [${plainTextSourceLabel}](<${sourceHref}>)`,
+    ...sourceLines,
+    `PDF source SHA-256: \`${sourceSha256}\``,
     '',
-    'Selected text:',
-    selectedText,
+    ...(selectedText
+      ? ['Selected text:', selectedText]
+      : [
+          'Selected PDF region. Use the vault PDF skill to extract its text and inspect its visual content.',
+        ]),
   ].join('\n');
 
   return {
     selectionKey,
     sourceLabel,
     sourceHref,
-    selectedText,
+    ...(selectedText ? { selectedText } : {}),
     plainText,
   };
-}
-
-export function formatPdfAgentClipboardImageReference(
-  plainText: string,
-  relativeImagePath: string,
-): string {
-  const normalizedText = boundedNonEmptyString(
-    plainText,
-    MAX_AGENT_CLIPBOARD_TEXT_CHARACTERS + MAX_AGENT_CLIPBOARD_PATH_CHARACTERS,
-  );
-  const normalizedPath = relativeImagePath.replaceAll('\\', '/');
-  if (
-    !normalizedText
-    || !PDF_AGENT_CLIPBOARD_IMAGE_PATH_PATTERN.test(normalizedPath)
-  ) {
-    throw new TypeError('PDF agent clipboard image must be workspace-local.');
-  }
-  return `${normalizedText}\n\nSelection image: @${normalizedPath}`;
 }
 
 function escapeMarkdownLinkLabel(value: string): string {
@@ -130,7 +124,17 @@ function escapeMarkdownLinkLabel(value: string): string {
 export function pdfAgentClipboardSelectionKey(
   input: PdfAgentClipboardSelection,
 ): string | undefined {
-  if (!isRecord(input)) return undefined;
+  const normalized = normalizePdfAgentClipboardSelection(input);
+  if (!normalized) return undefined;
+
+  const key = JSON.stringify(normalized);
+  return key.length <= MAX_AGENT_CLIPBOARD_KEY_CHARACTERS ? key : undefined;
+}
+
+function normalizePdfAgentClipboardSelection(
+  input: unknown,
+): PdfAgentClipboardSelection | undefined {
+  if (!isRecord(input) || (input.kind !== 'text' && input.kind !== 'area')) return undefined;
   if (
     !isPositiveSafeInteger(input.startPage)
     || !isPositiveSafeInteger(input.endPage)
@@ -139,11 +143,12 @@ export function pdfAgentClipboardSelectionKey(
     || input.pages.length === 0
     || input.pages.length > MAX_AGENT_CLIPBOARD_PAGES
   ) return undefined;
-  const selectedText = boundedNonEmptyString(
-    input.selectedText,
-    MAX_AGENT_CLIPBOARD_TEXT_CHARACTERS,
-  );
-  if (!selectedText) return undefined;
+
+  const selectedText = input.kind === 'text'
+    ? boundedNonEmptyString(input.selectedText, MAX_AGENT_CLIPBOARD_TEXT_CHARACTERS)
+    : undefined;
+  if (input.kind === 'text' && !selectedText) return undefined;
+  if (input.kind === 'area' && input.selectedText !== undefined) return undefined;
 
   const normalizedPages: PdfAgentClipboardPageSelection[] = [];
   const seenPages = new Set<number>();
@@ -176,37 +181,41 @@ export function pdfAgentClipboardSelectionKey(
     );
   }
 
-  const key = JSON.stringify({
-    startPage: input.startPage,
-    endPage: input.endPage,
-    selectedText,
-    pages: normalizedPages,
-  });
-  return key.length <= MAX_AGENT_CLIPBOARD_KEY_CHARACTERS ? key : undefined;
+  if (
+    normalizedPages[0]?.page !== input.startPage
+    || normalizedPages[normalizedPages.length - 1]?.page !== input.endPage
+  ) return undefined;
+
+  return input.kind === 'text'
+    ? {
+        kind: 'text',
+        startPage: input.startPage,
+        endPage: input.endPage,
+        pages: normalizedPages,
+        selectedText: selectedText!,
+      }
+    : {
+        kind: 'area',
+        startPage: input.startPage,
+        endPage: input.endPage,
+        pages: normalizedPages,
+      };
 }
 
-function openAnchorHref(value: unknown): string | undefined {
-  const target = normalizeAnchorTarget(value);
-  if (!target) return undefined;
-  try {
-    const href = llmWikiOpenAnchorUri(target);
-    return typeof href === 'string' && href.trim() ? href : undefined;
-  } catch {
-    return undefined;
-  }
+function unionPdfAgentClipboardRects(
+  rects: PdfAgentClipboardPageSelection['rects'],
+): { left: number; top: number; width: number; height: number } {
+  const left = Math.min(...rects.map(rect => rect[0]));
+  const top = Math.min(...rects.map(rect => rect[1]));
+  const right = Math.max(...rects.map(rect => rect[2]));
+  const bottom = Math.max(...rects.map(rect => rect[3]));
+  return { left, top, width: right - left, height: bottom - top };
 }
 
-function normalizeAnchorTarget(value: unknown): string | undefined {
-  if (typeof value !== 'string' || !value || value.trim() !== value) return undefined;
-  const hashIndex = value.indexOf('#');
-  const rawPath = hashIndex < 0 ? value : value.slice(0, hashIndex);
-  const normalizedPath = normalizeWorkspaceRelativePath(rawPath);
-  if (!normalizedPath || normalizedPath.toLowerCase().endsWith('.llm_wiki_anchor')) {
-    return undefined;
-  }
-  return hashIndex < 0
-    ? normalizedPath
-    : `${normalizedPath}${value.slice(hashIndex)}`;
+function normalizeSha256(value: unknown): string | undefined {
+  return typeof value === 'string' && /^[a-f0-9]{64}$/iu.test(value)
+    ? value.toLowerCase()
+    : undefined;
 }
 
 function normalizeWorkspaceRelativePath(value: unknown): string | undefined {
