@@ -116,7 +116,7 @@ test('VSIX metadata includes package-local documentation, license, and repositor
   assert.match(readFileSync(join(extensionRoot, 'LICENSE'), 'utf8'), /MIT License/);
   assert.deepEqual(manifest.repository, {
     type: 'git',
-    url: 'https://github.com/t04dJ14n9/human-learning.git',
+    url: 'https://github.com/t04dJ14n9/vscode-llm-wiki.git',
   });
 });
 
