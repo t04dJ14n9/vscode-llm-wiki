@@ -1,5 +1,107 @@
 import type { PdfRect } from './pdfTextBands';
 
+export interface PdfAreaCssRect {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+}
+
+export interface PdfAreaPageBounds extends PdfAreaCssRect {
+  page: number;
+}
+
+export interface PdfAreaPageSelection {
+  page: number;
+  rects: PdfRect[];
+}
+
+export function pdfAreaPageIntersections(
+  marquee: PdfAreaCssRect,
+  pages: readonly PdfAreaPageBounds[],
+): Array<{ page: number; rect: PdfRect }> {
+  const normalized = normalizeCssRect(marquee);
+  return pages
+    .map(bounds => {
+      const pageBounds = normalizeCssRect(bounds);
+      const left = Math.max(normalized.left, pageBounds.left);
+      const top = Math.max(normalized.top, pageBounds.top);
+      const right = Math.min(normalized.right, pageBounds.right);
+      const bottom = Math.min(normalized.bottom, pageBounds.bottom);
+      return right > left && bottom > top
+        ? {
+            page: bounds.page,
+            rect: [
+              left - pageBounds.left,
+              top - pageBounds.top,
+              right - pageBounds.left,
+              bottom - pageBounds.top,
+            ] as PdfRect,
+          }
+        : undefined;
+    })
+    .filter((value): value is { page: number; rect: PdfRect } => Boolean(value))
+    .sort((left, right) => left.page - right.page);
+}
+
+export function mergePdfAreaPageSelections(
+  existing: readonly PdfAreaPageSelection[],
+  added: readonly PdfAreaPageSelection[],
+): PdfAreaPageSelection[] {
+  const byPage = new Map<number, PdfRect[]>();
+  for (const selection of [...existing, ...added]) {
+    const rects = byPage.get(selection.page) ?? [];
+    rects.push(...selection.rects.map(rect => [...rect] as PdfRect));
+    byPage.set(selection.page, rects);
+  }
+  return [...byPage.entries()]
+    .sort(([left], [right]) => left - right)
+    .map(([page, rects]) => ({ page, rects: mergeTouchingRects(rects) }));
+}
+
+function mergeTouchingRects(rects: PdfRect[]): PdfRect[] {
+  const pending = rects.map(rect => [...rect] as PdfRect);
+  const merged: PdfRect[] = [];
+  while (pending.length) {
+    let current = pending.shift()!;
+    for (let index = pending.length - 1; index >= 0; index--) {
+      const candidate = pending[index]!;
+      if (!rectsTouch(current, candidate)) continue;
+      current = [
+        Math.min(current[0], candidate[0]),
+        Math.min(current[1], candidate[1]),
+        Math.max(current[2], candidate[2]),
+        Math.max(current[3], candidate[3]),
+      ];
+      pending.splice(index, 1);
+      index = pending.length;
+    }
+    merged.push(current);
+  }
+  return merged.sort((left, right) => (
+    left[1] - right[1]
+    || left[0] - right[0]
+    || left[3] - right[3]
+    || left[2] - right[2]
+  ));
+}
+
+function rectsTouch(left: PdfRect, right: PdfRect): boolean {
+  return left[0] <= right[2]
+    && left[2] >= right[0]
+    && left[1] <= right[3]
+    && left[3] >= right[1];
+}
+
+function normalizeCssRect(rect: PdfAreaCssRect): PdfAreaCssRect {
+  return {
+    left: Math.min(rect.left, rect.right),
+    top: Math.min(rect.top, rect.bottom),
+    right: Math.max(rect.left, rect.right),
+    bottom: Math.max(rect.top, rect.bottom),
+  };
+}
+
 export interface PdfAreaDrag {
   pointerId: number;
   page: number;

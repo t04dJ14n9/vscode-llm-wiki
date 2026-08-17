@@ -23,6 +23,10 @@ const toolbarLayoutSource = join(
   packageRoot,
   '../pdf-editor/src/webview/domain/pdfToolbarLayout.ts',
 );
+const areaSelectionSource = join(
+  packageRoot,
+  '../pdf-editor/src/webview/pdfAreaSelection.ts',
+);
 const viewerSource = join(
   packageRoot,
   '../pdf-editor/src/webview/pdf-viewer.ts',
@@ -56,6 +60,7 @@ function compileTsModule(filename, mocks = {}) {
 
 const pdfSearch = compileTsModule(searchSource);
 const pdfToolbarLayout = compileTsModule(toolbarLayoutSource);
+const pdfAreaSelection = compileTsModule(areaSelectionSource);
 const pdfTextExtraction = compileTsModule(extractionSource);
 const pdfSelection = compileTsModule(selectionSource, {
   './pdfSearch': pdfSearch,
@@ -95,7 +100,7 @@ const pdfViewer = compileTsModule(viewerSource, {
   './domain/pdfToolbarLayout': pdfToolbarLayout,
   './pdfToolbarDom': {},
   './pdfAgentClipboard': pdfAgentClipboardMock,
-  './pdfAreaSelection': {},
+  './pdfAreaSelection': pdfAreaSelection,
   './pdfLayout': {},
   './pdfTextLayer': {},
   './obsidianContextMenu': {},
@@ -664,6 +669,51 @@ test('pointer selection intent uses text only near a glyph unless area is forced
     horizontalDistance: 0,
     verticalDistance: 0,
   }, 12, true), 'area');
+});
+
+test('area page intersections clip one marquee into ordered page-local rectangles', () => {
+  assert.deepEqual(pdfAreaSelection.pdfAreaPageIntersections(
+    { left: 40, top: 80, right: 240, bottom: 760 },
+    [
+      { page: 1, left: 20, top: 20, right: 620, bottom: 400 },
+      { page: 2, left: 20, top: 420, right: 620, bottom: 800 },
+    ],
+  ), [
+    { page: 1, rect: [20, 60, 220, 380] },
+    { page: 2, rect: [20, 0, 220, 340] },
+  ]);
+
+  assert.deepEqual(pdfAreaSelection.pdfAreaPageIntersections(
+    { left: 510, top: 260, right: 110, bottom: 40 },
+    [
+      { page: 2, left: 330, top: 20, right: 630, bottom: 300 },
+      { page: 1, left: 10, top: 20, right: 310, bottom: 300 },
+    ],
+  ), [
+    { page: 1, rect: [100, 20, 300, 240] },
+    { page: 2, rect: [0, 20, 180, 240] },
+  ]);
+
+  assert.deepEqual(pdfAreaSelection.pdfAreaPageIntersections(
+    { left: 40, top: 405, right: 240, bottom: 415 },
+    [
+      { page: 1, left: 20, top: 20, right: 620, bottom: 400 },
+      { page: 2, left: 20, top: 420, right: 620, bottom: 800 },
+    ],
+  ), []);
+});
+
+test('merge area page selections unions touching rectangles and preserves disjoint regions', () => {
+  assert.deepEqual(pdfAreaSelection.mergePdfAreaPageSelections(
+    [{ page: 2, rects: [[10, 10, 40, 40], [100, 100, 120, 120]] }],
+    [
+      { page: 1, rects: [[5, 5, 20, 20]] },
+      { page: 2, rects: [[35, 35, 60, 60], [160, 10, 180, 30]] },
+    ],
+  ), [
+    { page: 1, rects: [[5, 5, 20, 20]] },
+    { page: 2, rects: [[10, 10, 60, 60], [160, 10, 180, 30], [100, 100, 120, 120]] },
+  ]);
 });
 
 test('selection glyphs are grouped into visual lines independent of item order', () => {
