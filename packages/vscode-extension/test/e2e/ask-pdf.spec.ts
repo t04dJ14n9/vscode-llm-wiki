@@ -144,7 +144,7 @@ test('Ask PDF follows Look up, prepares without persisting, and captures an outl
   expect(stats.contentPixels).toBeGreaterThan(stats.accentPixels);
 });
 
-test('PDF selection adds exact text and a best-effort crop to chat without submitting', async ({ page }) => {
+test('PDF selection adds exact text to chat without submitting or copying a screenshot', async ({ page }) => {
   await page.setViewportSize({ width: 480, height: 720 });
   await openPdf(page);
   await selectText(page, 'FlashAttention uses tiling');
@@ -196,14 +196,7 @@ test('PDF selection adds exact text and a best-effort crop to chat without submi
     },
   });
   expect(first.anchor.rects.length).toBeGreaterThan(0);
-  expect(typeof first.snapshotPngBase64).toBe('string');
-  expect(first.snapshotPngBase64.length).toBeGreaterThan(32);
-  expect(
-    await page.evaluate(base64 => Array.from(
-      atob(base64).slice(0, 8),
-      character => character.charCodeAt(0),
-    ), first.snapshotPngBase64),
-  ).toEqual([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  expect(first).not.toHaveProperty('snapshotPngBase64');
   await page.waitForTimeout(50);
   expect(await messagesOfType(page, 'selectionAction')).toHaveLength(1);
   expect(await messagesOfType(page, 'pdfDiscussionSubmit')).toHaveLength(0);
@@ -285,8 +278,7 @@ test('PDF text drag takes focus from an external composer before the Cursor shor
     action: 'addToCursorChat',
     anchor: { page: 1, snippet: quote },
   });
-  expect(actions[0].snapshotPngBase64).toEqual(expect.any(String));
-  expect(actions[0].snapshotPngBase64.length).toBeGreaterThan(32);
+  expect(actions[0]).not.toHaveProperty('snapshotPngBase64');
   expect(await page.evaluate(() =>
     window.getSelection()?.toString().replace(/\s+/gu, ' ').trim()
   )).toBe(selectedBeforeShortcut);

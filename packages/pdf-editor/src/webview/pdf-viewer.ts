@@ -1026,8 +1026,9 @@ export class PdfViewer {
   private setupTextSelection(): void {
     this.pageContainer.addEventListener('pointerdown', event => {
       if (event.button !== 0 || event.pointerType === 'touch') return;
-      if ((event.target as HTMLElement | null)?.closest('.pdf-link-overlay')) return;
-      const wrapper = (event.target as HTMLElement | null)?.closest<HTMLElement>('.page-wrapper');
+      const target = event.target as HTMLElement | null;
+      if (target?.closest('button, a, input, textarea, select, [role="button"], [contenteditable="true"], .pdf-link-overlay')) return;
+      const wrapper = target?.closest<HTMLElement>('.page-wrapper');
       const page = Number(wrapper?.dataset.page ?? 0);
       const state = this.pages.get(page);
       if (!wrapper || !state?.rendered) return;
