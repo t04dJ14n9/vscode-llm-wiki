@@ -7,6 +7,13 @@ export interface PdfTextFragment {
   suffix?: string;
 }
 
+export interface PdfViewRect {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
 export interface ReferenceTarget {
   kind: ReferenceKind;
   uri: string;
@@ -16,6 +23,7 @@ export interface ReferenceTarget {
   lines?: { start: number; end: number };
   page?: number;
   textFragment?: PdfTextFragment;
+  viewRect?: PdfViewRect;
   webTargetId?: string;
 }
 
@@ -38,6 +46,7 @@ export function classifyReferenceTarget(uri: string): ReferenceTarget {
     const { navigation, directives } = splitFragmentDirective(fragment);
     const params = fragmentParams(navigation);
     const page = numberParam(params, 'page');
+    const viewRect = parsePdfViewRect(params.get('viewrect'));
     const textFragment = parsePdfTextFragment(directives);
     return withoutUndefined({
       kind: 'pdf',
@@ -45,6 +54,7 @@ export function classifyReferenceTarget(uri: string): ReferenceTarget {
       path: decodedPath,
       page,
       textFragment,
+      viewRect,
     });
   }
 
@@ -91,15 +101,42 @@ export function noteHref(path: string, heading?: string): string {
 export function pdfHref(path: string, options: {
   page?: number;
   textFragment?: PdfTextFragment;
+  viewRect?: PdfViewRect;
 } = {}): string {
   const params = new URLSearchParams();
   if (typeof options.page === 'number' && Number.isFinite(options.page)) {
     params.set('page', String(Math.max(1, Math.floor(options.page))));
   }
+  const viewRect = serializePdfViewRect(options.viewRect);
+  if (viewRect) params.set('viewrect', viewRect);
   const navigation = params.toString();
   const textDirective = serializePdfTextFragment(options.textFragment);
   const fragment = `${navigation}${textDirective ? `:~:${textDirective}` : ''}`;
   return `${normalizePdfPath(path)}${fragment ? `#${fragment}` : ''}`;
+}
+
+function serializePdfViewRect(value: PdfViewRect | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  const coordinates = [value.left, value.top, value.width, value.height];
+  if (
+    !coordinates.every(Number.isFinite)
+    || value.left < 0
+    || value.top < 0
+    || value.width <= 0
+    || value.height <= 0
+  ) throw new TypeError('Invalid PDF view rectangle');
+  return coordinates
+    .map(coordinate => String(Math.round(coordinate * 1000) / 1000))
+    .join(',');
+}
+
+function parsePdfViewRect(value: string | null): PdfViewRect | undefined {
+  if (!value) return undefined;
+  const coordinates = value.split(',').map(Number);
+  if (coordinates.length !== 4 || !coordinates.every(Number.isFinite)) return undefined;
+  const [left, top, width, height] = coordinates as [number, number, number, number];
+  if (left < 0 || top < 0 || width <= 0 || height <= 0) return undefined;
+  return { left, top, width, height };
 }
 
 export function codeHref(path: string, lines?: { start: number; end?: number }): string {
