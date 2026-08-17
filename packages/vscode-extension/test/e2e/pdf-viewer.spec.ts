@@ -272,7 +272,7 @@ test('pdf viewer exposes PDF++-like direct page and zoom controls', async ({ pag
   await expect(page.getByRole('button', { name: 'Display options' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Previous page' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Next page' })).toBeVisible();
-  await expect(toolbar.getByRole('button', { name: 'Copy embed link to rectangular selection' })).toBeVisible();
+  await expect(toolbar.getByRole('button', { name: 'Copy embed link to rectangular selection' })).toHaveCount(0);
   await expect(toolbar.getByRole('button', { name: 'Copy link format' })).toHaveCount(0);
   await expect(toolbar.getByRole('button', { name: 'Highlight color' })).toHaveCount(0);
   await expect(toolbar.getByRole('button', { name: 'Direct highlight' })).toHaveCount(0);
@@ -808,7 +808,6 @@ test('pdf viewer production surface exposes only live selection actions and keep
   });
 
   await expect(page.locator('#selection-toolbar button')).toHaveText([
-    'Copy Link',
     /Add to Chat/,
     'Copy for Agent',
   ]);
@@ -823,8 +822,7 @@ test('pdf viewer production surface exposes only live selection actions and keep
   }
   await expect(page.getByRole('button', { name: 'Copy link format' })).toHaveCount(0);
 
-  const rectangle = page.getByRole('button', { name: 'Copy embed link to rectangular selection' });
-  await expect(rectangle).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Copy embed link to rectangular selection' })).toHaveCount(0);
 
   await page.evaluate(() => window.postMessage({
     type: 'pdfDiscussionSnapshot',
@@ -854,7 +852,6 @@ test('pdf viewer production surface exposes only live selection actions and keep
     'Look up ...',
     expect.stringMatching(/Add to Chat/),
     'Copy for Agent',
-    'Copy link to selection',
     'Copy selected text',
   ]);
 });
@@ -865,7 +862,6 @@ test('stock VS Code exposes only Copy for Agent as a selection handoff action', 
 
   await selectPdfTextRange(page, 0, 26);
   expect(await visibleSelectionToolbarLabels(page)).toEqual([
-    'Copy Link',
     'Copy for Agent',
   ]);
   await expect(page.locator('#selection-toolbar')
@@ -877,7 +873,6 @@ test('stock VS Code exposes only Copy for Agent as a selection handoff action', 
   expect(await visibleSelectionContextMenuLabels(page)).toEqual([
     'Look up ...',
     'Copy for Agent',
-    'Copy link to selection',
     'Copy selected text',
   ]);
   await expectNoProviderSendControls(page);
@@ -889,7 +884,6 @@ test('Cursor exposes Add to Chat alongside Copy for Agent', async ({ page }) => 
 
   await selectPdfTextRange(page, 0, 26);
   expect(await visibleSelectionToolbarLabels(page)).toEqual([
-    'Copy Link',
     'Add to Chat',
     'Copy for Agent',
   ]);
@@ -905,7 +899,6 @@ test('Cursor exposes Add to Chat alongside Copy for Agent', async ({ page }) => 
     'Look up ...',
     'Add to Chat',
     'Copy for Agent',
-    'Copy link to selection',
     'Copy selected text',
   ]);
 });
@@ -916,7 +909,6 @@ test('provider arrays never add Send controls', async ({ page }) => {
 
   await selectPdfTextRange(page, 0, 26);
   expect(await visibleSelectionToolbarLabels(page)).toEqual([
-    'Copy Link',
     'Copy for Agent',
   ]);
   await expectNoProviderSendControls(page);
@@ -931,7 +923,6 @@ test('provider arrays never add Send controls', async ({ page }) => {
     ],
   }, '*'));
   expect(await visibleSelectionToolbarLabels(page)).toEqual([
-    'Copy Link',
     'Add to Chat',
     'Copy for Agent',
   ]);
@@ -942,48 +933,71 @@ test('provider arrays never add Send controls', async ({ page }) => {
     'Look up ...',
     'Add to Chat',
     'Copy for Agent',
-    'Copy link to selection',
     'Copy selected text',
   ]);
   await expectNoProviderSendControls(page);
 });
 
-test('pdf viewer rectangular selection copies PDF++ coordinates in a one-shot drag', async ({ page }) => {
+test('pdf viewer automatically selects a retained PDF page region away from text', async ({ page }) => {
   await page.goto('http://localhost:8979/pdf-viewer.html');
   await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 1/, { timeout: 10_000 });
-
-  const rectangle = page.getByRole('button', { name: 'Copy embed link to rectangular selection' });
-  await rectangle.click();
-  await expect(rectangle).toHaveAttribute('aria-pressed', 'true');
 
   const wrapper = page.locator('#page-1');
   const box = await wrapper.boundingBox();
   expect(box).not.toBeNull();
   if (!box) return;
 
-  const start = { x: box.x + 54, y: box.y + 68 };
-  const end = { x: box.x + 216, y: box.y + 176 };
-  const scale = Number(await page.getByRole('spinbutton', { name: 'Zoom' }).inputValue()) / 100;
+  const start = { x: box.x + box.width - 190, y: box.y + box.height - 120 };
+  const end = { x: box.x + box.width - 35, y: box.y + box.height - 35 };
   await page.mouse.move(start.x, start.y);
+  await expect(wrapper).toHaveCSS('cursor', 'crosshair');
   await page.mouse.down();
   await page.mouse.move(end.x, end.y, { steps: 6 });
   await expect(page.locator('.rectangle-selection-overlay')).toBeVisible();
   await page.mouse.up();
 
-  const actions = await page.evaluate(() =>
-    window.__mockMessages?.filter(message => message.type === 'selectionAction' && message.action === 'copyRectEmbed')
+  await expect(page.locator('#page-1 .pdf-area-selection')).toBeVisible();
+  await expect(page.locator('#page-1 .pdf-selection-rect')).toHaveCount(0);
+  const changes = await page.evaluate(() =>
+    window.__mockMessages?.filter(message => message.type === 'selectionChanged' && message.clipboardSelection?.kind === 'area')
   );
-  expect(actions).toHaveLength(1);
-  expect(actions[0].anchor.page).toBe(1);
-  expect(actions[0].anchor.rects).toHaveLength(1);
-  const rect = actions[0].anchor.rects[0];
+  expect(changes).toHaveLength(1);
+  expect(changes[0].anchor).toMatchObject({ area: true, page: 1, snippet: 'Selected PDF region.' });
+  expect(changes[0].clipboardSelection).toMatchObject({
+    kind: 'area',
+    startPage: 1,
+    endPage: 1,
+  });
+  const rect = changes[0].clipboardSelection.pages[0].rects[0];
   expect(rect).toHaveLength(4);
-  expect(Math.abs(rect[0] - 54 / scale)).toBeLessThanOrEqual(2);
-  expect(Math.abs(rect[1] - 68 / scale)).toBeLessThanOrEqual(2);
-  expect(Math.abs(rect[2] - 216 / scale)).toBeLessThanOrEqual(2);
-  expect(Math.abs(rect[3] - 176 / scale)).toBeLessThanOrEqual(2);
-  await expect(rectangle).toHaveAttribute('aria-pressed', 'false');
+  expect(rect[2]).toBeGreaterThan(rect[0]);
+  expect(rect[3]).toBeGreaterThan(rect[1]);
   await expect(page.locator('.rectangle-selection-overlay')).toHaveCount(0);
+});
+
+test('pdf viewer shows text intent near glyphs and Alt forces an area selection', async ({ page }) => {
+  await page.goto('http://localhost:8979/pdf-viewer.html?fixture=selector-edge');
+  await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 1/, { timeout: 10_000 });
+
+  const glyph = page.locator('#page-1 .text-layer span').filter({ hasText: /\S/ }).first();
+  const glyphBox = await glyph.boundingBox();
+  expect(glyphBox).not.toBeNull();
+  if (!glyphBox) return;
+  const start = { x: glyphBox.x + 2, y: glyphBox.y + glyphBox.height / 2 };
+  await page.mouse.move(start.x, start.y);
+  await expect(page.locator('#page-1')).toHaveCSS('cursor', 'text');
+
+  await page.keyboard.down('Alt');
+  await page.mouse.down();
+  await page.mouse.move(start.x + 80, start.y + 45, { steps: 5 });
+  await page.mouse.up();
+  await page.keyboard.up('Alt');
+
+  await expect(page.locator('#page-1 .pdf-area-selection')).toBeVisible();
+  const selection = await page.evaluate(() =>
+    window.__mockMessages?.findLast(message => message.type === 'selectionChanged' && message.clipboardSelection)
+  );
+  expect(selection.clipboardSelection.kind).toBe('area');
 });
 
 test('pdf viewer search bar finds text and uses compact VS Code find-widget layout', async ({ page }) => {
@@ -1944,7 +1958,7 @@ test('pdf text-fragment review drops a partial leading word from 32-character pr
   expect(Array.from(anchor.prefix).length).toBeLessThanOrEqual(32);
 });
 
-test('pdf selection toolbar emits the portable copy-link action', async ({ page }) => {
+test('pdf selection toolbar omits the standalone copy-link action', async ({ page }) => {
   await page.goto('http://localhost:8979/pdf-viewer.html');
   await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 1/, { timeout: 10_000 });
   await expect(page.locator('.text-layer span[data-item-index="0"]')).toBeVisible();
@@ -1974,17 +1988,8 @@ test('pdf selection toolbar emits the portable copy-link action', async ({ page 
   expect(latestSelectionMessage.anchor.snippet).toBe('FlashAttention uses tiling');
   expect(latestSelectionMessage.anchor.page).toBe(1);
 
-  await page.evaluate(() => {
-    window.__mockMessages = [];
-  });
-  await page.locator('#selection-toolbar button', { hasText: 'Copy Link' }).click();
-
-  const messages = await page.evaluate(() =>
-    window.__mockMessages?.filter((message) => message.type === 'selectionAction')
-  );
-  expect(messages).toHaveLength(1);
-  expect(messages[0].action).toBe('copyLink');
-  expect(messages[0].anchor.snippet).toBe('FlashAttention uses tiling');
+  await expect(page.locator('#selection-toolbar button', { hasText: 'Copy Link' })).toHaveCount(0);
+  await expect(page.locator('#selection-toolbar button', { hasText: 'Copy for Agent' })).toBeVisible();
 });
 
 test('pdf native selection emits bounded word-safe text-fragment context', async ({ page }) => {
@@ -2081,7 +2086,6 @@ test('pdf viewer exposes a PDF++-style context menu for selections and pages', a
     'Look up ...',
     /(?:⌘L|Ctrl\+L)  Add to Chat/,
     'Copy for Agent',
-    'Copy link to selection',
     'Copy selected text',
   ]);
   await page.getByRole('menuitem', { name: 'Look up ...', exact: true }).click();
@@ -2094,16 +2098,6 @@ test('pdf viewer exposes a PDF++-style context menu for selections and pages', a
   await expect.poll(() => page.evaluate(() =>
     window.__mockMessages?.filter(message => message.type === 'copyText')
   )).toEqual([{ type: 'copyText', text: quote }]);
-
-  await openSelectionMenu();
-  await page.getByRole('menuitem', { name: 'Copy link to selection', exact: true }).click();
-  const selectionActions = await page.evaluate(() =>
-    window.__mockMessages?.filter(message => message.type === 'selectionAction')
-  );
-  expect(selectionActions).toHaveLength(1);
-  expect(selectionActions[0].action).toBe('copyLink');
-  expect(selectionActions[0].anchor.snippet).toBe(quote);
-  expect(selectionActions[0].anchor.page).toBe(1);
 
   await page.evaluate(() => { window.__mockMessages = []; });
   const canvas = page.locator('#page-1 .pdf-canvas');
@@ -2179,7 +2173,7 @@ test('selection context menu remains available at an aligned trailing glyph edge
 
   expect(hitTest.targetItemIndex).toBeDefined();
   expect(hitTest.targetItemIndex).not.toBe(hitTest.selectedItemIndex);
-  await expect(page.getByRole('menu').getByRole('menuitem', { name: 'Copy link to selection', exact: true })).toBeVisible();
+  await expect(page.getByRole('menu').getByRole('menuitem', { name: 'Copy for Agent', exact: true })).toBeVisible();
 });
 
 test('PDF++-style context menu cancels a pending mouseup toolbar update', async ({ page }) => {
@@ -2284,7 +2278,7 @@ test('PDF++-style context menu derives actions from a new same-text native range
   }, { selectedText: quote, exactEnd: exactEndOffset });
 
   await expect(page.getByRole('menu')).toBeVisible();
-  await page.getByRole('menuitem', { name: 'Copy link to selection', exact: true }).click();
+  await page.getByRole('menuitem', { name: /Add to Chat/, exact: false }).click();
   const actions = await page.evaluate(() =>
     window.__mockMessages?.filter(message => message.type === 'selectionAction')
   );
@@ -2348,7 +2342,6 @@ test('pdf selection toolbar fuzzes all actions across synthetic and dragged sele
   await expectPdfViewerStable(page, errors, 'selection fuzz initial document', 1);
 
   for (const actionCase of [
-    { label: 'Copy Link', action: 'copyLink', start: 0, end: 14 },
     { label: 'Add to Chat', action: 'addToCursorChat', start: 15, end: 26 },
   ]) {
     await selectPdfTextRange(page, actionCase.start, actionCase.end);
@@ -2379,8 +2372,8 @@ test('pdf selection toolbar fuzzes all actions across synthetic and dragged sele
   await page.evaluate(() => {
     window.__mockMessages = [];
   });
-  await page.locator('#selection-toolbar button', { hasText: 'Copy Link' }).click();
-  const draggedMessage = await waitForSelectionAction(page, 'copyLink');
+  await page.locator('#selection-toolbar button', { hasText: 'Add to Chat' }).click();
+  const draggedMessage = await waitForSelectionAction(page, 'addToCursorChat');
   expect(draggedMessage.anchor.snippet).toContain('Attention');
   await expectPdfViewerStable(page, errors, 'dragged selection action', 1);
 });

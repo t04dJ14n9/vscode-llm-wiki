@@ -43,6 +43,7 @@ import {
   orderedPdfCarets,
   pdfSearchRangeForSelection,
   pdfSelectionContainsPage,
+  pdfPointerSelectionIntent,
   pdfTextFragmentForSelection,
   pdfTextItemsJoinWord,
   pdfTextLineItemRange,
@@ -82,13 +83,15 @@ import {
   ensurePdfToolbarGrip,
   ensurePdfToolbarMenuActions,
 } from './pdfToolbarDom';
-import {
-  capturePdfAgentClipboardPng,
-  writePdfAgentClipboard,
-  type PdfAgentClipboardContext,
-  type PdfAgentClipboardResultMessage,
-} from './pdfAgentClipboard';
+import type { PdfAgentClipboardContext } from './pdfAgentClipboard';
 import { createPdfPageLayout, formatCssPx, type PdfPageLayout } from './pdfLayout';
+import {
+  beginPdfAreaDrag,
+  cancelPdfAreaDrag,
+  finishPdfAreaDrag,
+  updatePdfAreaDrag,
+  type PdfAreaDrag,
+} from './pdfAreaSelection';
 import {
   closestPdfTextSpan,
   pdfTextOffset,
@@ -96,7 +99,6 @@ import {
 } from './pdfTextLayer';
 import { showObsidianContextMenu } from './obsidianContextMenu';
 import {
-  capturePdfSelectionCrop,
   createPdfAskPanel,
   type PdfAskPanel,
   type PdfAskSelection,
@@ -109,9 +111,7 @@ const askPdfEnabled =
     .__llmWikiAskPdfEnabled === true;
 
 type PdfReduceAnimationSetting = 'on' | 'off' | 'system';
-type PdfTextSelectionAction =
-  | 'addToCursorChat'
-  | 'copyLink';
+type PdfTextSelectionAction = 'addToCursorChat';
 
 interface AgentSurfaceCapabilities {
   cursorAgent: boolean;
@@ -129,6 +129,7 @@ const PDF_DESTINATION_FOCUS_DURATION_MS = 2400;
 
 interface PdfAnchor {
   id?: string;
+  area?: boolean;
   page: number;
   multiPage?: boolean;
   textItemIndex?: number;
@@ -148,22 +149,29 @@ interface PdfAgentClipboardPageSelection {
   rects: ReadonlyArray<readonly [number, number, number, number]>;
 }
 
-interface PdfAgentClipboardSelection {
+interface PdfAgentClipboardTextSelection {
+  kind: 'text';
   startPage: number;
   endPage: number;
   pages: readonly PdfAgentClipboardPageSelection[];
   selectedText: string;
 }
 
+interface PdfAgentClipboardAreaSelection {
+  kind: 'area';
+  startPage: number;
+  endPage: number;
+  pages: readonly PdfAgentClipboardPageSelection[];
+}
+
+type PdfAgentClipboardSelection =
+  | PdfAgentClipboardTextSelection
+  | PdfAgentClipboardAreaSelection;
+
 interface PdfSelectionSnapshot {
   anchor: PdfAnchor;
   range: Range;
   clipboardSelection?: PdfAgentClipboardSelection;
-}
-
-interface PdfAgentClipboardWriteAttempt {
-  context: PdfAgentClipboardContext;
-  valid: boolean;
 }
 
 export function pdfAgentClipboardSelectionForState(
@@ -200,6 +208,7 @@ export function pdfAgentClipboardSelectionForState(
   }
   return pages.length
     ? {
+        kind: 'text',
         startPage: start.page,
         endPage: end.page,
         pages,
@@ -238,12 +247,12 @@ export function correlatePdfAgentClipboardContext(
     return undefined;
   }
   const context = value as Record<string, unknown>;
+  const selectedText = selection.kind === 'text' ? selection.selectedText : undefined;
   if (
     typeof context.selectionKey !== 'string'
     || typeof context.sourceLabel !== 'string'
     || typeof context.sourceHref !== 'string'
-    || typeof context.selectedText !== 'string'
-    || context.selectedText !== selection.selectedText
+    || context.selectedText !== selectedText
     || typeof context.plainText !== 'string'
   ) return undefined;
 
@@ -254,9 +263,10 @@ export function correlatePdfAgentClipboardContext(
     return undefined;
   }
   if (
-    keyedSelection.startPage !== selection.startPage
+    keyedSelection.kind !== selection.kind
+    || keyedSelection.startPage !== selection.startPage
     || keyedSelection.endPage !== selection.endPage
-    || keyedSelection.selectedText !== selection.selectedText
+    || keyedSelection.selectedText !== selectedText
     || !Array.isArray(keyedSelection.pages)
     || keyedSelection.pages.length !== selection.pages.length
   ) return undefined;
@@ -309,6 +319,14 @@ interface PdfSelectionGlyphHit {
   caret: PdfSelectionCaret;
   before: PdfSelectionCaret;
   after: PdfSelectionCaret;
+  horizontalDistance: number;
+  verticalDistance: number;
+  lineHeight: number;
+}
+
+interface PdfAreaSelection {
+  page: number;
+  rect: PdfRect;
 }
 
 interface PdfViewerStateV1 {
@@ -456,17 +474,7 @@ export class PdfViewer {
   private highlightAllSearchMatches = false;
   private matchDiacritics = false;
   private wholeWords = false;
-  private rectangleSelection = false;
-  private rectangleDrag: {
-    pointerId: number;
-    page: number;
-    wrapper: HTMLElement;
-    overlay: HTMLDivElement;
-    startX: number;
-    startY: number;
-    currentX: number;
-    currentY: number;
-  } | null = null;
+  private rectangleDrag: PdfAreaDrag | null = null;
   private fitResizeTimer: number | undefined;
   private paginatedWheelDelta = 0;
   private paginatedWheelDirection: -1 | 0 | 1 = 0;
@@ -492,6 +500,7 @@ export class PdfViewer {
   private selectionUpdateTimer: number | undefined;
   private selectionPaintFrame: number | undefined;
   private selectionState: PdfSelectionState | null = null;
+  private areaSelection: PdfAreaSelection | null = null;
   private selectionDrag: PdfSelectionDrag | null = null;
   private selectionClickCount = 0;
   private selectionLastPointerDownAt = 0;
@@ -503,7 +512,6 @@ export class PdfViewer {
   private pendingAgentClipboardSelection: PdfSelectionState | null = null;
   private agentClipboardSelection: PdfAgentClipboardSelection | null = null;
   private readonly agentClipboardContexts = new Map<string, PdfAgentClipboardContext>();
-  private agentClipboardWriteAttempt: PdfAgentClipboardWriteAttempt | undefined;
   private agentCapabilities: AgentSurfaceCapabilities = {
     cursorAgent: false,
   };
@@ -863,11 +871,6 @@ export class PdfViewer {
       if (this.pdfToolbarDrag?.pointerId === event.pointerId) this.cancelPdfToolbarDrag();
     });
 
-    const rectangleButton = document.getElementById('rectangle-selection') as HTMLButtonElement | null;
-    rectangleButton?.addEventListener('click', () => {
-      this.setRectangleSelection(!this.rectangleSelection);
-    });
-
     document.addEventListener('mousedown', event => {
       const target = event.target as Node;
       if (!this.displayMenu.classList.contains('hidden')
@@ -940,10 +943,10 @@ export class PdfViewer {
         this.setDisplayMenuOpen(false);
         displayButton?.focus();
       }
-      if (event.key === 'Escape' && (this.rectangleSelection || this.rectangleDrag)) {
+      if (event.key === 'Escape' && (this.rectangleDrag || this.areaSelection)) {
         event.preventDefault();
         this.cancelRectangleSelection();
-        rectangleButton?.focus();
+        this.container.focus({ preventScroll: true });
       }
     });
     this.updateToolbarState();
@@ -1016,19 +1019,24 @@ export class PdfViewer {
 
   private setupTextSelection(): void {
     this.pageContainer.addEventListener('pointerdown', event => {
-      if (this.rectangleSelection || event.button !== 0 || event.pointerType === 'touch') return;
+      if (event.button !== 0 || event.pointerType === 'touch') return;
       if ((event.target as HTMLElement | null)?.closest('.pdf-link-overlay')) return;
-      const layer = (event.target as HTMLElement | null)?.closest<HTMLElement>('.text-layer');
-      const wrapper = layer?.closest<HTMLElement>('.page-wrapper');
-      const page = Number(layer?.dataset.page ?? 0);
+      const wrapper = (event.target as HTMLElement | null)?.closest<HTMLElement>('.page-wrapper');
+      const page = Number(wrapper?.dataset.page ?? 0);
       const state = this.pages.get(page);
-      if (!layer || !wrapper || !state?.rendered) return;
+      if (!wrapper || !state?.rendered) return;
       const hit = this.hitTestSelectionGlyph(state, event.clientX, event.clientY);
+      const intent = pdfPointerSelectionIntent(hit, hit?.lineHeight ?? 0, event.altKey);
+      if (intent === 'area') {
+        this.startRectangleDrag(event, true);
+        return;
+      }
       if (!hit) return;
       const { caret } = hit;
 
       event.preventDefault();
       this.container.focus({ preventScroll: true });
+      if (this.areaSelection) this.clearSelection();
       this.cancelSelectionUpdate();
       document.getElementById('selection-toolbar')?.remove();
       const now = performance.now();
@@ -1084,12 +1092,19 @@ export class PdfViewer {
 
     this.pageContainer.addEventListener('pointermove', event => {
       const drag = this.selectionDrag;
-      if (!drag || drag.pointerId !== event.pointerId) return;
+      if (!drag || drag.pointerId !== event.pointerId) {
+        if (!this.rectangleDrag) this.updatePointerSelectionCursor(event);
+        return;
+      }
       event.preventDefault();
       drag.clientX = event.clientX;
       drag.clientY = event.clientY;
       this.updateSelectionDragAtPoint(drag, event.clientX, event.clientY);
       this.startSelectionAutoScroll();
+    }, true);
+
+    this.pageContainer.addEventListener('pointerleave', () => {
+      this.clearPointerSelectionCursor();
     }, true);
 
     const finish = (event: PointerEvent) => {
@@ -1129,6 +1144,27 @@ export class PdfViewer {
       this.stopSelectionAutoScroll();
       this.scheduleSelectionUpdate();
     }, true);
+  }
+
+  private updatePointerSelectionCursor(event: PointerEvent): void {
+    const wrapper = (event.target as HTMLElement | null)?.closest<HTMLElement>('.page-wrapper');
+    for (const page of this.pages.values()) {
+      if (page.wrapper !== wrapper) page.wrapper.classList.remove('pdf-text-selection-intent');
+    }
+    if (!wrapper) return;
+    const page = Number(wrapper.dataset.page ?? 0);
+    const state = this.pages.get(page);
+    const hit = state?.rendered
+      ? this.hitTestSelectionGlyph(state, event.clientX, event.clientY)
+      : undefined;
+    const intent = pdfPointerSelectionIntent(hit, hit?.lineHeight ?? 0, event.altKey);
+    wrapper.classList.toggle('pdf-text-selection-intent', intent === 'text');
+  }
+
+  private clearPointerSelectionCursor(): void {
+    for (const page of this.pages.values()) {
+      page.wrapper.classList.remove('pdf-text-selection-intent');
+    }
   }
 
   private updateSelectionDragAtPoint(drag: PdfSelectionDrag, clientX: number, clientY: number): void {
@@ -1251,6 +1287,9 @@ export class PdfViewer {
       caret: x < (left + right) / 2 ? before : after,
       before,
       after,
+      horizontalDistance: bestHorizontalDistance,
+      verticalDistance: bestVerticalDistance,
+      lineHeight: bestLine.height,
     };
   }
 
@@ -1377,7 +1416,6 @@ export class PdfViewer {
     if (!message) return false;
     this.pendingAgentClipboardSelection = null;
     this.latestSelectionAnchor = message.anchor;
-    this.invalidateAgentClipboardWriteAttempt(message.clipboardSelection);
     this.agentClipboardSelection = message.clipboardSelection;
     this.agentClipboardContexts.clear();
     vscode.postMessage(message);
@@ -1391,7 +1429,19 @@ export class PdfViewer {
   private drawSelectionOverlay(page: number): void {
     const state = this.pages.get(page);
     if (!state) return;
-    state.highlightLayer.querySelectorAll('.pdf-selection-rect').forEach(element => element.remove());
+    state.highlightLayer.querySelectorAll('.pdf-selection-rect, .pdf-area-selection').forEach(element => element.remove());
+    if (this.areaSelection?.page === page) {
+      const rect = this.areaSelection.rect;
+      const interactionScale = state.interactionScale;
+      const element = document.createElement('div');
+      element.className = 'pdf-area-selection';
+      element.style.left = formatCssPx(rect[0] * interactionScale);
+      element.style.top = formatCssPx(rect[1] * interactionScale);
+      element.style.width = formatCssPx((rect[2] - rect[0]) * interactionScale);
+      element.style.height = formatCssPx((rect[3] - rect[1]) * interactionScale);
+      state.highlightLayer.appendChild(element);
+      return;
+    }
     if (!this.selectionState || !pdfSelectionContainsPage(this.selectionState, page)) return;
     const interactionScale = state.interactionScale;
     for (const rect of this.selectionRectsForState(this.selectionState, page)) {
@@ -1511,26 +1561,13 @@ export class PdfViewer {
   }
 
   private setupRectangleSelection(): void {
-    this.pageContainer.addEventListener('pointerdown', event => this.startRectangleDrag(event), true);
     this.pageContainer.addEventListener('pointermove', event => this.updateRectangleDrag(event), true);
     this.pageContainer.addEventListener('pointerup', event => this.finishRectangleDrag(event), true);
     this.pageContainer.addEventListener('pointercancel', () => this.cancelRectangleSelection(), true);
   }
 
-  private setRectangleSelection(enabled: boolean): void {
-    this.rectangleSelection = enabled;
-    document.getElementById('rectangle-selection')?.setAttribute('aria-pressed', String(enabled));
-    this.pageContainer.classList.toggle('rectangle-mode', enabled);
-    if (enabled) {
-      window.getSelection()?.removeAllRanges();
-      this.clearSelection();
-    } else if (!this.rectangleDrag) {
-      this.pageContainer.classList.remove('rectangle-mode');
-    }
-  }
-
-  private startRectangleDrag(event: PointerEvent): void {
-    if (!this.rectangleSelection || event.button !== 0) return;
+  private startRectangleDrag(event: PointerEvent, automatic = false): void {
+    if (!automatic || event.button !== 0) return;
     const target = event.target as HTMLElement | null;
     const wrapper = target?.closest<HTMLElement>('.page-wrapper');
     if (!wrapper) return;
@@ -1539,74 +1576,63 @@ export class PdfViewer {
 
     event.preventDefault();
     event.stopPropagation();
-    const bounds = wrapper.getBoundingClientRect();
-    const startX = clamp(event.clientX - bounds.left, 0, bounds.width);
-    const startY = clamp(event.clientY - bounds.top, 0, bounds.height);
-    const overlay = document.createElement('div');
-    overlay.className = 'rectangle-selection-overlay';
-    overlay.style.left = `${startX}px`;
-    overlay.style.top = `${startY}px`;
-    overlay.style.width = '0px';
-    overlay.style.height = '0px';
-    wrapper.appendChild(overlay);
-    wrapper.setPointerCapture?.(event.pointerId);
-    this.rectangleDrag = {
-      pointerId: event.pointerId,
-      page,
-      wrapper,
-      overlay,
-      startX,
-      startY,
-      currentX: startX,
-      currentY: startY,
-    };
+    window.getSelection()?.removeAllRanges();
+    this.clearSelection();
+    this.clearPointerSelectionCursor();
+    this.rectangleDrag = beginPdfAreaDrag(event, wrapper, page);
   }
 
   private updateRectangleDrag(event: PointerEvent): void {
     const drag = this.rectangleDrag;
     if (!drag || drag.pointerId !== event.pointerId) return;
     event.preventDefault();
-    const bounds = drag.wrapper.getBoundingClientRect();
-    drag.currentX = clamp(event.clientX - bounds.left, 0, bounds.width);
-    drag.currentY = clamp(event.clientY - bounds.top, 0, bounds.height);
-    const left = Math.min(drag.startX, drag.currentX);
-    const top = Math.min(drag.startY, drag.currentY);
-    drag.overlay.style.left = `${left}px`;
-    drag.overlay.style.top = `${top}px`;
-    drag.overlay.style.width = `${Math.abs(drag.currentX - drag.startX)}px`;
-    drag.overlay.style.height = `${Math.abs(drag.currentY - drag.startY)}px`;
+    updatePdfAreaDrag(drag, event);
   }
 
   private finishRectangleDrag(event: PointerEvent): void {
     const drag = this.rectangleDrag;
     if (!drag || drag.pointerId !== event.pointerId) return;
-    this.updateRectangleDrag(event);
-    drag.wrapper.releasePointerCapture?.(event.pointerId);
-    const width = Math.abs(drag.currentX - drag.startX);
-    const height = Math.abs(drag.currentY - drag.startY);
-    const left = Math.min(drag.startX, drag.currentX);
-    const top = Math.min(drag.startY, drag.currentY);
-    const right = Math.max(drag.startX, drag.currentX);
-    const bottom = Math.max(drag.startY, drag.currentY);
-    drag.overlay.remove();
+    const state = this.pages.get(drag.page);
+    const rect = state
+      ? finishPdfAreaDrag(
+          drag,
+          event,
+          Number(state.pageObj.size.width),
+          Number(state.pageObj.size.height),
+        )
+      : undefined;
     this.rectangleDrag = null;
-    this.setRectangleSelection(false);
-    if (width < 4 || height < 4) return;
-
-    const rect = [left, top, right, bottom].map(value => Math.round(value / this.scale));
+    if (!rect) return;
+    this.areaSelection = { page: drag.page, rect };
+    this.drawSelectionOverlay(drag.page);
+    const anchor: PdfAnchor = {
+      area: true,
+      page: drag.page,
+      rects: [rect],
+      snippet: 'Selected PDF region.',
+    };
+    const clipboardSelection: PdfAgentClipboardAreaSelection = {
+      kind: 'area',
+      startPage: drag.page,
+      endPage: drag.page,
+      pages: [{ page: drag.page, rects: [rect] }],
+    };
+    this.latestSelectionAnchor = anchor;
+    this.agentClipboardSelection = clipboardSelection;
+    this.agentClipboardContexts.clear();
     vscode.postMessage({
-      type: 'selectionAction',
-      action: 'copyRectEmbed',
-      anchor: { page: drag.page, rects: [rect], snippet: '' },
+      type: 'selectionChanged',
+      anchor,
+      clipboardSelection,
     });
+    const viewportRect = this.selectionViewportRect(anchor);
+    if (viewportRect) this.showSelectionToolbar(anchor, viewportRect);
   }
 
   private cancelRectangleSelection(): void {
-    const drag = this.rectangleDrag;
-    drag?.overlay.remove();
-    if (drag) drag.wrapper.releasePointerCapture?.(drag.pointerId);
+    cancelPdfAreaDrag(this.rectangleDrag);
     this.rectangleDrag = null;
-    this.setRectangleSelection(false);
+    if (this.areaSelection) this.clearSelection();
   }
 
   private setDisplayMenuOpen(open: boolean): void {
@@ -2742,7 +2768,6 @@ export class PdfViewer {
     }
 
     const { anchor, range } = current;
-    this.invalidateAgentClipboardWriteAttempt(current.clipboardSelection);
     this.latestSelectionAnchor = anchor;
     this.pendingAgentClipboardSelection = this.selectionState && !current.clipboardSelection
       ? {
@@ -3012,7 +3037,6 @@ export class PdfViewer {
   }
 
   private clearSelection(): void {
-    this.invalidateAgentClipboardWriteAttempt();
     this.cancelSelectionUpdate();
     this.stopSelectionAutoScroll();
     if (this.selectionPaintFrame !== undefined) {
@@ -3025,9 +3049,10 @@ export class PdfViewer {
     }
     document.getElementById('selection-toolbar')?.remove();
     this.selectionState = null;
+    this.areaSelection = null;
     this.selectionDrag = null;
     for (const page of this.pages.values()) {
-      page.highlightLayer.querySelectorAll('.pdf-selection-rect').forEach(element => element.remove());
+      page.highlightLayer.querySelectorAll('.pdf-selection-rect, .pdf-area-selection').forEach(element => element.remove());
     }
     this.latestSelectionAnchor = null;
     this.pendingAgentClipboardSelection = null;
@@ -3051,7 +3076,6 @@ export class PdfViewer {
       && this.contextMenuTargetsSelection(event, current.range)
     ) {
       if (!samePdfSelectionRange(this.latestSelectionAnchor, current.anchor)) {
-        this.invalidateAgentClipboardWriteAttempt(current.clipboardSelection);
         this.pendingAgentClipboardSelection = null;
         this.agentClipboardSelection = current.clipboardSelection ?? null;
         this.agentClipboardContexts.clear();
@@ -3166,14 +3190,15 @@ export class PdfViewer {
       '#selection-toolbar [data-pdf-action="copy-for-agent"]',
     );
     if (!button) return;
-    const disabled = Boolean(this.agentClipboardWriteAttempt)
-      || !this.currentAgentClipboardContext();
+    const disabled = !this.currentAgentClipboardContext();
     button.disabled = disabled;
     if (disabled) button.setAttribute('aria-disabled', 'true');
     else button.removeAttribute('aria-disabled');
   }
 
-  private postAgentClipboardTextFallback(context: PdfAgentClipboardContext): void {
+  private copySelectionForAgent(): void {
+    const context = this.currentAgentClipboardContext();
+    if (!context) return;
     vscode.postMessage({
       type: 'agentClipboardResult',
       status: 'text-fallback',
@@ -3182,88 +3207,11 @@ export class PdfViewer {
     });
   }
 
-  private invalidateAgentClipboardWriteAttempt(
-    nextSelection?: PdfAgentClipboardSelection | null,
-  ): void {
-    const attempt = this.agentClipboardWriteAttempt;
-    if (
-      !attempt
-      || (
-        nextSelection
-        && correlatePdfAgentClipboardContext(nextSelection, attempt.context)
-      )
-    ) return;
-    attempt.valid = false;
-  }
-
-  private copySelectionForAgent(): void {
-    if (this.agentClipboardWriteAttempt) return;
-    const selection = this.agentClipboardSelection;
-    const context = this.currentAgentClipboardContext();
-    if (!selection || !context) return;
-
-    const pages = [];
-    for (const selectedPage of selection.pages) {
-      const page = this.pages.get(selectedPage.page);
-      if (!page) {
-        this.postAgentClipboardTextFallback(context);
-        return;
-      }
-      pages.push({
-        page: selectedPage.page,
-        canvas: page.canvas,
-        pageWidth: Number(page.pageObj.size.width),
-        pageHeight: Number(page.pageObj.size.height),
-        rects: selectedPage.rects,
-      });
-    }
-
-    const attempt: PdfAgentClipboardWriteAttempt = {
-      context,
-      valid: true,
-    };
-    this.agentClipboardWriteAttempt = attempt;
-    this.updateAgentClipboardCopyControl();
-    const isCurrent = (): boolean => (
-      attempt.valid
-      && this.agentClipboardWriteAttempt === attempt
-      && this.currentAgentClipboardContext()?.selectionKey === context.selectionKey
-    );
-    const host = {
-      postMessage: (message: PdfAgentClipboardResultMessage): void => {
-        if (isCurrent()) vscode.postMessage(message);
-      },
-    };
-    const finish = (): void => {
-      if (this.agentClipboardWriteAttempt !== attempt) return;
-      this.agentClipboardWriteAttempt = undefined;
-      this.updateAgentClipboardCopyControl();
-    };
-
-    const pngBlob = capturePdfAgentClipboardPng({ pages });
-    const write = writePdfAgentClipboard({
-      context,
-      host,
-      isCurrent,
-      pngBlob,
-    });
-    void write.then(
-      () => finish(),
-      () => {
-        if (isCurrent()) {
-          this.postAgentClipboardTextFallback(context);
-        }
-        finish();
-      }
-    );
-  }
-
   private showSelectionContextMenu(clientX: number, clientY: number, anchor: PdfAnchor): void {
     const copyForAgent = {
       id: 'copy-for-agent',
       label: 'Copy for Agent',
-      disabled: Boolean(this.agentClipboardWriteAttempt)
-        || !this.currentAgentClipboardContext(),
+      disabled: !this.currentAgentClipboardContext(),
       onSelect: () => { void this.copySelectionForAgent(); },
     };
     if (anchor.multiPage) {
@@ -3274,6 +3222,22 @@ export class PdfViewer {
           copyForAgent,
           { type: 'separator' },
           { label: 'Copy selected text', onSelect: () => vscode.postMessage({ type: 'copyText', text: anchor.snippet }) },
+        ],
+      });
+      return;
+    }
+    if (anchor.area) {
+      showObsidianContextMenu({
+        clientX,
+        clientY,
+        items: [
+          ...(this.agentCapabilities.cursorAgent
+            ? [{
+                label: `${cursorSelectionShortcutLabel()}  Add to Chat`,
+                onSelect: () => this.postTextSelectionAction('addToCursorChat', anchor),
+              }]
+            : []),
+          copyForAgent,
         ],
       });
       return;
@@ -3294,7 +3258,6 @@ export class PdfViewer {
           : []),
         copyForAgent,
         { type: 'separator' },
-        { label: 'Copy link to selection', onSelect: () => this.postTextSelectionAction('copyLink', anchor) },
         { label: 'Copy selected text', onSelect: () => vscode.postMessage({ type: 'copyText', text: anchor.snippet }) },
       ],
     });
@@ -3304,34 +3267,14 @@ export class PdfViewer {
     action: PdfTextSelectionAction,
     anchor: PdfAnchor,
   ): void {
-    const message: Record<string, unknown> = { type: 'selectionAction', action, anchor };
-    if (action === 'addToCursorChat') {
-      try {
-        const page = this.pages.get(anchor.page);
-        const rects = validPdfRects(anchor.rects);
-        if (page && rects.length) {
-          const crop = capturePdfSelectionCrop({
-            canvas: page.canvas,
-            pageWidth: Number(page.pageObj.size.width),
-            pageHeight: Number(page.pageObj.size.height),
-          }, { page: anchor.page, rects }, { throwOnCaptureError: true });
-          if (crop?.startsWith('data:image/png;base64,')) {
-            message.snapshotPngBase64 = crop.slice('data:image/png;base64,'.length);
-          } else {
-            message.cropCaptureFailed = true;
-          }
-        }
-      } catch {
-        message.cropCaptureFailed = true;
-      }
-    }
-    vscode.postMessage(message);
+    vscode.postMessage({ type: 'selectionAction', action, anchor });
   }
 
   private addCurrentSelectionToCursorChat(): boolean {
     const current = this.selectionAnchorFromNativeRange();
-    if (!current || current.anchor.multiPage) return false;
-    this.postTextSelectionAction('addToCursorChat', current.anchor);
+    const anchor = current?.anchor ?? this.latestSelectionAnchor ?? undefined;
+    if (!anchor || anchor.multiPage) return false;
+    this.postTextSelectionAction('addToCursorChat', anchor);
     return true;
   }
 
@@ -3403,8 +3346,7 @@ export class PdfViewer {
       button.className = 'secondary copy-for-agent-action';
       button.dataset.pdfAction = 'copy-for-agent';
       button.setAttribute('aria-label', 'Copy for Agent');
-      button.disabled = Boolean(this.agentClipboardWriteAttempt)
-        || !this.currentAgentClipboardContext();
+      button.disabled = !this.currentAgentClipboardContext();
       if (button.disabled) button.setAttribute('aria-disabled', 'true');
       button.addEventListener('click', event => {
         event.preventDefault();
@@ -3423,12 +3365,6 @@ export class PdfViewer {
       return;
     }
 
-    addButton('Copy Link', 'copyLink');
-    const separator = document.createElement('span');
-    separator.className = 'selection-toolbar-separator';
-    separator.setAttribute('role', 'separator');
-    separator.setAttribute('aria-orientation', 'vertical');
-    toolbar.appendChild(separator);
     if (this.agentCapabilities.cursorAgent) {
       const button = addButton('', 'addToCursorChat', 'secondary cursor-chat-action');
       button.setAttribute('aria-label', `Add to Chat ${cursorSelectionShortcutLabel()}`);

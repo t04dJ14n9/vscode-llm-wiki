@@ -44,7 +44,6 @@ const clipboard = loadTsModule('src/agentClipboard.ts', {
 const {
   createPdfAgentClipboardContext,
   formatMarkdownAgentReference,
-  formatPdfAgentClipboardImageReference,
   pdfAgentClipboardSelectionKey,
 } = clipboard;
 
@@ -144,33 +143,6 @@ test('builds portable area context without inventing selected text', () => {
     '',
     'Selected PDF region. Use the vault PDF skill to extract its text and inspect its visual content.',
   ].join('\n'));
-});
-
-test('adds a workspace-local PDF crop reference without replacing source text', () => {
-  const imagePath =
-    `.llm_wiki/agent/clipboard/pdf-selection-${'a'.repeat(64)}.png`;
-  const plainText = [
-    'Source: [raw/paper.pdf (page 3)](<cursor://llm-wiki/open-anchor?target=paper>)',
-    '',
-    'Selected text:',
-    'Exact passage',
-  ].join('\n');
-
-  assert.equal(
-    formatPdfAgentClipboardImageReference(
-      plainText,
-      imagePath,
-    ),
-    [
-      plainText,
-      '',
-      `Selection image: @${imagePath}`,
-    ].join('\n'),
-  );
-  assert.throws(
-    () => formatPdfAgentClipboardImageReference(plainText, '../outside.png'),
-    /workspace-local/,
-  );
 });
 
 test('escapes PDF workspace filenames only in the plain-text Markdown link label', () => {

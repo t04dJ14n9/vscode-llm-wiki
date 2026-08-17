@@ -345,21 +345,18 @@ test('clipboard text fallback accepts only the current key and exact precomputed
   });
 
   assert.deepEqual(clipboardWrites, [currentContext.plainText]);
-  assert.deepEqual(warningMessages, [
-    'Selection text copied, but the image reference could not be saved.',
-  ]);
+  assert.deepEqual(warningMessages, []);
+  assert.deepEqual(informationMessages, ['Selection copied for agent.']);
 
   await receiveMessage({
     type: 'agentClipboardResult',
     status: 'rich',
     selectionKey: currentContext.selectionKey,
   });
-  assert.deepEqual(informationMessages, []);
+  assert.deepEqual(informationMessages, ['Selection copied for agent.']);
 });
 
-test('PDF clipboard persists a validated crop and copies text with its workspace reference', async () => {
-  const imageFileName = `pdf-selection-${'a'.repeat(64)}.png`;
-  const imageRelativePath = `.llm_wiki/agent/clipboard/${imageFileName}`;
+test('PDF clipboard copies only portable text and never persists a selection screenshot', async () => {
   const posted = [];
   const clipboardWrites = [];
   const informationMessages = [];
@@ -396,10 +393,7 @@ test('PDF clipboard persists a validated crop and copies text with its workspace
     './pdfAgentClipboardImage': {
       persistPdfAgentClipboardImage: input => {
         persistCalls.push(input);
-        return {
-          absolutePath: `/vault/${imageRelativePath}`,
-          relativePath: imageRelativePath,
-        };
+        throw new Error(`must not persist ${input.selectionKey}`);
       },
     },
   });
@@ -456,22 +450,15 @@ test('PDF clipboard persists a validated crop and copies text with its workspace
 
   await receiveMessage({
     type: 'agentClipboardResult',
-    status: 'image-reference',
+    status: 'text-fallback',
     selectionKey: context.selectionKey,
-    pngBase64: 'canonical-png',
+    plainText: context.plainText,
   });
 
-  assert.equal(persistCalls.length, 1);
-  assert.equal(persistCalls[0].rootPath, '/vault');
-  assert.equal(persistCalls[0].sourceIdentity, pdfUri.toString());
-  assert.equal(persistCalls[0].selectionKey, context.selectionKey);
-  assert.deepEqual(Array.from(persistCalls[0].bytes), [1, 2, 3]);
-  assert.deepEqual(clipboardWrites, [
-    `${context.plainText}\n\n`
-      + `Selection image: @${imageRelativePath}`,
-  ]);
+  assert.equal(persistCalls.length, 0);
+  assert.deepEqual(clipboardWrites, [context.plainText]);
   assert.deepEqual(informationMessages, [
-    'Selection text and image reference copied for agent.',
+    'Selection copied for agent.',
   ]);
   assert.deepEqual(warningMessages, []);
 });
@@ -556,7 +543,73 @@ test('PDF editor provider exposes portable database-free agent context with norm
   }]);
 });
 
-test('PDF Cursor handoff routes exact selection and an optional validated crop through one command', async () => {
+test('PDF area selection context uses a portable page view rectangle without text fragments', async () => {
+  const pdfHrefCalls = [];
+  const vscode = {
+    workspace: {
+      asRelativePath: uri => uri.fsPath.replace('/vault/', ''),
+    },
+    commands: {
+      executeCommand: async () => undefined,
+    },
+    Uri: {
+      joinPath: (...parts) => ({ parts }),
+    },
+  };
+  const { PdfEditorProvider } = loadTsModule('src/pdfEditorProvider.ts', {
+    vscode,
+    '@llm-wiki/core': {
+      pdfHref: (sourcePath, options) => {
+        pdfHrefCalls.push({ sourcePath, options });
+        return portablePdfHref(sourcePath, options);
+      },
+    },
+  });
+  const pdfUri = {
+    fsPath: '/vault/raw/papers/attention.pdf',
+    toString: () => 'file:///vault/raw/papers/attention.pdf',
+  };
+  const provider = new PdfEditorProvider({ extensionUri: { fsPath: '/extension' } }, '/vault');
+  provider.webviews.set(pdfUri.toString(), {
+    panel: {},
+    pdfUri,
+    postMessage: () => undefined,
+  });
+  provider.activeKey = pdfUri.toString();
+  await provider.updateActiveSelection(pdfUri.toString(), {
+    area: true,
+    page: 2,
+    rects: [[90, 45, 522, 185]],
+    snippet: 'Selected PDF region.',
+  });
+
+  const context = await provider.getActiveSelectionContext();
+
+  assert.deepEqual(context, {
+    uri: pdfUri,
+    text: 'Selected PDF region.',
+    startLine: 2,
+    endLine: 2,
+    sourceLabel: 'raw/papers/attention.pdf',
+    rangeLabel: 'page 2 region',
+    anchorUri: 'raw/papers/attention.pdf#page=2&viewrect=90%2C45%2C432%2C140',
+    metadata: {
+      kind: 'pdf',
+      page: 2,
+      selectionKind: 'area',
+      viewRect: { left: 90, top: 45, width: 432, height: 140 },
+    },
+  });
+  assert.deepEqual(pdfHrefCalls, [{
+    sourcePath: 'raw/papers/attention.pdf',
+    options: {
+      page: 2,
+      viewRect: { left: 90, top: 45, width: 432, height: 140 },
+    },
+  }]);
+});
+
+test('PDF Cursor handoff routes exact portable selection without a screenshot attachment', async () => {
   const commands = [];
   const vscode = {
     workspace: {
@@ -632,7 +685,7 @@ test('PDF Cursor handoff routes exact selection and an optional validated crop t
   assert.equal(commands.length, 2);
   assert.equal(commands[0][0], ADD_SELECTION_TO_CURSOR_CHAT_COMMAND);
   assert.deepEqual(commands[0][1].selection, selection);
-  assert.deepEqual(Buffer.from(commands[0][1].snapshotPng), png);
+  assert.equal('snapshotPng' in commands[0][1], false);
   assert.deepEqual(commands[1], [
     ADD_SELECTION_TO_CURSOR_CHAT_COMMAND,
     { selection },
@@ -795,7 +848,7 @@ test('PDF provider falls back to one visible PDF without guessing between visibl
   assert.equal(provider.getActivePdfUri(), secondUri);
 });
 
-test('PDF copy link action uses a portable URL without persistence or highlight refreshes', async () => {
+test('standalone PDF copy-link action is removed', async () => {
   const clipboard = [];
   const pdfHrefCalls = [];
   const vscode = {
@@ -847,21 +900,8 @@ test('PDF copy link action uses a portable URL without persistence or highlight 
     'copyLink',
     selection,
   );
-  const link = '[paper.pdf p.3](raw/pdf/paper.pdf#page=3:~:text=before%20context-,Selected%20text,-after%20context)';
-  assert.deepEqual(clipboard, [link]);
-  assert.deepEqual(pdfHrefCalls, [
-    {
-      sourcePath: 'raw/pdf/paper.pdf',
-      options: {
-        page: 3,
-        textFragment: {
-          textStart: 'Selected text',
-          prefix: 'before context',
-          suffix: 'after context',
-        },
-      },
-    },
-  ]);
+  assert.deepEqual(clipboard, []);
+  assert.deepEqual(pdfHrefCalls, []);
 });
 
 test('removed selection actions are rejected without clipboard or command side effects', async () => {
@@ -1373,7 +1413,7 @@ test('combined PDF provider loads global Ask PDF state outside a vault', async (
   assert.deepEqual(warnings, []);
 });
 
-test('PDF rectangle selection copies the exact PDF++ embed-link shape without persisting a text anchor', async () => {
+test('PDF rectangle embed formatter remains available but its selection action is removed', async () => {
   const clipboard = [];
   const messages = [];
   const vscode = {
@@ -1412,10 +1452,8 @@ test('PDF rectangle selection copies the exact PDF++ embed-link shape without pe
     { page: 1, rects: [[155, 149, 323, 267]], snippet: '' },
   );
 
-  assert.deepEqual(clipboard, [
-    '![[Topics/AI/LLM/cs336/Resources/lectures/lecture_03.pdf#page=1&rect=155,149,323,267|lecture_03, p.1]]',
-  ]);
-  assert.deepEqual(messages, ['LLM Wiki PDF rectangular embed link copied']);
+  assert.deepEqual(clipboard, []);
+  assert.deepEqual(messages, []);
 });
 
 test('PDF page links use the exact PDF++ wikilink shape', () => {
@@ -1609,13 +1647,17 @@ test('PDF toolbar preference persists globally, broadcasts, and restores its las
   });
 });
 
-function portablePdfHref(sourcePath, { page, textFragment } = {}) {
+function portablePdfHref(sourcePath, { page, textFragment, viewRect } = {}) {
   const pageDirective = page ? `page=${page}` : '';
+  const viewRectDirective = viewRect
+    ? `viewrect=${encodeURIComponent(`${viewRect.left},${viewRect.top},${viewRect.width},${viewRect.height}`)}`
+    : '';
+  const directives = [pageDirective, viewRectDirective].filter(Boolean).join('&');
   if (!textFragment?.textStart) {
-    return `${sourcePath}${pageDirective ? `#${pageDirective}` : ''}`;
+    return `${sourcePath}${directives ? `#${directives}` : ''}`;
   }
   const prefix = textFragment.prefix ? `${encodeURIComponent(textFragment.prefix)}-,` : '';
   const end = textFragment.textEnd ? `,${encodeURIComponent(textFragment.textEnd)}` : '';
   const suffix = textFragment.suffix ? `,-${encodeURIComponent(textFragment.suffix)}` : '';
-  return `${sourcePath}#${pageDirective}:~:text=${prefix}${encodeURIComponent(textFragment.textStart)}${end}${suffix}`;
+  return `${sourcePath}#${directives}:~:text=${prefix}${encodeURIComponent(textFragment.textStart)}${end}${suffix}`;
 }
