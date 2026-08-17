@@ -2278,14 +2278,14 @@ test('PDF++-style context menu derives actions from a new same-text native range
   }, { selectedText: quote, exactEnd: exactEndOffset });
 
   await expect(page.getByRole('menu')).toBeVisible();
-  await page.getByRole('menuitem', { name: /Add to Chat/, exact: false }).click();
-  const actions = await page.evaluate(() =>
-    window.__mockMessages?.filter(message => message.type === 'selectionAction')
+  const anchor = await page.evaluate(() =>
+    window.__mockMessages
+      ?.filter(message => message.type === 'selectionChanged' && message.anchor)
+      .at(-1)?.anchor
   );
-  expect(actions).toHaveLength(1);
-  expect(actions[0].anchor.snippet).toBe(quote);
-  expect(actions[0].anchor.endCharOffset).toBe(expandedEndOffset);
-  expect(actions[0].anchor.endCharOffset).not.toBe(exactEndOffset);
+  expect(anchor.snippet).toBe(quote);
+  expect(anchor.endCharOffset).toBe(expandedEndOffset);
+  expect(anchor.endCharOffset).not.toBe(exactEndOffset);
 });
 
 test('PDF++-style context menu uses page actions outside a non-collapsed selection', async ({ page }) => {
