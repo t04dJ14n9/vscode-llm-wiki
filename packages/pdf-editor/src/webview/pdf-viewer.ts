@@ -88,9 +88,15 @@ import { createPdfPageLayout, formatCssPx, type PdfPageLayout } from './pdfLayou
 import {
   beginPdfAreaDrag,
   cancelPdfAreaDrag,
+  drawPdfAreaDragOverlays,
   finishPdfAreaDrag,
+  mergePdfAreaPageSelections,
+  pdfAreaSelectionsForMarquee,
   updatePdfAreaDrag,
+  updatePdfAreaDragPoint,
   type PdfAreaDrag,
+  type PdfAreaPageSelection,
+  type PdfAreaPageSurface,
 } from './pdfAreaSelection';
 import {
   closestPdfTextSpan,
@@ -325,8 +331,7 @@ interface PdfSelectionGlyphHit {
 }
 
 interface PdfAreaSelection {
-  page: number;
-  rect: PdfRect;
+  pages: PdfAreaPageSelection[];
 }
 
 interface PdfViewerStateV1 {
@@ -508,6 +513,7 @@ export class PdfViewer {
   private selectionLastPointerDownY = Number.NaN;
   private selectionLastPointerDownPage = 0;
   private selectionAutoScrollFrame: number | undefined;
+  private areaSelectionAutoScrollFrame: number | undefined;
   private selectionToolbarPositionFrame: number | undefined;
   private pendingAgentClipboardSelection: PdfSelectionState | null = null;
   private agentClipboardSelection: PdfAgentClipboardSelection | null = null;
@@ -1430,16 +1436,18 @@ export class PdfViewer {
     const state = this.pages.get(page);
     if (!state) return;
     state.highlightLayer.querySelectorAll('.pdf-selection-rect, .pdf-area-selection').forEach(element => element.remove());
-    if (this.areaSelection?.page === page) {
-      const rect = this.areaSelection.rect;
+    const areaPage = this.areaSelection?.pages.find(selection => selection.page === page);
+    if (areaPage) {
       const interactionScale = state.interactionScale;
-      const element = document.createElement('div');
-      element.className = 'pdf-area-selection';
-      element.style.left = formatCssPx(rect[0] * interactionScale);
-      element.style.top = formatCssPx(rect[1] * interactionScale);
-      element.style.width = formatCssPx((rect[2] - rect[0]) * interactionScale);
-      element.style.height = formatCssPx((rect[3] - rect[1]) * interactionScale);
-      state.highlightLayer.appendChild(element);
+      for (const rect of areaPage.rects) {
+        const element = document.createElement('div');
+        element.className = 'pdf-area-selection';
+        element.style.left = formatCssPx(rect[0] * interactionScale);
+        element.style.top = formatCssPx(rect[1] * interactionScale);
+        element.style.width = formatCssPx((rect[2] - rect[0]) * interactionScale);
+        element.style.height = formatCssPx((rect[3] - rect[1]) * interactionScale);
+        state.highlightLayer.appendChild(element);
+      }
       return;
     }
     if (!this.selectionState || !pdfSelectionContainsPage(this.selectionState, page)) return;
@@ -1563,7 +1571,12 @@ export class PdfViewer {
   private setupRectangleSelection(): void {
     this.pageContainer.addEventListener('pointermove', event => this.updateRectangleDrag(event), true);
     this.pageContainer.addEventListener('pointerup', event => this.finishRectangleDrag(event), true);
-    this.pageContainer.addEventListener('pointercancel', () => this.cancelRectangleSelection(), true);
+    this.pageContainer.addEventListener('pointercancel', event => {
+      if (this.rectangleDrag?.pointerId === event.pointerId) this.cancelRectangleSelection();
+    }, true);
+    this.pageContainer.addEventListener('lostpointercapture', event => {
+      if (this.rectangleDrag?.pointerId === event.pointerId) this.cancelRectangleSelection();
+    }, true);
   }
 
   private startRectangleDrag(event: PointerEvent, automatic = false): void {
@@ -1577,45 +1590,60 @@ export class PdfViewer {
     event.preventDefault();
     event.stopPropagation();
     window.getSelection()?.removeAllRanges();
-    this.clearSelection();
+    const additive = event.shiftKey && Boolean(this.areaSelection);
+    if (additive) {
+      this.cancelSelectionUpdate();
+      document.getElementById('selection-toolbar')?.remove();
+      this.selectionState = null;
+      this.selectionDrag = null;
+    } else {
+      this.clearSelection();
+    }
     this.clearPointerSelectionCursor();
-    this.rectangleDrag = beginPdfAreaDrag(event, wrapper, page);
+    this.rectangleDrag = beginPdfAreaDrag(event, wrapper, this.pageContainer, additive);
+    this.drawRectangleDrag();
   }
 
   private updateRectangleDrag(event: PointerEvent): void {
     const drag = this.rectangleDrag;
     if (!drag || drag.pointerId !== event.pointerId) return;
     event.preventDefault();
-    updatePdfAreaDrag(drag, event);
+    updatePdfAreaDrag(drag, event, this.pageContainer);
+    this.drawRectangleDrag();
+    this.startAreaSelectionAutoScroll();
   }
 
   private finishRectangleDrag(event: PointerEvent): void {
     const drag = this.rectangleDrag;
     if (!drag || drag.pointerId !== event.pointerId) return;
-    const state = this.pages.get(drag.page);
-    const rect = state
-      ? finishPdfAreaDrag(
-          drag,
-          event,
-          Number(state.pageObj.size.width),
-          Number(state.pageObj.size.height),
-        )
-      : undefined;
     this.rectangleDrag = null;
-    if (!rect) return;
-    this.areaSelection = { page: drag.page, rect };
-    this.drawSelectionOverlay(drag.page);
+    this.stopAreaSelectionAutoScroll();
+    const marquee = finishPdfAreaDrag(drag, event, this.pageContainer);
+    if (!marquee) return;
+    const added = pdfAreaSelectionsForMarquee(
+      marquee,
+      this.pageContainer,
+      this.pdfAreaPageSurfaces(),
+    );
+    const pages = drag.additive && this.areaSelection
+      ? mergePdfAreaPageSelections(this.areaSelection.pages, added)
+      : added;
+    if (!pages.length) return;
+    this.areaSelection = { pages };
+    this.drawSelectionOverlays();
+    const first = pages[0]!;
+    const last = pages[pages.length - 1]!;
     const anchor: PdfAnchor = {
       area: true,
-      page: drag.page,
-      rects: [rect],
+      page: first.page,
+      rects: first.rects,
       snippet: 'Selected PDF region.',
     };
     const clipboardSelection: PdfAgentClipboardAreaSelection = {
       kind: 'area',
-      startPage: drag.page,
-      endPage: drag.page,
-      pages: [{ page: drag.page, rects: [rect] }],
+      startPage: first.page,
+      endPage: last.page,
+      pages,
     };
     this.latestSelectionAnchor = anchor;
     this.agentClipboardSelection = clipboardSelection;
@@ -1625,14 +1653,59 @@ export class PdfViewer {
       anchor,
       clipboardSelection,
     });
-    const viewportRect = this.selectionViewportRect(anchor);
+    const viewportRect = this.selectionViewportRect({ page: last.page, rects: last.rects });
     if (viewportRect) this.showSelectionToolbar(anchor, viewportRect);
   }
 
   private cancelRectangleSelection(): void {
-    cancelPdfAreaDrag(this.rectangleDrag);
+    const drag = this.rectangleDrag;
     this.rectangleDrag = null;
+    this.stopAreaSelectionAutoScroll();
+    cancelPdfAreaDrag(drag);
+    if (drag) return;
     if (this.areaSelection) this.clearSelection();
+  }
+
+  private drawRectangleDrag(): void {
+    const drag = this.rectangleDrag;
+    if (!drag) return;
+    drawPdfAreaDragOverlays(drag, this.pageContainer, this.pdfAreaPageSurfaces());
+  }
+
+  private pdfAreaPageSurfaces(): PdfAreaPageSurface[] {
+    return [...this.pages.values()].map(state => ({
+        page: state.pageNum,
+        wrapper: state.wrapper,
+        pdfWidth: Number(state.pageObj.size.width),
+        pdfHeight: Number(state.pageObj.size.height),
+      }));
+  }
+
+  private startAreaSelectionAutoScroll(): void {
+    if (this.areaSelectionAutoScrollFrame !== undefined) return;
+    const tick = () => {
+      const drag = this.rectangleDrag;
+      if (!drag) {
+        this.areaSelectionAutoScrollFrame = undefined;
+        return;
+      }
+      const next = this.selectionAutoScrollDelta(drag.clientX, drag.clientY);
+      if (!next.left && !next.top) {
+        this.areaSelectionAutoScrollFrame = undefined;
+        return;
+      }
+      this.container.scrollBy({ left: next.left, top: next.top });
+      updatePdfAreaDragPoint(drag, drag.clientX, drag.clientY, this.pageContainer);
+      this.drawRectangleDrag();
+      this.areaSelectionAutoScrollFrame = window.requestAnimationFrame(tick);
+    };
+    this.areaSelectionAutoScrollFrame = window.requestAnimationFrame(tick);
+  }
+
+  private stopAreaSelectionAutoScroll(): void {
+    if (this.areaSelectionAutoScrollFrame === undefined) return;
+    window.cancelAnimationFrame(this.areaSelectionAutoScrollFrame);
+    this.areaSelectionAutoScrollFrame = undefined;
   }
 
   private setDisplayMenuOpen(open: boolean): void {
@@ -3039,6 +3112,7 @@ export class PdfViewer {
   private clearSelection(): void {
     this.cancelSelectionUpdate();
     this.stopSelectionAutoScroll();
+    this.stopAreaSelectionAutoScroll();
     if (this.selectionPaintFrame !== undefined) {
       window.cancelAnimationFrame(this.selectionPaintFrame);
       this.selectionPaintFrame = undefined;

@@ -16,6 +16,13 @@ export interface PdfAreaPageSelection {
   rects: PdfRect[];
 }
 
+export interface PdfAreaPageSurface {
+  page: number;
+  wrapper: HTMLElement;
+  pdfWidth: number;
+  pdfHeight: number;
+}
+
 export function pdfAreaPageIntersections(
   marquee: PdfAreaCssRect,
   pages: readonly PdfAreaPageBounds[],
@@ -57,6 +64,86 @@ export function mergePdfAreaPageSelections(
   return [...byPage.entries()]
     .sort(([left], [right]) => left - right)
     .map(([page, rects]) => ({ page, rects: mergeTouchingRects(rects) }));
+}
+
+export function drawPdfAreaDragOverlays(
+  drag: PdfAreaDrag,
+  container: HTMLElement,
+  surfaces: readonly PdfAreaPageSurface[],
+): void {
+  for (const overlay of drag.overlays) overlay.remove();
+  drag.overlays = [];
+  const byPage = new Map(surfaces.map(surface => [surface.page, surface]));
+  for (const { page, rect } of pdfAreaPageIntersections(
+    pdfAreaDragMarquee(drag),
+    pdfAreaPageBoundsForSurfaces(container, surfaces),
+  )) {
+    if (!validCssSelectionRect(rect)) continue;
+    const wrapper = byPage.get(page)?.wrapper;
+    if (!wrapper) continue;
+    const overlay = document.createElement('div');
+    overlay.className = 'rectangle-selection-overlay';
+    overlay.style.left = `${rect[0]}px`;
+    overlay.style.top = `${rect[1]}px`;
+    overlay.style.width = `${rect[2] - rect[0]}px`;
+    overlay.style.height = `${rect[3] - rect[1]}px`;
+    wrapper.appendChild(overlay);
+    drag.overlays.push(overlay);
+  }
+}
+
+export function pdfAreaSelectionsForMarquee(
+  marquee: PdfAreaCssRect,
+  container: HTMLElement,
+  surfaces: readonly PdfAreaPageSurface[],
+): PdfAreaPageSelection[] {
+  const byPage = new Map(surfaces.map(surface => [surface.page, surface]));
+  const output: PdfAreaPageSelection[] = [];
+  for (const { page, rect } of pdfAreaPageIntersections(
+    marquee,
+    pdfAreaPageBoundsForSurfaces(container, surfaces),
+  )) {
+    if (!validCssSelectionRect(rect)) continue;
+    const surface = byPage.get(page);
+    const bounds = surface?.wrapper.getBoundingClientRect();
+    if (!surface || !bounds || bounds.width <= 0 || bounds.height <= 0) continue;
+    const scaleX = surface.pdfWidth / bounds.width;
+    const scaleY = surface.pdfHeight / bounds.height;
+    output.push({
+      page,
+      rects: [[
+        roundCoordinate(rect[0] * scaleX),
+        roundCoordinate(rect[1] * scaleY),
+        roundCoordinate(rect[2] * scaleX),
+        roundCoordinate(rect[3] * scaleY),
+      ]],
+    });
+  }
+  return output;
+}
+
+function pdfAreaPageBoundsForSurfaces(
+  container: HTMLElement,
+  surfaces: readonly PdfAreaPageSurface[],
+): PdfAreaPageBounds[] {
+  const containerBounds = container.getBoundingClientRect();
+  return surfaces.flatMap(surface => {
+    if (surface.wrapper.style.display === 'none') return [];
+    const bounds = surface.wrapper.getBoundingClientRect();
+    return bounds.width > 0 && bounds.height > 0
+      ? [{
+          page: surface.page,
+          left: bounds.left - containerBounds.left,
+          top: bounds.top - containerBounds.top,
+          right: bounds.right - containerBounds.left,
+          bottom: bounds.bottom - containerBounds.top,
+        }]
+      : [];
+  });
+}
+
+function validCssSelectionRect(rect: PdfRect): boolean {
+  return rect[2] - rect[0] >= 4 && rect[3] - rect[1] >= 4;
 }
 
 function mergeTouchingRects(rects: PdfRect[]): PdfRect[] {
@@ -104,87 +191,99 @@ function normalizeCssRect(rect: PdfAreaCssRect): PdfAreaCssRect {
 
 export interface PdfAreaDrag {
   pointerId: number;
-  page: number;
-  wrapper: HTMLElement;
-  overlay: HTMLDivElement;
-  startX: number;
-  startY: number;
-  currentX: number;
-  currentY: number;
+  captureTarget: HTMLElement;
+  startContainerX: number;
+  startContainerY: number;
+  currentContainerX: number;
+  currentContainerY: number;
+  clientX: number;
+  clientY: number;
+  additive: boolean;
+  overlays: HTMLDivElement[];
 }
 
 export function beginPdfAreaDrag(
   event: PointerEvent,
-  wrapper: HTMLElement,
-  page: number,
+  captureTarget: HTMLElement,
+  container: HTMLElement,
+  additive: boolean,
 ): PdfAreaDrag {
-  const bounds = wrapper.getBoundingClientRect();
-  const startX = clamp(event.clientX - bounds.left, 0, bounds.width);
-  const startY = clamp(event.clientY - bounds.top, 0, bounds.height);
-  const overlay = document.createElement('div');
-  overlay.className = 'rectangle-selection-overlay';
-  overlay.style.left = `${startX}px`;
-  overlay.style.top = `${startY}px`;
-  overlay.style.width = '0px';
-  overlay.style.height = '0px';
-  wrapper.appendChild(overlay);
-  wrapper.setPointerCapture?.(event.pointerId);
+  const point = pdfAreaContainerPoint(container, event.clientX, event.clientY);
+  captureTarget.setPointerCapture?.(event.pointerId);
   return {
     pointerId: event.pointerId,
-    page,
-    wrapper,
-    overlay,
-    startX,
-    startY,
-    currentX: startX,
-    currentY: startY,
+    captureTarget,
+    startContainerX: point.x,
+    startContainerY: point.y,
+    currentContainerX: point.x,
+    currentContainerY: point.y,
+    clientX: event.clientX,
+    clientY: event.clientY,
+    additive,
+    overlays: [],
   };
 }
 
-export function updatePdfAreaDrag(drag: PdfAreaDrag, event: PointerEvent): void {
-  const bounds = drag.wrapper.getBoundingClientRect();
-  drag.currentX = clamp(event.clientX - bounds.left, 0, bounds.width);
-  drag.currentY = clamp(event.clientY - bounds.top, 0, bounds.height);
-  const left = Math.min(drag.startX, drag.currentX);
-  const top = Math.min(drag.startY, drag.currentY);
-  drag.overlay.style.left = `${left}px`;
-  drag.overlay.style.top = `${top}px`;
-  drag.overlay.style.width = `${Math.abs(drag.currentX - drag.startX)}px`;
-  drag.overlay.style.height = `${Math.abs(drag.currentY - drag.startY)}px`;
+export function updatePdfAreaDrag(
+  drag: PdfAreaDrag,
+  event: PointerEvent,
+  container: HTMLElement,
+): void {
+  updatePdfAreaDragPoint(drag, event.clientX, event.clientY, container);
+}
+
+export function updatePdfAreaDragPoint(
+  drag: PdfAreaDrag,
+  clientX: number,
+  clientY: number,
+  container: HTMLElement,
+): void {
+  const point = pdfAreaContainerPoint(container, clientX, clientY);
+  drag.currentContainerX = point.x;
+  drag.currentContainerY = point.y;
+  drag.clientX = clientX;
+  drag.clientY = clientY;
+}
+
+export function pdfAreaDragMarquee(drag: PdfAreaDrag): PdfAreaCssRect {
+  return normalizeCssRect({
+    left: drag.startContainerX,
+    top: drag.startContainerY,
+    right: drag.currentContainerX,
+    bottom: drag.currentContainerY,
+  });
 }
 
 export function finishPdfAreaDrag(
   drag: PdfAreaDrag,
   event: PointerEvent,
-  pageWidth: number,
-  pageHeight: number,
-): PdfRect | undefined {
-  updatePdfAreaDrag(drag, event);
-  drag.wrapper.releasePointerCapture?.(event.pointerId);
-  const left = Math.min(drag.startX, drag.currentX);
-  const top = Math.min(drag.startY, drag.currentY);
-  const right = Math.max(drag.startX, drag.currentX);
-  const bottom = Math.max(drag.startY, drag.currentY);
-  drag.overlay.remove();
-  if (right - left < 4 || bottom - top < 4) return undefined;
-  const bounds = drag.wrapper.getBoundingClientRect();
-  const scaleX = pageWidth / Math.max(1, bounds.width);
-  const scaleY = pageHeight / Math.max(1, bounds.height);
-  return [
-    roundCoordinate(left * scaleX),
-    roundCoordinate(top * scaleY),
-    roundCoordinate(right * scaleX),
-    roundCoordinate(bottom * scaleY),
-  ];
+  container: HTMLElement,
+): PdfAreaCssRect | undefined {
+  updatePdfAreaDrag(drag, event, container);
+  const marquee = pdfAreaDragMarquee(drag);
+  releasePdfAreaDrag(drag);
+  return marquee.right - marquee.left >= 4 && marquee.bottom - marquee.top >= 4
+    ? marquee
+    : undefined;
 }
 
 export function cancelPdfAreaDrag(drag: PdfAreaDrag | null): void {
-  drag?.overlay.remove();
-  if (drag) drag.wrapper.releasePointerCapture?.(drag.pointerId);
+  if (drag) releasePdfAreaDrag(drag);
 }
 
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value));
+function releasePdfAreaDrag(drag: PdfAreaDrag): void {
+  for (const overlay of drag.overlays) overlay.remove();
+  drag.overlays = [];
+  drag.captureTarget.releasePointerCapture?.(drag.pointerId);
+}
+
+function pdfAreaContainerPoint(
+  container: HTMLElement,
+  clientX: number,
+  clientY: number,
+): { x: number; y: number } {
+  const bounds = container.getBoundingClientRect();
+  return { x: clientX - bounds.left, y: clientY - bounds.top };
 }
 
 function roundCoordinate(value: number): number {

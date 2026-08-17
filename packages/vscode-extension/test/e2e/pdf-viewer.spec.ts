@@ -979,6 +979,120 @@ test('pdf viewer automatically selects a retained PDF page region away from text
   await expect(page.locator('.rectangle-selection-overlay')).toHaveCount(0);
 });
 
+test('pdf viewer commits one cross-page area marquee as ordered page regions', async ({ page }) => {
+  await page.setViewportSize({ width: 1100, height: 1200 });
+  await page.goto('http://localhost:8979/pdf-viewer.html?fixture=two-page&host=cursor');
+  await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 2/, { timeout: 10_000 });
+  const zoom = page.getByRole('spinbutton', { name: 'Zoom' });
+  await zoom.fill('55');
+  await zoom.press('Enter');
+  await expect(zoom).toHaveValue('55');
+
+  const first = await page.locator('#page-1').boundingBox();
+  const second = await page.locator('#page-2').boundingBox();
+  expect(first).not.toBeNull();
+  expect(second).not.toBeNull();
+  if (!first || !second) return;
+
+  await page.evaluate(() => { window.__mockMessages = []; });
+  await page.keyboard.down('Alt');
+  await page.mouse.move(first.x + 60, first.y + first.height - 90);
+  await page.mouse.down();
+  await page.mouse.move(second.x + second.width - 60, second.y + 90, { steps: 12 });
+  await page.mouse.up();
+  await page.keyboard.up('Alt');
+
+  await expect(page.locator('#page-1 .pdf-area-selection')).toBeVisible();
+  await expect(page.locator('#page-2 .pdf-area-selection')).toBeVisible();
+  expect(await visibleSelectionToolbarLabels(page)).toEqual([
+    'Add to Chat',
+    'Copy for Agent',
+  ]);
+  const change = await page.evaluate(() =>
+    window.__mockMessages
+      ?.filter(message => message.type === 'selectionChanged' && message.clipboardSelection?.kind === 'area')
+      .at(-1)
+  );
+  expect(change.clipboardSelection).toMatchObject({
+    kind: 'area',
+    startPage: 1,
+    endPage: 2,
+  });
+  expect(change.clipboardSelection.pages.map(entry => entry.page)).toEqual([1, 2]);
+  expect(change.clipboardSelection.pages.every(entry => entry.rects.length > 0)).toBe(true);
+});
+
+test('pdf viewer auto-scrolls an active area marquee into the next page', async ({ page }) => {
+  await page.setViewportSize({ width: 1000, height: 650 });
+  await page.goto('http://localhost:8979/pdf-viewer.html?fixture=two-page');
+  await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 2/, { timeout: 10_000 });
+  const zoom = page.getByRole('spinbutton', { name: 'Zoom' });
+  await zoom.fill('100');
+  await zoom.press('Enter');
+  await expect(zoom).toHaveValue('100');
+  await page.locator('#viewer-container').evaluate(element => {
+    element.scrollTop = 0;
+  });
+
+  const first = await page.locator('#page-1').boundingBox();
+  expect(first).not.toBeNull();
+  if (!first) return;
+  await page.keyboard.down('Alt');
+  await page.mouse.move(first.x + 70, Math.min(610, first.y + first.height - 80));
+  await page.mouse.down();
+  await page.mouse.move(first.x + first.width - 70, 645, { steps: 8 });
+  await expect.poll(() => page.locator('#viewer-container').evaluate(element => element.scrollTop), {
+    timeout: 5_000,
+  }).toBeGreaterThan(80);
+  await page.mouse.up();
+  await page.keyboard.up('Alt');
+
+  await expect(page.locator('#page-1 .pdf-area-selection')).toBeVisible();
+  await expect(page.locator('#page-2 .pdf-area-selection')).toBeVisible();
+});
+
+test('pdf viewer Shift-adds a paginated area on another page', async ({ page }) => {
+  await page.goto('http://localhost:8979/pdf-viewer.html?fixture=two-page&host=cursor');
+  await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 2/, { timeout: 10_000 });
+  await setContinuousScroll(page, false);
+
+  const dragArea = async (wrapper, modifiers: string[]) => {
+    const box = await wrapper.boundingBox();
+    expect(box).not.toBeNull();
+    if (!box) return;
+    for (const modifier of modifiers) await page.keyboard.down(modifier);
+    await page.mouse.move(box.x + box.width - 180, box.y + box.height - 120);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width - 40, box.y + box.height - 40, { steps: 6 });
+    await page.mouse.up();
+    for (const modifier of [...modifiers].reverse()) await page.keyboard.up(modifier);
+  };
+
+  await dragArea(page.locator('#page-1'), ['Alt']);
+  await expect(page.locator('#page-1 .pdf-area-selection')).toBeVisible();
+  await page.locator('#next').click();
+  await expect(page.locator('#page-info')).toHaveText(/Page 2 \/ 2/);
+
+  await page.evaluate(() => { window.__mockMessages = []; });
+  await dragArea(page.locator('#page-2'), ['Shift', 'Alt']);
+  await expect(page.locator('#page-2 .pdf-area-selection')).toBeVisible();
+  const change = await page.evaluate(() =>
+    window.__mockMessages
+      ?.filter(message => message.type === 'selectionChanged' && message.clipboardSelection?.kind === 'area')
+      .at(-1)
+  );
+  expect(change.clipboardSelection).toMatchObject({
+    kind: 'area',
+    startPage: 1,
+    endPage: 2,
+  });
+  expect(change.clipboardSelection.pages.map(entry => entry.page)).toEqual([1, 2]);
+
+  await page.locator('#prev').click();
+  await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 2/);
+  await expect(page.locator('#page-1 .pdf-area-selection')).toBeVisible();
+});
+
 test('pdf viewer shows text intent near glyphs and Alt forces an area selection', async ({ page }) => {
   await page.goto('http://localhost:8979/pdf-viewer.html?fixture=selector-edge');
   await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 1/, { timeout: 10_000 });
