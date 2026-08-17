@@ -126,15 +126,17 @@ test('dispatchUri opens markdown note links with the LLM Wiki markdown editor', 
   assert.deepEqual(showTextDocumentCalls, []);
 });
 
-test('dispatchUri opens OKF concept IDs, bundle-relative paths, and directory indexes', async () => {
+test('dispatchUri opens OKF concept IDs, bundle-relative paths, and underscore directory indexes', async () => {
   const root = mkdtempSync(join(tmpdir(), 'llm-wiki-okf-links-'));
   const executeCommandCalls = [];
   const errorMessages = [];
   try {
     mkdirSync(join(root, 'concepts'), { recursive: true });
     mkdirSync(join(root, 'summaries'), { recursive: true });
+    mkdirSync(join(root, 'legacy'), { recursive: true });
     writeFileSync(join(root, 'concepts', 'tokenization.md'), '# Tokenization\n');
-    writeFileSync(join(root, 'summaries', 'index.md'), '# Summary\n');
+    writeFileSync(join(root, 'summaries', '_index.md'), '# Summary\n');
+    writeFileSync(join(root, 'legacy', 'index.md'), '# Legacy summary\n');
 
     const vscode = createVscodeMock({
       executeCommandCalls,
@@ -166,6 +168,7 @@ test('dispatchUri opens OKF concept IDs, bundle-relative paths, and directory in
     await dispatchUri(root, 'concepts/tokenization');
     await dispatchUri(root, '/concepts/tokenization.md');
     await dispatchUri(root, 'summaries/');
+    await dispatchUri(root, 'legacy/');
 
     assert.deepEqual(executeCommandCalls, [
       [
@@ -180,11 +183,11 @@ test('dispatchUri opens OKF concept IDs, bundle-relative paths, and directory in
       ],
       [
         'vscode.openWith',
-        { fsPath: join(root, 'summaries', 'index.md') },
+        { fsPath: join(root, 'summaries', '_index.md') },
         'llm-wiki.markdownEditor',
       ],
     ]);
-    assert.deepEqual(errorMessages, []);
+    assert.deepEqual(errorMessages, ['Cannot open link target: legacy/']);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

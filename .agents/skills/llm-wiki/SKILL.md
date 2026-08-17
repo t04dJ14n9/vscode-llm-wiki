@@ -13,11 +13,11 @@ step explicit through generated indexes and links.
 
 ## Workflow
 
-1. Locate the intended bundle root. A strict OKF bundle has a root `index.md`;
+1. Locate the intended bundle root. A strict OKF bundle has a root `_index.md`;
    it may be a repository or a subdirectory.
 2. Preserve existing content unless the user explicitly requests replacement.
    Never silently turn an existing vault into a new scaffold.
-3. Read the bundle's `AGENTS.md`, `SCHEMA.md`, root `index.md`, and newest
+3. Read the bundle's `AGENTS.md`, `SCHEMA.md`, root `_index.md`, and newest
    `log.md` entry before mutation.
 4. Read the reference for the operation:
 
@@ -34,7 +34,7 @@ step explicit through generated indexes and links.
 
 - Keep the reusable skill and producer tooling outside a strict bundle.
 - Give every non-reserved Markdown document a nonempty OKF `type`.
-- Give every visible bundle-owned directory an immediate-child `index.md`.
+- Give every visible bundle-owned directory an immediate-child `_index.md`.
 - Treat raw snapshots as immutable evidence; write synthesis elsewhere.
 - Store large binary evidence through Git LFS without routing Markdown to LFS.
 - Store upstream projects as exact-commit submodules or external resources,
@@ -69,7 +69,7 @@ keep their direct `https://` source instead.
 | Existing vault | Orient, validate, and preserve before editing |
 | New source | Capture immutable evidence, then rebuild and validate |
 | New explanation | Search first; enrich an existing concept when possible |
-| New directory | Add or generate its local `index.md` |
+| New directory | Add or generate its local `_index.md` |
 | Conflicting sources | Keep `status: draft`, record both positions, escalate |
 | Completion | Rebuild, check, validate, inspect diff, update log |
 
@@ -86,7 +86,7 @@ python3 ../tools/demo-vault/validate_vault.py --vault .
 
 ## Common Mistakes
 
-- Treating `index.md` as a global dump instead of one navigation level.
+- Treating `_index.md` as a global dump instead of one navigation level.
 - Putting summaries into raw companions.
 - Using arXiv IDs instead of canonical titles as ordinary filenames.
 - Claiming human verification after only automated linting.

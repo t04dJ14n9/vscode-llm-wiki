@@ -55,7 +55,7 @@ test('demo vault reading journey is smooth from indexes to evidence and code', a
 }) => {
   test.setTimeout(120_000);
 
-  await openQuickFile(page, 'index.md');
+  await openQuickFile(page, '_index.md');
   const root = await waitForMarkdown('okf_version: "0.2"');
   expect(root.source).toContain('[summaries](summaries/)');
   expect(root.source).toContain('[projects](projects/)');
@@ -100,7 +100,7 @@ test('demo vault reading journey is smooth from indexes to evidence and code', a
   expect(pdf.hasProductionControls).toBe(true);
   await screenshot(page, '04-local-paper-pdf');
 
-  await openQuickFile(page, 'index.md');
+  await openQuickFile(page, '_index.md');
   await waitForMarkdown('okf_version: "0.2"');
   await followMarkdownLink('okf_version: "0.2"', 'projects/');
   await waitForMarkdown('# Software Project');
@@ -165,7 +165,7 @@ test('demo vault reading journey is smooth from indexes to evidence and code', a
   );
   await followMarkdownLink(
     'repository_url: "https://github.com/karpathy/nanochat.git"',
-    'code/index.md',
+    'code/_index.md',
   );
   await waitForMarkdown('# Code Resources');
   await followMarkdownLink('# Code Resources', 'nanochat/README.md');

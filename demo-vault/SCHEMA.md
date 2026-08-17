@@ -12,7 +12,7 @@ generated: {"by": "codex/gpt-5.6", "at": "2026-08-13T00:00:00Z"}
 ## Bundle boundary
 
 This directory is the OKF v0.2 bundle root and unit of distribution. Every
-non-reserved Markdown file below it is a concept document. `index.md` and
+non-reserved Markdown file below it is a concept document. `_index.md` and
 `log.md` are reserved at every level.
 
 The reusable skill and producer scripts live in the parent repository, outside
@@ -79,9 +79,9 @@ claim attribution.
 
 ## Hierarchical indexes
 
-Every visible bundle-owned directory has an `index.md`. Each index lists only
+Every visible bundle-owned directory has an `_index.md`. Each index lists only
 immediate children, groups concepts by exact type, links subdirectories as
-`child/` so consumers can open the local `index.md`, and includes
+`child/` so consumers can open the local `_index.md`, and includes
 descriptions. Indexes are generated deterministically.
 
 Only the root index has frontmatter, containing exactly:

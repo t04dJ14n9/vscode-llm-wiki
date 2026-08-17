@@ -728,6 +728,49 @@ test.describe('LLM Wiki — E2E Bidirectional Links', () => {
     await expect(page.locator('.cm-hybrid-footnote-def-label')).toHaveText('tab-survey');
   });
 
+  test('long footnotes stay visible while another table row is active', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+    await waitForEditorBootstrap(page);
+    const doc = [
+      '| Research source | Status |',
+      '| --- | --- |',
+      '| BPE[^bpe] | implemented |',
+      '| SmolLM2/SmolTalk[^smollm2] | adapter |',
+      '',
+      '[^bpe]: BPE',
+      '[^smollm2]: SmolLM2',
+    ].join('\n');
+    await page.evaluate(text => window.postMessage({ type: 'setText', text }, '*'), doc);
+    await page.waitForSelector('#editor .cm-content');
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      view.dispatch({ selection: { anchor: view.state.doc.line(3).from + 2 } });
+      view.focus();
+    });
+
+    const smollm2 = page.locator('.cm-hybrid-footnote-ref[data-footnote-id="smollm2"]');
+    await expect(smollm2).toBeVisible();
+    await expect(smollm2).toHaveText('smollm2');
+    await expect(page.locator('.cm-llm-wiki-link[aria-label="^smollm2"]')).toHaveCount(0);
+
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      const line = view.state.doc.line(4);
+      view.dispatch({
+        selection: {
+          anchor: line.from + line.text.indexOf('smollm2') + 2,
+        },
+      });
+    });
+    await expect(page.locator('.cm-active-footnote-ref')).toHaveText('smollm2');
+
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      view.dispatch({ selection: { anchor: view.state.doc.line(3).from + 2 } });
+    });
+    await expect(smollm2).toBeVisible();
+  });
+
   test('editor sends edit messages on document change', async ({ page }) => {
     await page.goto('http://localhost:8979/test.html');
     await waitForEditorBootstrap(page);

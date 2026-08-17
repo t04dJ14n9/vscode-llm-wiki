@@ -87,34 +87,35 @@ class RebuildIndexesTests(unittest.TestCase):
         outputs = build_indexes(self.root)
 
         expected = {
-            self.root / "index.md",
-            self.root / "raw/index.md",
-            self.root / "raw/assets/index.md",
-            self.root / "projects/index.md",
-            self.root / "projects/code/index.md",
-            self.root / "summaries/index.md",
-            self.root / "entities/index.md",
-            self.root / "concepts/index.md",
-            self.root / "comparisons/index.md",
-            self.root / "queries/index.md",
+            self.root / "_index.md",
+            self.root / "raw/_index.md",
+            self.root / "raw/assets/_index.md",
+            self.root / "projects/_index.md",
+            self.root / "projects/code/_index.md",
+            self.root / "summaries/_index.md",
+            self.root / "entities/_index.md",
+            self.root / "concepts/_index.md",
+            self.root / "comparisons/_index.md",
+            self.root / "queries/_index.md",
         }
         self.assertEqual(set(outputs), expected)
+        self.assertNotIn(self.root / "index.md", outputs)
         self.assertNotIn(
-            self.root / "projects/code/nanochat/index.md",
+            self.root / "projects/code/nanochat/_index.md",
             outputs,
         )
 
     def test_indexes_form_an_immediate_child_hierarchy(self) -> None:
         outputs = build_indexes(self.root)
 
-        root_index = outputs[self.root / "index.md"]
+        root_index = outputs[self.root / "_index.md"]
         self.assertIn(
             "[raw](raw/) - Immutable source evidence and local assets.",
             root_index,
         )
         self.assertNotIn("fixture-paper.md", root_index)
 
-        raw_index = outputs[self.root / "raw/index.md"]
+        raw_index = outputs[self.root / "raw/_index.md"]
         self.assertIn(
             "[Fixture Paper](fixture-paper.md) - "
             "A local immutable paper snapshot.",
@@ -125,7 +126,7 @@ class RebuildIndexesTests(unittest.TestCase):
             raw_index,
         )
 
-        assets_index = outputs[self.root / "raw/assets/index.md"]
+        assets_index = outputs[self.root / "raw/assets/_index.md"]
         self.assertIn(
             "[Fixture Paper — PDF](fixture-paper.pdf) - "
             "Archived PDF for Fixture Paper.",
@@ -136,7 +137,7 @@ class RebuildIndexesTests(unittest.TestCase):
         self,
     ) -> None:
         code_index = build_indexes(self.root)[
-            self.root / "projects/code/index.md"
+            self.root / "projects/code/_index.md"
         ]
 
         self.assertIn("# Code Resources", code_index)
@@ -148,7 +149,7 @@ class RebuildIndexesTests(unittest.TestCase):
 
     def test_root_index_declares_only_okf_version_frontmatter(self) -> None:
         root_index = parse_frontmatter(
-            build_indexes(self.root)[self.root / "index.md"]
+            build_indexes(self.root)[self.root / "_index.md"]
         )
 
         self.assertEqual(root_index.metadata, {"okf_version": "0.2"})
@@ -170,7 +171,7 @@ class RebuildIndexesTests(unittest.TestCase):
             description="Earlier alphabetically.",
         )
 
-        index = build_indexes(self.root)[self.root / "concepts/index.md"]
+        index = build_indexes(self.root)[self.root / "concepts/_index.md"]
 
         self.assertIn("# Concept", index)
         self.assertLess(
@@ -181,7 +182,7 @@ class RebuildIndexesTests(unittest.TestCase):
     def test_empty_owned_directory_still_has_progressive_disclosure(
         self,
     ) -> None:
-        queries = build_indexes(self.root)[self.root / "queries/index.md"]
+        queries = build_indexes(self.root)[self.root / "queries/_index.md"]
 
         self.assertIn("# Contents", queries)
         self.assertIn("* No entries yet.", queries)
@@ -191,7 +192,7 @@ class RebuildIndexesTests(unittest.TestCase):
 
     def test_check_reports_stale_indexes_without_writing(self) -> None:
         update_indexes(self.root, check=False)
-        index = self.root / "raw/index.md"
+        index = self.root / "raw/_index.md"
         index.write_text("stale\n", encoding="utf-8")
 
         stale = update_indexes(self.root, check=True)
@@ -202,7 +203,7 @@ class RebuildIndexesTests(unittest.TestCase):
     def test_write_mode_then_check_is_clean(self) -> None:
         changed = update_indexes(self.root, check=False)
 
-        self.assertIn(self.root / "raw/assets/index.md", changed)
+        self.assertIn(self.root / "raw/assets/_index.md", changed)
         self.assertEqual(update_indexes(self.root, check=True), ())
 
     def test_generator_refuses_to_guess_concept_metadata(self) -> None:

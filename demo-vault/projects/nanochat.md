@@ -81,7 +81,7 @@ or RL checkpoint for conversation.
 Read the [end-to-end training summary](/summaries/nanochat-end-to-end-training-pipeline)
 for a narrative, then use [where the paper ideas appear in Nanochat](../queries/where-do-the-paper-ideas-appear-in-nanochat.md)
 to jump between research evidence and exact implementation files.
-The [code index](code/index.md) is the progressive-disclosure entry point into
+The [code index](code/_index.md) is the progressive-disclosure entry point into
 the pinned submodule.
 
 The project is a moving experimental baseline. This wiki describes only the

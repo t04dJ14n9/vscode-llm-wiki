@@ -408,8 +408,8 @@ Fixture paper text.
 
         self.assertNotIn("page.type", self.issue_codes())
 
-    def test_missing_raw_index_is_reported(self) -> None:
-        (self.root / "raw/index.md").unlink()
+    def test_missing_raw_underscore_index_is_reported(self) -> None:
+        (self.root / "raw/_index.md").unlink()
         self.assertIn("index.missing", self.issue_codes())
 
     def test_added_unindexed_resource_makes_index_stale(self) -> None:
@@ -419,7 +419,7 @@ Fixture paper text.
         self.assertIn("index.stale", self.issue_codes())
 
     def test_nested_index_cannot_have_frontmatter(self) -> None:
-        path = self.root / "raw/index.md"
+        path = self.root / "raw/_index.md"
         path.write_text(
             render_frontmatter({"type": "Index"}, "# Raw\n"),
             encoding="utf-8",
@@ -427,7 +427,7 @@ Fixture paper text.
         self.assertIn("index.frontmatter", self.issue_codes())
 
     def test_root_index_can_only_declare_okf_version(self) -> None:
-        path = self.root / "index.md"
+        path = self.root / "_index.md"
         document = parse_frontmatter(path.read_text(encoding="utf-8"))
         path.write_text(
             render_frontmatter(
@@ -437,6 +437,14 @@ Fixture paper text.
             encoding="utf-8",
         )
         self.assertIn("index.frontmatter", self.issue_codes())
+
+    def test_plain_index_is_an_ordinary_concept(self) -> None:
+        (self.root / "index.md").write_text(
+            "# Legacy generated index\n",
+            encoding="utf-8",
+        )
+
+        self.assertIn("okf.frontmatter", self.issue_codes())
 
     def test_log_dates_must_be_newest_first(self) -> None:
         path = self.root / "log.md"
@@ -609,7 +617,7 @@ Fixture paper text.
     ) -> None:
         self._rewrite_document(
             "README.md",
-            body_change=lambda body: body + "\n[Root index](index.md)\n",
+            body_change=lambda body: body + "\n[Root index](_index.md)\n",
         )
         self.assertNotIn("link.ambiguous", self.issue_codes())
 

@@ -37,9 +37,20 @@ function loadTsModule(relativePath, mocks = {}) {
 
 const {
   markdownFootnoteIndex,
+  markdownReferenceDefinitions,
   obsidianCommentSourceSpans,
 } = loadTsModule('webview-src/markdownSpans.ts', {
   './markdownFences': loadTsModule('webview-src/markdownFences.ts'),
+});
+
+test('footnote definitions are not collapsed reference-link definitions', () => {
+  const definitions = markdownReferenceDefinitions([
+    '[guide]: concepts/guide.md',
+    '[^smollm2]: SmolLM2',
+  ].join('\n'));
+
+  assert.equal(definitions.get('guide')?.destination, 'concepts/guide.md');
+  assert.equal(definitions.has('^smollm2'), false);
 });
 
 test('literal Obsidian comment markers in inline code do not hide later footnotes', () => {

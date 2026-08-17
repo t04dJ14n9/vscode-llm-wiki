@@ -5,6 +5,15 @@ title: "Nanochat LLM Wiki bundle history"
 
 # Bundle history
 
+## 2026-08-17
+
+* **Index migration**: Renamed every hierarchical index to `_index.md`; the
+  producer, validator, extension, skill, and operator documentation no longer
+  recognize `index.md` as an index.
+* **Markdown rendering**: Footnote definitions no longer enter the collapsed
+  reference-link index, so long inactive references remain visible in active
+  tables.
+
 ## 2026-08-14
 
 * **Editor fix**: Structured frontmatter property editors now hide their
@@ -25,7 +34,7 @@ title: "Nanochat LLM Wiki bundle history"
 ## 2026-08-13
 
 * **Verification**: Read the bundle in VS Code and Cursor Extension Development Hosts, including hierarchical `child/` indexes, an extensionless bundle-relative concept ID, a real Obsidian image embed, a long raw paper companion, and its local 11-page PDF.
-* **Compatibility**: Added consumer support and regression coverage for OKF concept IDs without `.md`, `/bundle-relative` targets, and directory targets that open the local `index.md`.
+* **Compatibility**: Added consumer support and regression coverage for OKF concept IDs without `.md`, `/bundle-relative` targets, and directory targets that open the local `_index.md`.
 * **Compilation**: Added 35 source-backed summaries, entities, concepts, comparisons, and durable queries spanning the Nanochat lifecycle.
 * **Ingestion**: Archived eight exact-version CC BY 4.0 arXiv papers as canonical-title Markdown/PDF pairs with extraction and integrity metadata.
 * **Project pin**: Added the Nanochat repository as a submodule at commit `92d63d4e8bb4df75c3b71618f31ddde2378b2bcd` and mapped the executable pipeline.

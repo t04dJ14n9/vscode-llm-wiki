@@ -9,7 +9,7 @@ from pathlib import Path
 
 from vaultlib import default_vault_root, parse_frontmatter, render_frontmatter
 
-INDEX_FILE = "index.md"
+INDEX_FILE = "_index.md"
 LOG_FILE = "log.md"
 OPAQUE_DIRECTORIES = (Path("projects/code/nanochat"),)
 GENERATED_WARNING = (

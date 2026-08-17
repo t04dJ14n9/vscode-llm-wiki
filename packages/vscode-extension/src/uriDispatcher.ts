@@ -151,7 +151,7 @@ export async function dispatchUri(
           showOutsideWorkspaceError(target.path);
           return;
         }
-        if (existsSync(filePath)) {
+        if (existsSync(filePath) && !hostLinkProbe.isDirectory(filePath)) {
           await vscode.commands.executeCommand('vscode.open', vscode.Uri.file(filePath));
           return;
         }
