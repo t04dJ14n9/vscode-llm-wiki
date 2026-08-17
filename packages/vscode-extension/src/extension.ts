@@ -32,7 +32,6 @@ import { validateCursorCropPng } from './cursorCrop';
 import {
   formatMarkdownAgentReference,
 } from './agentClipboard';
-import { persistPdfAgentClipboardImage } from './pdfAgentClipboardImage';
 import {
   type MarkdownOutlineTreeProvider,
   registerMarkdownOutlineProvider,
@@ -576,10 +575,7 @@ async function exportSelectionAndHandoff(
     && isPdfUri(resolvedSelection.uri)
   ) {
     return handoffPdfSelectionToCursor(
-      workspaceRoot,
       resolvedSelection,
-      snapshotPng,
-      cropFailureMessage,
     );
   }
 
@@ -607,33 +603,12 @@ async function exportSelectionAndHandoff(
 }
 
 async function handoffPdfSelectionToCursor(
-  fallbackWorkspaceRoot: string,
   selection: SelectionContext,
-  snapshotPng: Uint8Array | undefined,
-  cropFailureMessage: string,
 ): Promise<boolean> {
   const agentText = selection.metadata?.agentText;
   if (typeof agentText !== 'string' || !agentText.trim()) {
     vscode.window.showWarningMessage('The selected PDF text could not be added to chat.');
     return false;
-  }
-
-  const attachmentUris: vscode.Uri[] = [];
-  const crop = validateCursorCropPng(snapshotPng);
-  if (crop) {
-    const workspaceRoot = vscode.workspace.getWorkspaceFolder?.(selection.uri)?.uri.fsPath
-      ?? fallbackWorkspaceRoot;
-    try {
-      const image = persistPdfAgentClipboardImage({
-        rootPath: workspaceRoot,
-        sourceIdentity: selection.uri.toString(),
-        selectionKey: agentText,
-        bytes: crop,
-      });
-      attachmentUris.push(vscode.Uri.file(image.absolutePath));
-    } catch {
-      vscode.window.showWarningMessage(cropFailureMessage);
-    }
   }
 
   return handoffRawTextToCursor({
@@ -643,7 +618,7 @@ async function handoffPdfSelectionToCursor(
       endLine: selection.endLine,
     },
     rawText: agentText,
-  }, attachmentUris);
+  }, []);
 }
 
 async function markdownRangeHandoffContext(

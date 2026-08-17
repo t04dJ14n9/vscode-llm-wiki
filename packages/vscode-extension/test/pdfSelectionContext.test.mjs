@@ -47,7 +47,6 @@ function loadTsModule(relativePath, mocks = {}) {
     }
     if (request === './agentClipboard') return agentClipboard;
     if (request === './cursorCrop') return cursorCrop;
-    if (request === './pdfAgentClipboardImage') return pdfAgentClipboardImage;
     return originalLoad.call(this, request, parent, isMain);
   };
   try {
@@ -70,8 +69,6 @@ const agentClipboard = loadTsModule('src/agentClipboard.ts', {
       `cursor://llm-wiki/open-anchor?target=${encodeURIComponent(target)}`,
   },
 });
-
-const pdfAgentClipboardImage = loadTsModule('src/pdfAgentClipboardImage.ts');
 
 test('PDF provider correlates multi-page clipboard context to exact selection geometry', async () => {
   const posted = [];

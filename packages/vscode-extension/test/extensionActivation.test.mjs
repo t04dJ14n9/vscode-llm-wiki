@@ -867,6 +867,7 @@ test('Add to Chat stays Cursor-only while provider-specific selection commands a
     'Selected text:',
     'FlashAttention uses tiling',
   ].join('\n');
+  pdfSelection.metadata = { kind: 'pdf', agentText: rawPdfText };
   const vscode = createVscodeMock({
     executeCommandCalls: [],
     activeDocumentUri: undefined,
@@ -971,7 +972,7 @@ test('Add to Chat stays Cursor-only while provider-specific selection commands a
         range: { startLine: 2, endLine: 2 },
         rawText: rawPdfText,
       },
-      attachments: ['/vault/.llm_wiki/agent/clipboard/pdf-selection-a.png'],
+      attachments: [],
     },
     {
       input: {
@@ -979,33 +980,10 @@ test('Add to Chat stays Cursor-only while provider-specific selection commands a
         range: { startLine: 2, endLine: 2 },
         rawText: rawPdfText,
       },
-      attachments: ['/vault/.llm_wiki/agent/clipboard/pdf-selection-a.png'],
+      attachments: [],
     },
   ]);
-  assert.deepEqual(persistedImages, [
-    {
-      rootPath: '/vault',
-      sourceIdentity: 'file:///vault/raw/papers/attention.pdf',
-      selectionKey: JSON.stringify({
-        anchorUri: 'raw/papers/attention.pdf#page=2',
-        startLine: 2,
-        endLine: 2,
-        text: 'FlashAttention uses tiling',
-      }),
-      bytes: snapshotPng,
-    },
-    {
-      rootPath: '/vault',
-      sourceIdentity: 'file:///vault/raw/papers/attention.pdf',
-      selectionKey: JSON.stringify({
-        anchorUri: 'raw/papers/attention.pdf#page=2',
-        startLine: 2,
-        endLine: 2,
-        text: 'FlashAttention uses tiling',
-      }),
-      bytes: snapshotPng,
-    },
-  ]);
+  assert.deepEqual(persistedImages, []);
 });
 
 test('activation provides the Cursor capability to PDF hosts and sets the product context', () => {
@@ -1163,7 +1141,7 @@ test('Cursor handoff marks agent focus and Escape restores the Markdown editor',
   ));
 });
 
-test('Add to Chat keeps raw PDF text when crop persistence fails', async () => {
+test('Add to Chat keeps raw PDF text and ignores legacy crop input', async () => {
   const cursorHandoffs = [];
   const warningMessages = [];
   const selection = {
@@ -1183,6 +1161,7 @@ test('Add to Chat keeps raw PDF text when crop persistence fails', async () => {
     'Selected text:',
     'FlashAttention uses tiling',
   ].join('\n');
+  selection.metadata = { kind: 'pdf', agentText: rawText };
   const vscode = createVscodeMock({
     executeCommandCalls: [],
     activeDocumentUri: undefined,
@@ -1238,9 +1217,7 @@ test('Add to Chat keeps raw PDF text when crop persistence fails', async () => {
     },
     attachmentPaths: [],
   }]);
-  assert.ok(warningMessages.includes(
-    'The selection crop could not be saved; the active agent will use text context only.',
-  ));
+  assert.deepEqual(warningMessages, []);
 });
 
 test('Cursor Browser selection is exported with its crop and routed to the active agent', async () => {
