@@ -148,11 +148,7 @@ function normalizePdfAgentClipboardSelection(
     ? boundedNonEmptyString(input.selectedText, MAX_AGENT_CLIPBOARD_TEXT_CHARACTERS)
     : undefined;
   if (input.kind === 'text' && !selectedText) return undefined;
-  if (input.kind === 'area' && (
-    input.startPage !== input.endPage
-    || input.pages.length !== 1
-    || input.selectedText !== undefined
-  )) return undefined;
+  if (input.kind === 'area' && input.selectedText !== undefined) return undefined;
 
   const normalizedPages: PdfAgentClipboardPageSelection[] = [];
   const seenPages = new Set<number>();

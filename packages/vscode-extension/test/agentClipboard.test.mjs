@@ -145,6 +145,35 @@ test('builds portable area context without inventing selected text', () => {
   ].join('\n'));
 });
 
+test('builds portable multi-page PDF area context with ordered source links', () => {
+  const sourceSha256 = 'd'.repeat(64);
+  const context = createPdfAgentClipboardContext({
+    selectionKey: 'multi-area-key',
+    relativePath: 'raw/paper.pdf',
+    sourceSha256,
+    selection: {
+      kind: 'area',
+      startPage: 2,
+      endPage: 3,
+      pages: [
+        { page: 3, rects: [[90, 0, 522, 120]] },
+        { page: 2, rects: [[90, 700, 522, 792]] },
+      ],
+    },
+  });
+
+  assert.ok(context);
+  assert.equal(context.selectedText, undefined);
+  assert.equal(context.plainText, [
+    'Sources:',
+    '- [raw/paper.pdf (page 2 region)](<raw/paper.pdf#page=2&viewrect=90%2C700%2C432%2C92>)',
+    '- [raw/paper.pdf (page 3 region)](<raw/paper.pdf#page=3&viewrect=90%2C0%2C432%2C120>)',
+    `PDF source SHA-256: \`${sourceSha256}\``,
+    '',
+    'Selected PDF region. Use the vault PDF skill to extract its text and inspect its visual content.',
+  ].join('\n'));
+});
+
 test('escapes PDF workspace filenames only in the plain-text Markdown link label', () => {
   const sourceSha256 = 'c'.repeat(64);
   const context = createPdfAgentClipboardContext({
@@ -194,11 +223,27 @@ test('rejects malformed clipboard inputs', () => {
       selectedText: '   ',
     },
   }), undefined);
-  assert.equal(createPdfAgentClipboardContext({
-    selectionKey: 'key',
-    relativePath: 'raw/paper.pdf',
-    sourceSha256: 'a'.repeat(64),
-    selection: {
+  for (const selection of [
+    {
+      kind: 'area',
+      startPage: 1,
+      endPage: 2,
+      pages: [
+        { page: 1, rects: [[0, 0, 10, 10]] },
+        { page: 1, rects: [[0, 0, 10, 10]] },
+        { page: 2, rects: [[0, 0, 10, 10]] },
+      ],
+    },
+    {
+      kind: 'area',
+      startPage: 1,
+      endPage: 3,
+      pages: [
+        { page: 1, rects: [[0, 0, 10, 10]] },
+        { page: 2, rects: [[0, 0, 10, 10]] },
+      ],
+    },
+    {
       kind: 'area',
       startPage: 1,
       endPage: 2,
@@ -206,8 +251,25 @@ test('rejects malformed clipboard inputs', () => {
         { page: 1, rects: [[0, 0, 10, 10]] },
         { page: 2, rects: [[0, 0, 10, 10]] },
       ],
+      selectedText: 'not allowed',
     },
-  }), undefined);
+    {
+      kind: 'area',
+      startPage: 1,
+      endPage: 2,
+      pages: [
+        { page: 1, rects: [[0, 0, 10, 10]] },
+        { page: 2, rects: [[0, 0, 0, 10]] },
+      ],
+    },
+  ]) {
+    assert.equal(createPdfAgentClipboardContext({
+      selectionKey: 'key',
+      relativePath: 'raw/paper.pdf',
+      sourceSha256: 'a'.repeat(64),
+      selection,
+    }), undefined);
+  }
 });
 
 test('rejects absolute and URI PDF source paths', () => {
