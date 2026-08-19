@@ -1174,15 +1174,35 @@ test.describe('LLM Wiki — E2E Bidirectional Links', () => {
       const from = view.state.doc.toString().indexOf('beta');
       view.dispatch({ selection: { anchor: from, head: from + 'beta'.length } });
     });
+    const expectedSelection = await page.evaluate(() => {
+      const selection = window.__cmView.state.selection.main;
+      return { from: selection.from, to: selection.to };
+    });
 
     const prompt = page.locator('.llm-wiki-cursor-selection-prompt');
-    await expect(prompt.getByRole('button', { name: 'Copy for Agent' })).toHaveText('Copy for Agent');
+    const copyButton = prompt.locator('button.llm-wiki-cursor-selection-copy');
+    await expect(copyButton).toHaveAccessibleName('Copy for Agent');
+    await expect(copyButton.locator('.copy-for-agent-label')).toHaveText('Copy for Agent');
+    await expect(copyButton.locator('.copy-for-agent-shortcut')).toHaveText(/^(?:⌥⌘C|Ctrl\+Alt\+C)$/);
     await expect(prompt.getByRole('button', { name: /Add to Chat/ })).toHaveCount(0);
     await expect(prompt.getByRole('button', { name: /Claude/ })).toHaveCount(0);
-    await prompt.getByRole('button', { name: 'Copy for Agent' }).click();
+    await copyButton.click();
     await expect.poll(() => page.evaluate(() =>
       window.__mockMessages?.filter(message => message.type === 'copySelectionForAgent').at(-1)
-    )).toEqual({ type: 'copySelectionForAgent' });
+    )).toEqual({
+      type: 'copySelectionForAgent',
+      selection: expectedSelection,
+    });
+    await page.evaluate(() => {
+      window.postMessage({ type: 'copySelectionForAgentResult', ok: true }, '*');
+    });
+    await expect(copyButton).toHaveAccessibleName('Copied');
+    await expect(copyButton.locator('.copy-for-agent-label')).toHaveText('Copied');
+    await expect(copyButton.locator('.copy-for-agent-shortcut')).toBeHidden();
+    await page.waitForTimeout(1_100);
+    await expect(copyButton).toHaveAccessibleName('Copy for Agent');
+    await expect(copyButton.locator('.copy-for-agent-label')).toHaveText('Copy for Agent');
+    await expect(copyButton.locator('.copy-for-agent-shortcut')).toBeVisible();
 
     await page.evaluate(() => {
       window.postMessage({ type: 'agentHandoffCapabilities', cursorAgent: true, providers: [{ id: 'claude', label: 'Claude Code' }] }, '*');

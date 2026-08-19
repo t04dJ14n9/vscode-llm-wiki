@@ -575,8 +575,21 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
           break;
         case 'copySelectionForAgent':
           this.activePanel = webviewPanel;
+          {
+            const selection = normalizeSelectionMessage(message.selection);
+            if (selection) activeWebview.selection = selection;
+          }
           this.updateSelectionContext();
-          await vscode.commands.executeCommand('llm-wiki.copySelectionForAgent');
+          {
+            const selection = normalizeSelectionMessage(message.selection);
+            const suppliedSelection = selection && selection.from !== selection.to
+              ? this.getActiveSelectionContext()
+              : undefined;
+            await vscode.commands.executeCommand<boolean>(
+              'llm-wiki.copySelectionForAgent',
+              suppliedSelection,
+            );
+          }
           break;
         case 'renameTitle': {
           if (document.isUntitled) return;
@@ -630,6 +643,13 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
         to: lineRangeTo,
       },
     };
+  }
+
+  async postCopySelectionForAgentResult(ok: boolean): Promise<void> {
+    await this.getActiveWebview()?.postMessage({
+      type: 'copySelectionForAgentResult',
+      ok,
+    });
   }
 
   private updateVimModeContext(): void {
