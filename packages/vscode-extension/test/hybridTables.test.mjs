@@ -32,12 +32,12 @@ const { parseTableRow, tableAlignmentsFromSeparator } = loadTsModule(
 
 test('parses short table separators and preserves HTML line breaks in cells', () => {
   const separator = '| - | - | - |';
-  const problem = '1、matchsvrCPU内存增涨<br/><br/>2、多个server进程CPU负载不均';
+  const cellText = 'first item<br/><br/>second item';
 
   assert.deepEqual(parseTableRow(separator), ['-', '-', '-']);
   assert.deepEqual(tableAlignmentsFromSeparator(separator), ['left', 'left', 'left']);
   assert.deepEqual(
-    parseTableRow(`| ${problem} |  |  |`),
-    [problem, '', ''],
+    parseTableRow(`| ${cellText} |  |  |`),
+    [cellText, '', ''],
   );
 });
