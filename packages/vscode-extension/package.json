@@ -178,6 +178,12 @@
     ],
     "keybindings": [
       {
+        "command": "llm-wiki.copySelectionForAgent",
+        "key": "ctrl+alt+c",
+        "mac": "cmd+alt+c",
+        "when": "(activeCustomEditorId == 'llm-wiki.markdownEditor' && llmWikiMarkdownHasSelection) || (llmWikiPdfOpen && llmWikiPdfHasAgentClipboardSelection) || (editorLangId == markdown && editorHasSelection)"
+      },
+      {
         "command": "llm-wiki.consumeVimHostShortcut",
         "key": "ctrl+o",
         "mac": "cmd+o",

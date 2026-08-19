@@ -1938,7 +1938,13 @@ function copySelectionForAgent(editorView: EditorView): boolean {
   syncNativeSelectionToEditorSelection(editorView);
   const selection = editorView.state.selection.main;
   if (selection.empty) return false;
-  vscode.postMessage({ type: 'copySelectionForAgent' });
+  vscode.postMessage({
+    type: 'copySelectionForAgent',
+    selection: {
+      from: selection.from,
+      to: selection.to,
+    },
+  });
   return true;
 }
 
@@ -1947,20 +1953,51 @@ let cursorSelectionPrompt:
     container: HTMLDivElement;
     editorView: EditorView;
     capabilityKey: string;
+    copyButton: HTMLButtonElement;
+    copyButtonLabel: HTMLSpanElement;
+    copyButtonShortcut: HTMLSpanElement;
+    copyTimer?: number;
   }
   | undefined;
+
+function removeCursorSelectionPrompt(): void {
+  const prompt = cursorSelectionPrompt;
+  if (!prompt) return;
+  if (prompt.copyTimer !== undefined) {
+    window.clearTimeout(prompt.copyTimer);
+  }
+  prompt.container.remove();
+  cursorSelectionPrompt = undefined;
+}
+
+function showCopySucceeded(): void {
+  const prompt = cursorSelectionPrompt;
+  if (!prompt) return;
+  if (prompt.copyTimer !== undefined) {
+    window.clearTimeout(prompt.copyTimer);
+  }
+  prompt.copyButtonLabel.textContent = 'Copied';
+  prompt.copyButtonShortcut.hidden = true;
+  prompt.copyButton.setAttribute('aria-label', 'Copied');
+  prompt.copyTimer = window.setTimeout(() => {
+    if (!cursorSelectionPrompt || cursorSelectionPrompt !== prompt) return;
+    prompt.copyButtonLabel.textContent = 'Copy for Agent';
+    prompt.copyButtonShortcut.hidden = false;
+    prompt.copyButton.setAttribute('aria-label', 'Copy for Agent');
+    prompt.copyTimer = undefined;
+  }, 1000);
+}
 
 function updateCursorSelectionPrompt(editorView: EditorView): void {
   const selection = editorView.state.selection.main;
   if (selection.empty || !editorView.dom.isConnected) {
-    cursorSelectionPrompt?.container.remove();
-    cursorSelectionPrompt = undefined;
+    removeCursorSelectionPrompt();
     return;
   }
 
   const capabilityKey = String(agentCapabilities.cursorAgent);
   if (!cursorSelectionPrompt || cursorSelectionPrompt.capabilityKey !== capabilityKey) {
-    cursorSelectionPrompt?.container.remove();
+    removeCursorSelectionPrompt();
     const container = document.createElement('div');
     container.className = 'llm-wiki-cursor-selection-prompt';
     container.setAttribute('role', 'toolbar');
@@ -1998,7 +2035,14 @@ function updateCursorSelectionPrompt(editorView: EditorView): void {
     copyButton.type = 'button';
     copyButton.className = 'llm-wiki-cursor-selection-copy';
     copyButton.setAttribute('aria-label', 'Copy for Agent');
-    copyButton.textContent = 'Copy for Agent';
+    const copyButtonLabel = document.createElement('span');
+    copyButtonLabel.className = 'copy-for-agent-label';
+    copyButtonLabel.textContent = 'Copy for Agent';
+    const copyButtonShortcut = document.createElement('span');
+    copyButtonShortcut.className = 'copy-for-agent-shortcut';
+    copyButtonShortcut.textContent = copyForAgentShortcutLabel();
+    copyButtonShortcut.setAttribute('aria-hidden', 'true');
+    copyButton.append(copyButtonLabel, copyButtonShortcut);
     copyButton.addEventListener('pointerdown', event => {
       event.preventDefault();
       event.stopPropagation();
@@ -2013,7 +2057,14 @@ function updateCursorSelectionPrompt(editorView: EditorView): void {
     container.appendChild(copyButton);
     ensureCursorSelectionPromptStyles();
     document.body.appendChild(container);
-    cursorSelectionPrompt = { container, editorView, capabilityKey };
+    cursorSelectionPrompt = {
+      container,
+      editorView,
+      capabilityKey,
+      copyButton,
+      copyButtonLabel,
+      copyButtonShortcut,
+    };
   } else {
     cursorSelectionPrompt.editorView = editorView;
   }
@@ -2039,6 +2090,10 @@ function updateCursorSelectionPrompt(editorView: EditorView): void {
 
 function cursorSelectionShortcutLabel(): string {
   return /Mac|iPhone|iPad/u.test(navigator.platform) ? '⌘L' : 'Ctrl+L';
+}
+
+function copyForAgentShortcutLabel(): string {
+  return /Mac|iPhone|iPad/u.test(navigator.platform) ? '⌥⌘C' : 'Ctrl+Alt+C';
 }
 
 function ensureCursorSelectionPromptStyles(): void {
@@ -2095,8 +2150,25 @@ function ensureCursorSelectionPromptStyles(): void {
       padding: 0 2px 0 3px;
     }
     .llm-wiki-cursor-selection-prompt .llm-wiki-cursor-selection-copy {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
       padding: 0 7px;
       color: var(--vscode-descriptionForeground, inherit);
+    }
+    .llm-wiki-cursor-selection-prompt .copy-for-agent-shortcut {
+      display: inline-flex;
+      align-items: center;
+      height: 18px;
+      padding: 0 4px;
+      border: 0;
+      border-radius: 4px;
+      background: var(--vscode-toolbar-hoverBackground, rgba(127, 127, 127, .16));
+      color: var(--vscode-input-placeholderForeground, var(--vscode-descriptionForeground, inherit));
+      font: 11px var(--vscode-font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
+    }
+    .llm-wiki-cursor-selection-prompt .copy-for-agent-shortcut[hidden] {
+      display: none;
     }
     .llm-wiki-cursor-selection-prompt .add-to-chat-shortcut {
       display: inline-flex;
@@ -3168,6 +3240,10 @@ window.addEventListener('message', event => {
     case 'agentHandoffCapabilities':
       agentCapabilities = normalizeAgentSurfaceCapabilities(message);
       if (view) updateCursorSelectionPrompt(view);
+      break;
+
+    case 'copySelectionForAgentResult':
+      if (message.ok === true) showCopySucceeded();
       break;
 
     case 'revealPosition':

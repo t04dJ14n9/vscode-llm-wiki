@@ -356,6 +356,19 @@ test('manifest exposes Copy for Agent in both hosts while Add to Chat stays Curs
   assert.ok(copyForAgentContributions.some(
     item => item.when.includes('editorLangId == markdown') && item.when.includes('editorHasSelection'),
   ));
+  const copyForAgentKeybinding = (manifest.contributes.keybindings ?? []).find(
+    item => item.command === copyForAgent.command,
+  );
+  assert.deepEqual(copyForAgentKeybinding, {
+    command: 'llm-wiki.copySelectionForAgent',
+    key: 'ctrl+alt+c',
+    mac: 'cmd+alt+c',
+    when: [
+      "(activeCustomEditorId == 'llm-wiki.markdownEditor' && llmWikiMarkdownHasSelection)",
+      "(llmWikiPdfOpen && llmWikiPdfHasAgentClipboardSelection)",
+      '(editorLangId == markdown && editorHasSelection)',
+    ].join(' || '),
+  });
   assert.equal(
     (manifest.activationEvents ?? []).includes('onView:llm-wiki.learningChat'),
     false,

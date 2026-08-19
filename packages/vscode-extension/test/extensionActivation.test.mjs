@@ -480,6 +480,87 @@ test('Copy for Agent copies a multi-line Markdown reference without export or ha
   assert.equal(informationMessages.at(-1), 'Selection copied for agent.');
 });
 
+test('Copy for Agent uses a supplied custom-editor selection without recapturing it', async () => {
+  const clipboardWrites = [];
+  let captureCalls = 0;
+  const uri = { scheme: 'file', fsPath: '/vault/notes/source.md' };
+  const selection = {
+    uri,
+    text: 'selected',
+    startLine: 12,
+    endLine: 14,
+    metadata: { kind: 'markdown' },
+  };
+  const vscode = createVscodeMock({
+    executeCommandCalls: [],
+    activeDocumentUri: undefined,
+    activeTabUri: uri,
+    activeTabViewType: 'llm-wiki.markdownEditor',
+  });
+  vscode.env.clipboard = {
+    writeText: async text => clipboardWrites.push(text),
+  };
+  const mocks = createActivationMocks({ vscode });
+  mocks['./markdownEditorProvider'] = {
+    MarkdownEditorProvider: class {
+      static viewType = 'llm-wiki.markdownEditor';
+      async captureActiveSelectionContext() {
+        captureCalls += 1;
+        throw new Error('the supplied selection should avoid a second capture');
+      }
+    },
+  };
+  const { activate } = loadTsModule('src/extension.ts', mocks);
+  activate({ subscriptions: [] });
+
+  assert.equal(
+    await vscode.__registeredCommands['llm-wiki.copySelectionForAgent'](selection),
+    true,
+  );
+  assert.deepEqual(clipboardWrites, ['@notes/source.md#12-14']);
+  assert.equal(captureCalls, 0);
+});
+
+test('Copy for Agent reports direct command success to the active Markdown webview', async () => {
+  const clipboardWrites = [];
+  const resultMessages = [];
+  const uri = { scheme: 'file', fsPath: '/vault/notes/source.md' };
+  const selection = {
+    uri,
+    text: 'selected',
+    startLine: 12,
+    endLine: 14,
+    metadata: { kind: 'markdown' },
+  };
+  const vscode = createVscodeMock({
+    executeCommandCalls: [],
+    activeDocumentUri: undefined,
+    activeTabUri: uri,
+    activeTabViewType: 'llm-wiki.markdownEditor',
+  });
+  vscode.env.clipboard = {
+    writeText: async text => clipboardWrites.push(text),
+  };
+  const mocks = createActivationMocks({ vscode });
+  mocks['./markdownEditorProvider'] = {
+    MarkdownEditorProvider: class {
+      static viewType = 'llm-wiki.markdownEditor';
+      async captureActiveSelectionContext() {
+        return selection;
+      }
+      async postCopySelectionForAgentResult(ok) {
+        resultMessages.push(ok);
+      }
+    },
+  };
+  const { activate } = loadTsModule('src/extension.ts', mocks);
+  activate({ subscriptions: [] });
+
+  assert.equal(await vscode.__registeredCommands['llm-wiki.copySelectionForAgent'](), true);
+  assert.deepEqual(clipboardWrites, ['@notes/source.md#12-14']);
+  assert.deepEqual(resultMessages, [true]);
+});
+
 test('Copy for Agent formats a single-line Markdown selection without a range suffix', async () => {
   const clipboardWrites = [];
   const uri = { scheme: 'file', fsPath: '/vault/notes/source.md' };

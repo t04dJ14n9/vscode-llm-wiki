@@ -891,12 +891,29 @@ test('markdown editor provider routes Copy for Agent intent through the shared h
     workspaceState: createStorageMock(),
   });
   const panel = createPanelMock(messages);
+  const document = createDocumentMock({
+    text: '# Note\nAlpha **beta** gamma\nOmega\n',
+  });
 
-  await provider.resolveCustomTextEditor(createDocumentMock(), panel, {});
-  await panel.fireMessage({ type: 'copySelectionForAgent' });
+  await provider.resolveCustomTextEditor(document, panel, {});
+  await panel.fireMessage({
+    type: 'copySelectionForAgent',
+    selection: { from: 13, to: 21 },
+  });
 
   assert.deepEqual(executeCommandCalls.at(-1), [
     'llm-wiki.copySelectionForAgent',
+    {
+      uri: document.uri,
+      text: '**beta**',
+      startLine: 2,
+      endLine: 2,
+      metadata: {
+        kind: 'markdown',
+        from: 13,
+        to: 21,
+      },
+    },
   ]);
 });
 
