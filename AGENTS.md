@@ -14,22 +14,26 @@ requested otherwise.
 - Do not restore the removed PDF discussion backend, add a database or required
   embeddings, integrate `llm-wiki-compiler`, or implement the deferred graph UI.
 - Vault behavior is specified by the nearest `AGENTS.md`; there is no general
-  LLM Wiki skill. Retain the focused PDF selection skill and installer.
+  LLM Wiki skill. Retain the focused PDF selection skill, the optional
+  humanizer prose-editing skill, and their installer.
 
 ## Canonical vault workflow
 
-Before study or maintenance, read the nearest `AGENTS.md`, `SCHEMA.md`, root
+Before study or maintenance, read the nearest `AGENTS.md`, `SCHEMA.md`, `TAGS.md`, root
 `_index.md`, `tasks/current.md`, and newest `_log.md` entry, then search before
 writing. Canonical navigation and history filenames are `_index.md` and
 `_log.md` only.
 
 A knowledge vault stores graph-visible durable pages under
-`wiki/{concepts,comparisons,entities,queries,daily}`. Summaries and playbooks
-remain outside `wiki/`. Raw textual evidence is flat under `raw/`; binary
+`wiki/{summaries,concepts,comparisons,entities,queries,daily}`. Playbooks remain
+outside `wiki/`. Raw textual evidence is flat under `raw/`; binary
 evidence is flat under optional `assets/` and uses Git LFS. Workbench material
 belongs in `inbox/`, `tasks/`, or `scratch/`. `templates/`, `projects/code/`,
 assets, hidden runtime directories, and skill packages are opaque to indexing
 and validation.
+
+Operational prompts and skills, assets, and `.md.tmpl` templates are outside
+the OKF concept-document set and follow their native formats.
 
 Use the nearest `templates/*.md.tmpl` and replace every required
 `{{placeholder}}`. Every graph-visible page except generated `_index.md` has a
@@ -39,6 +43,19 @@ not create edges. Allowed kinds are `references`, `depends-on`, `supported-by`,
 `contrasts-with`, `extends`, `supersedes`, `applies-to`, and `example-of`.
 Captions are required, direct, and at most 160 Unicode code points. No self or
 duplicate target/kind edge is allowed.
+Durable templates include complete sample `sources` and `relations` items;
+replace them with real JSON-flow entries or `[]`, and never publish unresolved
+placeholders.
+
+Each vault owns one `TAGS.md` registry. Use its canonical tag headings. Unknown
+tags are advisory warnings, not base OKF failures. `verified` may record
+independent machine and `human:<id>` review
+events; never add either without checking the current content against evidence.
+Substantive content pages require tags. Root operational/navigation documents
+(`AGENTS.md`, `README.md`, `SCHEMA.md`, `TAGS.md`, `_index.md`, `_log.md`),
+and operational templates are tagless. Skills follow their own native metadata
+schema and may declare tags when useful; skill tags are outside the vault tag
+registry, indexing, validation, and graph.
 
 ## Daily active recall
 
@@ -63,8 +80,14 @@ then Query, Concept, Comparison, Entity, and statement fallback.
 tracked ref, observed revision/time, status, and ongoing change, but no local
 path, YAML registry, submodule, or paired outer-vault project directory. Its ID
 implies ignored binding `projects/code/<id>`, which may be a checkout or an
-exact symlink. Validate only that binding and its Git remote, P4 mapping, or SVN
-URL. Never automatically clone, sync, switch, reset, or bulk-update it.
+exact symlink. When registering a repository, ask the user for its existing
+local working-copy location or whether it is unavailable. Keep an in-place copy
+already at the canonical binding; otherwise verify the supplied directory's VCS
+identity and create an absolute symlink at `projects/code/<id>`. Never overwrite
+an existing binding, discover candidates elsewhere, store the local path in the
+card, or create a separate `workspace/` namespace. Validate only that binding
+and its Git remote, P4 mapping, or SVN URL. Never automatically clone, sync,
+switch, reset, or bulk-update it.
 
 Repository-specific implementation knowledge and Queries live with writable
 code under `docs/llm-wiki/` so they follow repository branches and commits.
@@ -115,7 +138,7 @@ git status --short
 ```
 
 For extension behavior also run focused tests, lint, typecheck, build, and the
-appropriate browser/VS Code E2E path. Log material vault changes newest-first as
-`**Learned**`, `**Changed**`, or `**Maintained**`. Never claim human verification
+appropriate browser/VS Code E2E path. Append material vault events with
+`tools/llm-wiki/append_log.py`; never rewrite earlier log bytes. Never claim human verification
 from automated checks. Never commit, push, publish, sync code, or write back
 externally without authority. Never expose secrets or private identifiers.

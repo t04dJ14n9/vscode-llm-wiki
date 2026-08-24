@@ -5,7 +5,7 @@ description: "Keep the paper-grounded demo coherent while Nanochat remains a ref
 tags: ["operations", "reproducibility"]
 status: "draft"
 scope: "vault"
-generated: {"by": "process:vault-format-v2", "at": "2026-08-24T00:00:00+08:00"}
+generated: {"by": "codex/gpt-5.6", "at": "2026-08-24T20:14:36+08:00"}
 ---
 
 # Curate the graph-ready demo vault

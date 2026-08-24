@@ -13,34 +13,6 @@ ALLOWED_PAGE_TYPES = frozenset(
     {"Summary", "Entity", "Concept", "Comparison", "Query"}
 )
 ALLOWED_STATUSES = frozenset({"draft", "stable", "deprecated"})
-TAG_REGISTRY = (
-    "alignment",
-    "architecture",
-    "attention",
-    "data",
-    "data-curation",
-    "datasets",
-    "distributed-training",
-    "evaluation",
-    "inference",
-    "language-models",
-    "numerics",
-    "open-knowledge-format",
-    "operations",
-    "optimization",
-    "paper",
-    "post-training",
-    "pretraining",
-    "project-nanochat",
-    "provenance",
-    "reinforcement-learning",
-    "reproducibility",
-    "sampling",
-    "small-models",
-    "tokenization",
-    "training-systems",
-)
-
 FRONTMATTER_KEY = re.compile(r"^[A-Za-z_][A-Za-z0-9_-]*$")
 MARKDOWN_LINK = re.compile(r"(?<!!)\[[^\]]+\]\(([^)]+)\)")
 WIKI_LINK = re.compile(r"(?<!!)\[\[([^\]|#]+)(?:#[^\]|]+)?(?:\|[^\]]+)?\]\]")

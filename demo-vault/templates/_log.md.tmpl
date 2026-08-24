@@ -1,13 +1,13 @@
 ---
 type: "Log"
 title: "{{vault_title}} history"
-description: "Newest-first record of material vault changes."
+description: "Oldest-first append-only record of material vault changes."
 ---
 
 # {{vault_title}} history
 
-## {{date}}
+> Append new events at end of file; never rewrite earlier events.
 
-- **Learned**: [{{title}}]({{relative_target}}) — {{durable_takeaway}}
-- **Changed**: {{material_change}}
-- **Maintained**: {{maintenance_action}}
+## [{{date}}] {{kind_slug}} | {{subject}}
+
+- **{{kind_title}}**: {{message}}

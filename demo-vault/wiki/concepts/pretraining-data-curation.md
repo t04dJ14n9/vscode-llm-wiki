@@ -5,9 +5,9 @@ description: "Selecting, cleaning, deduplicating, mixing, and validating documen
 tags: ["data", "data-curation", "datasets", "pretraining"]
 status: "draft"
 scope: "vault"
-generated: {"by": "codex/gpt-5.6", "at": "2026-08-13T00:00:00Z"}
+generated: {"by": "codex/gpt-5.6", "at": "2026-08-24T20:14:36+08:00"}
 sources: [{"id": "fineweb-paper", "resource": "../../raw/the-fineweb-datasets-decanting-the-web-for-the-finest-text-data-at-scale.md", "title": "The FineWeb Datasets"}, {"id": "dclm-paper", "resource": "../../raw/datacomp-lm-in-search-of-the-next-generation-of-training-sets-for-language-models.md", "title": "DataComp-LM"}, {"id": "dataset-source", "resource": "../../projects/code/nanochat/nanochat/dataset.py", "title": "Nanochat dataset loader", "repository": "nanochat", "revision": "92d63d4e8bb4df75c3b71618f31ddde2378b2bcd", "path": "nanochat/dataset.py"}]
-created: {"by": "process:project-scope-migration", "at": "2026-08-23T00:00:00Z"}
+created: {"by": "codex/gpt-5.6", "at": "2026-08-13T00:00:00Z"}
 source_state: "awaiting-source"
 relations: [{"target": "entities/fineweb.md", "kind": "references", "caption": "FineWeb"}, {"target": "entities/datacomp-lm.md", "kind": "references", "caption": "DataComp-LM"}, {"target": "comparisons/fineweb-vs-datacomp-lm.md", "kind": "references", "caption": "FineWeb versus DataComp-LM"}, {"target": "concepts/compute-optimal-training.md", "kind": "references", "caption": "Compute-optimal training"}]
 ---

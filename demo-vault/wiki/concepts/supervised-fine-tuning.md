@@ -5,11 +5,11 @@ description: "Updating a pretrained model on examples of desired prompts, conver
 tags: ["alignment", "post-training", "small-models"]
 status: "draft"
 scope: "vault"
-generated: {"by": "codex/gpt-5.6", "at": "2026-08-13T00:00:00Z"}
+generated: {"by": "codex/gpt-5.6", "at": "2026-08-24T20:14:36+08:00"}
 sources: [{"id": "smollm2-paper", "resource": "../../raw/smollm2-when-smol-goes-big-data-centric-training-of-a-small-language-model.md", "title": "SmolLM2"}, {"id": "chat-sft", "resource": "../../projects/code/nanochat/scripts/chat_sft.py", "title": "Nanochat supervised finetuning", "repository": "nanochat", "revision": "92d63d4e8bb4df75c3b71618f31ddde2378b2bcd", "path": "scripts/chat_sft.py"}]
-created: {"by": "process:project-scope-migration", "at": "2026-08-23T00:00:00Z"}
+created: {"by": "codex/gpt-5.6", "at": "2026-08-13T00:00:00Z"}
 source_state: "awaiting-source"
-relations: [{"target": "concepts/chat-formatting.md", "kind": "references", "caption": "chat formatting"}, {"target": "concepts/preference-and-policy-optimization.md", "kind": "references", "caption": "preference and policy optimization"}, {"target": "entities/smollm2-and-smoltalk.md", "kind": "references", "caption": "SmolLM2 and SmolTalk"}]
+relations: [{"target": "concepts/chat-formatting.md", "kind": "references", "caption": "chat formatting"}, {"target": "concepts/preference-and-policy-optimization.md", "kind": "references", "caption": "preference and policy optimization"}, {"target": "entities/smollm2-and-smoltalk.md", "kind": "references", "caption": "SmolLM2 and SmolTalk"}, {"target": "summaries/from-pretraining-to-chat-model.md", "kind": "applies-to", "caption": "Places supervised fine-tuning in the end-to-end model lifecycle"}]
 ---
 
 # Supervised fine-tuning
@@ -39,7 +39,7 @@ is [preference and policy optimization](preference-and-policy-optimization.md).
 ## Related pages
 
 - [SmolLM2 and SmolTalk](../entities/smollm2-and-smoltalk.md)
-- [From pretraining to a chat model](../../summaries/from-pretraining-to-chat-model.md)
+- [From pretraining to a chat model](../summaries/from-pretraining-to-chat-model.md)
 - [Chat formatting](chat-formatting.md)
 
 [^smollm2-paper]: SmolLM2

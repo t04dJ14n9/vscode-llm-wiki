@@ -5,8 +5,9 @@ description: "How the mirrored papers support the Nanochat wiki without being mi
 tags: ["paper", "provenance", "project-nanochat", "reproducibility"]
 status: "stable"
 scope: "vault"
-generated: {"by": "codex/gpt-5.6", "at": "2026-08-13T00:00:00Z"}
-sources: [{"id": "bpe", "resource": "../raw/neural-machine-translation-of-rare-words-with-subword-units.md", "title": "Neural Machine Translation of Rare Words with Subword Units"}, {"id": "fineweb", "resource": "../raw/the-fineweb-datasets-decanting-the-web-for-the-finest-text-data-at-scale.md", "title": "The FineWeb Datasets"}, {"id": "dclm", "resource": "../raw/datacomp-lm-in-search-of-the-next-generation-of-training-sets-for-language-models.md", "title": "DataComp-LM"}, {"id": "smollm2", "resource": "../raw/smollm2-when-smol-goes-big-data-centric-training-of-a-small-language-model.md", "title": "SmolLM2"}, {"id": "gqa", "resource": "../raw/gqa-training-generalized-multi-query-transformer-models-from-multi-head-checkpoints.md", "title": "GQA"}, {"id": "fa3", "resource": "../raw/flashattention-3-fast-and-accurate-attention-with-asynchrony-and-low-precision.md", "title": "FlashAttention-3"}, {"id": "fp8", "resource": "../raw/fp8-formats-for-deep-learning.md", "title": "FP8 Formats for Deep Learning"}, {"id": "dpo", "resource": "../raw/direct-preference-optimization-your-language-model-is-secretly-a-reward-model.md", "title": "Direct Preference Optimization"}]
+generated: {"by": "codex/gpt-5.6", "at": "2026-08-24T20:14:36+08:00"}
+sources: [{"id": "bpe", "resource": "../../raw/neural-machine-translation-of-rare-words-with-subword-units.md", "title": "Neural Machine Translation of Rare Words with Subword Units"}, {"id": "fineweb", "resource": "../../raw/the-fineweb-datasets-decanting-the-web-for-the-finest-text-data-at-scale.md", "title": "The FineWeb Datasets"}, {"id": "dclm", "resource": "../../raw/datacomp-lm-in-search-of-the-next-generation-of-training-sets-for-language-models.md", "title": "DataComp-LM"}, {"id": "smollm2", "resource": "../../raw/smollm2-when-smol-goes-big-data-centric-training-of-a-small-language-model.md", "title": "SmolLM2"}, {"id": "gqa", "resource": "../../raw/gqa-training-generalized-multi-query-transformer-models-from-multi-head-checkpoints.md", "title": "GQA"}, {"id": "fa3", "resource": "../../raw/flashattention-3-fast-and-accurate-attention-with-asynchrony-and-low-precision.md", "title": "FlashAttention-3"}, {"id": "fp8", "resource": "../../raw/fp8-formats-for-deep-learning.md", "title": "FP8 Formats for Deep Learning"}, {"id": "dpo", "resource": "../../raw/direct-preference-optimization-your-language-model-is-secretly-a-reward-model.md", "title": "Direct Preference Optimization"}]
+relations: [{"target": "concepts/byte-pair-encoding.md", "kind": "references", "caption": "Links to Byte-pair encoding"}, {"target": "comparisons/fineweb-vs-datacomp-lm.md", "kind": "references", "caption": "Links to FineWeb versus DataComp-LM"}, {"target": "comparisons/bf16-vs-fp8.md", "kind": "references", "caption": "Links to BF16 versus FP8"}, {"target": "comparisons/dpo-vs-on-policy-reinforcement-learning.md", "kind": "references", "caption": "Links to DPO versus on-policy reinforcement learning"}]
 ---
 
 # Research corpus overview
@@ -19,7 +20,7 @@ post-training. Each companion captures one exact arXiv version, its canonical
 metadata, a mechanically extracted text layer, and the original PDF.
 
 The BPE paper supplies the historical subword construction behind the
-[tokenization concept](../wiki/concepts/byte-pair-encoding.md).[^bpe] FineWeb and
+[tokenization concept](../concepts/byte-pair-encoding.md).[^bpe] FineWeb and
 DataComp-LM supply contrasting evidence about turning web crawls into training
 data.[^fineweb][^dclm] SmolLM2 connects data mixtures and staged training to the
 small-model regime.[^smollm2]
@@ -59,9 +60,9 @@ navigation; the PDF remains the visual authority.
 
 ## Related pages
 
-- [FineWeb versus DataComp-LM](../wiki/comparisons/fineweb-vs-datacomp-lm.md)
-- [BF16 versus FP8](../wiki/comparisons/bf16-vs-fp8.md)
-- [DPO versus on-policy reinforcement learning](../wiki/comparisons/dpo-vs-on-policy-reinforcement-learning.md)
+- [FineWeb versus DataComp-LM](../comparisons/fineweb-vs-datacomp-lm.md)
+- [BF16 versus FP8](../comparisons/bf16-vs-fp8.md)
+- [DPO versus on-policy reinforcement learning](../comparisons/dpo-vs-on-policy-reinforcement-learning.md)
 
 [^bpe]: Neural Machine Translation of Rare Words with Subword Units
 [^fineweb]: The FineWeb Datasets

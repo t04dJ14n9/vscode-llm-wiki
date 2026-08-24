@@ -5,9 +5,10 @@ description: "The behavioral transition from next-token prediction through super
 tags: ["alignment", "post-training", "pretraining", "project-nanochat", "reinforcement-learning"]
 status: "draft"
 scope: "vault"
-generated: {"by": "codex/gpt-5.6", "at": "2026-08-13T00:00:00Z"}
-sources: [{"id": "base", "resource": "../projects/code/nanochat/scripts/base_train.py", "title": "Nanochat base training", "repository": "nanochat", "revision": "92d63d4e8bb4df75c3b71618f31ddde2378b2bcd", "path": "scripts/base_train.py"}, {"id": "sft", "resource": "../projects/code/nanochat/scripts/chat_sft.py", "title": "Nanochat supervised finetuning", "repository": "nanochat", "revision": "92d63d4e8bb4df75c3b71618f31ddde2378b2bcd", "path": "scripts/chat_sft.py"}, {"id": "rl", "resource": "../projects/code/nanochat/scripts/chat_rl.py", "title": "Nanochat on-policy reinforcement learning", "repository": "nanochat", "revision": "92d63d4e8bb4df75c3b71618f31ddde2378b2bcd", "path": "scripts/chat_rl.py"}, {"id": "engine", "resource": "../projects/code/nanochat/nanochat/engine.py", "title": "Nanochat generation engine", "repository": "nanochat", "revision": "92d63d4e8bb4df75c3b71618f31ddde2378b2bcd", "path": "nanochat/engine.py"}]
+generated: {"by": "codex/gpt-5.6", "at": "2026-08-24T20:14:36+08:00"}
+sources: [{"id": "base", "resource": "../../projects/code/nanochat/scripts/base_train.py", "title": "Nanochat base training", "repository": "nanochat", "revision": "92d63d4e8bb4df75c3b71618f31ddde2378b2bcd", "path": "scripts/base_train.py"}, {"id": "sft", "resource": "../../projects/code/nanochat/scripts/chat_sft.py", "title": "Nanochat supervised finetuning", "repository": "nanochat", "revision": "92d63d4e8bb4df75c3b71618f31ddde2378b2bcd", "path": "scripts/chat_sft.py"}, {"id": "rl", "resource": "../../projects/code/nanochat/scripts/chat_rl.py", "title": "Nanochat on-policy reinforcement learning", "repository": "nanochat", "revision": "92d63d4e8bb4df75c3b71618f31ddde2378b2bcd", "path": "scripts/chat_rl.py"}, {"id": "engine", "resource": "../../projects/code/nanochat/nanochat/engine.py", "title": "Nanochat generation engine", "repository": "nanochat", "revision": "92d63d4e8bb4df75c3b71618f31ddde2378b2bcd", "path": "nanochat/engine.py"}]
 source_state: "awaiting-source"
+relations: [{"target": "comparisons/dpo-vs-on-policy-reinforcement-learning.md", "kind": "references", "caption": "Links to DPO versus on-policy reinforcement learning"}, {"target": "concepts/supervised-fine-tuning.md", "kind": "references", "caption": "Links to Supervised fine-tuning"}, {"target": "concepts/chat-formatting.md", "kind": "references", "caption": "Links to Chat formatting"}, {"target": "concepts/preference-and-policy-optimization.md", "kind": "references", "caption": "Links to Preference and policy optimization"}, {"target": "concepts/inference-and-sampling.md", "kind": "references", "caption": "Links to Inference and sampling"}]
 ---
 
 # From pretraining to a chat model
@@ -38,7 +39,7 @@ extracts final answers, assigns correctness rewards, subtracts the group mean,
 and updates the policy from those on-policy samples.[^rl] It calls itself
 GRPO-inspired but deliberately omits a reference-policy KL term and PPO-style
 ratio clipping. That makes the
-[DPO/on-policy comparison](../wiki/comparisons/dpo-vs-on-policy-reinforcement-learning.md)
+[DPO/on-policy comparison](../comparisons/dpo-vs-on-policy-reinforcement-learning.md)
 especially important.
 
 Finally, the generation engine separates prompt prefill from token-by-token
@@ -56,10 +57,10 @@ easy to conflate.
 
 ## Related pages
 
-- [Supervised finetuning](../wiki/concepts/supervised-fine-tuning.md)
-- [Chat formatting](../wiki/concepts/chat-formatting.md)
-- [Preference and policy optimization](../wiki/concepts/preference-and-policy-optimization.md)
-- [Inference and sampling](../wiki/concepts/inference-and-sampling.md)
+- [Supervised finetuning](../concepts/supervised-fine-tuning.md)
+- [Chat formatting](../concepts/chat-formatting.md)
+- [Preference and policy optimization](../concepts/preference-and-policy-optimization.md)
+- [Inference and sampling](../concepts/inference-and-sampling.md)
 
 [^base]: Nanochat base training
 [^sft]: Nanochat supervised finetuning

@@ -52,8 +52,9 @@ expose accessible condensed-answer popovers.
 
 ## Vault and repository boundary
 
-Graph-visible durable knowledge is under `wiki/`; summaries and playbooks are
-outside it. `projects/<id>.md` is a portable VCS card. An optional checkout or
+Graph-visible durable knowledge, including summaries, is under `wiki/`;
+the root `TAGS.md` defines its canonical search vocabulary;
+playbooks remain outside it. `projects/<id>.md` is a portable VCS card. An optional checkout or
 symlink is implied at opaque `projects/code/<id>`; no registry YAML or
 submodule is involved. Code-owned knowledge stays in writable repositories at
 `docs/llm-wiki/` and therefore follows their commits and branches.

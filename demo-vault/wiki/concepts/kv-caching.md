@@ -5,9 +5,9 @@ description: "Reuse of attention keys and values from earlier tokens during auto
 tags: ["attention", "inference", "training-systems"]
 status: "draft"
 scope: "vault"
-generated: {"by": "codex/gpt-5.6", "at": "2026-08-13T00:00:00Z"}
+generated: {"by": "codex/gpt-5.6", "at": "2026-08-24T20:14:36+08:00"}
 sources: [{"id": "engine", "resource": "../../projects/code/nanochat/nanochat/engine.py", "title": "Nanochat generation engine", "repository": "nanochat", "revision": "92d63d4e8bb4df75c3b71618f31ddde2378b2bcd", "path": "nanochat/engine.py"}, {"id": "gpt-source", "resource": "../../projects/code/nanochat/nanochat/gpt.py", "title": "Nanochat GPT implementation", "repository": "nanochat", "revision": "92d63d4e8bb4df75c3b71618f31ddde2378b2bcd", "path": "nanochat/gpt.py"}]
-created: {"by": "process:project-scope-migration", "at": "2026-08-23T00:00:00Z"}
+created: {"by": "codex/gpt-5.6", "at": "2026-08-13T00:00:00Z"}
 source_state: "awaiting-source"
 relations: [{"target": "concepts/grouped-query-attention.md", "kind": "references", "caption": "grouped-query attention"}, {"target": "concepts/inference-and-sampling.md", "kind": "references", "caption": "inference and sampling"}, {"target": "concepts/rotary-position-embeddings.md", "kind": "references", "caption": "Rotary position embeddings"}]
 ---

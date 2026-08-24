@@ -5,9 +5,9 @@ description: "A benchmark and experimental framework for comparing language-mode
 tags: ["data", "data-curation", "datasets", "evaluation", "pretraining"]
 status: "stable"
 scope: "vault"
-generated: {"by": "codex/gpt-5.6", "at": "2026-08-13T00:00:00Z"}
+generated: {"by": "codex/gpt-5.6", "at": "2026-08-24T20:14:36+08:00"}
 sources: [{"id": "dclm-paper", "resource": "../../raw/datacomp-lm-in-search-of-the-next-generation-of-training-sets-for-language-models.md", "title": "DataComp-LM"}]
-created: {"by": "process:project-scope-migration", "at": "2026-08-23T00:00:00Z"}
+created: {"by": "codex/gpt-5.6", "at": "2026-08-13T00:00:00Z"}
 relations: [{"target": "entities/fineweb.md", "kind": "references", "caption": "FineWeb"}, {"target": "concepts/compute-optimal-training.md", "kind": "references", "caption": "compute-budget choices"}, {"target": "comparisons/fineweb-vs-datacomp-lm.md", "kind": "references", "caption": "FineWeb versus DataComp-LM"}, {"target": "concepts/pretraining-data-curation.md", "kind": "references", "caption": "Pretraining data curation"}]
 ---
 

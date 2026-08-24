@@ -19,11 +19,14 @@ def main(argv: list[str] | None = None) -> int:
     )
     arguments = parser.parse_args(argv)
     issues = validate_vault(arguments.vault)
-    if issues:
-        for issue in issues:
-            print(f"ERROR [{issue.layer}] {issue.code} {issue.path}: {issue.message}")
+    for issue in issues:
+        print(f"{issue.severity.upper()} [{issue.layer}] {issue.code} {issue.path}: {issue.message}")
+    errors = tuple(issue for issue in issues if issue.severity == "error")
+    warnings = tuple(issue for issue in issues if issue.severity == "warning")
+    if errors:
         return 1
-    print("vault valid")
+    suffix = f" with {len(warnings)} warning(s)" if warnings else ""
+    print(f"vault valid{suffix}")
     return 0
 
 

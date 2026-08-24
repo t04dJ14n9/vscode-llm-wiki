@@ -54,14 +54,15 @@ vault/
 ├── _log.md
 ├── AGENTS.md
 ├── SCHEMA.md
+├── TAGS.md                       # vault-local canonical tag registry
 ├── templates/                     # opaque .md.tmpl authoring formats
 ├── wiki/
 │   ├── daily/
 │   ├── concepts/
 │   ├── comparisons/
 │   ├── entities/
+│   ├── summaries/
 │   └── queries/
-├── summaries/
 ├── playbooks/
 ├── projects/
 │   ├── <id>.md                    # portable VCS reference card
@@ -94,6 +95,7 @@ packages/
 └── core/                          # portable reference primitives
 tools/llm-wiki/                    # deterministic producers and validators
 .agents/skills/pdf/                # focused PDF selection workflow
+.agents/skills/humanizer/          # evidence-preserving prose polish
 demo-vault/                        # graph-ready example vault
 ```
 

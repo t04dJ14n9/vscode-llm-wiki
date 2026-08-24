@@ -7,8 +7,10 @@ change the current graph implementation.
 
 Each Markdown file below a recognized `wiki/` root is one node, except generated
 `_index.md` files. Node label, type, lifecycle status, and tags come from the
-existing frontmatter. Templates, summaries, playbooks, raw sources, project
+existing frontmatter. Templates, playbooks, raw sources, project
 cards, assets, workbench pages, and ignored code bindings are not nodes.
+Canonical tags come from the level-two headings in the vault-local `TAGS.md`;
+unknown page tags remain visible but should be surfaced as advisory warnings.
 
 ## Edges
 

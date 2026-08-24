@@ -5,9 +5,9 @@ description: "Choosing model size and token budget to use a fixed training-compu
 tags: ["optimization", "pretraining", "small-models", "training-systems"]
 status: "draft"
 scope: "vault"
-generated: {"by": "codex/gpt-5.6", "at": "2026-08-13T00:00:00Z"}
+generated: {"by": "codex/gpt-5.6", "at": "2026-08-24T20:14:36+08:00"}
 sources: [{"id": "dclm-paper", "resource": "../../raw/datacomp-lm-in-search-of-the-next-generation-of-training-sets-for-language-models.md", "title": "DataComp-LM"}, {"id": "base-train", "resource": "../../projects/code/nanochat/scripts/base_train.py", "title": "Nanochat base training", "repository": "nanochat", "revision": "92d63d4e8bb4df75c3b71618f31ddde2378b2bcd", "path": "scripts/base_train.py"}, {"id": "scaling-run", "resource": "../../projects/code/nanochat/runs/scaling_laws.sh", "title": "Nanochat scaling-law run", "repository": "nanochat", "revision": "92d63d4e8bb4df75c3b71618f31ddde2378b2bcd", "path": "runs/scaling_laws.sh"}]
-created: {"by": "process:project-scope-migration", "at": "2026-08-23T00:00:00Z"}
+created: {"by": "codex/gpt-5.6", "at": "2026-08-13T00:00:00Z"}
 source_state: "awaiting-source"
 relations: [{"target": "concepts/gradient-accumulation-and-distributed-training.md", "kind": "references", "caption": "Gradient accumulation and distributed training"}, {"target": "concepts/pretraining-data-curation.md", "kind": "references", "caption": "Pretraining data curation"}]
 ---

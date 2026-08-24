@@ -5,7 +5,7 @@ description: "Offline preference-pair optimization compared with Nanochat's rewa
 tags: ["alignment", "post-training", "reinforcement-learning"]
 status: "draft"
 scope: "vault"
-generated: {"by": "codex/gpt-5.6", "at": "2026-08-13T00:00:00Z"}
+generated: {"by": "codex/gpt-5.6", "at": "2026-08-24T20:14:36+08:00"}
 sources: [{"id": "dpo-paper", "resource": "../../raw/direct-preference-optimization-your-language-model-is-secretly-a-reward-model.md", "title": "Direct Preference Optimization"}, {"id": "deepseekmath", "resource": "https://arxiv.org/abs/2402.03300v3", "title": "DeepSeekMath"}, {"id": "chat-rl", "resource": "../../projects/code/nanochat/scripts/chat_rl.py", "title": "Nanochat on-policy reinforcement learning", "repository": "nanochat", "revision": "92d63d4e8bb4df75c3b71618f31ddde2378b2bcd", "path": "scripts/chat_rl.py"}]
 source_state: "awaiting-source"
 relations: [{"target": "concepts/preference-and-policy-optimization.md", "kind": "references", "caption": "Preference and policy optimization"}, {"target": "concepts/supervised-fine-tuning.md", "kind": "references", "caption": "Supervised fine-tuning"}]
@@ -43,7 +43,7 @@ clipping, and loss. That is the reproducible algorithm.
 ## Related pages
 
 - [Preference and policy optimization](../concepts/preference-and-policy-optimization.md)
-- [From pretraining to a chat model](../../summaries/from-pretraining-to-chat-model.md)
+- [From pretraining to a chat model](../summaries/from-pretraining-to-chat-model.md)
 - [Supervised fine-tuning](../concepts/supervised-fine-tuning.md)
 
 [^dpo-paper]: Direct Preference Optimization

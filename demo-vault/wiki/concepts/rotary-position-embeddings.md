@@ -5,9 +5,9 @@ description: "Position-dependent rotations applied to attention queries and keys
 tags: ["architecture", "attention", "language-models"]
 status: "draft"
 scope: "vault"
-generated: {"by": "codex/gpt-5.6", "at": "2026-08-13T00:00:00Z"}
+generated: {"by": "codex/gpt-5.6", "at": "2026-08-24T20:14:36+08:00"}
 sources: [{"id": "roformer", "resource": "https://arxiv.org/abs/2104.09864v5", "title": "RoFormer: Enhanced Transformer with Rotary Position Embedding"}, {"id": "gpt-source", "resource": "../../projects/code/nanochat/nanochat/gpt.py", "title": "Nanochat GPT implementation", "repository": "nanochat", "revision": "92d63d4e8bb4df75c3b71618f31ddde2378b2bcd", "path": "nanochat/gpt.py"}]
-created: {"by": "process:project-scope-migration", "at": "2026-08-23T00:00:00Z"}
+created: {"by": "codex/gpt-5.6", "at": "2026-08-13T00:00:00Z"}
 source_state: "awaiting-source"
 relations: [{"target": "concepts/kv-caching.md", "kind": "references", "caption": "KV caching"}, {"target": "concepts/flash-attention.md", "kind": "references", "caption": "FlashAttention"}, {"target": "concepts/decoder-only-transformers.md", "kind": "references", "caption": "Decoder-only transformers"}, {"target": "concepts/inference-and-sampling.md", "kind": "references", "caption": "Inference and sampling"}]
 ---

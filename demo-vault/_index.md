@@ -12,7 +12,6 @@ okf_version: "0.2"
 * [projects](projects/) - Portable repository cards; code knowledge stays with each repository.
 * [raw](raw/) - Flat immutable source companions for the knowledge vault.
 * [scratch](scratch/) - Ephemeral working notes and hypotheses.
-* [summaries](summaries/) - Narrative entry points through the knowledge vault.
 * [tasks](tasks/) - Current and historical work state.
 * [templates](templates/) - Opaque authoring templates for agents and humans.
 * [wiki](wiki/) - Durable graph-ready knowledge and daily review notes.
@@ -23,9 +22,10 @@ okf_version: "0.2"
 
 # Reference
 
+* [Demo vault tag registry](TAGS.md) - Canonical tags and their intended use in the demo knowledge vault.
 * [Graph-ready LLM Wiki schema](SCHEMA.md) - OKF v0.2 placement, project cards, relations, Queries, templates, and daily-review rules.
-* [LLM Wiki demo vault](README.md) - A source-backed demonstration of graph-ready knowledge, Query annotations, and daily active recall.
+* [LLM Wiki demo vault](README.md) - A working example of source-backed reading, durable Queries, repository references, and active recall in LLM Wiki for VS Code.
 
 # Log
 
-* [Bundle history](_log.md) - Newest-first record of material bundle changes.
+* [Bundle history](_log.md) - Oldest-first append-only record of material bundle changes.

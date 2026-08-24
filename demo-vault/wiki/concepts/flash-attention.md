@@ -5,9 +5,9 @@ description: "Exact attention kernels organized to reduce expensive memory traff
 tags: ["attention", "numerics", "training-systems"]
 status: "draft"
 scope: "vault"
-generated: {"by": "codex/gpt-5.6", "at": "2026-08-13T00:00:00Z"}
+generated: {"by": "codex/gpt-5.6", "at": "2026-08-24T20:14:36+08:00"}
 sources: [{"id": "fa3-paper", "resource": "../../raw/flashattention-3-fast-and-accurate-attention-with-asynchrony-and-low-precision.md", "title": "FlashAttention-3"}, {"id": "attention-source", "resource": "../../projects/code/nanochat/nanochat/flash_attention.py", "title": "Nanochat attention backend", "repository": "nanochat", "revision": "92d63d4e8bb4df75c3b71618f31ddde2378b2bcd", "path": "nanochat/flash_attention.py"}]
-created: {"by": "process:project-scope-migration", "at": "2026-08-23T00:00:00Z"}
+created: {"by": "codex/gpt-5.6", "at": "2026-08-13T00:00:00Z"}
 source_state: "awaiting-source"
 relations: [{"target": "concepts/grouped-query-attention.md", "kind": "references", "caption": "Grouped-query attention"}, {"target": "concepts/low-precision-training.md", "kind": "references", "caption": "Low-precision training"}]
 ---

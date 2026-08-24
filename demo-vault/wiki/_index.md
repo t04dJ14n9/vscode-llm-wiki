@@ -6,3 +6,4 @@
 * [daily](daily/) - Daily goals, active recall, and review plans.
 * [entities](entities/) - Durable named subjects with independent lookup value.
 * [queries](queries/) - Source-grounded durable answers.
+* [summaries](summaries/) - Narrative synthesis and entry points through the knowledge vault.

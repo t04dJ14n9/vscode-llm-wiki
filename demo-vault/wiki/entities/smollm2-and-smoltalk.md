@@ -5,9 +5,9 @@ description: "A small-model training recipe and the instruction-data family repr
 tags: ["datasets", "post-training", "small-models", "training-systems"]
 status: "draft"
 scope: "vault"
-generated: {"by": "codex/gpt-5.6", "at": "2026-08-13T00:00:00Z"}
+generated: {"by": "codex/gpt-5.6", "at": "2026-08-24T20:14:36+08:00"}
 sources: [{"id": "smollm2-paper", "resource": "../../raw/smollm2-when-smol-goes-big-data-centric-training-of-a-small-language-model.md", "title": "SmolLM2"}, {"id": "smoltalk-task", "resource": "../../projects/code/nanochat/tasks/smoltalk.py", "title": "Nanochat SmolTalk task adapter", "repository": "nanochat", "revision": "92d63d4e8bb4df75c3b71618f31ddde2378b2bcd", "path": "tasks/smoltalk.py"}]
-created: {"by": "process:project-scope-migration", "at": "2026-08-23T00:00:00Z"}
+created: {"by": "codex/gpt-5.6", "at": "2026-08-13T00:00:00Z"}
 source_state: "awaiting-source"
 relations: [{"target": "concepts/supervised-fine-tuning.md", "kind": "references", "caption": "Supervised finetuning"}, {"target": "concepts/chat-formatting.md", "kind": "references", "caption": "Chat formatting"}]
 ---
@@ -40,7 +40,7 @@ training recipe.
 
 - [Supervised finetuning](../concepts/supervised-fine-tuning.md)
 - [Chat formatting](../concepts/chat-formatting.md)
-- [From pretraining to a chat model](../../summaries/from-pretraining-to-chat-model.md)
+- [From pretraining to a chat model](../summaries/from-pretraining-to-chat-model.md)
 
 [^smollm2-paper]: SmolLM2
 [^smoltalk-task]: Nanochat SmolTalk task adapter

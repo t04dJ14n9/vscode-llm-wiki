@@ -26,6 +26,12 @@ LAYERS = frozenset({"okf-base", "karpathy-vault-v1", "project-policy"})
 HEX_SHA256 = re.compile(r"^[0-9a-f]{64}$")
 HEX_GIT_OID = re.compile(r"^[0-9a-f]{40}$")
 ACTOR = re.compile(r"^(?:human:[^\s]+|process:[^\s]+|[A-Za-z0-9_.-]+/[A-Za-z0-9_.:+-]+)$")
+LOG_EVENT_HEADING = re.compile(
+    r"^## \[(\d{4}-\d{2}-\d{2})\] (learned|changed|maintained) \| (\S.*)$",
+    re.MULTILINE,
+)
+TAG_NAME = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+TAG_HEADING = re.compile(r"^## ([a-z0-9]+(?:-[a-z0-9]+)*)$", re.MULTILINE)
 FOOTNOTE_REFERENCE = re.compile(r"\[\^([A-Za-z0-9_.:-]+)\](?!:)")
 FOOTNOTE_DEFINITION = re.compile(r"^\[\^([A-Za-z0-9_.:-]+)\]:", re.MULTILINE)
 BINARY_SUFFIXES = frozenset({".pdf", ".png", ".jpg", ".jpeg", ".webp", ".gif", ".svg", ".zip", ".tar", ".gz"})
@@ -41,22 +47,26 @@ BINARY_MEDIA_TYPES = {
     ".tar": "application/x-tar",
     ".gz": "application/gzip",
 }
-WIKI_COLLECTIONS = ("concepts", "comparisons", "entities", "queries")
-ROOT_COLLECTIONS = ("summaries", "playbooks")
+WIKI_COLLECTIONS = ("summaries", "concepts", "comparisons", "entities", "queries")
+ROOT_COLLECTIONS = ("playbooks",)
 ROOT_EVIDENCE_DIRECTORIES = ("raw",)
 WORKBENCH_DIRECTORIES = (
     "inbox", "raw", "assets", "tasks", "scratch", "summaries", "concepts",
     "entities", "playbooks", "comparisons", "queries", "output",
 )
-REQUIRED_FILES = (".gitattributes", ".gitignore", "README.md", "SCHEMA.md", "AGENTS.md", INDEX_FILE, LOG_FILE)
-PROJECT_REQUIRED_FILES = (".gitattributes", ".gitignore", "README.md", "SCHEMA.md", "AGENTS.md", INDEX_FILE, LOG_FILE)
+REQUIRED_FILES = (".gitattributes", ".gitignore", "README.md", "SCHEMA.md", "TAGS.md", "AGENTS.md", INDEX_FILE, LOG_FILE)
+PROJECT_REQUIRED_FILES = (".gitattributes", ".gitignore", "README.md", "SCHEMA.md", "TAGS.md", "AGENTS.md", INDEX_FILE, LOG_FILE)
 TEMPLATE_FILES = (
-    "_index.md.tmpl", "_log.md.tmpl", "AGENTS.md.tmpl", "SCHEMA.md.tmpl",
+    "_index.md.tmpl", "_log.md.tmpl",
     "daily.md.tmpl", "concept.md.tmpl", "entity.md.tmpl",
     "comparison.md.tmpl", "query.md.tmpl", "summary.md.tmpl",
     "playbook.md.tmpl", "project-card.md.tmpl", "raw-source.md.tmpl",
 )
-ROOT_TYPES = {"README.md": "Reference", "SCHEMA.md": "Reference", "AGENTS.md": "Playbook"}
+TAGLESS_TEMPLATE_FILES = frozenset({"_index.md.tmpl", "_log.md.tmpl"})
+TAGGED_TEMPLATE_FILES = frozenset(TEMPLATE_FILES) - TAGLESS_TEMPLATE_FILES
+DURABLE_TEMPLATE_FILES = frozenset({"summary.md.tmpl", "concept.md.tmpl", "entity.md.tmpl", "comparison.md.tmpl", "query.md.tmpl"})
+ROOT_TYPES = {"README.md": "Reference", "SCHEMA.md": "Reference", "TAGS.md": "Reference", "AGENTS.md": "Playbook"}
+UNTAGGED_ROOT_FILES = frozenset(ROOT_TYPES)
 COMPILED_COLLECTION_TYPES = {
     "summaries": "Summary", "concepts": "Concept", "entities": "Entity",
     "playbooks": "Playbook", "comparisons": "Comparison", "queries": "Query",
@@ -65,6 +75,7 @@ RELATION_KINDS = frozenset({
     "references", "depends-on", "supported-by", "contrasts-with",
     "extends", "supersedes", "applies-to", "example-of",
 })
+DURABLE_KNOWLEDGE_TYPES = frozenset({"Summary", "Concept", "Entity", "Comparison", "Query"})
 REVIEW_INTERVALS = (1, 3, 7, 14, 30, 60, 90)
 DAILY_MARKERS = (
     ("<!-- human:goals:start -->", "<!-- human:goals:end -->"),
@@ -81,6 +92,7 @@ class Issue:
     code: str
     path: str
     message: str
+    severity: Literal["error", "warning"] = "error"
 
 
 @dataclass(frozen=True)
@@ -175,8 +187,16 @@ def _relative(root: Path, path: Path) -> str:
         return path.as_posix()
 
 
-def _issue(layer: str, code: str, root: Path, path: Path, message: str) -> Issue:
-    return Issue(layer, code, _relative(root, path), message)
+def _issue(
+    layer: str,
+    code: str,
+    root: Path,
+    path: Path,
+    message: str,
+    *,
+    severity: Literal["error", "warning"] = "error",
+) -> Issue:
+    return Issue(layer, code, _relative(root, path), message, severity)
 
 
 def _iso_datetime(value: object) -> bool:
@@ -254,6 +274,20 @@ def check_layout(root: Path, state: GitStateReader) -> list[Issue]:
             path = root / "templates" / filename
             if not path.is_file():
                 issues.append(_issue("karpathy-vault-v1", "template.missing", root, path, f"required template is missing: {filename}"))
+                continue
+            declares_tags = re.search(r"^tags:", path.read_text(encoding="utf-8"), re.MULTILINE) is not None
+            if filename in TAGLESS_TEMPLATE_FILES and declares_tags:
+                issues.append(_issue("project-policy", "template.tags", root, path, "operational and navigation templates must be tagless"))
+            if filename in TAGGED_TEMPLATE_FILES and not declares_tags:
+                issues.append(_issue("project-policy", "template.tags", root, path, "substantive content templates must require canonical registered tags"))
+            if filename in DURABLE_TEMPLATE_FILES:
+                text = path.read_text(encoding="utf-8")
+                required_fragments = (
+                    'sources: [{"id": "{{source_id}}", "resource": "{{relative_path_or_url}}", "title": "{{source_title}}"}]',
+                    'relations: [{"target": "{{wiki_root_relative_markdown_target}}", "kind": "{{allowed_relation_kind}}", "caption": "{{direct_caption_under_160_code_points}}"}]',
+                )
+                if any(fragment not in text for fragment in required_fragments):
+                    issues.append(_issue("project-policy", "template.fields", root, path, "durable templates must demonstrate complete JSON-flow source and relation items"))
     forbidden_layouts = (
         "revisions", "raw/assets", "projects/repositories.yaml",
         *(name for name in WIKI_COLLECTIONS),
@@ -309,6 +343,60 @@ def check_indexes(root: Path, _state: GitStateReader) -> list[Issue]:
     return issues
 
 
+def check_tag_registry(root: Path, _state: GitStateReader) -> list[Issue]:
+    issues: list[Issue] = []
+    registry_path = root / "TAGS.md"
+    if not registry_path.is_file():
+        return issues
+    registry, read_issues = _read(root, registry_path)
+    issues.extend(read_issues)
+    if not registry:
+        return issues
+
+    matches = tuple(TAG_HEADING.finditer(registry.body))
+    canonical = [match.group(1) for match in matches]
+    canonical_set = set(canonical)
+    if not canonical or len(canonical) != len(canonical_set):
+        issues.append(_issue("project-policy", "tag.registry", root, registry_path, "TAGS.md requires unique canonical tag headings"))
+    section_ends = [match.start() for match in matches[1:]] + [len(registry.body)]
+    for match, end in zip(matches, section_ends):
+        section = registry.body[match.end():end]
+        prose = [
+            line.strip()
+            for line in section.splitlines()
+            if line.strip() and not line.lstrip().startswith("-")
+        ]
+        if not prose:
+            issues.append(_issue("project-policy", "tag.registry", root, registry_path, f"tag {match.group(1)} requires a prose description"))
+
+    for path in _concept_files(root):
+        document, page_issues = _read(root, path)
+        issues.extend(page_issues)
+        if not document:
+            continue
+        relative = path.relative_to(root)
+        if len(relative.parts) == 1 and path.name in UNTAGGED_ROOT_FILES:
+            if "tags" in document.metadata:
+                issues.append(_issue("project-policy", "tag.operational", root, path, "root operational and navigation documents must not declare tags"))
+            continue
+        if "tags" not in document.metadata:
+            issues.append(_issue("project-policy", "tag.required", root, path, "substantive content pages require registered tags"))
+            continue
+        tags = document.metadata.get("tags")
+        if (
+            not isinstance(tags, list)
+            or len(tags) != len(set(str(tag) for tag in tags))
+            or any(not isinstance(tag, str) or TAG_NAME.fullmatch(tag) is None for tag in tags)
+        ):
+            issues.append(_issue("project-policy", "tag.metadata", root, path, "tags must be a unique list of lowercase kebab-case names"))
+            continue
+        for tag in tags:
+            if tag in canonical_set:
+                continue
+            issues.append(_issue("project-policy", "tag.unknown", root, path, f"tag {tag} is not registered in TAGS.md", severity="warning"))
+    return issues
+
+
 def check_okf_and_profile(root: Path, _state: GitStateReader) -> list[Issue]:
     issues: list[Issue] = []
     project_vault = _is_project_vault(root)
@@ -330,13 +418,30 @@ def check_okf_and_profile(root: Path, _state: GitStateReader) -> list[Issue]:
         generated = data.get("generated")
         if not isinstance(generated, dict) or not ACTOR.fullmatch(str(generated.get("by", ""))) or not _iso_datetime(generated.get("at")):
             issues.append(_issue("karpathy-vault-v1", "page.generated", root, path, "generated requires a conventional actor and ISO timestamp"))
+        verified = data.get("verified")
+        if verified is not None:
+            verification_events = [verified] if isinstance(verified, dict) else verified
+            valid_verified = (
+                isinstance(verification_events, list)
+                and bool(verification_events)
+                and all(
+                    isinstance(event, dict)
+                    and ACTOR.fullmatch(str(event.get("by", ""))) is not None
+                    and _iso_datetime(event.get("at"))
+                    for event in verification_events
+                )
+            )
+            if not valid_verified:
+                issues.append(_issue("okf-base", "verification.metadata", root, path, "verified must contain one or more {by, at} events using OKF actors and ISO timestamps"))
         relative = path.relative_to(root)
         expected_type = ROOT_TYPES.get(path.name) if len(relative.parts) == 1 else None
         if len(relative.parts) >= 2:
             if project_vault and relative.parts[0] in COMPILED_COLLECTION_TYPES:
                 expected_type = COMPILED_COLLECTION_TYPES[relative.parts[0]]
-            elif not project_vault and relative.parts[0] in {"summaries", "playbooks"}:
+            elif not project_vault and relative.parts[0] == "playbooks":
                 expected_type = COMPILED_COLLECTION_TYPES[relative.parts[0]]
+            elif not project_vault and len(relative.parts) >= 3 and relative.parts[:2] == ("wiki", "summaries"):
+                expected_type = "Summary"
             elif not project_vault and len(relative.parts) >= 3 and relative.parts[:2] == ("wiki", "concepts"):
                 expected_type = "Concept"
             elif not project_vault and len(relative.parts) >= 3 and relative.parts[:2] == ("wiki", "entities"):
@@ -361,6 +466,26 @@ def check_okf_and_profile(root: Path, _state: GitStateReader) -> list[Issue]:
             created = data.get("created")
             if not isinstance(created, dict) or not ACTOR.fullmatch(str(created.get("by", ""))) or not _iso_datetime(created.get("at")):
                 issues.append(_issue("project-policy", "creation.metadata", root, path, "Concept and Entity pages require created.by and created.at"))
+        if page_type in DURABLE_KNOWLEDGE_TYPES:
+            conflicts = data.get("conflicts")
+            has_section = "contradictions" in {
+                match.group(1).strip().lower()
+                for match in re.finditer(r"^## (.+)$", document.body, re.MULTILINE)
+            }
+            if conflicts is None:
+                if has_section:
+                    issues.append(_issue("project-policy", "conflict.metadata", root, path, "a Contradictions section requires nonempty conflicts metadata"))
+            else:
+                valid_conflicts = (
+                    isinstance(conflicts, list)
+                    and bool(conflicts)
+                    and all(isinstance(item, str) and item.strip() for item in conflicts)
+                    and len(conflicts) == len(set(conflicts))
+                )
+                if not valid_conflicts:
+                    issues.append(_issue("project-policy", "conflict.metadata", root, path, "conflicts, when present, must be a nonempty unique string list"))
+                elif not has_section:
+                    issues.append(_issue("project-policy", "conflict.section", root, path, "nonempty conflicts metadata requires a Contradictions section"))
     return issues
 
 
@@ -678,7 +803,7 @@ def check_provenance_queries_links(root: Path, state: GitStateReader) -> list[Is
                 continue
             issues.append(_issue("okf-base", "link.missing", root, path, f"link does not resolve: {target.target}"))
         conflicts = data.get("conflicts")
-        if conflicts is not None and data.get("status") != "draft":
+        if isinstance(conflicts, list) and conflicts and data.get("status") != "draft":
             issues.append(_issue("karpathy-vault-v1", "conflict.status", root, path, "unresolved conflicts require draft status"))
     return issues
 
@@ -692,7 +817,7 @@ def _graph_pages(root: Path) -> tuple[Path, ...]:
     if not wiki_root.is_dir():
         return ()
     allowed_roots = (
-        ("concepts", "comparisons", "entities", "queries", "daily")
+        (*WIKI_COLLECTIONS, "daily")
         if not _is_project_vault(root)
         else tuple(COMPILED_COLLECTION_TYPES) + ("daily",)
     )
@@ -830,6 +955,24 @@ def check_relations_and_daily(root: Path, _state: GitStateReader) -> list[Issue]
         document, read_issues = _read(root, log)
         issues.extend(read_issues)
         if document:
+            headings = tuple(line for line in document.body.splitlines() if line.startswith("## "))
+            events = tuple(LOG_EVENT_HEADING.finditer(document.body))
+            if len(events) != len(headings):
+                issues.append(_issue("project-policy", "log.event", root, log, "every level-two heading must be a canonical dated log event"))
+            event_dates: list[date] = []
+            for event in events:
+                try:
+                    event_dates.append(date.fromisoformat(event.group(1)))
+                except ValueError:
+                    issues.append(_issue("project-policy", "log.event", root, log, "log event headings require real ISO calendar dates"))
+            if event_dates != sorted(event_dates):
+                issues.append(_issue("project-policy", "log.order", root, log, "append-only log events must be ordered oldest first"))
+            event_starts = [event.start() for event in events] + [len(document.body)]
+            labels = {"learned": "Learned", "changed": "Changed", "maintained": "Maintained"}
+            for event, start, end in zip(events, event_starts, event_starts[1:]):
+                bullets = re.findall(r"^- \*\*(Learned|Changed|Maintained)\*\*:", document.body[start:end], re.MULTILINE)
+                if bullets != [labels[event.group(2)]]:
+                    issues.append(_issue("project-policy", "log.category", root, log, "each event requires exactly one categorized bullet matching its heading kind"))
             for line in document.body.splitlines():
                 if line.startswith("- ") and not re.match(r"^- \*\*(?:Learned|Changed|Maintained)\*\*:", line):
                     issues.append(_issue("project-policy", "log.category", root, log, "log bullets must begin with **Learned**, **Changed**, or **Maintained**"))
@@ -839,6 +982,7 @@ def check_relations_and_daily(root: Path, _state: GitStateReader) -> list[Issue]
 CHECKS = (
     check_layout,
     check_indexes,
+    check_tag_registry,
     check_okf_and_profile,
     check_registry_and_sources,
     check_workbench_raw_assets,

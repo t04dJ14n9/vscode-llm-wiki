@@ -6,3 +6,4 @@
 * [DPO versus on-policy reinforcement learning](dpo-vs-on-policy-reinforcement-learning.md) - Offline preference-pair optimization compared with Nanochat's reward-driven online sampling loop.
 * [FineWeb versus DataComp-LM](fineweb-vs-datacomp-lm.md) - Two complementary ways to reason about web-scale language-model data curation.
 * [Multi-head versus multi-query versus grouped-query attention](multi-head-vs-multi-query-vs-grouped-query-attention.md) - The quality and cache-bandwidth tradeoff created by sharing key/value heads.
+* [Pre-norm versus post-norm transformers](pre-norm-vs-post-norm.md) - How placing normalization before or after a transformer sublayer changes optimization and residual-stream behavior.

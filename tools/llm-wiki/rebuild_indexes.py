@@ -23,7 +23,7 @@ DIRECTORY_DESCRIPTIONS = {
     "projects": "Portable repository cards; code knowledge stays with each repository.",
     "projects/code": "Ignored checkout-or-symlink bindings derived from project IDs.",
     "scratch": "Ephemeral working notes and hypotheses.",
-    "summaries": "Narrative entry points through the knowledge vault.",
+    "wiki/summaries": "Narrative synthesis and entry points through the knowledge vault.",
     "tasks": "Current and historical work state.",
     "templates": "Opaque authoring templates for agents and humans.",
     "wiki": "Durable graph-ready knowledge and daily review notes.",
@@ -124,7 +124,7 @@ def child_records(directory: Path, vault_root: Path) -> tuple[IndexRecord, ...]:
         if child.is_dir():
             records.append(_directory_record(vault_root, child))
         elif child.name == LOG_FILE:
-            records.append(IndexRecord("Log", "Bundle history", LOG_FILE, "Newest-first record of material bundle changes."))
+            records.append(IndexRecord("Log", "Bundle history", LOG_FILE, "Oldest-first append-only record of material bundle changes."))
         elif child.suffix.lower() == ".md":
             records.append(_page_record(child))
         else:

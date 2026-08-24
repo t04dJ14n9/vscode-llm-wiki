@@ -5,9 +5,9 @@ description: "Building a large token batch from microbatches spread across devic
 tags: ["distributed-training", "pretraining", "training-systems"]
 status: "draft"
 scope: "vault"
-generated: {"by": "codex/gpt-5.6", "at": "2026-08-13T00:00:00Z"}
+generated: {"by": "codex/gpt-5.6", "at": "2026-08-24T20:14:36+08:00"}
 sources: [{"id": "base-train", "resource": "../../projects/code/nanochat/scripts/base_train.py", "title": "Nanochat base training", "repository": "nanochat", "revision": "92d63d4e8bb4df75c3b71618f31ddde2378b2bcd", "path": "scripts/base_train.py"}, {"id": "dataloader", "resource": "../../projects/code/nanochat/nanochat/dataloader.py", "title": "Nanochat distributed data loader", "repository": "nanochat", "revision": "92d63d4e8bb4df75c3b71618f31ddde2378b2bcd", "path": "nanochat/dataloader.py"}, {"id": "optimizer", "resource": "../../projects/code/nanochat/nanochat/optim.py", "title": "Nanochat distributed optimizer", "repository": "nanochat", "revision": "92d63d4e8bb4df75c3b71618f31ddde2378b2bcd", "path": "nanochat/optim.py"}]
-created: {"by": "process:project-scope-migration", "at": "2026-08-23T00:00:00Z"}
+created: {"by": "codex/gpt-5.6", "at": "2026-08-13T00:00:00Z"}
 source_state: "awaiting-source"
 relations: [{"target": "concepts/compute-optimal-training.md", "kind": "references", "caption": "Compute-optimal training"}, {"target": "concepts/adamw-and-muon-optimization.md", "kind": "references", "caption": "AdamW and Muon optimization"}]
 ---

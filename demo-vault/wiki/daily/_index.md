@@ -3,3 +3,4 @@
 
 * [2026-08-23](2026-08-23.md) - Goals, learning, and active recall for 2026-08-23.
 * [2026-08-24](2026-08-24.md) - Goals, learning, and active recall for 2026-08-24.
+* [2026-08-25](2026-08-25.md) - Goals, learning, and active recall for 2026-08-25.

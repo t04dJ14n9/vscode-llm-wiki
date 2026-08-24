@@ -29,8 +29,8 @@ class RebuildIndexesTests(unittest.TestCase):
         self.root = Path(self.temporary_directory.name)
         for relative in (
             "assets", "raw", "inbox", "output", "playbooks",
-            "projects/code/demo", "scratch", "summaries", "tasks", "templates",
-            "wiki/concepts", "wiki/comparisons", "wiki/entities", "wiki/queries", "wiki/daily",
+            "projects/code/demo", "scratch", "tasks", "templates",
+            "wiki/summaries", "wiki/concepts", "wiki/comparisons", "wiki/entities", "wiki/queries", "wiki/daily",
         ):
             (self.root / relative).mkdir(parents=True)
         (self.root / "templates/concept.md.tmpl").write_text("{{title}}\n", encoding="utf-8")

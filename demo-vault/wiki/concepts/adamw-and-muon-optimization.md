@@ -5,9 +5,9 @@ description: "Nanochat's parameter-aware combination of adaptive AdamW updates a
 tags: ["distributed-training", "optimization", "project-nanochat"]
 status: "draft"
 scope: "vault"
-generated: {"by": "codex/gpt-5.6", "at": "2026-08-13T00:00:00Z"}
+generated: {"by": "codex/gpt-5.6", "at": "2026-08-24T20:14:36+08:00"}
 sources: [{"id": "muon-paper", "resource": "https://arxiv.org/abs/2502.16982v1", "title": "Muon is Scalable for LLM Training"}, {"id": "optimizer", "resource": "../../projects/code/nanochat/nanochat/optim.py", "title": "Nanochat mixed optimizer", "repository": "nanochat", "revision": "92d63d4e8bb4df75c3b71618f31ddde2378b2bcd", "path": "nanochat/optim.py"}, {"id": "gpt-source", "resource": "../../projects/code/nanochat/nanochat/gpt.py", "title": "Nanochat GPT parameter grouping", "repository": "nanochat", "revision": "92d63d4e8bb4df75c3b71618f31ddde2378b2bcd", "path": "nanochat/gpt.py"}]
-created: {"by": "process:project-scope-migration", "at": "2026-08-23T00:00:00Z"}
+created: {"by": "codex/gpt-5.6", "at": "2026-08-13T00:00:00Z"}
 source_state: "awaiting-source"
 relations: [{"target": "comparisons/adamw-vs-muon.md", "kind": "references", "caption": "AdamW versus Muon"}, {"target": "concepts/gradient-accumulation-and-distributed-training.md", "kind": "references", "caption": "Gradient accumulation and distributed training"}, {"target": "concepts/low-precision-training.md", "kind": "references", "caption": "Low-precision training"}]
 ---

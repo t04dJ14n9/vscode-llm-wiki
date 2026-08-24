@@ -5,9 +5,9 @@ description: "Using compact numerical formats for selected training operations w
 tags: ["numerics", "optimization", "training-systems"]
 status: "draft"
 scope: "vault"
-generated: {"by": "codex/gpt-5.6", "at": "2026-08-13T00:00:00Z"}
+generated: {"by": "codex/gpt-5.6", "at": "2026-08-24T20:14:36+08:00"}
 sources: [{"id": "fp8-paper", "resource": "../../raw/fp8-formats-for-deep-learning.md", "title": "FP8 Formats for Deep Learning"}, {"id": "fp8-source", "resource": "../../projects/code/nanochat/nanochat/fp8.py", "title": "Nanochat FP8 operations", "repository": "nanochat", "revision": "92d63d4e8bb4df75c3b71618f31ddde2378b2bcd", "path": "nanochat/fp8.py"}, {"id": "base-train", "resource": "../../projects/code/nanochat/scripts/base_train.py", "title": "Nanochat base training", "repository": "nanochat", "revision": "92d63d4e8bb4df75c3b71618f31ddde2378b2bcd", "path": "scripts/base_train.py"}]
-created: {"by": "process:project-scope-migration", "at": "2026-08-23T00:00:00Z"}
+created: {"by": "codex/gpt-5.6", "at": "2026-08-13T00:00:00Z"}
 source_state: "awaiting-source"
 relations: [{"target": "comparisons/bf16-vs-fp8.md", "kind": "references", "caption": "BF16 versus FP8"}, {"target": "concepts/flash-attention.md", "kind": "references", "caption": "FlashAttention"}, {"target": "concepts/rms-normalization.md", "kind": "references", "caption": "RMS normalization"}]
 ---

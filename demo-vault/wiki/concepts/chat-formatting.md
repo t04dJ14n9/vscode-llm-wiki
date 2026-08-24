@@ -5,9 +5,9 @@ description: "The deterministic mapping between structured conversation messages
 tags: ["post-training", "tokenization", "project-nanochat"]
 status: "draft"
 scope: "vault"
-generated: {"by": "codex/gpt-5.6", "at": "2026-08-13T00:00:00Z"}
+generated: {"by": "codex/gpt-5.6", "at": "2026-08-24T20:14:36+08:00"}
 sources: [{"id": "tokenizer", "resource": "../../projects/code/nanochat/nanochat/tokenizer.py", "title": "Nanochat tokenizer and conversation rendering", "repository": "nanochat", "revision": "92d63d4e8bb4df75c3b71618f31ddde2378b2bcd", "path": "nanochat/tokenizer.py"}, {"id": "chat-sft", "resource": "../../projects/code/nanochat/scripts/chat_sft.py", "title": "Nanochat supervised finetuning", "repository": "nanochat", "revision": "92d63d4e8bb4df75c3b71618f31ddde2378b2bcd", "path": "scripts/chat_sft.py"}]
-created: {"by": "process:project-scope-migration", "at": "2026-08-23T00:00:00Z"}
+created: {"by": "codex/gpt-5.6", "at": "2026-08-13T00:00:00Z"}
 source_state: "awaiting-source"
 relations: [{"target": "concepts/byte-pair-encoding.md", "kind": "references", "caption": "byte-pair encoding"}, {"target": "concepts/supervised-fine-tuning.md", "kind": "references", "caption": "supervised fine-tuning"}]
 ---

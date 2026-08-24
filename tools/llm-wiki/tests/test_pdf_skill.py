@@ -10,6 +10,7 @@ from pathlib import Path
 REPOSITORY = Path(__file__).resolve().parents[3]
 VAULT = REPOSITORY / "demo-vault"
 SKILL = REPOSITORY / ".agents/skills/pdf"
+HUMANIZER_SKILL = REPOSITORY / ".agents/skills/humanizer"
 HELPER = SKILL / "scripts/extract_selection.py"
 INSTALLER = REPOSITORY / "tools/llm-wiki/install_agent_skills.py"
 PDF_NAME = "direct-preference-optimization-your-language-model-is-secretly-a-reward-model.pdf"
@@ -160,6 +161,11 @@ class PdfSkillTests(unittest.TestCase):
                 (installed / "SKILL.md").read_bytes(),
                 (SKILL / "SKILL.md").read_bytes(),
             )
+            installed_humanizer = vault / ".agents/skills/humanizer"
+            self.assertEqual(
+                (installed_humanizer / "SKILL.md").read_bytes(),
+                (HUMANIZER_SKILL / "SKILL.md").read_bytes(),
+            )
             (installed / "SKILL.md").write_text("custom\n", encoding="utf-8")
             refused = subprocess.run(
                 [sys.executable, INSTALLER, "--vault", vault],
@@ -180,6 +186,19 @@ class PdfSkillTests(unittest.TestCase):
                 (installed / "SKILL.md").read_bytes(),
                 (SKILL / "SKILL.md").read_bytes(),
             )
+
+    def test_installer_can_select_only_humanizer(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            vault = Path(directory)
+            result = subprocess.run(
+                [sys.executable, INSTALLER, "--vault", vault, "--skill", "humanizer"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue((vault / ".agents/skills/humanizer/SKILL.md").is_file())
+            self.assertFalse((vault / ".agents/skills/pdf").exists())
 
 
 if __name__ == "__main__":
