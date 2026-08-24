@@ -38,6 +38,15 @@ function loadTsModule(relativePath, mocks = {}) {
         getGitDiffForFile: async () => ({ available: false, lines: [] }),
       };
     }
+    if (request === './queryAnnotationIndex') {
+      return mocks['./queryAnnotationIndex'] ?? {
+        resolveMarkdownAnchor: (anchor) => ({
+          range: typeof anchor?.from === 'number' && typeof anchor?.to === 'number'
+            ? { from: anchor.from, to: anchor.to, startLine: 1, endLine: 1 }
+            : undefined,
+        }),
+      };
+    }
     if (request === './pdfPngConstraints') return { MAX_PNG_BYTES: 5 * 1024 * 1024 };
     if (request === './cursorCrop') return cursorCrop;
     if (request === './linkPreviewResolver') return linkPreviewResolver;
@@ -1258,7 +1267,7 @@ test('markdown editor provider resolves ordinary relative links from nested inde
   });
   const panel = createPanelMock(messages);
 
-  const document = createDocumentMock({ uri: 'file:///vault/summaries/index.md' });
+  const document = createDocumentMock({ uri: 'file:///vault/summaries/_index.md' });
   await provider.resolveCustomTextEditor(document, panel, {});
   await panel.fireMessage({
     type: 'openUri',

@@ -3,9 +3,12 @@ type: "Concept"
 title: "Bits per byte"
 description: "A tokenizer-aware language-model compression metric normalized by underlying UTF-8 bytes."
 tags: ["evaluation", "language-models", "tokenization"]
-status: "stable"
+status: "draft"
+scope: "vault"
 generated: {"by": "codex/gpt-5.6", "at": "2026-08-13T00:00:00Z"}
-sources: [{"id": "loss-eval", "resource": "../projects/code/nanochat/nanochat/loss_eval.py", "title": "Nanochat loss evaluation", "commit": "92d63d4e8bb4df75c3b71618f31ddde2378b2bcd"}, {"id": "tok-eval", "resource": "../projects/code/nanochat/scripts/tok_eval.py", "title": "Nanochat tokenizer evaluation", "commit": "92d63d4e8bb4df75c3b71618f31ddde2378b2bcd"}]
+sources: [{"id": "loss-eval", "resource": "../projects/code/nanochat/nanochat/loss_eval.py", "title": "Nanochat loss evaluation", "repository": "nanochat", "revision": "92d63d4e8bb4df75c3b71618f31ddde2378b2bcd", "path": "nanochat/loss_eval.py"}, {"id": "tok-eval", "resource": "../projects/code/nanochat/scripts/tok_eval.py", "title": "Nanochat tokenizer evaluation", "repository": "nanochat", "revision": "92d63d4e8bb4df75c3b71618f31ddde2378b2bcd", "path": "scripts/tok_eval.py"}]
+created: {"by": "process:project-scope-migration", "at": "2026-08-23T00:00:00Z"}
+source_state: "awaiting-source"
 ---
 
 # Bits per byte
@@ -34,7 +37,7 @@ benchmarks; it complements the task-oriented
 ## Related pages
 
 - [Byte-pair encoding](byte-pair-encoding.md)
-- [Why Nanochat uses bits per byte](../queries/why-does-nanochat-use-bits-per-byte.md)
+- [Why Nanochat uses bits per byte](../projects/nanochat/queries/why-does-nanochat-use-bits-per-byte.md)
 - [Language-model evaluation](language-model-evaluation.md)
 
 [^loss-eval]: Nanochat loss evaluation

@@ -1,91 +1,74 @@
 ---
 type: "Software Project"
 title: "Nanochat"
-description: "An exact-commit snapshot of Karpathy's compact end-to-end language-model training and inference harness."
+description: "Repository overview, studied baseline, working-copy status, and entry point for the Nanochat code vault."
 resource: "https://github.com/karpathy/nanochat"
 tags: ["language-models", "project-nanochat", "reproducibility", "training-systems"]
 status: "stable"
-generated: { "by": "codex/gpt-5.6", "at": "2026-08-13T00:00:00Z" }
-sources: [{ "id": "nanochat-repository", "resource": "https://github.com/karpathy/nanochat", "title": "Nanochat repository" }]
+generated: {"by": "process:project-vault-migration", "at": "2026-08-24T00:00:00+08:00"}
+sources: [{"id": "nanochat-repository", "resource": "https://github.com/karpathy/nanochat", "title": "Nanochat repository"}]
+repository: "nanochat"
+vcs: "git"
 repository_url: "https://github.com/karpathy/nanochat.git"
-default_branch: "master"
-pinned_commit: "92d63d4e8bb4df75c3b71618f31ddde2378b2bcd"
-commit_date: "2026-07-03T22:54:57Z"
+default_ref: "master"
+vault_path: "nanochat"
+code_path: "code/nanochat"
+workspace: "in-place"
+studied_revision: "92d63d4e8bb4df75c3b71618f31ddde2378b2bcd"
+studied_at: "2026-08-23T13:38:07Z"
+project_status: "active"
+code_state: "missing"
+current_task: "nanochat/tasks/current.md"
+ongoing_change: "DeepWiki repository-documentation verification pending"
 license: "MIT"
-source_path: "code/nanochat"
 ---
 
 # Nanochat
 
-Nanochat is the implementation anchor for this wiki: a deliberately compact
-PyTorch repository that spans tokenizer training, base-model pretraining,
-evaluation, supervised chat finetuning, optional on-policy reinforcement
-learning, inference, and an interactive CLI.[^nanochat-repository]
+Nanochat is Karpathy's compact end-to-end language-model training and
+inference repository. Its executable path covers data preparation and tokenizer
+training, base-model pretraining and evaluation, supervised chat finetuning,
+reinforcement learning, serving, and chat evaluation.[^nanochat-repository]
 
-![[projects/code/nanochat/dev/nanochat.png|Nanochat logo]]
+## Repository baseline
 
-# Pinned revision
+- VCS: Git.
+- Default ref: `master`.
+- Studied revision: `92d63d4e8bb4df75c3b71618f31ddde2378b2bcd`.
+- Knowledge status: active, with code-backed pages still draft.
+- Working copy: expected at `code/nanochat/` but currently absent. It is always
+  an in-place checkout managed by its own VCS and ignored by the outer vault
+  repository.
 
-This bundle indexes commit
-`92d63d4e8bb4df75c3b71618f31ddde2378b2bcd` (`clean up fragile code`),
-committed on 2026-07-03. The submodule is evidence, not a fork: do not edit its
-files to satisfy the outer OKF profile.
-Repository: [karpathy/nanochat](https://github.com/karpathy/nanochat)
+The working copy may advance independently. `studied_revision` changes only
+after its diff and affected knowledge have been reviewed.
 
-- Local source: [upstream README](code/nanochat/README.md)
-- License: [MIT](code/nanochat/LICENSE)
+## Codebase map
 
-Initialize it after cloning:
+The speedrun is the shortest architecture map: prepare data and train the
+tokenizer, train and evaluate the base model, then perform chat finetuning and
+evaluation. The repository's tokenizer, model, training scripts, optimizer,
+evaluation, and inference engine are the main evidence surfaces.
 
-```bash
-git submodule update --init --recursive
-```
+Open the self-contained [Nanochat code vault](nanochat/) for its
+[pipeline narrative](nanochat/summaries/nanochat-end-to-end-training-pipeline.md),
+[imported repository documentation](nanochat/summaries/deepwiki-01-overview.md),
+[durable code Queries](nanochat/queries/), and
+[current task](nanochat/tasks/current.md). Higher-level [papers](../raw/),
+[concepts](../concepts/), and [comparisons](../comparisons/) stay in the outer
+vault.
 
-## Start with the pipeline
+## Current work
 
-[`runs/speedrun.sh`](code/nanochat/runs/speedrun.sh) is the shortest executable
-tour. At this revision it downloads the current pretraining shards, trains and
-evaluates a 32,768-token BPE tokenizer, pretrains and evaluates a depth-24 base
-model across eight GPUs, then performs supervised chat finetuning and chat
-evaluation.
+The current task is to verify the imported DeepWiki discovery map against the
+studied commit once the in-place working copy is available. Detailed state
+belongs in [`tasks/current.md`](nanochat/tasks/current.md); this card keeps only
+the short catalog-level status.
 
-```bash
-git submodule update --init --recursive
-```
+## Knowledge boundary
 
-The script intentionally does not run every optional stage. In particular,
-[`scripts/chat_rl.py`](code/nanochat/scripts/chat_rl.py) provides a separate
-on-policy GSM8K reinforcement-learning stage, and
-[`scripts/chat_cli.py`](code/nanochat/scripts/chat_cli.py) loads either an SFT
-or RL checkpoint for conversation.
-
-## Source map
-
-| Question                                                 | Primary source                                                                                                                 |
-| -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| How is the tokenizer trained and conversations rendered? | [`nanochat/tokenizer.py`](code/nanochat/nanochat/tokenizer.py), [`scripts/tok_train.py`](code/nanochat/scripts/tok_train.py)   |
-| Where do pretraining documents come from?                | [`nanochat/dataset.py`](code/nanochat/nanochat/dataset.py)                                                                     |
-| How are documents packed across ranks?                   | [`nanochat/dataloader.py`](code/nanochat/nanochat/dataloader.py)                                                               |
-| What is the transformer architecture?                    | [`nanochat/gpt.py`](code/nanochat/nanochat/gpt.py)                                                                             |
-| How are attention kernels selected?                      | [`nanochat/flash_attention.py`](code/nanochat/nanochat/flash_attention.py)                                                     |
-| How are AdamW and Muon combined?                         | [`nanochat/optim.py`](code/nanochat/nanochat/optim.py)                                                                         |
-| How is base training configured?                         | [`scripts/base_train.py`](code/nanochat/scripts/base_train.py)                                                                 |
-| How are compression and capability measured?             | [`nanochat/loss_eval.py`](code/nanochat/nanochat/loss_eval.py), [`nanochat/core_eval.py`](code/nanochat/nanochat/core_eval.py) |
-| How does supervised chat training work?                  | [`scripts/chat_sft.py`](code/nanochat/scripts/chat_sft.py)                                                                     |
-| How does optional RL work?                               | [`scripts/chat_rl.py`](code/nanochat/scripts/chat_rl.py)                                                                       |
-| How does cached autoregressive generation work?          | [`nanochat/engine.py`](code/nanochat/nanochat/engine.py)                                                                       |
-| What tasks evaluate the chat model?                      | [`scripts/chat_eval.py`](code/nanochat/scripts/chat_eval.py), [`tasks/`](code/nanochat/tasks/)                                 |
-
-## Wiki orientation
-
-Read the [end-to-end training summary](/summaries/nanochat-end-to-end-training-pipeline)
-for a narrative, then use [where the paper ideas appear in Nanochat](../queries/where-do-the-paper-ideas-appear-in-nanochat.md)
-to jump between research evidence and exact implementation files.
-The [code index](code/_index.md) is the progressive-disclosure entry point into
-the pinned submodule.
-
-The project is a moving experimental baseline. This wiki describes only the
-pinned revision; later upstream behavior is not silently projected backward
-onto this source snapshot.
+The code checkout is not distributed with the vault. Code claims retain their
+historical commit and path, but remain `draft`/`awaiting-source` until the
+in-place checkout is available and content hashes are verified.
 
 [^nanochat-repository]: Nanochat repository

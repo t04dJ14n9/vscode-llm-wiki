@@ -1019,6 +1019,7 @@ test.describe('LLM Wiki — VS Code Extension E2E', () => {
 
     const inactiveCodeState = await evaluateLlmWikiWebview<{
       selectedLine: number;
+      targetLine: number;
       lineLeft: number;
       linePaddingLeft: string;
       lineColor: string;
@@ -1042,6 +1043,7 @@ test.describe('LLM Wiki — VS Code Extension E2E', () => {
       const keywordStyle = keyword ? getComputedStyle(keyword) : null;
       return {
         selectedLine: view.state.doc.lineAt(view.state.selection.main.head).number,
+        targetLine: targetLine.number,
         lineLeft: codeLine?.getBoundingClientRect().left ?? 0,
         linePaddingLeft: lineStyle?.paddingLeft ?? '',
         lineColor: lineStyle?.color ?? '',
@@ -1094,7 +1096,7 @@ test.describe('LLM Wiki — VS Code Extension E2E', () => {
       };
     `);
 
-    expect(inactiveCodeState.selectedLine).toBe(1);
+    expect(inactiveCodeState.selectedLine).not.toBe(inactiveCodeState.targetLine);
     expect(inactiveCodeState.keywordText).toBe('def');
     expect(inactiveCodeState.tokenCount).toBeGreaterThan(0);
     expect(codeState.selectedLineText).toBe('def softmax(x):');

@@ -3,9 +3,12 @@ type: "Concept"
 title: "Byte-pair encoding"
 description: "A subword vocabulary learned by repeatedly merging frequent adjacent symbols."
 tags: ["tokenization", "language-models", "project-nanochat"]
-status: "stable"
+status: "draft"
+scope: "vault"
 generated: {"by": "codex/gpt-5.6", "at": "2026-08-13T00:00:00Z"}
-sources: [{"id": "bpe-paper", "resource": "../raw/neural-machine-translation-of-rare-words-with-subword-units.md", "title": "Neural Machine Translation of Rare Words with Subword Units"}, {"id": "nanochat-tokenizer", "resource": "../projects/code/nanochat/nanochat/tokenizer.py", "title": "Nanochat tokenizer", "commit": "92d63d4e8bb4df75c3b71618f31ddde2378b2bcd"}]
+sources: [{"id": "bpe-paper", "resource": "../raw/neural-machine-translation-of-rare-words-with-subword-units.md", "title": "Neural Machine Translation of Rare Words with Subword Units"}, {"id": "nanochat-tokenizer", "resource": "../projects/code/nanochat/nanochat/tokenizer.py", "title": "Nanochat tokenizer", "repository": "nanochat", "revision": "92d63d4e8bb4df75c3b71618f31ddde2378b2bcd", "path": "nanochat/tokenizer.py"}]
+created: {"by": "process:project-scope-migration", "at": "2026-08-23T00:00:00Z"}
+source_state: "awaiting-source"
 ---
 
 # Byte-pair encoding
@@ -36,8 +39,8 @@ without making raw token count the unit of comparison.
 ## Related pages
 
 - [Chat formatting](chat-formatting.md)
-- [Nanochat training pipeline](../summaries/nanochat-end-to-end-training-pipeline.md)
-- [Why Nanochat uses bits per byte](../queries/why-does-nanochat-use-bits-per-byte.md)
+- [Nanochat training pipeline](../projects/nanochat/summaries/nanochat-end-to-end-training-pipeline.md)
+- [Why Nanochat uses bits per byte](../projects/nanochat/queries/why-does-nanochat-use-bits-per-byte.md)
 
 [^bpe-paper]: [Neural Machine Translation of Rare Words with Subword Units](../raw/neural-machine-translation-of-rare-words-with-subword-units.md)
 [^nanochat-tokenizer]: Nanochat tokenizer

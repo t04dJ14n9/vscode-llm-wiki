@@ -38,6 +38,10 @@ import {
   registerMarkdownOutlineTreeProvider,
 } from './markdownSymbols';
 import { PdfEditorProvider } from './pdfEditorProvider';
+import {
+  QueryAnnotationIndex,
+  registerQueryAnnotationWatchers,
+} from './queryAnnotationIndex';
 import { syncRepository } from './repositorySync';
 import type { SelectionContext } from './selectionContext';
 import { dispatchUri } from './uriDispatcher';
@@ -48,11 +52,12 @@ let pdfEditorProvider: PdfEditorProvider | undefined;
 let markdownEditorProvider: MarkdownEditorProvider | undefined;
 let markdownOutlineProvider: MarkdownOutlineTreeProvider | undefined;
 let graphPanel: KnowledgeGraphPanel | undefined;
+let queryAnnotationIndex: QueryAnnotationIndex | undefined;
 let refreshTimer: NodeJS.Timeout | undefined;
 
 const STARTUP_CUSTOM_EDITOR_RETRY_DELAYS_MS = [0, 250, 1_000] as const;
 const WORKSPACE_REQUIRED_MESSAGE =
-  'Open a folder to use LLM Wiki notes and repository features.';
+  'Open a folder to use LLM Wiki Queries and repository features.';
 const AGENT_HANDOFF_ACTIVE_CONTEXT_KEY = 'llmWikiAgentHandoffActive';
 
 interface AddSelectionToChatInput {
@@ -69,6 +74,21 @@ export function activate(context: vscode.ExtensionContext): void {
   const learningNotes = workspaceRoot
     ? new LearningNoteStore(workspaceRoot)
     : undefined;
+  const queryDiagnostics = workspaceRoot && vscode.languages?.createDiagnosticCollection
+    ? vscode.languages.createDiagnosticCollection('llm-wiki-queries')
+    : undefined;
+  if (queryDiagnostics) context.subscriptions.push(queryDiagnostics);
+  queryAnnotationIndex = workspaceRoot
+    ? new QueryAnnotationIndex(workspaceRoot, { legacyStore: learningNotes })
+    : undefined;
+  if (queryAnnotationIndex) {
+    context.subscriptions.push(queryAnnotationIndex);
+    registerQueryAnnotationWatchers(
+      context,
+      vscode.workspace,
+      queryAnnotationIndex,
+    );
+  }
 
   registerLinkProvider(context);
   registerMarkdownOutlineProvider(context);
@@ -78,11 +98,15 @@ export function activate(context: vscode.ExtensionContext): void {
   markdownEditorProvider = new MarkdownEditorProvider(context, learningNotes, {
     agentCapabilities: () => agentCapabilitySource.read(),
     onDidChangeAgentCapabilities: agentCapabilitySource.onDidChange,
+    ...(queryAnnotationIndex ? { queryAnnotationIndex } : {}),
+    ...(queryDiagnostics ? { queryDiagnostics } : {}),
   });
   pdfEditorProvider = new PdfEditorProvider(context, {
     ...(workspaceRoot ? { vaultRoot: workspaceRoot, documentRoot: workspaceRoot } : {}),
     agentCapabilities: () => agentCapabilitySource.read(),
     onDidChangeAgentCapabilities: agentCapabilitySource.onDidChange,
+    ...(queryAnnotationIndex ? { queryAnnotationIndex } : {}),
+    ...(queryDiagnostics ? { queryDiagnostics } : {}),
   });
   void vscode.commands.executeCommand(
     'setContext',
@@ -155,8 +179,8 @@ export function activate(context: vscode.ExtensionContext): void {
   refreshAllViews();
   vscode.window.showInformationMessage(
     workspaceRoot
-      ? `LLM Wiki ready — Markdown, PDF, and Git-backed notes at ${workspaceRoot}`
-      : 'LLM Wiki viewers ready — open a folder to enable learning notes and repository features.',
+      ? `LLM Wiki for VS Code ready — Markdown, PDF, and Git-backed knowledge at ${workspaceRoot}`
+      : 'LLM Wiki for VS Code viewers ready — open a folder to enable Queries and repository features.',
   );
 }
 
@@ -502,9 +526,15 @@ function registerMarkdownWatcher(context: vscode.ExtensionContext): void {
 }
 
 async function refreshFilesystemViews(): Promise<void> {
+  queryAnnotationIndex?.invalidate();
   refreshAllViews();
-  if (typeof markdownEditorProvider?.refreshLearningAnnotations === 'function') {
+  if (typeof markdownEditorProvider?.refreshQueryAnnotations === 'function') {
+    await markdownEditorProvider.refreshQueryAnnotations();
+  } else if (typeof markdownEditorProvider?.refreshLearningAnnotations === 'function') {
     await markdownEditorProvider.refreshLearningAnnotations();
+  }
+  if (typeof pdfEditorProvider?.refreshQueryAnnotations === 'function') {
+    await pdfEditorProvider.refreshQueryAnnotations();
   }
 }
 
@@ -519,6 +549,8 @@ export function deactivate(): void {
   refreshTimer = undefined;
   graphPanel?.dispose();
   graphPanel = undefined;
+  queryAnnotationIndex?.dispose();
+  queryAnnotationIndex = undefined;
 }
 
 function setAgentHandoffActive(active: boolean): void {

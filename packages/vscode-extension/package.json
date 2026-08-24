@@ -1,9 +1,9 @@
 {
   "name": "llm-wiki-vscode",
-  "displayName": "LLM Wiki",
+  "displayName": "LLM Wiki for VS Code",
   "version": "0.2.0",
   "private": true,
-  "description": "LLM Wiki — a local-first VS Code vault for agentic study",
+  "description": "Local-first, source-grounded Markdown, PDF, and code knowledge workbench",
   "publisher": "llm-wiki",
   "license": "MIT",
   "repository": {

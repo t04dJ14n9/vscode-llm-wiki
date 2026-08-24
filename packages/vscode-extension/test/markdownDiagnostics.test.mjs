@@ -85,10 +85,10 @@ test('collectMarkdownDiagnostics reports a missing local link at its destination
 
   const diagnostics = await collectMarkdownDiagnostics({
     content,
-    filePath: '/workspace/index.md',
+    filePath: '/workspace/_index.md',
     workspaceRoot: '/workspace',
     fileSystem: {
-      exists: candidate => candidate === '/workspace/index.md',
+      exists: candidate => candidate === '/workspace/_index.md',
       isDirectory: () => false,
       readText: async () => '',
     },
@@ -103,4 +103,28 @@ test('collectMarkdownDiagnostics reports a missing local link at its destination
     code: 'MD-LINK',
     severity: 'error',
   }]);
+});
+
+test('directory link diagnostics accept the canonical underscore index', async () => {
+  const markdownLinkDiagnostics = loadTsModule('src/markdownLinkDiagnostics.ts');
+  const { collectMarkdownDiagnostics } = loadTsModule('src/markdownDiagnostics.ts', {
+    './markdownLint': {
+      lintMarkdownContent: async () => ({}),
+      mapMarkdownLintResults: () => [],
+    },
+    './markdownLinkDiagnostics': markdownLinkDiagnostics,
+  });
+
+  const files = new Set(['/workspace/home.md', '/workspace/notes/_index.md']);
+  const diagnostics = await collectMarkdownDiagnostics({
+    content: '[Notes](notes/)\n',
+    filePath: '/workspace/home.md',
+    workspaceRoot: '/workspace',
+    fileSystem: {
+      exists: candidate => files.has(candidate) || candidate === '/workspace/notes',
+      isDirectory: candidate => candidate === '/workspace/notes',
+      readText: async () => '',
+    },
+  });
+  assert.equal(diagnostics.some(diagnostic => diagnostic.code === 'MD-LINK'), false);
 });

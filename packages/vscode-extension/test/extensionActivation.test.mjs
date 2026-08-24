@@ -114,6 +114,15 @@ function loadTsModule(relativePath, mocks = {}) {
         LearningNoteStore: class {},
       };
     }
+    if (request === './queryAnnotationIndex') {
+      return {
+        QueryAnnotationIndex: class {
+          invalidate() {}
+          dispose() {}
+        },
+        registerQueryAnnotationWatchers: () => ({ dispose() {} }),
+      };
+    }
     if (request === './dailyNotes') {
       return {
         generateDailyNote: async () => ({
@@ -2399,7 +2408,7 @@ test('no-folder activation keeps custom viewers read-only and gates repository l
   assert.equal(treeProviderIds.length, 0);
   assert.equal(watcherCount, 0);
   assert.ok(informationMessages.includes(
-    'LLM Wiki viewers ready — open a folder to enable learning notes and repository features.',
+    'LLM Wiki for VS Code viewers ready — open a folder to enable Queries and repository features.',
   ));
 
   await vscode.__registeredCommands['llm-wiki.generateDailyNote']();
@@ -2410,7 +2419,7 @@ test('no-folder activation keeps custom viewers read-only and gates repository l
   assert.equal(exportedSelectionCount, 0);
   assert.equal(warningMessages.length, 2);
   assert.ok(warningMessages.every(message =>
-    message === 'Open a folder to use LLM Wiki notes and repository features.'
+    message === 'Open a folder to use LLM Wiki Queries and repository features.'
   ));
 
   await vscode.__registeredCommands['llm-wiki.openPdfTarget']({

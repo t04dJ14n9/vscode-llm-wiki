@@ -13,10 +13,10 @@ source_url: "https://arxiv.org/abs/2209.05433v2"
 ingested: "2026-08-13"
 submitted: "2022-09-12"
 revised: "2022-09-29"
-sha256: "b4d307f68361c935c86a24dabbd6f3fedfdcf20039ea3226fd9c0232888e9597"
+sha256: "a0e57faac2121f3b2c9f32d0d21ab7fdabd820e406cbe832a5ac7c41efe890a5"
 arxiv: {"id": "2209.05433", "version": 2}
 license: {"id": "CC-BY-4.0", "url": "https://creativecommons.org/licenses/by/4.0/"}
-attachment: {"resource": "assets/fp8-formats-for-deep-learning.pdf", "media_type": "application/pdf", "bytes": 281195, "sha256": "809a9557e907765b452c5a1b7308a92e31dd31a07e668d49d14b1594b6c0cf0c"}
+attachment: {"resource": "../assets/fp8-formats-for-deep-learning.pdf", "media_type": "application/pdf", "bytes": 281195, "sha256": "809a9557e907765b452c5a1b7308a92e31dd31a07e668d49d14b1594b6c0cf0c", "role": "original"}
 extraction: {"tool": "pdftotext", "version": "pdftotext version 26.04.0"}
 ---
 
@@ -29,7 +29,7 @@ extraction: {"tool": "pdftotext", "version": "pdftotext version 26.04.0"}
 - **Submitted:** 2022-09-12
 - **Revised:** 2022-09-29
 - **License:** [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)
-- **Local attachment:** [Open the archived PDF](assets/fp8-formats-for-deep-learning.pdf)
+- **Local attachment:** [Open the archived PDF](../assets/fp8-formats-for-deep-learning.pdf)
 
 > Extraction notice: The text below was produced mechanically with
 > `pdftotext version 26.04.0`. Reading order, equations, tables, figures, and

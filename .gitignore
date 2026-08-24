@@ -20,6 +20,8 @@ test-results/
 **/test-results/
 e2e-report/
 output/
+!/demo-vault/projects/*/output/
+!/demo-vault/projects/*/output/**
 artifacts/
 .playwright-cli/
 .vscode-test/
@@ -38,6 +40,9 @@ artifacts/
 
 demos/
 reference/
+
+# In-place code working copies registered by project ID
+/demo-vault/projects/code/
 
 *.sqlite
 *.sqlite-shm

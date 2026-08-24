@@ -31,6 +31,10 @@ const viewerSource = join(
   packageRoot,
   '../pdf-editor/src/webview/pdf-viewer.ts',
 );
+const queryAnnotationsSource = join(
+  packageRoot,
+  '../pdf-editor/src/webview/pdfQueryAnnotations.ts',
+);
 
 function compileTsModule(filename, mocks = {}) {
   const source = readFileSync(filename, 'utf8');
@@ -62,6 +66,7 @@ const pdfSearch = compileTsModule(searchSource);
 const pdfToolbarLayout = compileTsModule(toolbarLayoutSource);
 const pdfAreaSelection = compileTsModule(areaSelectionSource);
 const pdfTextExtraction = compileTsModule(extractionSource);
+const pdfQueryAnnotations = compileTsModule(queryAnnotationsSource);
 const pdfSelection = compileTsModule(selectionSource, {
   './pdfSearch': pdfSearch,
   './pdfTextExtraction': pdfTextExtraction,
@@ -105,6 +110,7 @@ const pdfViewer = compileTsModule(viewerSource, {
   './pdfTextLayer': {},
   './obsidianContextMenu': {},
   './pdfTextBands': {},
+  './pdfQueryAnnotations': pdfQueryAnnotations,
 });
 if (originalWindow === undefined) delete globalThis.window;
 else globalThis.window = originalWindow;
@@ -124,6 +130,37 @@ function deferred() {
     reject: rejectPromise,
   };
 }
+
+test('PDF Query annotations validate, bound, and sort viewer-safe geometry', () => {
+  const annotations = pdfQueryAnnotations.normalizePdfQueryAnnotations([
+    {
+      annotationId: 'draft',
+      queryPath: 'queries/draft.md',
+      title: 'Draft answer',
+      status: 'draft',
+      condensedSummary: 'Draft summary.',
+      updatedTime: '2026-08-24T00:00:00Z',
+      navigationTarget: { kind: 'query', queryPath: 'queries/draft.md' },
+      page: 2,
+      rects: [[10, 20, 40, 30]],
+    },
+    {
+      annotationId: 'stable',
+      queryPath: 'queries/stable.md',
+      title: 'Stable answer',
+      status: 'stable',
+      condensedSummary: 'Stable summary.',
+      updatedTime: '2026-08-23T00:00:00Z',
+      navigationTarget: { kind: 'query', queryPath: 'queries/stable.md' },
+      page: 2,
+      rects: [[10, 20, 40, 30]],
+    },
+    { status: 'stable', page: 0, rects: [[0, 0, 0, 0]] },
+  ]);
+
+  assert.deepEqual(annotations.map(annotation => annotation.annotationId), ['stable', 'draft']);
+  assert.deepEqual(annotations[0].rects, [[10, 20, 40, 30]]);
+});
 
 function resetPdfAgentClipboardState() {
   const pendingPng = deferred();

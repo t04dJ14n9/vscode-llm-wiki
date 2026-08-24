@@ -3,9 +3,12 @@ type: "Concept"
 title: "Rotary position embeddings"
 description: "Position-dependent rotations applied to attention queries and keys."
 tags: ["architecture", "attention", "language-models"]
-status: "stable"
+status: "draft"
+scope: "vault"
 generated: {"by": "codex/gpt-5.6", "at": "2026-08-13T00:00:00Z"}
-sources: [{"id": "roformer", "resource": "https://arxiv.org/abs/2104.09864v5", "title": "RoFormer: Enhanced Transformer with Rotary Position Embedding"}, {"id": "gpt-source", "resource": "../projects/code/nanochat/nanochat/gpt.py", "title": "Nanochat GPT implementation", "commit": "92d63d4e8bb4df75c3b71618f31ddde2378b2bcd"}]
+sources: [{"id": "roformer", "resource": "https://arxiv.org/abs/2104.09864v5", "title": "RoFormer: Enhanced Transformer with Rotary Position Embedding"}, {"id": "gpt-source", "resource": "../projects/code/nanochat/nanochat/gpt.py", "title": "Nanochat GPT implementation", "repository": "nanochat", "revision": "92d63d4e8bb4df75c3b71618f31ddde2378b2bcd", "path": "nanochat/gpt.py"}]
+created: {"by": "process:project-scope-migration", "at": "2026-08-23T00:00:00Z"}
+source_state: "awaiting-source"
 ---
 
 # Rotary position embeddings

@@ -385,6 +385,10 @@
   }
   .text-layer span::selection { background: transparent; }
   .highlight-layer { right: 0; bottom: 0; pointer-events: none; }
+  .pdf-query-highlight { position: absolute; border-bottom: 2px solid #4daafc; background: rgba(77,170,252,.18); pointer-events: none; }
+  .pdf-query-marker { position: absolute; z-index: 8; pointer-events: auto; }
+  .pdf-query-popover { position: fixed; z-index: 1200; width: 360px; max-height: 280px; overflow: auto; background: #252526; color: #fff; border: 1px solid #555; padding: 10px; }
+  .pdf-query-popover[hidden] { display: none; }
   .pdf-selection-rect {
     position: absolute;
     z-index: 14;

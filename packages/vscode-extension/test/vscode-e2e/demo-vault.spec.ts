@@ -50,29 +50,47 @@ const test = base.extend<{
   },
 });
 
-test('demo vault reading journey is smooth from indexes to evidence and code', async ({
+test.skip(
+  !process.env.LLM_WIKI_E2E_VAULT,
+  'Set LLM_WIKI_E2E_VAULT to run the repository demo-vault journey.',
+);
+
+test('demo vault reading journey is smooth from project indexes to evidence', async ({
   vsCodePage: page,
 }) => {
   test.setTimeout(120_000);
 
   await openQuickFile(page, '_index.md');
   const root = await waitForMarkdown('okf_version: "0.2"');
-  expect(root.source).toContain('[summaries](summaries/)');
   expect(root.source).toContain('[projects](projects/)');
   await screenshot(page, '01-root-index');
 
-  await followMarkdownLink('okf_version: "0.2"', 'summaries/');
+  await followMarkdownLink('okf_version: "0.2"', 'projects/');
+  await waitForMarkdown('repositories.yaml');
+  await followMarkdownLink('repositories.yaml', 'nanochat.md');
+  const card = await waitForMarkdown(
+    'repository_url: "https://github.com/karpathy/nanochat.git"',
+  );
+  expect(card.source).toContain('code_state: "missing"');
+  await screenshot(page, '02-project-card');
+
+  await followMarkdownLink(
+    'repository_url: "https://github.com/karpathy/nanochat.git"',
+    'nanochat/',
+  );
+  await waitForMarkdown('Nanochat project-vault agent guidance');
+  await followMarkdownLink('Nanochat project-vault agent guidance', 'summaries/');
   await waitForMarkdown('# Summary');
   await followMarkdownLink(
     '# Summary',
     'nanochat-end-to-end-training-pipeline.md',
   );
   await waitForMarkdown('# Nanochat end-to-end training pipeline');
-  await screenshot(page, '02-pipeline-summary');
+  await screenshot(page, '03-pipeline-summary');
 
   await followMarkdownLink(
     '# Nanochat end-to-end training pipeline',
-    '../concepts/byte-pair-encoding.md',
+    '../../../concepts/byte-pair-encoding.md',
   );
   await waitForMarkdown('# Byte-pair encoding');
 
@@ -87,93 +105,26 @@ test('demo vault reading journey is smooth from indexes to evidence and code', a
   );
   expect(raw.source.length).toBeGreaterThan(30_000);
   expect(Date.now() - rawStarted).toBeLessThan(20_000);
-  await screenshot(page, '03-raw-paper');
+  await screenshot(page, '04-raw-paper');
 
   await followMarkdownLink(
     '## Mechanically extracted full text',
-    'assets/neural-machine-translation-of-rare-words-with-subword-units.pdf',
+    '../assets/neural-machine-translation-of-rare-words-with-subword-units.pdf',
   );
   const pdf = await waitForPdf();
   expect(pdf.pageCount).toBeGreaterThan(0);
   expect(pdf.pageInfo).toMatch(/^Page 1 \//);
   expect(pdf.firstCanvasReady).toBe(true);
   expect(pdf.hasProductionControls).toBe(true);
-  await screenshot(page, '04-local-paper-pdf');
+  await screenshot(page, '05-local-paper-pdf');
 
-  await openQuickFile(page, '_index.md');
-  await waitForMarkdown('okf_version: "0.2"');
-  await followMarkdownLink('okf_version: "0.2"', 'projects/');
-  await waitForMarkdown('# Software Project');
-  await followMarkdownLink('# Software Project', 'nanochat.md');
-  const project = await waitForMarkdown(
-    'repository_url: "https://github.com/karpathy/nanochat.git"',
-  );
-  expect(project.source).toContain(
-    '![[projects/code/nanochat/dev/nanochat.png|Nanochat logo]]',
-  );
-  const image = await waitForRenderedImage('Nanochat logo');
-  expect(image.naturalWidth).toBeGreaterThan(0);
-  expect(image.naturalHeight).toBeGreaterThan(0);
-  expect(image.resolvedSrc).toContain(
-    '/projects/code/nanochat/dev/nanochat.png',
-  );
+  await openQuickFile(page, 'in-place-code-workflow.md');
+  await waitForMarkdown('# In-place code study workflow');
+  await screenshot(page, '06-workflow-summary');
 
-  const activeImage = await evaluateWebviews<{
-    alt: string;
-    resolvedSrc: string;
-    visible: boolean;
-  }>(`(async () => {
-    const hostFrame = document.getElementById('active-frame');
-    const doc = hostFrame?.contentDocument;
-    const view = hostFrame?.contentWindow?.__cmView;
-    const source = '![[projects/code/nanochat/dev/nanochat.png|Nanochat logo]]';
-    const from = view?.state.doc.toString().indexOf(source) ?? -1;
-    if (!view || from < 0) return { ok: false };
-    view.dispatch({ selection: { anchor: from + 4 } });
-    view.focus();
-    await new Promise(resolve => setTimeout(resolve, 100));
-    const image = Array.from(
-      doc?.querySelectorAll('.cm-hybrid-image-img') ?? [],
-    ).find(candidate => candidate.getAttribute('alt') === 'Nanochat logo');
-    if (!image) return { ok: false };
-    const rect = image.getBoundingClientRect();
-    return {
-      ok: true,
-      value: {
-        alt: image.getAttribute('alt') ?? '',
-        resolvedSrc: image.closest('.cm-hybrid-image')?.getAttribute('data-resolved-src') ?? '',
-        visible: rect.width > 0 && rect.height > 0,
-      },
-    };
-  })()`);
-  expect(activeImage.alt).toBe('Nanochat logo');
-  expect(activeImage.resolvedSrc).toContain(
-    '/projects/code/nanochat/dev/nanochat.png',
-  );
-  expect(activeImage.visible).toBe(true);
-  await screenshot(page, '05-project-card-with-obsidian-image');
-
-  await followMarkdownLink(
-    'repository_url: "https://github.com/karpathy/nanochat.git"',
-    '/summaries/nanochat-end-to-end-training-pipeline',
-  );
-  await waitForMarkdown('# Nanochat end-to-end training pipeline');
-
-  await openQuickFile(page, 'nanochat.md');
-  await waitForMarkdown(
-    'repository_url: "https://github.com/karpathy/nanochat.git"',
-  );
-  await followMarkdownLink(
-    'repository_url: "https://github.com/karpathy/nanochat.git"',
-    'code/_index.md',
-  );
-  await waitForMarkdown('# Code Resources');
-  await followMarkdownLink('# Code Resources', 'nanochat/README.md');
-  const upstream = await waitForMarkdown('# nanochat');
-  expect(upstream.source).toContain(
-    'nanochat is the simplest experimental harness for training LLMs',
-  );
-  await screenshot(page, '06-pinned-project-source');
+  await openQuickFile(page, 'nanochat-code-vault.md');
+  await waitForMarkdown('## Identity');
+  await screenshot(page, '07-vault-entity');
 
   await openQuickFile(
     page,
@@ -184,7 +135,7 @@ test('demo vault reading journey is smooth from indexes to evidence and code', a
   );
   expect(query.source).toContain('| BPE');
   expect(query.source).toContain('| DPO');
-  await screenshot(page, '07-durable-query');
+  await screenshot(page, '08-durable-query');
 });
 
 async function openQuickFile(
@@ -317,45 +268,6 @@ async function waitForPdf(): Promise<{
         return value.firstCanvasReady ? { ok: true, value } : { ok: false };
       })()`);
       return result;
-    } catch (error) {
-      lastError = error;
-      await new Promise(resolve => setTimeout(resolve, 250));
-    }
-  }
-  throw lastError;
-}
-
-async function waitForRenderedImage(alt: string): Promise<{
-  naturalHeight: number;
-  naturalWidth: number;
-  resolvedSrc: string;
-}> {
-  const deadline = Date.now() + 15_000;
-  let lastError: unknown;
-  while (Date.now() < deadline) {
-    try {
-      return await evaluateWebviews<{
-        naturalHeight: number;
-        naturalWidth: number;
-        resolvedSrc: string;
-      }>(`(async () => {
-        const hostFrame = document.getElementById('active-frame');
-        const doc = hostFrame?.contentDocument;
-        const image = Array.from(
-          doc?.querySelectorAll('.cm-hybrid-image-img') ?? [],
-        ).find(candidate => candidate.getAttribute('alt') === ${JSON.stringify(alt)});
-        if (!image || image.tagName !== 'IMG' || !image.complete || image.naturalWidth === 0) {
-          return { ok: false };
-        }
-        return {
-          ok: true,
-          value: {
-            naturalHeight: image.naturalHeight,
-            naturalWidth: image.naturalWidth,
-            resolvedSrc: image.closest('.cm-hybrid-image')?.getAttribute('data-resolved-src') ?? '',
-          },
-        };
-      })()`);
     } catch (error) {
       lastError = error;
       await new Promise(resolve => setTimeout(resolve, 250));

@@ -107,7 +107,7 @@ test('filesystem wiki resolves basename wikilinks to the closest note', () => {
   assert.equal(link.resolved, true);
 });
 
-test('filesystem wiki resolves only canonical OKF directory indexes', () => {
+test('filesystem wiki resolves canonical underscore indexes', () => {
   const wiki = filesystemWiki.createFilesystemWiki([
     {
       path: '_index.md',
@@ -131,7 +131,7 @@ test('filesystem wiki resolves only canonical OKF directory indexes', () => {
       text: '# Tokenization',
     },
     {
-      path: 'legacy/index.md',
+      path: 'legacy/_index.md',
       text: '# Legacy index',
     },
   ]);
@@ -144,7 +144,7 @@ test('filesystem wiki resolves only canonical OKF directory indexes', () => {
     [
       ['concepts/_index.md', true],
       ['concepts/tokenization.md', true],
-      ['legacy.md', false],
+      ['legacy/_index.md', true],
     ],
   );
   assert.deepEqual(
@@ -152,6 +152,7 @@ test('filesystem wiki resolves only canonical OKF directory indexes', () => {
     [
       ['_index.md', 'concepts/_index.md'],
       ['_index.md', 'concepts/tokenization.md'],
+      ['_index.md', 'legacy/_index.md'],
     ],
   );
 });

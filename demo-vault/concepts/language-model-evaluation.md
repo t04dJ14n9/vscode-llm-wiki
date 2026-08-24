@@ -3,9 +3,12 @@ type: "Concept"
 title: "Language-model evaluation"
 description: "Separating predictive compression, benchmark capability, chat behavior, and generation inspection."
 tags: ["evaluation", "language-models", "reproducibility"]
-status: "stable"
+status: "draft"
+scope: "vault"
 generated: {"by": "codex/gpt-5.6", "at": "2026-08-13T00:00:00Z"}
-sources: [{"id": "loss-eval", "resource": "../projects/code/nanochat/nanochat/loss_eval.py", "title": "Nanochat loss evaluation", "commit": "92d63d4e8bb4df75c3b71618f31ddde2378b2bcd"}, {"id": "core-eval", "resource": "../projects/code/nanochat/nanochat/core_eval.py", "title": "Nanochat CORE evaluation", "commit": "92d63d4e8bb4df75c3b71618f31ddde2378b2bcd"}, {"id": "chat-eval", "resource": "../projects/code/nanochat/scripts/chat_eval.py", "title": "Nanochat chat evaluation", "commit": "92d63d4e8bb4df75c3b71618f31ddde2378b2bcd"}]
+sources: [{"id": "loss-eval", "resource": "../projects/code/nanochat/nanochat/loss_eval.py", "title": "Nanochat loss evaluation", "repository": "nanochat", "revision": "92d63d4e8bb4df75c3b71618f31ddde2378b2bcd", "path": "nanochat/loss_eval.py"}, {"id": "core-eval", "resource": "../projects/code/nanochat/nanochat/core_eval.py", "title": "Nanochat CORE evaluation", "repository": "nanochat", "revision": "92d63d4e8bb4df75c3b71618f31ddde2378b2bcd", "path": "nanochat/core_eval.py"}, {"id": "chat-eval", "resource": "../projects/code/nanochat/scripts/chat_eval.py", "title": "Nanochat chat evaluation", "repository": "nanochat", "revision": "92d63d4e8bb4df75c3b71618f31ddde2378b2bcd", "path": "scripts/chat_eval.py"}]
+created: {"by": "process:project-scope-migration", "at": "2026-08-23T00:00:00Z"}
+source_state: "awaiting-source"
 ---
 
 # Language-model evaluation
@@ -35,8 +38,8 @@ model.
 ## Related pages
 
 - [Bits per byte](bits-per-byte.md)
-- [Nanochat model family](../entities/nanochat-model-family.md)
-- [How a reader can reproduce the pipeline](../queries/how-can-a-reader-reproduce-the-pipeline.md)
+- [Nanochat model family](../projects/nanochat/entities/nanochat-model-family.md)
+- [How a reader can reproduce the pipeline](../projects/nanochat/queries/how-can-a-reader-reproduce-the-pipeline.md)
 
 [^loss-eval]: Nanochat loss evaluation
 [^core-eval]: Nanochat CORE evaluation

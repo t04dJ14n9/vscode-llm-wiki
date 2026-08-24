@@ -1,4 +1,4 @@
 interface:
-  display_name: "LLM Wiki Vault"
-  short_description: "Build and maintain source-backed LLM wikis"
-  default_prompt: "Use $llm-wiki to initialize or maintain a source-backed OKF LLM wiki vault."
+  display_name: "LLM Wiki for VS Code"
+  short_description: "Maintain project-scoped, source-backed OKF vaults"
+  default_prompt: "Use $llm-wiki to maintain this project-scoped LLM Wiki and its Markdown/PDF source annotations."

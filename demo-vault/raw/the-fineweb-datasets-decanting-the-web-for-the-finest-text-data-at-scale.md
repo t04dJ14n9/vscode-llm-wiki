@@ -13,10 +13,10 @@ source_url: "https://arxiv.org/abs/2406.17557v2"
 ingested: "2026-08-13"
 submitted: "2024-06-25"
 revised: "2024-10-31"
-sha256: "b0fc5f450405c0c2d1cdf77e20e61b94733a6960a44cd5489a166b73921ef64c"
+sha256: "17a8c0fe59104cd84cac6fc2facd72328edfcd61983b2517960ff60f4f37bc1e"
 arxiv: {"id": "2406.17557", "version": 2}
 license: {"id": "CC-BY-4.0", "url": "https://creativecommons.org/licenses/by/4.0/"}
-attachment: {"resource": "assets/the-fineweb-datasets-decanting-the-web-for-the-finest-text-data-at-scale.pdf", "media_type": "application/pdf", "bytes": 3137041, "sha256": "ae632bd6618d2566e708962670f27ab1fbc5ba9bc8de3acaceee8fbda85fbdd4"}
+attachment: {"resource": "../assets/the-fineweb-datasets-decanting-the-web-for-the-finest-text-data-at-scale.pdf", "media_type": "application/pdf", "bytes": 3137041, "sha256": "ae632bd6618d2566e708962670f27ab1fbc5ba9bc8de3acaceee8fbda85fbdd4", "role": "original"}
 extraction: {"tool": "pdftotext", "version": "pdftotext version 26.04.0"}
 ---
 
@@ -29,7 +29,7 @@ extraction: {"tool": "pdftotext", "version": "pdftotext version 26.04.0"}
 - **Submitted:** 2024-06-25
 - **Revised:** 2024-10-31
 - **License:** [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)
-- **Local attachment:** [Open the archived PDF](assets/the-fineweb-datasets-decanting-the-web-for-the-finest-text-data-at-scale.pdf)
+- **Local attachment:** [Open the archived PDF](../assets/the-fineweb-datasets-decanting-the-web-for-the-finest-text-data-at-scale.pdf)
 
 > Extraction notice: The text below was produced mechanically with
 > `pdftotext version 26.04.0`. Reading order, equations, tables, figures, and

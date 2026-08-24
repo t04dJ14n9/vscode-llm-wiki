@@ -13,10 +13,10 @@ source_url: "https://arxiv.org/abs/1508.07909v5"
 ingested: "2026-08-13"
 submitted: "2015-08-31"
 revised: "2016-06-10"
-sha256: "2aee2e21cf0350df748159527a69979b2e97be16dc27e93bda8c343938b70808"
+sha256: "38eced47544d28ee156459ef78438a5c67b9cf47314b21e8a9b3126cc8947f8d"
 arxiv: {"id": "1508.07909", "version": 5}
 license: {"id": "CC-BY-4.0", "url": "https://creativecommons.org/licenses/by/4.0/"}
-attachment: {"resource": "assets/neural-machine-translation-of-rare-words-with-subword-units.pdf", "media_type": "application/pdf", "bytes": 193216, "sha256": "f4e5a6bbbe0d87459997fffe892f8be485e33903cc71f923c2884639fbf96401"}
+attachment: {"resource": "../assets/neural-machine-translation-of-rare-words-with-subword-units.pdf", "media_type": "application/pdf", "bytes": 193216, "sha256": "f4e5a6bbbe0d87459997fffe892f8be485e33903cc71f923c2884639fbf96401", "role": "original"}
 extraction: {"tool": "pdftotext", "version": "pdftotext version 26.04.0"}
 ---
 
@@ -29,7 +29,7 @@ extraction: {"tool": "pdftotext", "version": "pdftotext version 26.04.0"}
 - **Submitted:** 2015-08-31
 - **Revised:** 2016-06-10
 - **License:** [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)
-- **Local attachment:** [Open the archived PDF](assets/neural-machine-translation-of-rare-words-with-subword-units.pdf)
+- **Local attachment:** [Open the archived PDF](../assets/neural-machine-translation-of-rare-words-with-subword-units.pdf)
 
 > Extraction notice: The text below was produced mechanically with
 > `pdftotext version 26.04.0`. Reading order, equations, tables, figures, and

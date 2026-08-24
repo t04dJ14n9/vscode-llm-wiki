@@ -33,6 +33,53 @@ test('pdf viewer renders the demo PDF into a visible canvas', async ({ page }) =
   expect(pixelStats.nonWhite, errors.join('\n')).toBeGreaterThan(0);
 });
 
+test('PDF source rectangles expose aggregated Query summaries and navigation', async ({ page }) => {
+  await page.goto('http://localhost:8979/pdf-viewer.html');
+  await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 1/, { timeout: 10_000 });
+  await page.evaluate(() => {
+    window.__mockMessages = [];
+    window.postMessage({
+      type: 'setQueryAnnotations',
+      annotations: [
+        {
+          annotationId: 'stable',
+          queryPath: 'queries/stable.md',
+          title: 'Why does this matter?',
+          status: 'stable',
+          condensedSummary: 'The selected mechanism keeps the pipeline reproducible.',
+          project: 'nanochat',
+          updatedTime: '2026-08-23T00:00:00Z',
+          navigationTarget: { kind: 'query', queryPath: 'queries/stable.md' },
+          page: 1,
+          rects: [[20, 20, 120, 40]],
+        },
+        {
+          annotationId: 'draft',
+          queryPath: 'queries/draft.md',
+          title: 'What remains uncertain?',
+          status: 'draft',
+          condensedSummary: 'The performance boundary still needs measurement.',
+          updatedTime: '2026-08-24T00:00:00Z',
+          navigationTarget: { kind: 'query', queryPath: 'queries/draft.md' },
+          page: 1,
+          rects: [[20, 20, 120, 40]],
+        },
+      ],
+    }, '*');
+  });
+
+  await expect(page.locator('#page-1 .pdf-query-highlight')).toHaveCount(1);
+  const marker = page.locator('#page-1 .pdf-query-marker');
+  await expect(marker).toHaveText('✦ 2 Queries');
+  await marker.click();
+  const popover = page.locator('.pdf-query-popover');
+  await expect(popover).toContainText('Why does this matter?');
+  await expect(popover).toContainText('What remains uncertain?');
+  await popover.getByRole('button', { name: 'Open Query' }).first().click();
+  await expect.poll(() => page.evaluate(() => window.__mockMessages
+    ?.some(message => message.type === 'openQuery' && message.navigation?.queryPath === 'queries/stable.md'))).toBe(true);
+});
+
 test('pdf viewer keeps canvas and overlay geometry aligned to exact scaled size', async ({ page }) => {
   await page.goto('http://localhost:8979/pdf-viewer.html');
   await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 1/, { timeout: 10_000 });

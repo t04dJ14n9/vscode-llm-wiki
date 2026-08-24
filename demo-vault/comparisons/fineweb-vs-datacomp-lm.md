@@ -4,6 +4,7 @@ title: "FineWeb versus DataComp-LM"
 description: "Two complementary ways to reason about web-scale language-model data curation."
 tags: ["data-curation", "datasets", "evaluation"]
 status: "stable"
+scope: "vault"
 generated: {"by": "codex/gpt-5.6", "at": "2026-08-13T00:00:00Z"}
 sources: [{"id": "fineweb-paper", "resource": "../raw/the-fineweb-datasets-decanting-the-web-for-the-finest-text-data-at-scale.md", "title": "The FineWeb Datasets"}, {"id": "dclm-paper", "resource": "../raw/datacomp-lm-in-search-of-the-next-generation-of-training-sets-for-language-models.md", "title": "DataComp-LM"}]
 ---

@@ -105,6 +105,7 @@ import {
 } from './pdfTextLayer';
 import { showObsidianContextMenu } from './obsidianContextMenu';
 import { normalizePdfTextBands, type PdfRect } from './pdfTextBands';
+import { PdfQueryAnnotationLayer } from './pdfQueryAnnotations';
 
 const vscode = acquireVsCodeApi();
 
@@ -525,6 +526,7 @@ export class PdfViewer {
     previousDescribedBy: string | null;
   } | undefined;
   private readonly viewerResizeObserver: ResizeObserver | null;
+  private readonly queryAnnotationLayer = new PdfQueryAnnotationLayer(this.pages, message => vscode.postMessage(message));
 
   constructor() {
     this.container.tabIndex = -1;
@@ -558,11 +560,20 @@ export class PdfViewer {
       this.scheduleSelectionUpdate();
     });
     document.addEventListener('copy', event => this.copyNativeSelection(event), true);
+    document.addEventListener('pointerdown', event => this.queryAnnotationLayer.handleDocumentPointerDown(event.target), true);
     document.addEventListener('keydown', event => {
-      if (event.key !== 'Escape' || !this.pdfLinkPreview) return;
+      if (event.key !== 'Escape') return;
+      if (this.queryAnnotationLayer.active) {
+        this.queryAnnotationLayer.dismiss();
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+      if (!this.pdfLinkPreview) return;
       event.preventDefault();
       event.stopPropagation();
       this.dismissPdfLinkPreview();
+      this.queryAnnotationLayer.dismiss();
     }, true);
     this.container.addEventListener('scroll', () => {
       // Preview dismisses the transient selection controls when the document
@@ -642,6 +653,9 @@ export class PdfViewer {
           break;
         case 'pdfToolbarPreference':
           this.applyPdfToolbarPreference(message.preference);
+          break;
+        case 'setQueryAnnotations':
+          this.queryAnnotationLayer.set(message.annotations);
           break;
         case 'goToAnchor':
           void this.goToAnchor(message.anchor ?? {
@@ -2460,6 +2474,7 @@ export class PdfViewer {
       this.drawSearchHighlightsForPage(state.pageNum);
       this.restoreSelectionForPage(state.pageNum);
       this.redrawPdfDestinationFocus(state.pageNum);
+      this.queryAnnotationLayer.drawPage(state.pageNum);
     } catch (error) {
       console.error(`Failed to render page ${state.pageNum}`, error);
       if (renderGeneration === state.renderGeneration) state.rendered = sharpCanvasInstalled;

@@ -13,6 +13,11 @@ import type {
 } from './agentHandoff';
 import type { SelectionContext } from './selectionContext';
 import {
+  isQueryPagePath,
+  resolvePdfAnchor,
+  type QueryAnnotationIndex,
+} from './queryAnnotationIndex';
+import {
   createPdfAgentClipboardContext,
   pdfAgentClipboardSelectionKey,
   type PdfAgentClipboardContext,
@@ -59,6 +64,7 @@ interface ActivePdfWebview {
   panel: vscode.WebviewPanel;
   pdfUri: vscode.Uri;
   pdfSha256?: string;
+  pdfBytes?: Uint8Array;
   ready: boolean;
   pendingAnchor?: PdfAnchorNavigation;
   agentClipboardContext?: PdfAgentClipboardContext;
@@ -86,6 +92,8 @@ export interface PdfEditorProviderOptions {
   documentRoot?: string;
   agentCapabilities?: () => AgentSurfaceCapabilities;
   onDidChangeAgentCapabilities?: vscode.Event<void>;
+  queryAnnotationIndex?: Pick<QueryAnnotationIndex, 'listAnnotationsForSource'>;
+  queryDiagnostics?: vscode.DiagnosticCollection;
 }
 
 export const ADD_SELECTION_TO_CURSOR_CHAT_COMMAND =
@@ -130,6 +138,8 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
   private readonly webviews = new Map<string, ActivePdfWebview>();
   private readonly documentRoot: string;
   private readonly agentCapabilities: () => AgentSurfaceCapabilities;
+  private readonly queryAnnotationIndex?: Pick<QueryAnnotationIndex, 'listAnnotationsForSource'>;
+  private readonly queryDiagnostics?: vscode.DiagnosticCollection;
   private readonly pdfOutlineListeners = new Set<(uri: vscode.Uri) => unknown>();
   private pdfToolbarPreference: PdfToolbarPreference;
   readonly onDidChangePdfOutline: vscode.Event<vscode.Uri> = (listener, thisArgs, disposables) => {
@@ -165,6 +175,8 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
       cursorAgent: false,
       providers: [],
     }));
+    this.queryAnnotationIndex = options.queryAnnotationIndex;
+    this.queryDiagnostics = options.queryDiagnostics;
     this.pdfToolbarPreference = normalizePdfToolbarPreference(
       context.globalState?.get(PDF_TOOLBAR_PREFERENCE_KEY),
     );
@@ -272,6 +284,10 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
     if (!active) return false;
     active.postMessage({ type: 'copySelectionForAgent' });
     return true;
+  }
+
+  async refreshQueryAnnotations(): Promise<void> {
+    await Promise.all([...this.webviews.values()].map(active => this.postQueryAnnotations(active)));
   }
 
   async getActiveSelectionContext(): Promise<SelectionContext | undefined> {
@@ -436,6 +452,26 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
         case 'selectionChanged':
           await this.updateActiveSelection(key, message.anchor, message.clipboardSelection);
           break;
+        case 'openQuery': {
+          const navigation = message.navigation;
+          if (!navigation || typeof navigation !== 'object') break;
+          const target = navigation as Record<string, unknown>;
+          if (
+            target.kind !== 'query'
+            || typeof target.queryPath !== 'string'
+            || path.isAbsolute(target.queryPath)
+            || target.queryPath.includes('\\')
+            || target.queryPath.split('/').includes('..')
+            || !target.queryPath.toLowerCase().endsWith('.md')
+            || !isQueryPagePath(target.queryPath)
+          ) break;
+          await vscode.commands.executeCommand(
+            'llm-wiki.openLinkTarget',
+            target.queryPath,
+            pdfUri,
+          );
+          break;
+        }
         case 'pdfOutline':
           active.outlineLoading = message.loading === true;
           active.outline = active.outlineLoading
@@ -510,13 +546,61 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
   private async loadPdf(active: ActivePdfWebview): Promise<void> {
     try {
       const bytes = await vscode.workspace.fs.readFile(active.pdfUri);
+      active.pdfBytes = bytes;
       active.pdfSha256 = createHash('sha256').update(bytes).digest('hex');
       active.postMessage({
         type: 'loadPdf',
         data: Buffer.from(bytes).toString('base64'),
       });
+      await this.postQueryAnnotations(active);
     } catch (error) {
       vscode.window.showErrorMessage(`Failed to load PDF: ${String(error)}`);
+    }
+  }
+
+  private async postQueryAnnotations(active: ActivePdfWebview): Promise<void> {
+    if (!this.queryAnnotationIndex || !active.pdfBytes) {
+      active.postMessage({ type: 'setQueryAnnotations', annotations: [] });
+      return;
+    }
+    try {
+      const sourcePath = vscode.workspace.asRelativePath(active.pdfUri, false);
+      const annotations = await this.queryAnnotationIndex.listAnnotationsForSource(sourcePath);
+      const diagnostics: vscode.Diagnostic[] = [];
+      const resolved = annotations.flatMap(annotation => {
+        if (annotation.anchor.kind !== 'pdf') return [];
+        const resolution = resolvePdfAnchor(annotation.anchor, active.pdfBytes!);
+        if (!resolution.geometry) {
+          if (resolution.diagnostic) {
+            const diagnostic = new vscode.Diagnostic(
+              new vscode.Range(0, 0, 0, 1),
+              resolution.diagnostic.message,
+              vscode.DiagnosticSeverity.Warning,
+            );
+            diagnostic.source = 'llm-wiki-query';
+            diagnostic.code = resolution.diagnostic.code;
+            diagnostics.push(diagnostic);
+          }
+          return [];
+        }
+        return [{
+          annotationId: `${annotation.queryPath}#${annotation.anchor.sourceId}`,
+          queryPath: annotation.queryPath,
+          title: annotation.title,
+          status: annotation.status,
+          condensedSummary: annotation.condensedSummary,
+          ...(annotation.project ? { project: annotation.project } : {}),
+          updatedTime: annotation.updatedTime,
+          navigationTarget: annotation.navigationTarget,
+          page: resolution.geometry.page,
+          rects: resolution.geometry.rects,
+        }];
+      });
+      this.queryDiagnostics?.set(active.pdfUri, diagnostics);
+      active.postMessage({ type: 'setQueryAnnotations', annotations: resolved });
+    } catch {
+      this.queryDiagnostics?.delete(active.pdfUri);
+      active.postMessage({ type: 'setQueryAnnotations', annotations: [] });
     }
   }
 
@@ -972,6 +1056,14 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
     }
     .rectangle-selection-overlay { position: absolute; z-index: 15; box-sizing: border-box; border: 1px dashed var(--vscode-focusBorder); background: rgba(0, 127, 212, .16); pointer-events: none; }
     .anchor-highlight { position: absolute; background: rgba(0, 150, 255, .35); border-radius: 2px; pointer-events: none; }
+    .pdf-query-highlight { position: absolute; box-sizing: border-box; border-bottom: 2px solid var(--vscode-editorInfo-foreground, #4daafc); background: color-mix(in srgb, var(--vscode-editorInfo-foreground, #4daafc) 18%, transparent); border-radius: 2px; pointer-events: none; }
+    .pdf-query-marker { position: absolute; z-index: 8; padding: 1px 6px; border: 1px solid var(--vscode-widget-border); border-radius: 9px; color: var(--vscode-textLink-foreground); background: var(--vscode-editorWidget-background); font: 11px var(--vscode-font-family); white-space: nowrap; cursor: pointer; pointer-events: auto; }
+    .pdf-query-popover { position: fixed; z-index: 1200; box-sizing: border-box; width: min(380px, calc(100vw - 16px)); max-height: min(280px, calc(100vh - 16px)); padding: 10px 12px; overflow: auto; border: 1px solid var(--vscode-editorHoverWidget-border, var(--vscode-widget-border)); border-radius: 6px; color: var(--vscode-editorHoverWidget-foreground, var(--vscode-editor-foreground)); background: var(--vscode-editorHoverWidget-background, var(--vscode-editorWidget-background)); box-shadow: 0 4px 14px var(--vscode-widget-shadow, rgba(0,0,0,.3)); font: 13px/1.45 var(--vscode-font-family); }
+    .pdf-query-popover[hidden] { display: none; }
+    .pdf-query-popover-item + .pdf-query-popover-item { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--vscode-widget-border); }
+    .pdf-query-popover-meta { margin-top: 2px; color: var(--vscode-descriptionForeground); font-size: 11px; }
+    .pdf-query-popover-summary { margin: 6px 0; }
+    .pdf-query-popover button { padding: 3px 8px; border: 1px solid var(--vscode-button-border, transparent); border-radius: 3px; color: var(--vscode-button-foreground); background: var(--vscode-button-background); cursor: pointer; }
     .pdf-destination-focus {
       position: absolute;
       z-index: 13;

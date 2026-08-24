@@ -9,6 +9,11 @@ import type {
   ExternalAgentId,
 } from './agentHandoff';
 import { resolveLinkPreviewTarget } from './linkPreviewResolver';
+import {
+  isQueryPagePath,
+  resolveMarkdownAnchor,
+  type QueryAnnotationIndex,
+} from './queryAnnotationIndex';
 
 interface ActiveMarkdownWebview {
   panel: vscode.WebviewPanel;
@@ -44,6 +49,8 @@ interface PendingSelectionRequest {
 export interface MarkdownEditorProviderOptions {
   agentCapabilities?: () => AgentSurfaceCapabilities;
   onDidChangeAgentCapabilities?: vscode.Event<void>;
+  queryAnnotationIndex?: Pick<QueryAnnotationIndex, 'listAnnotationsForSource'>;
+  queryDiagnostics?: vscode.DiagnosticCollection;
 }
 
 function inclusiveLineRange(
@@ -79,12 +86,16 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
   private activePanel: vscode.WebviewPanel | undefined;
   private vimModeEnabled: boolean;
   private readonly agentCapabilities: () => AgentSurfaceCapabilities;
+  private readonly queryAnnotationIndex?: Pick<QueryAnnotationIndex, 'listAnnotationsForSource'>;
+  private readonly queryDiagnostics?: vscode.DiagnosticCollection;
 
   constructor(
     private readonly context: vscode.ExtensionContext,
     private readonly learningNoteStore?: LearningNoteStore,
     options: MarkdownEditorProviderOptions = {},
   ) {
+    this.queryAnnotationIndex = options.queryAnnotationIndex;
+    this.queryDiagnostics = options.queryDiagnostics;
     this.agentCapabilities = options.agentCapabilities ?? (() => ({
       cursorAgent: false,
       providers: [],
@@ -102,8 +113,12 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
   }
 
   async refreshLearningAnnotations(): Promise<void> {
+    await this.refreshQueryAnnotations();
+  }
+
+  async refreshQueryAnnotations(): Promise<void> {
     await Promise.all([...this.webviews.values()].map(async active => {
-      await this.postLearningAnnotations(active.document, active.postMessage);
+      await this.postQueryAnnotations(active.document, active.postMessage);
     }));
   }
 
@@ -268,7 +283,7 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
         resourceBaseUri: webviewResourceUriString(webviewPanel.webview, documentDirectoryUri(document.uri)),
         resourceRootUri: webviewResourceUriString(webviewPanel.webview, workspaceRootUri(document.uri)),
       });
-      await this.postLearningAnnotations(
+      await this.postQueryAnnotations(
         document,
         message => webviewPanel.webview.postMessage(message),
       );
@@ -587,6 +602,38 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
             discussionId: message.discussionId,
           });
           break;
+        case 'openQuery': {
+          const navigation = message.navigation;
+          if (!navigation || typeof navigation !== 'object') return;
+          const target = navigation as Record<string, unknown>;
+          if (target.kind === 'legacy') {
+            if (
+              typeof target.notePath !== 'string'
+              || typeof target.discussionId !== 'string'
+              || path.isAbsolute(target.notePath)
+            ) return;
+            await vscode.commands.executeCommand('llm-wiki.openLearningDiscussion', {
+              notePath: target.notePath,
+              discussionId: target.discussionId,
+            });
+            break;
+          }
+          if (
+            target.kind !== 'query'
+            || typeof target.queryPath !== 'string'
+            || path.isAbsolute(target.queryPath)
+            || target.queryPath.includes('\\')
+            || target.queryPath.split('/').includes('..')
+            || !target.queryPath.toLowerCase().endsWith('.md')
+            || !isQueryPagePath(target.queryPath)
+          ) return;
+          await vscode.commands.executeCommand(
+            'llm-wiki.openLinkTarget',
+            target.queryPath,
+            document.uri,
+          );
+          break;
+        }
         case 'copyText':
           if (typeof message.text === 'string') {
             await vscode.env.clipboard.writeText(message.text);
@@ -753,10 +800,55 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
     return active;
   }
 
-  private async postLearningAnnotations(
+  private async postQueryAnnotations(
     document: vscode.TextDocument,
     postMessage: (message: unknown) => Thenable<boolean>,
   ): Promise<void> {
+    if (this.queryAnnotationIndex) {
+      try {
+        const sourcePath = vscode.workspace.asRelativePath(document.uri, false);
+        const annotations = await this.queryAnnotationIndex.listAnnotationsForSource(sourcePath);
+        const diagnostics: vscode.Diagnostic[] = [];
+        const resolved = annotations.flatMap(annotation => {
+          if (annotation.anchor.kind !== 'markdown') return [];
+          const resolution = resolveMarkdownAnchor(annotation.anchor, document.getText());
+          if (!resolution.range) {
+            if (resolution.diagnostic) {
+              const line = Math.max(0, (annotation.anchor.startLine ?? 1) - 1);
+              const diagnostic = new vscode.Diagnostic(
+                new vscode.Range(line, 0, line, 1),
+                resolution.diagnostic.message,
+                vscode.DiagnosticSeverity.Warning,
+              );
+              diagnostic.source = 'llm-wiki-query';
+              diagnostic.code = resolution.diagnostic.code;
+              diagnostics.push(diagnostic);
+            }
+            return [];
+          }
+          return [{
+            annotationId: `${annotation.queryPath}#${annotation.anchor.sourceId}`,
+            queryPath: annotation.queryPath,
+            title: annotation.title,
+            status: annotation.status,
+            condensedSummary: annotation.condensedSummary,
+            ...(annotation.project ? { project: annotation.project } : {}),
+            updatedTime: annotation.updatedTime,
+            navigationTarget: annotation.navigationTarget,
+            ...(annotation.compatibility ? { compatibility: annotation.compatibility } : {}),
+            ...(annotation.anchor.quote ? { quote: annotation.anchor.quote } : {}),
+            from: resolution.range.from,
+            to: resolution.range.to,
+          }];
+        });
+        this.queryDiagnostics?.set(document.uri, diagnostics);
+        await postMessage({ type: 'setQueryAnnotations', annotations: resolved });
+      } catch {
+        this.queryDiagnostics?.delete(document.uri);
+        await postMessage({ type: 'setQueryAnnotations', annotations: [] });
+      }
+      return;
+    }
     if (!this.learningNoteStore) {
       await postMessage({ type: 'setLearningAnnotations', annotations: [] });
       return;

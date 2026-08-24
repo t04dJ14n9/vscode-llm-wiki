@@ -165,6 +165,17 @@ interface LearningAnnotation {
   summary: string;
   from?: number;
   to?: number;
+  queries?: readonly QueryPopoverItem[];
+}
+
+interface QueryPopoverItem {
+  queryPath: string;
+  title: string;
+  status: 'draft' | 'stable' | 'deprecated';
+  condensedSummary: string;
+  project?: string;
+  updatedTime: string;
+  navigationTarget: Record<string, unknown>;
 }
 
 interface ResolvedLearningAnnotation extends LearningAnnotation {
@@ -639,10 +650,15 @@ class LearningNoteWidget extends WidgetType {
     button.type = 'button';
     button.className = 'cm-learning-note-link';
     button.dataset.learningDiscussionId = this.annotation.discussionId;
-    button.textContent = '✦ Note';
+    const queryCount = this.annotation.queries?.length ?? 0;
+    button.textContent = queryCount > 0
+      ? `✦ ${queryCount === 1 ? 'Query' : `${queryCount} Queries`}`
+      : '✦ Note';
     button.setAttribute(
       'aria-label',
-      `Open learning note: ${this.annotation.question || this.annotation.summary || this.annotation.notePath}`,
+      queryCount > 0
+        ? `Show ${queryCount === 1 ? 'Query' : `${queryCount} Queries`} for this passage`
+        : `Open learning note: ${this.annotation.question || this.annotation.summary || this.annotation.notePath}`,
     );
     const stopSelection = (event: Event) => {
       event.preventDefault();
@@ -652,6 +668,13 @@ class LearningNoteWidget extends WidgetType {
     button.addEventListener('mousedown', stopSelection);
     button.addEventListener('click', event => {
       stopSelection(event);
+      if (queryCount > 0) {
+        button.dispatchEvent(new CustomEvent('llm-wiki-query-pin', {
+          bubbles: true,
+          detail: { discussionId: this.annotation.discussionId },
+        }));
+        return;
+      }
       vscode.postMessage({
         type: 'openLearningNote',
         notePath: this.annotation.notePath,
@@ -666,7 +689,8 @@ class LearningNoteWidget extends WidgetType {
       && other.annotation.notePath === this.annotation.notePath
       && other.annotation.question === this.annotation.question
       && other.annotation.questionCount === this.annotation.questionCount
-      && other.annotation.summary === this.annotation.summary;
+      && other.annotation.summary === this.annotation.summary
+      && JSON.stringify(other.annotation.queries) === JSON.stringify(this.annotation.queries);
   }
 
   override ignoreEvent(): boolean {
@@ -745,6 +769,7 @@ class LearningAnnotationPopover {
   private hoveredDiscussionId: string | undefined;
   private hoverAnchor: HTMLElement | undefined;
   private dismissedDiscussionId: string | undefined;
+  private pinnedDiscussionId: string | undefined;
   private activeAnnotation: ResolvedLearningAnnotation | undefined;
   private lastCaretPosition = -1;
   private positionFrame: number | undefined;
@@ -761,6 +786,7 @@ class LearningAnnotationPopover {
   private readonly onPointerOut = (event: PointerEvent) => {
     const current = learningAnnotationElement(event.target, this.view.dom);
     if (!current) return;
+    if (event.relatedTarget instanceof Node && this.popover.contains(event.relatedTarget)) return;
     const related = learningAnnotationElement(event.relatedTarget, this.view.dom);
     if (
       related
@@ -786,6 +812,7 @@ class LearningAnnotationPopover {
   private readonly onFocusOut = (event: FocusEvent) => {
     const current = learningAnnotationElement(event.target, this.view.dom);
     if (!current?.classList.contains('cm-learning-note-link')) return;
+    if (event.relatedTarget instanceof Node && this.popover.contains(event.relatedTarget)) return;
     const related = learningAnnotationElement(event.relatedTarget, this.view.dom);
     if (
       related
@@ -801,11 +828,30 @@ class LearningAnnotationPopover {
   private readonly onKeyDown = (event: KeyboardEvent) => {
     if (event.key !== 'Escape' || !this.activeAnnotation) return;
     this.dismissedDiscussionId = this.activeAnnotation.discussionId;
+    this.pinnedDiscussionId = undefined;
     this.hoveredDiscussionId = undefined;
     this.hoverAnchor = undefined;
     this.hide();
     event.preventDefault();
     event.stopPropagation();
+  };
+
+  private readonly onPin = (event: Event) => {
+    const detail = (event as CustomEvent<{ discussionId?: unknown }>).detail;
+    if (typeof detail?.discussionId !== 'string') return;
+    this.pinnedDiscussionId = detail.discussionId;
+    this.dismissedDiscussionId = undefined;
+    this.sync();
+  };
+
+  private readonly onDocumentPointerDown = (event: PointerEvent) => {
+    if (!this.pinnedDiscussionId || !(event.target instanceof Node)) return;
+    if (
+      this.popover.contains(event.target)
+      || learningAnnotationElement(event.target, this.view.dom)
+    ) return;
+    this.pinnedDiscussionId = undefined;
+    this.sync();
   };
 
   private readonly reposition = () => this.schedulePosition();
@@ -821,6 +867,8 @@ class LearningAnnotationPopover {
     this.view.dom.addEventListener('focusin', this.onFocusIn);
     this.view.dom.addEventListener('focusout', this.onFocusOut);
     this.view.dom.addEventListener('keydown', this.onKeyDown, true);
+    this.view.dom.addEventListener('llm-wiki-query-pin', this.onPin);
+    document.addEventListener('pointerdown', this.onDocumentPointerDown, true);
     this.view.scrollDOM.addEventListener('scroll', this.reposition);
     window.addEventListener('resize', this.reposition);
     this.sync();
@@ -852,6 +900,8 @@ class LearningAnnotationPopover {
     this.view.dom.removeEventListener('focusin', this.onFocusIn);
     this.view.dom.removeEventListener('focusout', this.onFocusOut);
     this.view.dom.removeEventListener('keydown', this.onKeyDown, true);
+    this.view.dom.removeEventListener('llm-wiki-query-pin', this.onPin);
+    document.removeEventListener('pointerdown', this.onDocumentPointerDown, true);
     this.view.scrollDOM.removeEventListener('scroll', this.reposition);
     window.removeEventListener('resize', this.reposition);
     if (this.positionFrame !== undefined) cancelAnimationFrame(this.positionFrame);
@@ -863,13 +913,16 @@ class LearningAnnotationPopover {
     const hovered = this.hoveredDiscussionId
       ? annotations.find(annotation => annotation.discussionId === this.hoveredDiscussionId)
       : undefined;
+    const pinned = this.pinnedDiscussionId
+      ? annotations.find(annotation => annotation.discussionId === this.pinnedDiscussionId)
+      : undefined;
     const selection = this.view.state.selection.main;
     const caret = selection.empty
       ? annotations
         .filter(annotation => annotation.from <= selection.head && selection.head < annotation.to)
         .sort((left, right) => (left.to - left.from) - (right.to - right.from))[0]
       : undefined;
-    const annotation = hovered ?? caret;
+    const annotation = pinned ?? hovered ?? caret;
     if (!annotation || annotation.discussionId === this.dismissedDiscussionId) {
       this.hide();
       return;
@@ -879,7 +932,26 @@ class LearningAnnotationPopover {
 
   private show(annotation: ResolvedLearningAnnotation): void {
     this.activeAnnotation = annotation;
+    if (annotation.queries?.length) {
+      this.popover.style.pointerEvents = 'auto';
+      const label = annotation.queries.length === 1 ? 'Query' : `${annotation.queries.length} Queries`;
+      this.popover.replaceChildren(
+        popoverText('cm-learning-note-popover-label', label),
+        ...annotation.queries.map(query => queryPopoverItem(query)),
+      );
+      this.popover.hidden = false;
+      this.view.dom.querySelectorAll<HTMLElement>('.cm-learning-note-link').forEach(marker => {
+        if (marker.dataset.learningDiscussionId === annotation.discussionId) {
+          marker.setAttribute('aria-describedby', this.popover.id);
+        } else {
+          marker.removeAttribute('aria-describedby');
+        }
+      });
+      this.schedulePosition();
+      return;
+    }
     const count = Math.max(1, annotation.questionCount);
+    this.popover.style.removeProperty('pointer-events');
     const label = count === 1 ? 'Previous question' : `${count} previous questions`;
     const question = annotation.question || 'Previous learning note';
     const summary = annotation.summary || 'No answer recorded yet.';
@@ -990,6 +1062,30 @@ function popoverText(className: string, text: string): HTMLElement {
   element.className = className;
   element.textContent = text;
   return element;
+}
+
+function queryPopoverItem(query: QueryPopoverItem): HTMLElement {
+  const item = document.createElement('section');
+  item.className = 'cm-learning-note-popover-query';
+  item.append(
+    popoverText('cm-learning-note-popover-question', query.title),
+    popoverText(
+      'cm-learning-note-popover-meta',
+      [query.status, query.project, query.updatedTime.slice(0, 10)].filter(Boolean).join(' · '),
+    ),
+    popoverText('cm-learning-note-popover-summary', query.condensedSummary),
+  );
+  const open = document.createElement('button');
+  open.type = 'button';
+  open.className = 'cm-learning-note-popover-open';
+  open.textContent = 'Open Query';
+  open.addEventListener('click', event => {
+    event.preventDefault();
+    event.stopPropagation();
+    vscode.postMessage({ type: 'openQuery', navigation: query.navigationTarget });
+  });
+  item.append(open);
+  return item;
 }
 
 class TextReplacementWidget extends WidgetType {
@@ -1505,6 +1601,25 @@ function createView(text: string, title?: string): EditorView {
           '.cm-learning-note-popover-summary': {
             marginTop: '6px',
           },
+          '.cm-learning-note-popover-query + .cm-learning-note-popover-query': {
+            marginTop: '10px',
+            paddingTop: '10px',
+            borderTop: '1px solid var(--vscode-widget-border)',
+          },
+          '.cm-learning-note-popover-meta': {
+            marginTop: '2px',
+            color: 'var(--vscode-descriptionForeground)',
+            fontSize: '11px',
+          },
+          '.cm-learning-note-popover-open': {
+            marginTop: '7px',
+            padding: '3px 8px',
+            border: '1px solid var(--vscode-button-border, transparent)',
+            borderRadius: '3px',
+            color: 'var(--vscode-button-foreground)',
+            background: 'var(--vscode-button-background)',
+            cursor: 'pointer',
+          },
           '.cm-learning-note-popover-hint': {
             marginTop: '8px',
             color: 'var(--vscode-descriptionForeground)',
@@ -1669,6 +1784,7 @@ function createView(text: string, title?: string): EditorView {
             fontWeight: 'inherit',
             lineHeight: 'inherit',
             letterSpacing: 'inherit',
+            scrollPaddingLeft: '82px',
           },
           '.cm-content': {
             padding: '0',
@@ -1685,8 +1801,8 @@ function createView(text: string, title?: string): EditorView {
             color: 'var(--vscode-editorGutter-foreground)',
             borderRight: '0',
             boxSizing: 'border-box',
-            minWidth: '66px',
-            width: '66px',
+            minWidth: '82px',
+            width: '82px',
             paddingLeft: '18px',
             paddingRight: '8px',
           },
@@ -3763,6 +3879,13 @@ window.addEventListener('message', event => {
       });
       break;
 
+    case 'setQueryAnnotations':
+      if (!view) return;
+      view.dispatch({
+        effects: setLearningAnnotations.of(normalizeQueryAnnotations(message.annotations)),
+      });
+      break;
+
     case 'setDiagnostics':
       if (!view || !Array.isArray(message.diagnostics)) return;
       view.dispatch({
@@ -3885,6 +4008,60 @@ function normalizeLearningAnnotations(value: unknown): LearningAnnotation[] {
       ...(to !== undefined ? { to } : {}),
     }];
   });
+}
+
+function normalizeQueryAnnotations(value: unknown): LearningAnnotation[] {
+  if (!Array.isArray(value)) return [];
+  const groups = new Map<string, LearningAnnotation>();
+  for (const candidate of value.slice(0, 1_000)) {
+    if (!candidate || typeof candidate !== 'object') continue;
+    const raw = candidate as Record<string, unknown>;
+    const from = nonNegativeInteger(raw.from);
+    const to = nonNegativeInteger(raw.to);
+    if (
+      typeof raw.annotationId !== 'string'
+      || typeof raw.queryPath !== 'string'
+      || typeof raw.title !== 'string'
+      || (raw.status !== 'draft' && raw.status !== 'stable' && raw.status !== 'deprecated')
+      || typeof raw.condensedSummary !== 'string'
+      || typeof raw.updatedTime !== 'string'
+      || !raw.navigationTarget
+      || typeof raw.navigationTarget !== 'object'
+      || from === undefined
+      || to === undefined
+      || to <= from
+      || raw.title.length > 512
+      || raw.condensedSummary.length > 2_000
+    ) continue;
+    const groupKey = `${from}:${to}`;
+    const query: QueryPopoverItem = {
+      queryPath: raw.queryPath,
+      title: raw.title,
+      status: raw.status,
+      condensedSummary: raw.condensedSummary,
+      ...(typeof raw.project === 'string' ? { project: raw.project } : {}),
+      updatedTime: raw.updatedTime,
+      navigationTarget: raw.navigationTarget as Record<string, unknown>,
+    };
+    const current = groups.get(groupKey);
+    if (current) {
+      current.queries = [...(current.queries ?? []), query];
+      current.questionCount = current.queries.length;
+    } else {
+      groups.set(groupKey, {
+        discussionId: groupKey,
+        notePath: raw.queryPath,
+        quote: typeof raw.quote === 'string' ? raw.quote : '',
+        question: raw.title,
+        questionCount: 1,
+        summary: raw.condensedSummary,
+        from,
+        to,
+        queries: [query],
+      });
+    }
+  }
+  return [...groups.values()];
 }
 
 function normalizeMarkdownDiagnostics(value: unknown): MarkdownDiagnostic[] {

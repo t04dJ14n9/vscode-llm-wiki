@@ -42,7 +42,6 @@ export default [
       '**/coverage/**',
       '**/.vscode-test/**',
       '.cache/**',
-      '.codegraph/**',
       '.playwright-cli/**',
       '.pnpm-store/**',
       '.superpowers/**',

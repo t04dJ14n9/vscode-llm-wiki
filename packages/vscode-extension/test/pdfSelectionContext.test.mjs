@@ -29,6 +29,11 @@ function loadTsModule(relativePath, mocks = {}) {
     }
     if (request === './pdfPngConstraints') return { MAX_PNG_BYTES: 5 * 1024 * 1024 };
     if (request === './agentClipboard') return agentClipboard;
+    if (request === './queryAnnotationIndex') {
+      return mocks['./queryAnnotationIndex'] ?? {
+        resolvePdfAnchor: (anchor) => ({ geometry: { page: anchor.page, rects: anchor.rects } }),
+      };
+    }
     if (request === './cursorCrop') return cursorCrop;
     return originalLoad.call(this, request, parent, isMain);
   };
@@ -1097,9 +1102,9 @@ test('PDF provider queues anchor navigation until a newly opened webview is read
 
   assert.deepEqual(
     posted.map(message => message.type),
-    ['agentHandoffCapabilities', 'pdfToolbarPreference', 'loadPdf', 'goToAnchor'],
+    ['agentHandoffCapabilities', 'pdfToolbarPreference', 'loadPdf', 'setQueryAnnotations', 'goToAnchor'],
   );
-  assert.deepEqual(posted[3], {
+  assert.deepEqual(posted[4], {
     type: 'goToAnchor',
     anchor: { page: 7, textFragment },
   });

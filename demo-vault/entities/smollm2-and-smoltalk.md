@@ -3,9 +3,12 @@ type: "Entity"
 title: "SmolLM2 and SmolTalk"
 description: "A small-model training recipe and the instruction-data family represented in Nanochat's task mixture."
 tags: ["datasets", "post-training", "small-models", "training-systems"]
-status: "stable"
-generated: { "by": "codex/gpt-5.6", "at": "2026-08-13T00:00:00Z" }
-sources: [{"id":"smollm2-paper","resource":"../raw/smollm2-when-smol-goes-big-data-centric-training-of-a-small-language-model.md","title":"SmolLM2"},{"id":"smoltalk-task","resource":"../projects/code/nanochat/tasks/smoltalk.py","title":"Nanochat SmolTalk task adapter","commit":"92d63d4e8bb4df75c3b71618f31ddde2378b2bcd"}]
+status: "draft"
+scope: "vault"
+generated: {"by": "codex/gpt-5.6", "at": "2026-08-13T00:00:00Z"}
+sources: [{"id": "smollm2-paper", "resource": "../raw/smollm2-when-smol-goes-big-data-centric-training-of-a-small-language-model.md", "title": "SmolLM2"}, {"id": "smoltalk-task", "resource": "../projects/code/nanochat/tasks/smoltalk.py", "title": "Nanochat SmolTalk task adapter", "repository": "nanochat", "revision": "92d63d4e8bb4df75c3b71618f31ddde2378b2bcd", "path": "tasks/smoltalk.py"}]
+created: {"by": "process:project-scope-migration", "at": "2026-08-23T00:00:00Z"}
+source_state: "awaiting-source"
 ---
 
 # SmolLM2 and SmolTalk

@@ -13,10 +13,10 @@ source_url: "https://arxiv.org/abs/2407.08608v2"
 ingested: "2026-08-13"
 submitted: "2024-07-11"
 revised: "2024-07-12"
-sha256: "3bcb2cca26d94f6508f86315debb5659647d759e0b1431245c7ee503b695ba73"
+sha256: "ee0e31a0703477887b615d7195ba1b8d16510611d7d2b14afde891f0a32e133f"
 arxiv: {"id": "2407.08608", "version": 2}
 license: {"id": "CC-BY-4.0", "url": "https://creativecommons.org/licenses/by/4.0/"}
-attachment: {"resource": "assets/flashattention-3-fast-and-accurate-attention-with-asynchrony-and-low-precision.pdf", "media_type": "application/pdf", "bytes": 1096663, "sha256": "3d05ca102802e6b8ebbae5181efe777b7d258cd75e2fe9cca209efd2f5e6c6cb"}
+attachment: {"resource": "../assets/flashattention-3-fast-and-accurate-attention-with-asynchrony-and-low-precision.pdf", "media_type": "application/pdf", "bytes": 1096663, "sha256": "3d05ca102802e6b8ebbae5181efe777b7d258cd75e2fe9cca209efd2f5e6c6cb", "role": "original"}
 extraction: {"tool": "pdftotext", "version": "pdftotext version 26.04.0"}
 ---
 
@@ -29,7 +29,7 @@ extraction: {"tool": "pdftotext", "version": "pdftotext version 26.04.0"}
 - **Submitted:** 2024-07-11
 - **Revised:** 2024-07-12
 - **License:** [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)
-- **Local attachment:** [Open the archived PDF](assets/flashattention-3-fast-and-accurate-attention-with-asynchrony-and-low-precision.pdf)
+- **Local attachment:** [Open the archived PDF](../assets/flashattention-3-fast-and-accurate-attention-with-asynchrony-and-low-precision.pdf)
 
 > Extraction notice: The text below was produced mechanically with
 > `pdftotext version 26.04.0`. Reading order, equations, tables, figures, and

@@ -1012,6 +1012,55 @@ test.describe('LLM Wiki — E2E Bidirectional Links', () => {
     );
   });
 
+  test('Markdown source ranges aggregate linked Queries and open the selected Query', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+    await waitForEditorBootstrap(page);
+    await page.evaluate(() => {
+      window.postMessage({ type: 'setText', text: 'Alpha selected passage Omega' }, '*');
+      window.__mockMessages = [];
+      window.postMessage({
+        type: 'setQueryAnnotations',
+        annotations: [
+          {
+            annotationId: 'stable',
+            queryPath: 'queries/stable.md',
+            title: 'Why does this matter?',
+            status: 'stable',
+            condensedSummary: 'It records the invariant preserved by the update.',
+            project: 'nanochat',
+            updatedTime: '2026-08-23T00:00:00Z',
+            navigationTarget: { kind: 'query', queryPath: 'queries/stable.md' },
+            quote: 'selected passage',
+            from: 6,
+            to: 22,
+          },
+          {
+            annotationId: 'draft',
+            queryPath: 'queries/draft.md',
+            title: 'What remains open?',
+            status: 'draft',
+            condensedSummary: 'One performance limit remains unverified.',
+            updatedTime: '2026-08-24T00:00:00Z',
+            navigationTarget: { kind: 'query', queryPath: 'queries/draft.md' },
+            quote: 'selected passage',
+            from: 6,
+            to: 22,
+          },
+        ],
+      }, '*');
+    });
+
+    const marker = page.locator('.cm-learning-note-link');
+    await expect(marker).toHaveText('✦ 2 Queries');
+    await marker.click();
+    const popover = page.locator('.cm-learning-note-popover');
+    await expect(popover).toContainText('Why does this matter?');
+    await expect(popover).toContainText('What remains open?');
+    await popover.getByRole('button', { name: 'Open Query' }).first().click();
+    await expect.poll(() => page.evaluate(() => window.__mockMessages
+      ?.some(message => message.type === 'openQuery' && message.navigation?.queryPath === 'queries/stable.md'))).toBe(true);
+  });
+
   test('learning annotation caret activation uses exclusive ranges and exact repeated-quote offsets', async ({ page }) => {
     await page.goto('http://localhost:8979/test.html');
     await waitForEditorBootstrap(page);
@@ -6469,7 +6518,7 @@ test.describe('LLM Wiki — E2E Bidirectional Links', () => {
   test('a caret inside a Markdown link label reveals only that link source', async ({ page }) => {
     await page.goto('http://localhost:8979/test.html');
     await waitForEditorBootstrap(page);
-    const text = 'Read [code index](code/index.md) and [guide](guide.md).';
+    const text = 'Read [code index](code/_index.md) and [guide](guide.md).';
     await page.evaluate((documentText) => {
       window.postMessage({ type: 'setText', text: documentText }, '*');
     }, text);
@@ -6487,11 +6536,11 @@ test.describe('LLM Wiki — E2E Bidirectional Links', () => {
     });
 
     const line = page.locator('.cm-line').first();
-    await expect(line).toHaveText('Read [code index](code/index.md) and guide.');
+    await expect(line).toHaveText('Read [code index](code/_index.md) and guide.');
     await expect(
       line.locator('.cm-active-link-label').filter({ hasText: 'code index' }).first(),
     ).toHaveText('code index');
-    await expect(line.locator('.cm-active-link-destination')).toHaveText('code/index.md');
+    await expect(line.locator('.cm-active-link-destination')).toHaveText('code/_index.md');
     await expect(line.locator('.cm-active-link-punctuation')).toHaveText(['[', '](', ')']);
     await expect(
       line.locator('.cm-active-link-label').filter({ hasText: 'guide' }).first(),

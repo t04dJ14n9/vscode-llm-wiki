@@ -4,6 +4,7 @@ title: "Research corpus overview"
 description: "How the mirrored papers support the Nanochat wiki without being mistaken for implementation documentation."
 tags: ["paper", "provenance", "project-nanochat", "reproducibility"]
 status: "stable"
+scope: "vault"
 generated: {"by": "codex/gpt-5.6", "at": "2026-08-13T00:00:00Z"}
 sources: [{"id": "bpe", "resource": "../raw/neural-machine-translation-of-rare-words-with-subword-units.md", "title": "Neural Machine Translation of Rare Words with Subword Units"}, {"id": "fineweb", "resource": "../raw/the-fineweb-datasets-decanting-the-web-for-the-finest-text-data-at-scale.md", "title": "The FineWeb Datasets"}, {"id": "dclm", "resource": "../raw/datacomp-lm-in-search-of-the-next-generation-of-training-sets-for-language-models.md", "title": "DataComp-LM"}, {"id": "smollm2", "resource": "../raw/smollm2-when-smol-goes-big-data-centric-training-of-a-small-language-model.md", "title": "SmolLM2"}, {"id": "gqa", "resource": "../raw/gqa-training-generalized-multi-query-transformer-models-from-multi-head-checkpoints.md", "title": "GQA"}, {"id": "fa3", "resource": "../raw/flashattention-3-fast-and-accurate-attention-with-asynchrony-and-low-precision.md", "title": "FlashAttention-3"}, {"id": "fp8", "resource": "../raw/fp8-formats-for-deep-learning.md", "title": "FP8 Formats for Deep Learning"}, {"id": "dpo", "resource": "../raw/direct-preference-optimization-your-language-model-is-secretly-a-reward-model.md", "title": "Direct Preference Optimization"}]
 ---
@@ -39,7 +40,7 @@ rewarded by answer correctness, not a DPO implementation.
 
 The productive reading order is:
 
-1. use a [summary](nanochat-end-to-end-training-pipeline.md) to frame a stage;
+1. use a [summary](../projects/nanochat/summaries/nanochat-end-to-end-training-pipeline.md) to frame a stage;
 2. open the corresponding concept or comparison;
 3. follow its footnote into the immutable raw companion;
 4. open the local PDF when equations, figures, or reading order matter;
@@ -54,12 +55,12 @@ a different objective. The wiki preserves those distinctions explicitly.
 
 Only CC BY 4.0 papers are mirrored. Relevant papers under more restrictive or
 arXiv-only licenses are cited by URL from compiled pages rather than copied into
-`raw/assets/`. The extracted text is for search and navigation; the PDF remains
-the visual authority.
+the project `assets/` directory. The extracted text is for search and
+navigation; the PDF remains the visual authority.
 
 ## Related pages
 
-- [Where paper ideas appear in Nanochat](../queries/where-do-the-paper-ideas-appear-in-nanochat.md)
+- [Where paper ideas appear in Nanochat](../projects/nanochat/queries/where-do-the-paper-ideas-appear-in-nanochat.md)
 - [FineWeb versus DataComp-LM](../comparisons/fineweb-vs-datacomp-lm.md)
 - [BF16 versus FP8](../comparisons/bf16-vs-fp8.md)
 - [DPO versus on-policy reinforcement learning](../comparisons/dpo-vs-on-policy-reinforcement-learning.md)

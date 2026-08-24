@@ -3,9 +3,12 @@ type: "Concept"
 title: "Low-precision training"
 description: "Using compact numerical formats for selected training operations while preserving stable state where needed."
 tags: ["numerics", "optimization", "training-systems"]
-status: "stable"
+status: "draft"
+scope: "vault"
 generated: {"by": "codex/gpt-5.6", "at": "2026-08-13T00:00:00Z"}
-sources: [{"id": "fp8-paper", "resource": "../raw/fp8-formats-for-deep-learning.md", "title": "FP8 Formats for Deep Learning"}, {"id": "fp8-source", "resource": "../projects/code/nanochat/nanochat/fp8.py", "title": "Nanochat FP8 operations", "commit": "92d63d4e8bb4df75c3b71618f31ddde2378b2bcd"}, {"id": "base-train", "resource": "../projects/code/nanochat/scripts/base_train.py", "title": "Nanochat base training", "commit": "92d63d4e8bb4df75c3b71618f31ddde2378b2bcd"}]
+sources: [{"id": "fp8-paper", "resource": "../raw/fp8-formats-for-deep-learning.md", "title": "FP8 Formats for Deep Learning"}, {"id": "fp8-source", "resource": "../projects/code/nanochat/nanochat/fp8.py", "title": "Nanochat FP8 operations", "repository": "nanochat", "revision": "92d63d4e8bb4df75c3b71618f31ddde2378b2bcd", "path": "nanochat/fp8.py"}, {"id": "base-train", "resource": "../projects/code/nanochat/scripts/base_train.py", "title": "Nanochat base training", "repository": "nanochat", "revision": "92d63d4e8bb4df75c3b71618f31ddde2378b2bcd", "path": "scripts/base_train.py"}]
+created: {"by": "process:project-scope-migration", "at": "2026-08-23T00:00:00Z"}
+source_state: "awaiting-source"
 ---
 
 # Low-precision training

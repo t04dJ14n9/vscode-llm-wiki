@@ -3,9 +3,12 @@ type: "Concept"
 title: "Decoder-only transformers"
 description: "Causal transformer stacks that learn next-token distributions and generate autoregressively."
 tags: ["architecture", "attention", "language-models", "project-nanochat"]
-status: "stable"
+status: "draft"
+scope: "vault"
 generated: {"by": "codex/gpt-5.6", "at": "2026-08-13T00:00:00Z"}
-sources: [{"id": "gpt-source", "resource": "../projects/code/nanochat/nanochat/gpt.py", "title": "Nanochat GPT implementation", "commit": "92d63d4e8bb4df75c3b71618f31ddde2378b2bcd"}]
+sources: [{"id": "gpt-source", "resource": "../projects/code/nanochat/nanochat/gpt.py", "title": "Nanochat GPT implementation", "repository": "nanochat", "revision": "92d63d4e8bb4df75c3b71618f31ddde2378b2bcd", "path": "nanochat/gpt.py"}]
+created: {"by": "process:project-scope-migration", "at": "2026-08-23T00:00:00Z"}
+source_state: "awaiting-source"
 ---
 
 # Decoder-only transformers
@@ -36,6 +39,6 @@ configurable sliding/full windows.[^gpt-source] Follow
 
 - [Rotary position embeddings](rotary-position-embeddings.md)
 - [Grouped-query attention](grouped-query-attention.md)
-- [Nanochat model family](../entities/nanochat-model-family.md)
+- [Nanochat model family](../projects/nanochat/entities/nanochat-model-family.md)
 
 [^gpt-source]: Nanochat GPT implementation

@@ -13,10 +13,10 @@ source_url: "https://arxiv.org/abs/2305.13245v3"
 ingested: "2026-08-13"
 submitted: "2023-05-22"
 revised: "2023-12-23"
-sha256: "c86d608fd177bd9536adbfcf5af71e6ec86eee56d2d87f72fc3fb1adcec34b60"
+sha256: "1d8eaf08298ae5d0ca8fcf1454e7732f99fe4bd4eaa1cab858fc5b302399e794"
 arxiv: {"id": "2305.13245", "version": 3}
 license: {"id": "CC-BY-4.0", "url": "https://creativecommons.org/licenses/by/4.0/"}
-attachment: {"resource": "assets/gqa-training-generalized-multi-query-transformer-models-from-multi-head-checkpoints.pdf", "media_type": "application/pdf", "bytes": 269116, "sha256": "ba9094fe73db9bf515d47ae8b2d502fee9d8a6c7b1327e197ddb160f4c63b94a"}
+attachment: {"resource": "../assets/gqa-training-generalized-multi-query-transformer-models-from-multi-head-checkpoints.pdf", "media_type": "application/pdf", "bytes": 269116, "sha256": "ba9094fe73db9bf515d47ae8b2d502fee9d8a6c7b1327e197ddb160f4c63b94a", "role": "original"}
 extraction: {"tool": "pdftotext", "version": "pdftotext version 26.04.0"}
 ---
 
@@ -29,7 +29,7 @@ extraction: {"tool": "pdftotext", "version": "pdftotext version 26.04.0"}
 - **Submitted:** 2023-05-22
 - **Revised:** 2023-12-23
 - **License:** [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)
-- **Local attachment:** [Open the archived PDF](assets/gqa-training-generalized-multi-query-transformer-models-from-multi-head-checkpoints.pdf)
+- **Local attachment:** [Open the archived PDF](../assets/gqa-training-generalized-multi-query-transformer-models-from-multi-head-checkpoints.pdf)
 
 > Extraction notice: The text below was produced mechanically with
 > `pdftotext version 26.04.0`. Reading order, equations, tables, figures, and

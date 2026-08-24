@@ -3,9 +3,12 @@ type: "Concept"
 title: "Chat formatting"
 description: "The deterministic mapping between structured conversation messages and model tokens."
 tags: ["post-training", "tokenization", "project-nanochat"]
-status: "stable"
+status: "draft"
+scope: "vault"
 generated: {"by": "codex/gpt-5.6", "at": "2026-08-13T00:00:00Z"}
-sources: [{"id": "tokenizer", "resource": "../projects/code/nanochat/nanochat/tokenizer.py", "title": "Nanochat tokenizer and conversation rendering", "commit": "92d63d4e8bb4df75c3b71618f31ddde2378b2bcd"}, {"id": "chat-sft", "resource": "../projects/code/nanochat/scripts/chat_sft.py", "title": "Nanochat supervised finetuning", "commit": "92d63d4e8bb4df75c3b71618f31ddde2378b2bcd"}]
+sources: [{"id": "tokenizer", "resource": "../projects/code/nanochat/nanochat/tokenizer.py", "title": "Nanochat tokenizer and conversation rendering", "repository": "nanochat", "revision": "92d63d4e8bb4df75c3b71618f31ddde2378b2bcd", "path": "nanochat/tokenizer.py"}, {"id": "chat-sft", "resource": "../projects/code/nanochat/scripts/chat_sft.py", "title": "Nanochat supervised finetuning", "repository": "nanochat", "revision": "92d63d4e8bb4df75c3b71618f31ddde2378b2bcd", "path": "scripts/chat_sft.py"}]
+created: {"by": "process:project-scope-migration", "at": "2026-08-23T00:00:00Z"}
+source_state: "awaiting-source"
 ---
 
 # Chat formatting
@@ -36,7 +39,7 @@ examples.
 
 - [Byte-pair encoding](byte-pair-encoding.md)
 - [Supervised fine-tuning](supervised-fine-tuning.md)
-- [How Nanochat turns text into a chat model](../queries/how-does-nanochat-turn-text-into-a-chat-model.md)
+- [How Nanochat turns text into a chat model](../projects/nanochat/queries/how-does-nanochat-turn-text-into-a-chat-model.md)
 
 [^tokenizer]: Nanochat tokenizer and conversation rendering
 [^chat-sft]: Nanochat supervised finetuning

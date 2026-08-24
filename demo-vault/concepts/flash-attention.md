@@ -3,9 +3,12 @@ type: "Concept"
 title: "FlashAttention"
 description: "Exact attention kernels organized to reduce expensive memory traffic."
 tags: ["attention", "numerics", "training-systems"]
-status: "stable"
+status: "draft"
+scope: "vault"
 generated: {"by": "codex/gpt-5.6", "at": "2026-08-13T00:00:00Z"}
-sources: [{"id": "fa3-paper", "resource": "../raw/flashattention-3-fast-and-accurate-attention-with-asynchrony-and-low-precision.md", "title": "FlashAttention-3"}, {"id": "attention-source", "resource": "../projects/code/nanochat/nanochat/flash_attention.py", "title": "Nanochat attention backend", "commit": "92d63d4e8bb4df75c3b71618f31ddde2378b2bcd"}]
+sources: [{"id": "fa3-paper", "resource": "../raw/flashattention-3-fast-and-accurate-attention-with-asynchrony-and-low-precision.md", "title": "FlashAttention-3"}, {"id": "attention-source", "resource": "../projects/code/nanochat/nanochat/flash_attention.py", "title": "Nanochat attention backend", "repository": "nanochat", "revision": "92d63d4e8bb4df75c3b71618f31ddde2378b2bcd", "path": "nanochat/flash_attention.py"}]
+created: {"by": "process:project-scope-migration", "at": "2026-08-23T00:00:00Z"}
+source_state: "awaiting-source"
 ---
 
 # FlashAttention
@@ -31,13 +34,13 @@ Nanochat attempts to use the FA3 interface and supplies a PyTorch SDPA fallback.
 The wrapper supports causal and sliding-window masks and explicitly handles
 GQA-compatible tensor layouts.[^attention-source] A fallback preserves
 correctness but not necessarily the performance assumed by the
-[speedrun](../summaries/nanochat-end-to-end-training-pipeline.md).
+[speedrun](../projects/nanochat/summaries/nanochat-end-to-end-training-pipeline.md).
 
 ## Related pages
 
 - [Grouped-query attention](grouped-query-attention.md)
 - [Low-precision training](low-precision-training.md)
-- [What dominates a Nanochat training run](../queries/what-dominates-a-nanochat-training-run.md)
+- [What dominates a Nanochat training run](../projects/nanochat/queries/what-dominates-a-nanochat-training-run.md)
 
 [^fa3-paper]: FlashAttention-3
 [^attention-source]: Nanochat attention backend

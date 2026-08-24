@@ -471,9 +471,9 @@ function pdfTextLaneBounds(lane: OrderedPdfTextLane): {
 }
 
 function orderPdfTextLaneRegions(lanes: OrderedPdfTextLane[]): OrderedPdfTextLane[] {
-  const entries = lanes.map((lane, sourceOrder) => ({
+  const entries = lanes.map(lane => ({
     lane,
-    sourceOrder,
+    sourceOrder: Math.min(...lane.items.map(item => item.sourceOrder)),
     top: Math.min(...lane.items.map(item => item.rect.top)),
     bottom: Math.max(...lane.items.map(item => item.rect.top + item.rect.height)),
   })).sort((left, right) => (

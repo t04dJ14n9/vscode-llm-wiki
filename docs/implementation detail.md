@@ -1,340 +1,63 @@
-# LLM Wiki: Current Implementation Detail
-
-> This document describes the simplified combined desktop implementation. The
-> architectural rationale and user-facing flow are in
-> [Architecture and VS Code Integration](architecture-and-vscode-integration.md).
-
-## 1. Active package boundary
-
-The release artifact is `packages/vscode-extension`. It contains both custom
-editors, repository services, shared agent handoff, and command orchestration.
-
-```text
-packages/vscode-extension
-  src/                    extension-host code
-  webview-src/            Markdown editor and experimental web-reader webviews
-  dist/                   combined release bundle
-
-packages/pdf-editor
-  src/webview/            PDF viewer and selection UI
-
-packages/core
-  src/index.ts            canonical types used by the extension
-  src/links/              portable reference parsing and serialization
-```
-
-The extension build compiles core first and consumes its one canonical entry.
-Core exports portable-link classification. Database, ingestion,
-search, embeddings, activity, CLI, MCP, and split-extension surfaces have been
-removed.
-
-## 2. Combined extension output
-
-`pnpm --filter llm-wiki-vscode build` emits:
-
-| Artifact | Purpose |
-| --- | --- |
-| `dist/extension.js` | Node/Electron extension host |
-| `dist/markdown-editor.js` | CodeMirror Markdown webview |
-| `dist/pdf-viewer.js` | EmbedPDF/PDFium webview |
-| `dist/experimental-owned-browser.js` | Sanitized experimental web-reader webview |
-| `dist/pdfium.wasm` | Local PDF renderer |
-
-The combined output does not include `sql.js`, `sql-wasm.wasm`, a SQLite
-binding, or a required `.llm_wiki/index.sqlite`.
-
-## 3. Activation and host integration
-
-[`src/extension.ts`](../packages/vscode-extension/src/extension.ts) is the one
-entry point for VS Code and Cursor. It registers:
-
-- `llm-wiki.markdownEditor`;
-- `llm-wiki.pdfViewer`;
-- Backlinks and Forward Links in the LLM Wiki activity view;
-- context-aware Markdown Outline and PDF Outline panels in the main Explorer
-  sidebar;
-- source navigation, selection, daily-note, graph, Git-sync, Markdown, and PDF
-  commands;
-- Cursor Browser capture and the extension-owned Experimental Web Reader
-  commands;
-- a debounced Markdown watcher that refreshes file-derived views and source
-  annotations.
-
-Commands without a source document currently fall back to the first workspace
-folder as their repository root. Link navigation carries its source URI, so in
-a multi-root workspace the folder owning that document takes precedence. Without
-an open folder, the Markdown and PDF viewers still register, but learning notes,
-graph, daily review, and Git commands display a workspace requirement instead of
-creating hidden state.
-
-The same manifest and JavaScript bundle run in Cursor through its VS Code
-extension API. There is no Cursor-specific persistence layer or UI fork.
-
-## 4. Durable file model
-
-The active runtime has no opaque knowledge database. Durable state is:
-
-| Path | Responsibility |
-| --- | --- |
-| user-chosen `*.md` | authored notes and source material |
-| user-chosen `*.pdf` | original PDF sources |
-| `wiki/learning/*.md` | readable source quote, summary, full Q&A, and review dates |
-| `wiki/daily/*.md` | manual daily plan, carried TODOs, and due reviews |
-| `.llm_wiki/annotations/pdf/assets/…` | best-effort bounded PNG selection screenshots |
-| `.llm_wiki/agent/selection.{md,json,png}` | latest handoff aliases; PNG exists only for a validated PDF crop |
-
-These are ordinary files. Git provides diff, history, merge, remote update, and
-recovery. There is no required ingest step: commands retaining the old
-“refresh/ingest” wording simply rescan filesystem content.
-
-## 5. Markdown custom editor
-
-[`src/markdownEditorProvider.ts`](../packages/vscode-extension/src/markdownEditorProvider.ts)
-owns host synchronization. Each open webview panel has its own handle, even if
-the same document is visible in another group. The provider:
-
-- keeps VS Code's `TextDocument` as canonical content;
-- applies webview edits with `WorkspaceEdit`;
-- mirrors external document changes back to the webview;
-- requests the current live selection from the active panel before handoff;
-- passes exact offsets and source context to the host;
-- loads learning annotations for the active source file.
-
-[`webview-src/markdown-editor.ts`](../packages/vscode-extension/webview-src/markdown-editor.ts)
-owns CodeMirror interaction and rendering. Its `requestSelection` response
-prevents a menu or keyboard handoff from using a stale host-side selection. A
-non-empty selection reveals a compact **Cmd+L Add to Chat** prompt;
-`Cmd+L` on macOS and `Ctrl+L` elsewhere invoke the same action as the context
-menu.
-
-Learning-note annotations arrive as quote/offset records. The webview highlights
-the stored range and renders **✦ Note**. The same resolved range drives a
-floating previous-question/answer summary on hover, marker focus, or a collapsed
-caret inside `[from, to)`. If offsets no longer match, exact-quote search
-provides a conservative fallback rather than guessing a fuzzy location.
-
-## 6. Markdown agent handoff
-
-```text
-selection
-  -> exact source packet
-  -> immutable .llm_wiki/agent/exports/<id>/selection.md
-  -> active supported agent draft
-  -> learner reviews and submits
-```
-
-The automatic selection prompt, context menu, and `Cmd+L` / `Ctrl+L` shortcut
-all dispatch the provider-neutral `llm-wiki.addSelectionToChat` command.
-Saved Markdown selections are handed over as their original file plus a
-one-based, inclusive `#Lstart-Lend` range; they do not create a synthetic
-immutable export. Dirty notes are saved first, and the live selection is
-recaptured after a save that changes document layout. Unsaved or empty Markdown
-selections are rejected.
-The legacy `llm-wiki.addSelectionToCursorChat` ID remains an internal
-compatibility alias for older webview bundles. The shared `agentHandoff.ts`
-router prefers stable editor-tab evidence, uses feature-detected Cursor support
-only as a fallback, asks when ambiguous, never submits, and does not read the
-resulting external conversation.
-
-Local selection exports record both `open_uri` (the clickable host product link)
-and `chat_uri` (the internal immutable `.llm_wiki_anchor` attachment). The
-visible Source link and agent citations use `open_uri`; the bridge file is never
-presented as a user-facing link. Persisted vault notes retain relative Markdown
-links and wikilinks, while web selections keep their direct HTTPS source.
-
-### Web selection capture
-
-Cursor hosts expose private, feature-detected Browser commands that let the
-extension read the active selection, collect bounded surrounding text, verify
-the active tab and URL before and after capture, and request a validated PNG
-crop. Stock VS Code does not expose another extension's Simple Browser DOM or
-pixels, so LLM Wiki does not attempt to inspect it.
-
-For stock VS Code and portable testing, **Open Experimental Web Reader** opens
-an extension-owned, script-free reading surface. The host fetches only
-revalidated public HTTP(S) addresses with redirect, timeout, and size limits;
-the webview sanitizes the response and strips scripts, forms, credentials,
-remote media, and active page behavior. Its Add to Chat action attaches exact
-selected text, bounded before/after context, portable URL metadata, and an
-optional synthetic context image. Both browser paths use the same provider
-router and never submit the draft.
-
-Clicking a saved Markdown annotation invokes
-`llm-wiki.openLearningDiscussion` for compatibility. The host confines
-the requested path to `wiki/learning/`, checks that its frontmatter ID matches,
-and opens the durable Markdown note. It does not restore a Learning Chat
-sidebar or start an agent thread.
-
-## 7. Learning-note store
-
-[`src/learningNoteStore.ts`](../packages/vscode-extension/src/learningNoteStore.ts)
-uses the discussion ID as identity. A short deterministic hash appears in the
-filename, allowing a restart to find the same note by scanning
-`wiki/learning/` rather than querying an index.
-
-Each file contains:
-
-- validated frontmatter;
-- workspace-relative POSIX source path and portable link;
-- Markdown line/character offsets when available;
-- exact Markdown text or canonical PDF extracted quote;
-- latest question and first-paragraph answer summary;
-- complete ordered Q&A;
-- hidden per-message markers used for lossless transcript recovery;
-- fixed review dates;
-- a marked manual-notes region.
-
-Writes for the same discussion are serialized. The replacement is written to a
-temporary file and atomically renamed. Existing manual-note content is
-preserved during regeneration. Local `file://` URIs are removed from persisted
-workspace links.
-
-## 8. PDF viewer
-
-[`src/pdfEditorProvider.ts`](../packages/vscode-extension/src/pdfEditorProvider.ts)
-reads bytes with `vscode.workspace.fs` and sends them to the PDF webview.
-EmbedPDF/PDFium renders locally.
-
-A PDF selection carries:
-
-- page and quote;
-- prefix/suffix context;
-- normalized `[left, top, right, bottom]` rectangles in PDF points from a
-  top-left origin;
-- start/end text-item and character offsets when available;
-- a portable page/text-fragment URL;
-- a best-effort, size-limited PNG screenshot when a crop is requested.
-
-The screenshot attempt covers the union of the selection rectangles with 24
-PDF points of padding, clamped to the page. A successful snapshot stores
-`cropRect: [left, top, right, bottom]`, `padding: 24`, and `unit: "pt"` together
-with its repository-relative file, SHA-256, MIME type, and pixel dimensions.
-Capture failure leaves the text/page/rectangle anchor valid and continues with
-text-only context.
-
-## 9. Agent handoff
-
-[`src/agentHandoff.ts`](../packages/vscode-extension/src/agentHandoff.ts)
-exports exact Markdown text or the canonical PDF extracted quote to
-`.llm_wiki/agent/selection.*` and attaches the immutable Markdown export to an
-available Codex, Claude Code, Cursor Agent, or CodeBuddy sidebar.
-
-**Add to Chat** exposes that shared path in both custom editors; the PDF path
-may attach a validated crop PNG beside `selection.md`. The router updates the
-chosen provider's draft and never submits it. External answers remain owned by
-the provider and are not automatically written into LLM Wiki notes.
-
-## 10. Filesystem wiki and graph
-
-[`src/filesystemWiki.ts`](../packages/vscode-extension/src/filesystemWiki.ts)
-recursively reads Markdown while excluding internal/build paths. It derives
-notes, headings, Markdown links, wikilinks, backlinks, forward links, broken
-targets, and graph edges in memory.
-
-YAML `concepts` and `entities` accept inline or block string lists. Values are
-normalized and deduplicated case-insensitively. Invalid or ambiguous metadata
-is ignored instead of inferred.
-
-[`src/backlinksProvider.ts`](../packages/vscode-extension/src/backlinksProvider.ts)
-feeds the link trees.
-[`src/knowledgeGraphPanel.ts`](../packages/vscode-extension/src/knowledgeGraphPanel.ts)
-renders a CSP-safe SVG with distinct note, concept, and entity nodes, an honest
-legend, and accessible text fallback. The graph contains only explicit
-Markdown/frontmatter relationships.
-
-## 11. Daily notes
-
-[`src/dailyNotes.ts`](../packages/vscode-extension/src/dailyNotes.ts) creates or
-refreshes `wiki/daily/YYYY-MM-DD.md` using the desktop's local calendar date.
-
-It scans learning-note frontmatter for reviews due on or before the requested
-date. The fixed offsets are 1, 3, 7, 14, 30, 60, and 90 days. Completed
-note/date review pairs are found in earlier generated review regions and
-suppressed; overdue unchecked reviews remain visible.
-
-Unchecked ordinary TODOs are carried from the latest prior daily note. Review
-checkboxes are excluded from that TODO carry. Marker-delimited generated
-sections can be updated without replacing manual prose or current checkbox
-state.
-
-## 12. Git synchronization
-
-[`src/repositorySync.ts`](../packages/vscode-extension/src/repositorySync.ts)
-uses Git as a conservative transport:
-
-1. validate the repository;
-2. fetch and prune remote refs without touching working files;
-3. validate the upstream and refuse any merge for a dirty worktree;
-4. compare local and upstream ancestry;
-5. fast-forward when possible;
-6. return `merge-required` for divergence;
-7. merge only after the command obtains explicit confirmation.
-
-The implementation does not push, commit, reset, stash, delete, or resolve
-conflicts on the user's behalf.
-
-## 13. URI dispatch
-
-[`src/uriDispatcher.ts`](../packages/vscode-extension/src/uriDispatcher.ts)
-classifies ordinary destinations:
-
-| Kind | Behavior |
-| --- | --- |
-| Markdown/note | Open custom Markdown editor and reveal heading/block/line |
-| Code | Open native text editor and reveal `#Lx-Ly` |
-| PDF | Open custom PDF viewer at page/text fragment |
-| Web | Use `vscode.env.openExternal` |
-| Image/text | Open the local file |
-| Unknown | Report an error |
-
-Relative destinations in generated learning notes resolve against the
-containing note. Workspace-root-style destinations remain supported. When a
-trusted caller explicitly opts in, an existing absolute file is tried first;
-if it does not exist, the target falls back to the vault-relative path. Without
-that opt-in, root-looking paths stay inside the vault. Product deep links are
-unwrapped to their portable target before local path resolution. This keeps
-source links portable after clone or repository relocation while preventing
-external deep links from probing arbitrary machine paths.
-
-## 14. Security and reliability
-
-- Webviews use content-security policies and validated host messages.
-- Agent output is inserted with text-safe rendering, not arbitrary HTML.
-- Opening a Markdown annotation confines its note path to `wiki/learning/` and
-  verifies the stored ID.
-- PDF sidecars use schema validation, lock files, atomic writes, and
-  content-addressed routing.
-- Portable annotation paths remain repository-relative; the scanner ignores
-  damaged records and symbolic-link escapes.
-- Screenshot capture failure is non-fatal and never erases the source anchor.
-- Agent threads cannot modify the repository.
-- Git sync refuses dirty state and requires consent for divergence.
-- Exact quotes and complete transcripts keep summaries auditable.
-
-## 15. Retired legacy surfaces
-
-The old CLI, MCP server, SQLite-backed core, and standalone Markdown/PDF
-extensions were removed after the combined extension became the sole product.
-Future automation should reuse the filesystem-first services and preserve the
-same Markdown, JSON, and Git source-of-truth model.
-
-## 16. Verification
-
-Use scoped commands for the simplified product:
-
-```bash
-pnpm --filter llm-wiki-vscode exec tsc --noEmit
-pnpm --filter @llm-wiki/core test
-pnpm --filter llm-wiki-vscode test
-pnpm exec playwright test --config playwright.config.ts
-```
-
-The build should contain only the combined host/webview artifacts and
-`pdfium.wasm`. Unit tests cover filesystem parsing, learning-note persistence,
-annotation opening, daily regeneration, Git decisions, graph rendering, crop
-metadata, and host/webview messages. Playwright covers the rendered Markdown and PDF
-interactions.
-
-The final release gate is a real-host smoke test in both VS Code and Cursor,
-because browser fixtures alone cannot prove custom-editor, command, selection
-prompt, context-menu, shortcut, and composer behavior.
+# LLM Wiki for VS Code: current implementation
+
+## Extension activation
+
+Activation registers the Markdown/PDF/anchor custom editors, URI dispatcher,
+backlinks/forward links, outlines, selection handoff, and optional browser
+reader. With an open workspace it also creates `QueryAnnotationIndex`, its
+bounded filesystem watchers, legacy read adapter, and project features. Without
+a workspace the viewers remain read-only.
+
+## Query model
+
+`queryAnnotationIndex.ts` exports the lifecycle, Markdown/PDF/code anchor union,
+navigation targets, annotation model, resolvers, deterministic ordering, bounded
+scanner, legacy adapter, and debounced watcher registration.
+
+Valid Queries carry `condensed_summary`, generated/lifecycle metadata,
+`conversation.selection_id`, provenance sources, and source-ID-bound anchors.
+The index keeps in-memory maps by normalized source path, Query path, and
+selection ID. It writes nothing.
+
+## Markdown integration
+
+`MarkdownEditorProvider` asks the index for the current workspace-relative
+source, resolves Markdown anchors against the in-memory document text, and sends
+only safe ranges to the webview. The webview groups identical ranges, preserves
+legacy note compatibility, displays ordered condensed answers, supports hover,
+focus, caret, pin/Escape/outside-click behavior, and posts a validated
+`openQuery` navigation target.
+
+## PDF integration
+
+`PdfEditorProvider` hashes the exact PDF bytes, requests annotations for the
+source, resolves only PDF anchors whose stored hash matches, and sends page/
+rectangle geometry to the viewer. The viewer draws a dedicated Query layer
+after each page render, groups identical regions, repaints through zoom/lazy
+rendering, and retains normal selection/search/link layers. Query strings are
+rendered with DOM text nodes.
+
+## Vault tooling
+
+`tools/llm-wiki` builds immediate-child `_index.md` files and validates three
+explicit layers: `okf-base`, `karpathy-vault-v1`, and `project-policy`. Checks
+cover project placement, repository bindings, historical Git hashes,
+currentness, raw immutability, binary/LFS attachments, workbench roles, Query
+anchors, Entity/Concept creation metadata, links, and runtime state.
+
+`_index.md` and `_log.md` are canonical regular files. Unprefixed variants and
+navigation/log symlinks fail validation.
+
+## Removed architecture
+
+New conversations are not stored by `LearningNoteStore`, PDF discussion
+sidecars, JSON-LD mirrors, screenshots, or an app-server controller. The old
+`wiki/learning` parser and open command remain read-only for one compatibility
+release. The removed Ask PDF panel/backend is not part of the build.
+
+## Verification
+
+Run Python producer tests and demo validation, then TypeScript lint/typecheck,
+unit tests, production build, focused browser tests, and VS Code-host E2E. Git
+LFS inspection must use working-tree attributes for unstaged migrations because
+`git lfs ls-files` reports index paths until changes are staged.
