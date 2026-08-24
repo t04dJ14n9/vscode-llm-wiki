@@ -4,8 +4,10 @@ title: "DataComp-LM"
 description: "A benchmark and experimental framework for comparing language-model dataset curation recipes."
 tags: ["data", "data-curation", "datasets", "evaluation", "pretraining"]
 status: "stable"
+scope: "vault"
 generated: {"by": "codex/gpt-5.6", "at": "2026-08-13T00:00:00Z"}
 sources: [{"id": "dclm-paper", "resource": "../raw/datacomp-lm-in-search-of-the-next-generation-of-training-sets-for-language-models.md", "title": "DataComp-LM"}]
+created: {"by": "process:project-scope-migration", "at": "2026-08-23T00:00:00Z"}
 ---
 
 # DataComp-LM
@@ -37,6 +39,6 @@ measurement language for reading Nanochat’s data and
 
 - [FineWeb versus DataComp-LM](../comparisons/fineweb-vs-datacomp-lm.md)
 - [Pretraining data curation](../concepts/pretraining-data-curation.md)
-- [What dominates a Nanochat training run](../queries/what-dominates-a-nanochat-training-run.md)
+- [What dominates a Nanochat training run](../projects/nanochat/queries/what-dominates-a-nanochat-training-run.md)
 
 [^dclm-paper]: DataComp-LM

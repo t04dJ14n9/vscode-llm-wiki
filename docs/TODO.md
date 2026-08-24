@@ -179,7 +179,7 @@ appropriate.
 
 ### [x] Current PDF selection workflow
 
-- Text selection, page/range links, selection crop, Ask PDF, explicit provider
+- Text selection, page/range links, selection crop, explicit provider
   buttons, and correlated concurrent capture requests.
 - Text-only fallback for crop failures and immutable export files.
 
@@ -213,7 +213,8 @@ appropriate.
 - Add an index freshness indicator and an explicit rebuild/check command for
   large vaults.
 - Keep generated indexes deterministic and add a CI check that rejects stale
-  indexes or missing immediate-child `_index.md` files.
+  indexes or missing immediate-child `index.md` files; root underscore aliases
+  are compatibility symlinks only.
 
 ## Testing, CI, and observability
 

@@ -319,10 +319,11 @@ function orderPdfTextItems(items: OrderedPdfTextItem[]): any[] {
       ? [lane]
       : splitPdfTextLaneAtVerticalGaps(lane, typicalHeight, laneGap)
   ));
-  return orderPdfTextLaneRegions(
+  const ordered = orderPdfTextLaneRegions(
     mergeAdjacentPdfTextLanes(segmented, typicalHeight, laneGap, leftAlignmentTolerance),
   )
-    .flatMap(lane => orderSinglePdfTextFlow(lane.items))
+    .flatMap(lane => orderSinglePdfTextFlow(lane.items));
+  return restoreCompactPdfGridOrder(ordered, items, typicalHeight)
     .map(candidate => candidate.item);
 }
 
@@ -469,9 +470,9 @@ function pdfTextLaneBounds(lane: OrderedPdfTextLane): {
 }
 
 function orderPdfTextLaneRegions(lanes: OrderedPdfTextLane[]): OrderedPdfTextLane[] {
-  const entries = lanes.map((lane, sourceOrder) => ({
+  const entries = lanes.map(lane => ({
     lane,
-    sourceOrder,
+    sourceOrder: Math.min(...lane.items.map(item => item.sourceOrder)),
     top: Math.min(...lane.items.map(item => item.rect.top)),
     bottom: Math.max(...lane.items.map(item => item.rect.top + item.rect.height)),
   })).sort((left, right) => (
@@ -593,28 +594,74 @@ function pdfTextLaneMatch(
   const inlineGap = previousItem
     ? pdfTextIntervalDistance(previousItem.rect, candidate.rect)
     : Number.POSITIVE_INFINITY;
-  const continuesInlineRun = Boolean(
+  const sharesVisualLine = Boolean(
     previousItem
     && pdfTextItemsShareVisualLine(previousItem, candidate)
-    && (
-      inlineGap <= laneGap
-      // Some generators emit styled fragments on one line in reverse x order.
-      // Keep that local reversal together without letting a forward margin
-      // column bootstrap an otherwise multi-row body lane.
-      || (
-        candidate.rect.left < previousItem.rect.left
-        && inlineGap <= Math.max(laneGap, typicalHeight * 1.5)
-      )
-    )
   );
-  if (!aligned && supportRows < 2 && !continuesInlineRun) return undefined;
+  const continuesInlineRun = sharesVisualLine && inlineGap <= laneGap;
+  const continuesStyledForwardRun = Boolean(
+    sharesVisualLine
+    && previousItem
+    && candidate.rect.left >= previousItem.rect.left
+    && inlineGap > laneGap
+    && inlineGap <= Math.max(laneGap, typicalHeight * 3)
+    && pdfTextItemsHaveDistinctFontStyle(previousItem, candidate)
+  );
+  // Some generators emit styled fragments on one line in reverse x order.
+  // Keep that relaxed reversal eligible, but do not let it outrank a
+  // geometrically aligned lane: alternating columns can have the same shape.
+  const continuesRelaxedReverseRun = Boolean(
+    sharesVisualLine
+    && previousItem
+    && candidate.rect.left < previousItem.rect.left
+    && inlineGap > laneGap
+    && inlineGap <= Math.max(laneGap, typicalHeight * 1.5)
+  );
+  const conflictsWithExistingLine = recent.some(item => (
+    pdfTextItemsShareVisualLine(item, candidate)
+    && pdfTextIntervalDistance(item.rect, candidate.rect) > laneGap
+  ));
+  if (
+    conflictsWithExistingLine
+    && !continuesInlineRun
+    && !continuesStyledForwardRun
+    && !continuesRelaxedReverseRun
+  ) {
+    return undefined;
+  }
+  if (
+    !aligned
+    && supportRows < 2
+    && !continuesInlineRun
+    && !continuesStyledForwardRun
+    && !continuesRelaxedReverseRun
+  ) {
+    return undefined;
+  }
+  const relaxedUnalignedMatch = !aligned
+    && (continuesStyledForwardRun || continuesRelaxedReverseRun);
 
   // Repeated overlap on different rows is stronger evidence than one sparse,
-  // full-width header. Source-adjacent styled runs get the highest priority so
-  // a sentence split across font changes remains in one reading lane.
+  // full-width header. Near-touching inline runs get the highest priority;
+  // relaxed style/reversal matches stay below an aligned lane.
   return (continuesInlineRun ? 10_000 : 0)
-    + supportRows * 100
-    + (aligned ? Math.max(0, 50 - leftDistance) : 0);
+    + (continuesStyledForwardRun ? 10 : 0)
+    + (continuesRelaxedReverseRun ? 10 : 0)
+    + (relaxedUnalignedMatch ? 0 : supportRows * 100)
+    + (aligned ? 20 + Math.max(0, 50 - leftDistance) : 0);
+}
+
+function pdfTextItemsHaveDistinctFontStyle(
+  left: OrderedPdfTextItem,
+  right: OrderedPdfTextItem,
+): boolean {
+  const leftFont = left.item?.font;
+  const rightFont = right.item?.font;
+  if (!leftFont || !rightFont) return false;
+  return String(leftFont.family ?? '').trim() !== String(rightFont.family ?? '').trim()
+    || String(leftFont.size ?? '') !== String(rightFont.size ?? '')
+    || String(leftFont.weight ?? '') !== String(rightFont.weight ?? '')
+    || (leftFont.italic === true) !== (rightFont.italic === true);
 }
 
 function mergeSingleRowPdfTextLanes(
@@ -732,13 +779,100 @@ function pdfTextIntervalDistance(
   return 0;
 }
 
-function orderSinglePdfTextFlow(items: OrderedPdfTextItem[]): OrderedPdfTextItem[] {
+interface OrderedPdfTextRow {
+  center: number;
+  height: number;
+  items: OrderedPdfTextItem[];
+}
+
+function restoreCompactPdfGridOrder(
+  ordered: OrderedPdfTextItem[],
+  sourceItems: OrderedPdfTextItem[],
+  typicalHeight: number,
+): OrderedPdfTextItem[] {
+  const rows = pdfTextVisualRows(sourceItems);
+  const maximumRowGap = Math.max(3, typicalHeight * 3);
+  const minimumCellGap = Math.max(6, typicalHeight * 3);
+  const maximumFragmentGap = Math.max(6, typicalHeight * 0.7);
+  const coreRows = rows.map(row => {
+    const items = [...row.items].sort((left, right) => left.rect.left - right.rect.left);
+    let largeGaps = 0;
+    let inlineStyleTransitions = 0;
+    for (let index = 1; index < items.length; index++) {
+      const previous = items[index - 1]!;
+      const current = items[index]!;
+      const gap = current.rect.left - (previous.rect.left + previous.rect.width);
+      if (gap > minimumCellGap) {
+        largeGaps++;
+      }
+      if (
+        gap <= maximumFragmentGap
+        && pdfTextItemsHaveDistinctFontStyle(previous, current)
+      ) {
+        inlineStyleTransitions++;
+      }
+    }
+    return largeGaps >= 2 || (items.length >= 4 && inlineStyleTransitions >= 2);
+  });
+  const blocks: Array<{ orders: Set<number>; maximumSourceOrder: number }> = [];
+  for (let start = 0; start < rows.length;) {
+    if (!coreRows[start]) {
+      start++;
+      continue;
+    }
+    let end = start;
+    while (
+      coreRows[end + 1]
+      && rows[end + 1]!.center - rows[end]!.center <= maximumRowGap
+    ) {
+      end++;
+    }
+    if (end === start) {
+      start++;
+      continue;
+    }
+    while (
+      (rows[end + 1]?.items.length ?? 0) >= 2
+      && rows[end + 1]!.center - rows[end]!.center <= maximumRowGap
+    ) {
+      end++;
+    }
+    const blockItems = rows
+      .slice(start, end + 1)
+      .flatMap(row => row.items)
+      .sort((left, right) => left.sourceOrder - right.sourceOrder);
+    const minimumSourceOrder = blockItems[0]!.sourceOrder;
+    const maximumSourceOrder = blockItems.at(-1)!.sourceOrder;
+    if (maximumSourceOrder - minimumSourceOrder + 1 !== blockItems.length) {
+      start = end + 1;
+      continue;
+    }
+    blocks.push({
+      orders: new Set(blockItems.map(item => item.sourceOrder)),
+      maximumSourceOrder,
+    });
+    start = end + 1;
+  }
+
+  let result = [...ordered];
+  for (const block of blocks) {
+    const blockItems = sourceItems
+      .filter(item => block.orders.has(item.sourceOrder))
+      .sort((left, right) => left.sourceOrder - right.sourceOrder);
+    result = result.filter(item => !block.orders.has(item.sourceOrder));
+    const insertionIndex = result.findIndex(item => item.sourceOrder > block.maximumSourceOrder);
+    result.splice(insertionIndex < 0 ? result.length : insertionIndex, 0, ...blockItems);
+  }
+  return result;
+}
+
+function pdfTextVisualRows(items: OrderedPdfTextItem[]): OrderedPdfTextRow[] {
   const verticallySorted = [...items].sort((left, right) => (
     left.rect.top - right.rect.top
     || left.rect.left - right.rect.left
     || left.sourceOrder - right.sourceOrder
   ));
-  const lines: Array<{ center: number; height: number; items: OrderedPdfTextItem[] }> = [];
+  const lines: OrderedPdfTextRow[] = [];
   for (const item of verticallySorted) {
     const center = item.rect.top + item.rect.height / 2;
     const line = lines[lines.length - 1];
@@ -752,7 +886,11 @@ function orderSinglePdfTextFlow(items: OrderedPdfTextItem[]): OrderedPdfTextItem
       lines.push({ center, height: item.rect.height, items: [item] });
     }
   }
-  return lines.flatMap(line => line.items.sort((left, right) => (
+  return lines;
+}
+
+function orderSinglePdfTextFlow(items: OrderedPdfTextItem[]): OrderedPdfTextItem[] {
+  return pdfTextVisualRows(items).flatMap(line => line.items.sort((left, right) => (
     left.rect.left - right.rect.left || left.sourceOrder - right.sourceOrder
   )));
 }

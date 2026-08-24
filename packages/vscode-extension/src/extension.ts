@@ -38,6 +38,10 @@ import {
   registerMarkdownOutlineTreeProvider,
 } from './markdownSymbols';
 import { PdfEditorProvider } from './pdfEditorProvider';
+import {
+  QueryAnnotationIndex,
+  registerQueryAnnotationWatchers,
+} from './queryAnnotationIndex';
 import { syncRepository } from './repositorySync';
 import type { SelectionContext } from './selectionContext';
 import { dispatchUri } from './uriDispatcher';
@@ -48,11 +52,12 @@ let pdfEditorProvider: PdfEditorProvider | undefined;
 let markdownEditorProvider: MarkdownEditorProvider | undefined;
 let markdownOutlineProvider: MarkdownOutlineTreeProvider | undefined;
 let graphPanel: KnowledgeGraphPanel | undefined;
+let queryAnnotationIndex: QueryAnnotationIndex | undefined;
 let refreshTimer: NodeJS.Timeout | undefined;
 
 const STARTUP_CUSTOM_EDITOR_RETRY_DELAYS_MS = [0, 250, 1_000] as const;
 const WORKSPACE_REQUIRED_MESSAGE =
-  'Open a folder to use LLM Wiki notes and repository features.';
+  'Open a folder to use LLM Wiki Queries and repository features.';
 const AGENT_HANDOFF_ACTIVE_CONTEXT_KEY = 'llmWikiAgentHandoffActive';
 
 interface AddSelectionToChatInput {
@@ -69,6 +74,21 @@ export function activate(context: vscode.ExtensionContext): void {
   const learningNotes = workspaceRoot
     ? new LearningNoteStore(workspaceRoot)
     : undefined;
+  const queryDiagnostics = workspaceRoot && vscode.languages?.createDiagnosticCollection
+    ? vscode.languages.createDiagnosticCollection('llm-wiki-queries')
+    : undefined;
+  if (queryDiagnostics) context.subscriptions.push(queryDiagnostics);
+  queryAnnotationIndex = workspaceRoot
+    ? new QueryAnnotationIndex(workspaceRoot, { legacyStore: learningNotes })
+    : undefined;
+  if (queryAnnotationIndex) {
+    context.subscriptions.push(queryAnnotationIndex);
+    registerQueryAnnotationWatchers(
+      context,
+      vscode.workspace,
+      queryAnnotationIndex,
+    );
+  }
 
   registerLinkProvider(context);
   registerMarkdownOutlineProvider(context);
@@ -78,16 +98,15 @@ export function activate(context: vscode.ExtensionContext): void {
   markdownEditorProvider = new MarkdownEditorProvider(context, learningNotes, {
     agentCapabilities: () => agentCapabilitySource.read(),
     onDidChangeAgentCapabilities: agentCapabilitySource.onDidChange,
+    ...(queryAnnotationIndex ? { queryAnnotationIndex } : {}),
+    ...(queryDiagnostics ? { queryDiagnostics } : {}),
   });
   pdfEditorProvider = new PdfEditorProvider(context, {
     ...(workspaceRoot ? { vaultRoot: workspaceRoot, documentRoot: workspaceRoot } : {}),
-    globalStoragePath: context.globalStorageUri?.fsPath
-      ?? context.extensionUri?.fsPath
-      ?? workspaceRoot,
-    learningNoteStore: learningNotes,
     agentCapabilities: () => agentCapabilitySource.read(),
     onDidChangeAgentCapabilities: agentCapabilitySource.onDidChange,
-    // TODO(ask-pdf): Re-enable after the provider-neutral “More detail” workflow and backend policy are specified.
+    ...(queryAnnotationIndex ? { queryAnnotationIndex } : {}),
+    ...(queryDiagnostics ? { queryDiagnostics } : {}),
   });
   void vscode.commands.executeCommand(
     'setContext',
@@ -160,8 +179,8 @@ export function activate(context: vscode.ExtensionContext): void {
   refreshAllViews();
   vscode.window.showInformationMessage(
     workspaceRoot
-      ? `LLM Wiki ready — Markdown, PDF, and Git-backed notes at ${workspaceRoot}`
-      : 'LLM Wiki viewers ready — open a folder to enable learning notes and repository features.',
+      ? `LLM Wiki for VS Code ready — Markdown, PDF, and Git-backed knowledge at ${workspaceRoot}`
+      : 'LLM Wiki for VS Code viewers ready — open a folder to enable Queries and repository features.',
   );
 }
 
@@ -274,11 +293,30 @@ function registerCommands(
     }),
     vscode.commands.registerCommand(
       'llm-wiki.copySelectionForAgent',
-      (selection?: SelectionContext) => (
-        isPdfUri(activeTabUri())
-          ? pdfEditorProvider?.copySelectionForAgent() ?? false
-          : copyMarkdownSelectionForAgent(selection)
-      ),
+      async (selection?: SelectionContext) => {
+        const activeUri = activeTabUri();
+        const isPdf = isPdfUri(activeUri);
+        const shouldNotifyMarkdownWebview =
+          !isPdf
+          && activeTabCustomViewType() === MarkdownEditorProvider.viewType;
+        let copied = false;
+        try {
+          copied = isPdf
+            ? await pdfEditorProvider?.copySelectionForAgent() ?? false
+            : await copyMarkdownSelectionForAgent(selection);
+          return copied;
+        } finally {
+          if (shouldNotifyMarkdownWebview) {
+            try {
+              await markdownEditorProvider?.postCopySelectionForAgentResult(copied);
+            } catch {
+              // Clipboard success must not be turned into a command failure by
+              // a webview that is closing or otherwise unable to receive the
+              // cosmetic confirmation message.
+            }
+          }
+        }
+      },
     ),
     vscode.commands.registerCommand(
       'llm-wiki.addSelectionToChat',
@@ -488,9 +526,15 @@ function registerMarkdownWatcher(context: vscode.ExtensionContext): void {
 }
 
 async function refreshFilesystemViews(): Promise<void> {
+  queryAnnotationIndex?.invalidate();
   refreshAllViews();
-  if (typeof markdownEditorProvider?.refreshLearningAnnotations === 'function') {
+  if (typeof markdownEditorProvider?.refreshQueryAnnotations === 'function') {
+    await markdownEditorProvider.refreshQueryAnnotations();
+  } else if (typeof markdownEditorProvider?.refreshLearningAnnotations === 'function') {
     await markdownEditorProvider.refreshLearningAnnotations();
+  }
+  if (typeof pdfEditorProvider?.refreshQueryAnnotations === 'function') {
+    await pdfEditorProvider.refreshQueryAnnotations();
   }
 }
 
@@ -505,6 +549,8 @@ export function deactivate(): void {
   refreshTimer = undefined;
   graphPanel?.dispose();
   graphPanel = undefined;
+  queryAnnotationIndex?.dispose();
+  queryAnnotationIndex = undefined;
 }
 
 function setAgentHandoffActive(active: boolean): void {
@@ -650,9 +696,14 @@ interface MarkdownSelectionActionMessages {
   saveFailureMessage: string;
 }
 
+interface PrepareMarkdownSelectionOptions {
+  selectionIsFresh?: boolean;
+}
+
 async function prepareMarkdownSelectionForAction(
   selection: SelectionContext | undefined,
   messages: MarkdownSelectionActionMessages,
+  options: PrepareMarkdownSelectionOptions = {},
 ): Promise<SelectionContext | undefined> {
   if (!isMarkdownSelection(selection)) return undefined;
   if (!selection.text) {
@@ -670,7 +721,7 @@ async function prepareMarkdownSelectionForAction(
     activeTabCustomViewType() === MarkdownEditorProvider.viewType
     && typeof markdownEditorProvider?.flushActiveEditsBeforeSave === 'function'
   ) {
-    shouldRecapture = true;
+    shouldRecapture = options.selectionIsFresh !== true;
     try {
       if (!await markdownEditorProvider.flushActiveEditsBeforeSave(selectedUri)) {
         vscode.window.showWarningMessage(messages.saveFailureMessage);
@@ -731,6 +782,8 @@ export async function copyMarkdownSelectionForAgent(
     emptySelectionMessage: 'Select Markdown text before copying for agent.',
     unsavedSelectionMessage: 'Save this Markdown note before copying for agent.',
     saveFailureMessage: 'Save the Markdown note before copying for agent.',
+  }, {
+    selectionIsFresh: suppliedSelection !== undefined,
   });
   if (!selection) return false;
 

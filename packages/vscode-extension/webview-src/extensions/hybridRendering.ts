@@ -1,7 +1,7 @@
 import { Decoration, EditorView, WidgetType } from '@codemirror/view';
 import type { DecorationSet } from '@codemirror/view';
-import { StateEffect, StateField } from '@codemirror/state';
-import type { EditorState, Range, Transaction } from '@codemirror/state';
+import { EditorSelection, EditorState, StateEffect, StateField } from '@codemirror/state';
+import type { Range, Transaction } from '@codemirror/state';
 import DOMPurify from 'dompurify';
 import mermaid from 'mermaid';
 import {
@@ -30,7 +30,12 @@ import {
 } from './hybridImages';
 import type { ImageDimensions } from './hybridImages';
 import { hybridStyles } from './hybridStyles';
-import { FrontmatterPropertiesWidget, findFrontmatterBlock } from './hybridFrontmatter';
+import {
+  FrontmatterPropertiesWidget,
+  findFrontmatterBlock,
+  updateFrontmatterBlock,
+} from './hybridFrontmatter';
+import type { FrontmatterBlock } from './hybridFrontmatter';
 import {
   addMultiLineMathDecorations,
   addSingleLineMathDecorations,
@@ -1142,13 +1147,32 @@ function readSvgNaturalWidth(svg: SVGSVGElement): number {
 export const setHybridPreviewEnabled = StateEffect.define<boolean>();
 export const setDocumentTitle = StateEffect.define<string | null>();
 
+const LARGE_MARKDOWN_CHARACTER_LIMIT = 50_000;
+const LARGE_MARKDOWN_LINE_LIMIT = 500;
+
+function isLargeMarkdownDocument(state: EditorState): boolean {
+  return state.doc.length > LARGE_MARKDOWN_CHARACTER_LIMIT
+    || state.doc.lines > LARGE_MARKDOWN_LINE_LIMIT;
+}
+
 export const hybridPreviewEnabled = StateField.define<boolean>({
-  create: () => true,
+  create: state => !isLargeMarkdownDocument(state),
   update(value, transaction) {
     for (const effect of transaction.effects ?? []) {
       if (effect.is(setHybridPreviewEnabled)) return effect.value;
     }
     return value;
+  },
+});
+
+const parsedFrontmatter = StateField.define<FrontmatterBlock | null>({
+  create: state => isHybridPreviewEnabled(state) ? findFrontmatterBlock(state.doc) : null,
+  update(value, transaction) {
+    if (!hybridPreviewEnabledAfter(transaction)) return null;
+    if (!isHybridPreviewEnabled(transaction.startState)) {
+      return findFrontmatterBlock(transaction.newDoc);
+    }
+    return updateFrontmatterBlock(value, transaction);
   },
 });
 
@@ -1252,12 +1276,72 @@ function hasHybridPreviewToggle(transaction: Transaction): boolean {
   return (transaction.effects ?? []).some(effect => effect.is(setHybridPreviewEnabled));
 }
 
+function hybridPreviewEnabledAfter(transaction: Transaction): boolean {
+  let enabled = isHybridPreviewEnabled(transaction.startState);
+  for (const effect of transaction.effects ?? []) {
+    if (effect.is(setHybridPreviewEnabled)) enabled = effect.value;
+  }
+  return enabled;
+}
+
+function clampSelectionToFrontmatterBody(
+  selection: EditorSelection,
+  bodyFrom: number,
+): EditorSelection {
+  let changed = false;
+  const ranges = selection.ranges.map(range => {
+    const anchor = Math.max(range.anchor, bodyFrom);
+    const head = Math.max(range.head, bodyFrom);
+    if (anchor === range.anchor && head === range.head) return range;
+
+    changed = true;
+    if (range.empty) {
+      return EditorSelection.cursor(
+        head,
+        range.assoc,
+        range.bidiLevel ?? undefined,
+        range.goalColumn,
+      );
+    }
+    return EditorSelection.range(
+      anchor,
+      head,
+      range.goalColumn,
+      range.bidiLevel ?? undefined,
+      range.assoc,
+    );
+  });
+
+  return changed
+    ? EditorSelection.create(ranges, Math.min(selection.mainIndex, ranges.length - 1))
+    : selection;
+}
+
+const frontmatterSelectionFilter = EditorState.transactionFilter.of(transaction => {
+  if (!hybridPreviewEnabledAfter(transaction)) return transaction;
+
+  const cachedFrontmatter = transaction.startState.field(parsedFrontmatter, false) ?? null;
+  const frontmatter = updateFrontmatterBlock(cachedFrontmatter, transaction);
+  if (!frontmatter) return transaction;
+
+  const selection = clampSelectionToFrontmatterBody(transaction.newSelection, frontmatter.bodyFrom);
+  if (selection.eq(transaction.newSelection)) return transaction;
+
+  return [
+    transaction,
+    {
+      selection,
+      sequential: true,
+    },
+  ];
+});
+
 function buildHybridDecorations(state: EditorState): DecorationSet {
   if (!isHybridPreviewEnabled(state)) return Decoration.none;
 
   const decorations: Range<Decoration>[] = [];
   const active = activeLinesFromState(state);
-  const frontmatter = findFrontmatterBlock(state.doc);
+  const frontmatter = state.field(parsedFrontmatter, false) ?? null;
   const sourceText = state.doc.toString();
   // Obsidian comments are hidden in reading mode. HTML comments remain ordinary
   // Markdown source (generated-file banners commonly use them), so do not pass
@@ -1534,7 +1618,7 @@ const hybridLineRendering = StateField.define<DecorationSet>({
 
 function buildFrontmatterDecorations(state: EditorState): DecorationSet {
   if (!isHybridPreviewEnabled(state)) return Decoration.none;
-  const frontmatter = findFrontmatterBlock(state.doc);
+  const frontmatter = state.field(parsedFrontmatter, false) ?? null;
   if (!frontmatter) return Decoration.none;
 
   return Decoration.set([
@@ -2512,7 +2596,9 @@ function renderEscapedMarkdownPunctuation(
 
 export function hybridRendering() {
   return [
+    frontmatterSelectionFilter,
     hybridPreviewEnabled,
+    parsedFrontmatter,
     documentTitleRendering,
     frontmatterRendering,
     calloutRendering,

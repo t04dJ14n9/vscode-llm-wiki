@@ -25,32 +25,6 @@ test('workspace lint ignores generated SDD evidence', async () => {
   );
 });
 
-test('lint permits only the intentional Ask PDF deferral marker', async () => {
-  const sourcePath = join(packageRoot, 'src', 'extension.ts');
-  const source = readFileSync(sourcePath, 'utf8');
-  const eslint = new ESLint();
-
-  const [allowed] = await eslint.lintText(source, { filePath: sourcePath });
-  assert.equal(allowed.errorCount, 0);
-  assert.equal(allowed.warningCount, 0);
-
-  const [unrelatedTodo] = await eslint.lintText(
-    `${source}\n// eslint-disable-next-line no-warning-comments\n// TODO(unrelated): must fail\n`,
-    { filePath: sourcePath },
-  );
-  assert.ok(unrelatedTodo.messages.some(
-    message => message.ruleId === 'workspace-deferral/only-intentional-todo',
-  ));
-
-  const [inlineDisable] = await eslint.lintText(
-    `${source}\n// eslint-disable-next-line no-warning-comments\nvoid 0;\n`,
-    { filePath: sourcePath },
-  );
-  assert.ok(inlineDisable.messages.some(
-    message => message.message.includes('has no effect because you have \'noInlineConfig\''),
-  ));
-});
-
 function loadTsModule(relativePath, mocks = {}) {
   const filename = join(packageRoot, relativePath);
   const source = readFileSync(filename, 'utf8');
@@ -97,23 +71,6 @@ function loadTsModule(relativePath, mocks = {}) {
     if (Object.prototype.hasOwnProperty.call(mocks, request)) {
       return mocks[request];
     }
-    if (request === './codexAppServerClient') {
-      return {
-        CodexAppServerClient: class {
-          dispose() {}
-        },
-      };
-    }
-    if (request === './pdfDiscussionController') {
-      return {
-        PDF_DISCUSSION_MAX_PNG_BYTES: 5 * 1024 * 1024,
-        PDF_DISCUSSION_WORKSPACE_TRUST_MESSAGE:
-          'Trust this workspace before using Ask PDF with Codex.',
-        PdfDiscussionController: class {
-          dispose() {}
-        },
-      };
-    }
     if (request === './cursorCrop') {
       return {
         validateCursorCropPng: value => value instanceof Uint8Array
@@ -155,6 +112,15 @@ function loadTsModule(relativePath, mocks = {}) {
     if (request === './learningNoteStore') {
       return {
         LearningNoteStore: class {},
+      };
+    }
+    if (request === './queryAnnotationIndex') {
+      return {
+        QueryAnnotationIndex: class {
+          invalidate() {}
+          dispose() {}
+        },
+        registerQueryAnnotationWatchers: () => ({ dispose() {} }),
       };
     }
     if (request === './dailyNotes') {
@@ -478,6 +444,87 @@ test('Copy for Agent copies a multi-line Markdown reference without export or ha
   assert.equal(exportCalls.length, 0);
   assert.equal(handoffCalls.length, 0);
   assert.equal(informationMessages.at(-1), 'Selection copied for agent.');
+});
+
+test('Copy for Agent uses a supplied custom-editor selection without recapturing it', async () => {
+  const clipboardWrites = [];
+  let captureCalls = 0;
+  const uri = { scheme: 'file', fsPath: '/vault/notes/source.md' };
+  const selection = {
+    uri,
+    text: 'selected',
+    startLine: 12,
+    endLine: 14,
+    metadata: { kind: 'markdown' },
+  };
+  const vscode = createVscodeMock({
+    executeCommandCalls: [],
+    activeDocumentUri: undefined,
+    activeTabUri: uri,
+    activeTabViewType: 'llm-wiki.markdownEditor',
+  });
+  vscode.env.clipboard = {
+    writeText: async text => clipboardWrites.push(text),
+  };
+  const mocks = createActivationMocks({ vscode });
+  mocks['./markdownEditorProvider'] = {
+    MarkdownEditorProvider: class {
+      static viewType = 'llm-wiki.markdownEditor';
+      async captureActiveSelectionContext() {
+        captureCalls += 1;
+        throw new Error('the supplied selection should avoid a second capture');
+      }
+    },
+  };
+  const { activate } = loadTsModule('src/extension.ts', mocks);
+  activate({ subscriptions: [] });
+
+  assert.equal(
+    await vscode.__registeredCommands['llm-wiki.copySelectionForAgent'](selection),
+    true,
+  );
+  assert.deepEqual(clipboardWrites, ['@notes/source.md#12-14']);
+  assert.equal(captureCalls, 0);
+});
+
+test('Copy for Agent reports direct command success to the active Markdown webview', async () => {
+  const clipboardWrites = [];
+  const resultMessages = [];
+  const uri = { scheme: 'file', fsPath: '/vault/notes/source.md' };
+  const selection = {
+    uri,
+    text: 'selected',
+    startLine: 12,
+    endLine: 14,
+    metadata: { kind: 'markdown' },
+  };
+  const vscode = createVscodeMock({
+    executeCommandCalls: [],
+    activeDocumentUri: undefined,
+    activeTabUri: uri,
+    activeTabViewType: 'llm-wiki.markdownEditor',
+  });
+  vscode.env.clipboard = {
+    writeText: async text => clipboardWrites.push(text),
+  };
+  const mocks = createActivationMocks({ vscode });
+  mocks['./markdownEditorProvider'] = {
+    MarkdownEditorProvider: class {
+      static viewType = 'llm-wiki.markdownEditor';
+      async captureActiveSelectionContext() {
+        return selection;
+      }
+      async postCopySelectionForAgentResult(ok) {
+        resultMessages.push(ok);
+      }
+    },
+  };
+  const { activate } = loadTsModule('src/extension.ts', mocks);
+  activate({ subscriptions: [] });
+
+  assert.equal(await vscode.__registeredCommands['llm-wiki.copySelectionForAgent'](), true);
+  assert.deepEqual(clipboardWrites, ['@notes/source.md#12-14']);
+  assert.deepEqual(resultMessages, [true]);
 });
 
 test('Copy for Agent formats a single-line Markdown selection without a range suffix', async () => {
@@ -2233,16 +2280,6 @@ test('combined activation treats any folder as a filesystem wiki without opening
         return { refresh() {} };
       },
     },
-    './codexAppServerClient': {
-      CodexAppServerClient: class {
-        dispose() {}
-      },
-    },
-    './pdfDiscussionController': {
-      PdfDiscussionController: class {
-        dispose() {}
-      },
-    },
     './wikiLinks': { notePathToUri: value => value },
   });
 
@@ -2258,7 +2295,6 @@ test('combined activation treats any folder as a filesystem wiki without opening
   assert.equal(providerOptions.length, 1);
   assert.equal(providerOptions[0].vaultRoot, '/documents');
   assert.equal(providerOptions[0].documentRoot, '/documents');
-  assert.equal(providerOptions[0].globalStoragePath, '/global-storage');
   assert.equal(outlineRegistrationCount, 1);
   assert.equal(databaseOpenCount, 0);
 });
@@ -2271,7 +2307,6 @@ test('no-folder activation keeps custom viewers read-only and gates repository l
   const warningMessages = [];
   const informationMessages = [];
   const treeProviderIds = [];
-  let codexClientCount = 0;
   let learningNoteStoreCount = 0;
   let backlinksCount = 0;
   let watcherCount = 0;
@@ -2301,14 +2336,6 @@ test('no-folder activation keeps custom viewers read-only and gates repository l
   };
 
   const mocks = createActivationMocks({ vscode });
-  mocks['./codexAppServerClient'] = {
-    CodexAppServerClient: class {
-      constructor() {
-        codexClientCount += 1;
-      }
-      dispose() {}
-    },
-  };
   mocks['./learningNoteStore'] = {
     LearningNoteStore: class {
       constructor() {
@@ -2376,16 +2403,12 @@ test('no-folder activation keeps custom viewers read-only and gates repository l
   assert.equal(providerOptions.length, 1);
   assert.equal(providerOptions[0].vaultRoot, undefined);
   assert.equal(providerOptions[0].documentRoot, undefined);
-  assert.equal(providerOptions[0].learningNoteStore, undefined);
-  assert.equal(providerOptions[0].discussionController, undefined);
-  assert.equal(providerOptions[0].globalStoragePath, '/global-storage');
-  assert.equal(codexClientCount, 0);
   assert.equal(learningNoteStoreCount, 0);
   assert.equal(backlinksCount, 0);
   assert.equal(treeProviderIds.length, 0);
   assert.equal(watcherCount, 0);
   assert.ok(informationMessages.includes(
-    'LLM Wiki viewers ready — open a folder to enable learning notes and repository features.',
+    'LLM Wiki for VS Code viewers ready — open a folder to enable Queries and repository features.',
   ));
 
   await vscode.__registeredCommands['llm-wiki.generateDailyNote']();
@@ -2396,7 +2419,7 @@ test('no-folder activation keeps custom viewers read-only and gates repository l
   assert.equal(exportedSelectionCount, 0);
   assert.equal(warningMessages.length, 2);
   assert.ok(warningMessages.every(message =>
-    message === 'Open a folder to use LLM Wiki notes and repository features.'
+    message === 'Open a folder to use LLM Wiki Queries and repository features.'
   ));
 
   await vscode.__registeredCommands['llm-wiki.openPdfTarget']({
@@ -2412,12 +2435,9 @@ test('no-folder activation keeps custom viewers read-only and gates repository l
   assert.equal(warningMessages.length, 3);
 });
 
-test('production activation leaves Ask PDF and Codex uncomposed', () => {
+test('production activation leaves Codex uncomposed', () => {
   const outputChannels = [];
   const configurationSections = [];
-  const providerOptions = [];
-  let codexClientCount = 0;
-  let discussionControllerCount = 0;
   const vscode = createVscodeMock({
     executeCommandCalls: [],
     activeDocumentUri: undefined,
@@ -2428,22 +2448,10 @@ test('production activation leaves Ask PDF and Codex uncomposed', () => {
     return { get: (_key, fallback) => fallback };
   };
   const mocks = createActivationMocks({ vscode });
-  mocks['./codexAppServerClient'] = {
-    CodexAppServerClient: class {
-      constructor() { codexClientCount += 1; }
-      dispose() {}
-    },
-  };
-  mocks['./pdfDiscussionController'] = {
-    PdfDiscussionController: class {
-      constructor() { discussionControllerCount += 1; }
-      dispose() {}
-    },
-  };
   mocks['./pdfEditorProvider'] = {
     PdfEditorProvider: class {
       static viewType = 'llm-wiki.pdfViewer';
-      constructor(_context, options) { providerOptions.push(options); }
+      constructor(_context, _options) {}
       getActiveWebview() { return undefined; }
     },
   };
@@ -2455,12 +2463,8 @@ test('production activation leaves Ask PDF and Codex uncomposed', () => {
     globalStorageUri: { fsPath: '/global-storage' },
   });
 
-  assert.equal(codexClientCount, 0);
-  assert.equal(discussionControllerCount, 0);
   assert.equal(outputChannels.length, 0);
   assert.equal(configurationSections.includes('llmWiki.agent'), false);
-  assert.equal(vscode.__registeredCommands['llm-wiki.pdfAskSelection'], undefined);
-  assert.equal(providerOptions[0].discussionController, undefined);
 });
 
 function createActivationMocks({ vscode, core = {} }) {

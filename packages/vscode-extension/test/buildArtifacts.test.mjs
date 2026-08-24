@@ -135,19 +135,19 @@ test('webview bundles do not depend on webpack automatic publicPath detection', 
   }
 });
 
-test('combined PDF artifacts retain dormant Ask protocol but omit removed selection actions', () => {
+test('combined PDF artifacts omit removed selection actions', () => {
   const pdfBundle = readFileSync(join(dist, 'pdf-viewer.js'), 'utf8');
   const hostBundle = readFileSync(join(dist, 'extension.js'), 'utf8');
-  assert.match(pdfBundle, /pdfDiscussionPrepare/);
-  assert.match(pdfBundle, /pdfDiscussionLoadSnapshot/);
-  assert.match(pdfBundle, /Ask PDF/);
-  assert.match(pdfBundle, /Ask about selection/);
   for (const artifact of [pdfBundle, hostBundle]) {
     for (const removed of [
       'Insert Quote and Link',
       'Copy Quote and Link',
       'Insert Link',
       'copy-link-format',
+      'Ask PDF',
+      'Ask about selection',
+      'pdfDiscussionPrepare',
+      'pdfDiscussionLoadSnapshot',
     ]) {
       assert.equal(artifact.includes(removed), false);
     }
@@ -356,6 +356,19 @@ test('manifest exposes Copy for Agent in both hosts while Add to Chat stays Curs
   assert.ok(copyForAgentContributions.some(
     item => item.when.includes('editorLangId == markdown') && item.when.includes('editorHasSelection'),
   ));
+  const copyForAgentKeybinding = (manifest.contributes.keybindings ?? []).find(
+    item => item.command === copyForAgent.command,
+  );
+  assert.deepEqual(copyForAgentKeybinding, {
+    command: 'llm-wiki.copySelectionForAgent',
+    key: 'ctrl+alt+c',
+    mac: 'cmd+alt+c',
+    when: [
+      "(activeCustomEditorId == 'llm-wiki.markdownEditor' && llmWikiMarkdownHasSelection)",
+      "(llmWikiPdfOpen && llmWikiPdfHasAgentClipboardSelection)",
+      '(editorLangId == markdown && editorHasSelection)',
+    ].join(' || '),
+  });
   assert.equal(
     (manifest.activationEvents ?? []).includes('onView:llm-wiki.learningChat'),
     false,

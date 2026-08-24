@@ -132,6 +132,8 @@ export function renderedImageElement(
   const image = document.createElement('img');
   image.className = 'cm-hybrid-image-img';
   image.alt = alt;
+  image.loading = 'lazy';
+  image.decoding = 'async';
   image.src = url;
   image.dataset.sourceFrom = String(sourceFrom);
   image.dataset.sourceTo = String(sourceTo);

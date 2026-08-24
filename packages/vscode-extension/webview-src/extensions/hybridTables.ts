@@ -444,7 +444,7 @@ function isEscaped(text: string, index: number): boolean {
 
 export function tableAlignmentsFromSeparator(text: string): TableAlignment[] | null {
   const cells = parseTableRow(text);
-  if (!cells || !cells.every(cell => /^:?-{3,}:?$/.test(cell))) return null;
+  if (!cells || !cells.every(cell => /^:?-+:?$/.test(cell))) return null;
   return cells.map(tableAlignmentFromSeparatorCell);
 }
 

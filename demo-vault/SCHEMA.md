@@ -1,135 +1,74 @@
 ---
 type: "Reference"
-title: "Nanochat wiki schema"
-description: "The strict OKF v0.2 profile, evidence boundaries, and integrity rules used by this bundle."
+title: "Project-scoped LLM Wiki schema"
+description: "The OKF v0.2 base, Karpathy vault profile, and project policy enforced by this bundle."
 tags: ["open-knowledge-format", "provenance", "reproducibility"]
 status: "stable"
-generated: {"by": "codex/gpt-5.6", "at": "2026-08-13T00:00:00Z"}
+generated: {"by": "process:project-scope-migration", "at": "2026-08-23T13:38:07Z"}
+scope: "cross-project"
 ---
 
-# Nanochat wiki schema
+# Project-scoped LLM Wiki schema
 
-## Bundle boundary
+## Layers
 
-This directory is the OKF v0.2 bundle root and unit of distribution. Every
-non-reserved Markdown file below it is a concept document. `_index.md` and
-`log.md` are reserved at every level.
+Validation reports every issue as `okf-base`, `karpathy-vault-v1`, or
+`project-policy`. Base OKF requires a nonempty `type` on every ordinary
+Markdown document. This profile additionally requires descriptive metadata,
+provenance, deterministic navigation, evidence integrity, and project scope.
 
-The reusable skill and producer scripts live in the parent repository, outside
-this bundle. `projects/code/nanochat/` is an opaque nested Git repository and
-is not parsed as OKF.
+## Canonical indexes and traversal
 
-## Directory roles
+The vault root `_index.md` has exactly `okf_version: "0.2"` frontmatter. Every
+owned directory has a generated, frontmatter-free `_index.md` listing immediate
+children only. The outer and registered code-vault roots use regular `_log.md`
+files. Unprefixed variants and navigation/log symlinks are forbidden.
 
-| Directory | Content | Ordinary type |
-| --- | --- | --- |
-| `raw/` | Immutable paper companions | `Paper` |
-| `raw/assets/` | Archived PDFs and source media | binary resources |
-| `projects/` | Pinned project orientation | `Software Project` |
-| `summaries/` | Narrative entry points | `Summary` |
-| `entities/` | Named datasets, models, and artifacts | `Entity` |
-| `concepts/` | Focused mechanisms and ideas | `Concept` |
-| `comparisons/` | Decision-oriented contrasts | `Comparison` |
-| `queries/` | Durable answers | `Query` |
+This is an intentional local profile choice favoring the Hermes/Karpathy
+underscore convention over OKF v0.2's usual unprefixed entry filename; the
+remaining typed-Markdown, provenance, lifecycle, and link rules stay OKF-derived.
 
-Root `README.md` and this file are `Reference` concepts. `AGENTS.md` is a
-`Playbook`.
+Traversal treats `assets`, `projects/code`, `projects/*/assets`, `.llm_wiki`, hidden
+runtime directories, and `.agents/skills` as opaque. Assets and code never
+have generated indexes.
 
-## Concept frontmatter
+## Project workbench
 
-Base OKF requires only `type`. This bundle's maintained profile also requires
-`title`, `description`, nonempty registered `tags`, `status`, and
-`generated.by` plus `generated.at`.
+Each flat `projects/<id>.md` repository card contains overview, VCS identity,
+studied revision, project/code status, ongoing-change summary, and the current
+task pointer. It is paired with `projects/<id>/`, a self-contained OKF bundle
+containing its own schema, guidance, log, indexes, workbench,
+repository documentation, and code-specific compiled knowledge. Outer
+`raw/`/`assets/` hold papers and other higher-level evidence; outer compiled
+collections hold higher-level learning with `scope: vault` or genuinely
+cross-project knowledge with `scope: cross-project`. Compiled pages in a code
+vault declare `code_scope: true` so placement drift is machine-detectable.
 
-Substantive compiled pages carry a nonempty `sources` list:
+`projects/repositories.yaml` is version 1 and registers `vcs`, `url`,
+`default_ref`, flat `card`, paired `vault`, ignored `projects/code/<id>` path, in-place
+workspace mode, review update strategy, and LFS policy. Git, P4, and SVN are
+valid synchronizers. A working copy may be missing; validation never syncs it.
 
-```yaml
----
-type: "Concept"
-title: "Byte-pair encoding"
-description: "Subword tokenization learned by iterative pair merges."
-tags: ["tokenization", "project-nanochat"]
-status: "stable"
-generated: {"by": "codex/gpt-5.6", "at": "2026-08-13T00:00:00Z"}
-sources:
-  - {"id": "bpe-paper", "resource": "../raw/paper.md", "title": "Paper title"}
----
-```
+## Evidence and provenance
 
-Allowed lifecycle values are `draft`, `stable`, and `deprecated`. Unknown
-types and extension keys remain valid base OKF and must survive round trips.
+Raw Markdown companions and assets are flat siblings at either evidence scope.
+Papers default to outer `raw/` and `assets/`; project evidence is reserved for
+repository-specific material. An attachment records
+`resource`, `role` (`original` or `derived`), media type, byte size, and
+lowercase SHA-256. `/assets/**` and `/projects/*/assets/**` are routed through
+Git LFS; Markdown and source are not.
 
-Actors use `human:<id>`, `process:<id>`, or `<producer>/<version>`.
-`generated` records authorship. `verified` records an actual check and is
-never inferred from authorship or linting.
+Code sources record `repository`, full `revision`, repository-relative `path`,
+and a verified content `sha256` for stable claims. Draft pages may omit the
+hash only while marked `source_state: awaiting-source`. Historical revision
+provenance is distinct from whatever revision an optional checkout currently
+has.
 
-## Claim attribution
+## Durable pages
 
-A source ID joins frontmatter provenance to a body claim:
-
-```markdown
-The tokenizer learns a finite merge table.[^bpe-paper]
-
-[^bpe-paper]: Paper title
-```
-
-Every referenced footnote has a matching `sources[].id` and definition.
-Compiled pages use every listed source. Links to other concepts do not replace
-claim attribution.
-
-## Hierarchical indexes
-
-Every visible bundle-owned directory has an `_index.md`. Each index lists only
-immediate children, groups concepts by exact type, links subdirectories as
-`child/` so consumers can open the local `_index.md`, and includes
-descriptions. Indexes are generated deterministically.
-
-Only the root index has frontmatter, containing exactly:
-
-```yaml
----
-okf_version: "0.2"
----
-```
-
-A concept ID is its bundle path with the `.md` suffix removed. The LLM Wiki
-consumer accepts that ID directly as a link target, including bundle-relative
-forms such as `/summaries/nanochat-end-to-end-training-pipeline`; explicit
-`.md` paths remain valid. Directory size never triggers an automatic move.
-
-Obsidian image embeds use vault-relative targets. For example,
-`![[projects/code/nanochat/dev/nanochat.png|Nanochat logo]]` resolves from the
-bundle root, while ordinary Markdown image paths resolve from their containing
-document.
-
-## Raw paper contract
-
-A paper companion and PDF use the same canonical-title-derived basename. The
-companion records exact arXiv version, redistribution license, authors,
-version dates, generated time, body SHA-256, PDF resource, media type, byte
-size, PDF SHA-256, and extraction tool/version.
-
-Its body contains source metadata, abstract, a local PDF link, an extraction
-lossiness notice, and mechanically extracted full text. It contains no
-agent-written interpretation. Existing snapshots are immutable.
-
-Binary assets use extension-specific Git LFS patterns. Markdown under
-`raw/assets/` must remain ordinary Git text.
-
-## Project contract
-
-`projects/nanochat.md`, `.gitmodules`, the repository gitlink, and initialized
-submodule `HEAD` record the same repository and full commit. Compiled code
-sources include the pinned commit in their source entry.
-
-The outer validator does not descend into the upstream project or rewrite its
-Markdown.
-
-## Conflicts and history
-
-Unresolved knowledge stays `draft`. Structured conflict entries contain a
-counterpart resource, observation date, and reason; counterpart pages link
-back. `log.md` groups material operations by ISO date, newest first.
-
-Caches, SQLite databases, embeddings, temporary ingest directories, editor
-state, and duplicate project source are outside the bundle.
+Entity and Concept pages record `created.by` and `created.at`. Queries follow
+the contract in [the operator handbook](AGENTS.md): condensed summary,
+selection ID, exact anchors, direct answer, evidence, limitations, and related
+durable pages. Each anchor binds by `source_id` to one unique provenance entry
+and records a kind-specific Markdown range, PDF region, or code range.
+Unresolved conflicts remain draft and explicit.

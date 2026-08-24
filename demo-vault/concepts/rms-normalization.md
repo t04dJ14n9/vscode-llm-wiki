@@ -3,9 +3,12 @@ type: "Concept"
 title: "RMS normalization"
 description: "Activation normalization by root mean square without subtracting the mean."
 tags: ["architecture", "numerics", "optimization"]
-status: "stable"
+status: "draft"
+scope: "vault"
 generated: {"by": "codex/gpt-5.6", "at": "2026-08-13T00:00:00Z"}
-sources: [{"id": "rmsnorm-paper", "resource": "https://arxiv.org/abs/1910.07467v1", "title": "Root Mean Square Layer Normalization"}, {"id": "gpt-source", "resource": "../projects/code/nanochat/nanochat/gpt.py", "title": "Nanochat GPT implementation", "commit": "92d63d4e8bb4df75c3b71618f31ddde2378b2bcd"}]
+sources: [{"id": "rmsnorm-paper", "resource": "https://arxiv.org/abs/1910.07467v1", "title": "Root Mean Square Layer Normalization"}, {"id": "gpt-source", "resource": "../projects/code/nanochat/nanochat/gpt.py", "title": "Nanochat GPT implementation", "repository": "nanochat", "revision": "92d63d4e8bb4df75c3b71618f31ddde2378b2bcd", "path": "nanochat/gpt.py"}]
+created: {"by": "process:project-scope-migration", "at": "2026-08-23T00:00:00Z"}
+source_state: "awaiting-source"
 ---
 
 # RMS normalization

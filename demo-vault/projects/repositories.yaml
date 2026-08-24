@@ -1,0 +1,12 @@
+version: 1
+repositories:
+  nanochat:
+    vcs: git
+    url: https://github.com/karpathy/nanochat.git
+    default_ref: master
+    card: projects/nanochat.md
+    vault: projects/nanochat
+    code: projects/code/nanochat
+    workspace: in-place
+    update_strategy: review
+    lfs: auto

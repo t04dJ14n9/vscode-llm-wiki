@@ -1,34 +1,22 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
-import { statSync } from 'fs';
 import { createHash } from 'node:crypto';
 import {
   pdfHref,
-  type PdfDiscussionAnchorV1,
-  type PdfDiscussionAnnotationV1,
-  type PdfDiscussionStore,
   type PdfTextFragment,
   type PdfViewRect,
 } from '@llm-wiki/core';
-import {
-  createPdfDiscussionStoreForDocument,
-  PDF_DISCUSSION_MAX_PNG_BYTES,
-  PDF_DISCUSSION_MAX_QUESTION_BYTES,
-  type PdfDiscussionController,
-  type PdfDiscussionControllerEvent,
-} from './pdfDiscussionController';
 import type {
   AgentHandoffCapability,
   AgentSurfaceCapabilities,
   ExternalAgentId,
 } from './agentHandoff';
-import type {
-  PdfDiscussionAnnotationSnapshot,
-  PdfDiscussionHostToWebviewMessage,
-  PdfDiscussionWebviewToHostMessage,
-} from './pdfDiscussionProtocol';
-import type { LearningNoteResult, LearningNoteStore } from './learningNoteStore';
 import type { SelectionContext } from './selectionContext';
+import {
+  isQueryPagePath,
+  resolvePdfAnchor,
+  type QueryAnnotationIndex,
+} from './queryAnnotationIndex';
 import {
   createPdfAgentClipboardContext,
   pdfAgentClipboardSelectionKey,
@@ -76,6 +64,7 @@ interface ActivePdfWebview {
   panel: vscode.WebviewPanel;
   pdfUri: vscode.Uri;
   pdfSha256?: string;
+  pdfBytes?: Uint8Array;
   ready: boolean;
   pendingAnchor?: PdfAnchorNavigation;
   agentClipboardContext?: PdfAgentClipboardContext;
@@ -91,20 +80,6 @@ interface PdfAnchorNavigation {
   textFragment?: PdfTextFragment;
 }
 
-interface CachedPdfDiscussionStore {
-  store: PdfDiscussionStore;
-  fingerprint?: PdfFileFingerprint;
-}
-
-interface PdfFileFingerprint {
-  dev: bigint;
-  ino: bigint;
-  size: bigint;
-  mtimeNs: bigint;
-  ctimeNs: bigint;
-  birthtimeNs: bigint;
-}
-
 export type PdfToolbarDock = 'top' | 'left';
 
 export interface PdfToolbarPreference {
@@ -115,17 +90,15 @@ export interface PdfToolbarPreference {
 export interface PdfEditorProviderOptions {
   vaultRoot?: string;
   documentRoot?: string;
-  globalStoragePath?: string;
-  discussionController?: PdfDiscussionController;
-  learningNoteStore?: LearningNoteStore;
   agentCapabilities?: () => AgentSurfaceCapabilities;
   onDidChangeAgentCapabilities?: vscode.Event<void>;
+  queryAnnotationIndex?: Pick<QueryAnnotationIndex, 'listAnnotationsForSource'>;
+  queryDiagnostics?: vscode.DiagnosticCollection;
 }
 
 export const ADD_SELECTION_TO_CURSOR_CHAT_COMMAND =
   'llm-wiki.addSelectionToCursorChat';
 
-const PDF_DISCUSSION_CONSENT_KEY = 'llmWiki.pdf.askPdfConsent';
 const PDF_TOOLBAR_PREFERENCE_KEY = 'llmWiki.pdf.toolbarPreference.v1';
 const DEFAULT_PDF_TOOLBAR_PREFERENCE: PdfToolbarPreference = {
   dock: 'top',
@@ -163,13 +136,10 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
   static readonly viewType = 'llm-wiki.pdfViewer';
 
   private readonly webviews = new Map<string, ActivePdfWebview>();
-  private readonly discussionStores = new Map<string, CachedPdfDiscussionStore>();
-  private readonly vaultRoot?: string;
   private readonly documentRoot: string;
-  private readonly globalStoragePath?: string;
-  private readonly discussionController?: PdfDiscussionController;
-  private readonly learningNoteStore?: LearningNoteStore;
   private readonly agentCapabilities: () => AgentSurfaceCapabilities;
+  private readonly queryAnnotationIndex?: Pick<QueryAnnotationIndex, 'listAnnotationsForSource'>;
+  private readonly queryDiagnostics?: vscode.DiagnosticCollection;
   private readonly pdfOutlineListeners = new Set<(uri: vscode.Uri) => unknown>();
   private pdfToolbarPreference: PdfToolbarPreference;
   readonly onDidChangePdfOutline: vscode.Event<vscode.Uri> = (listener, thisArgs, disposables) => {
@@ -198,18 +168,15 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
       ? {
           vaultRoot: optionsOrVaultRoot,
           documentRoot: optionsOrVaultRoot,
-          globalStoragePath: context.globalStorageUri?.fsPath,
         }
       : optionsOrVaultRoot;
-    this.vaultRoot = options.vaultRoot;
     this.documentRoot = options.documentRoot ?? options.vaultRoot ?? process.cwd();
-    this.globalStoragePath = options.globalStoragePath;
-    this.discussionController = options.discussionController;
-    this.learningNoteStore = options.learningNoteStore;
     this.agentCapabilities = options.agentCapabilities ?? (() => ({
       cursorAgent: false,
       providers: [],
     }));
+    this.queryAnnotationIndex = options.queryAnnotationIndex;
+    this.queryDiagnostics = options.queryDiagnostics;
     this.pdfToolbarPreference = normalizePdfToolbarPreference(
       context.globalState?.get(PDF_TOOLBAR_PREFERENCE_KEY),
     );
@@ -218,11 +185,6 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
         options.onDidChangeAgentCapabilities(
           () => this.broadcastAgentHandoffCapabilities(),
         ),
-      );
-    }
-    if (this.discussionController) {
-      context.subscriptions.push(
-        this.discussionController.onEvent(event => this.forwardDiscussionEvent(event)),
       );
     }
   }
@@ -311,10 +273,6 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
     return true;
   }
 
-  async openAskPdfForSelection(): Promise<void> {
-    this.getActiveWebview()?.postMessage({ type: 'pdfDiscussionOpenForSelection' });
-  }
-
   async addSelectionToCursorChat(): Promise<void> {
     const active = this.getActiveWebview();
     if (!active) return;
@@ -326,6 +284,10 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
     if (!active) return false;
     active.postMessage({ type: 'copySelectionForAgent' });
     return true;
+  }
+
+  async refreshQueryAnnotations(): Promise<void> {
+    await Promise.all([...this.webviews.values()].map(active => this.postQueryAnnotations(active)));
   }
 
   async getActiveSelectionContext(): Promise<SelectionContext | undefined> {
@@ -436,11 +398,6 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
     }
 
     webview.onDidReceiveMessage(async (message: any) => {
-      if (isPdfDiscussionMessage(message)) {
-        if (!this.discussionController) return;
-        await this.handlePdfDiscussionMessage(webview, pdfUri, message);
-        return;
-      }
       switch (message?.type) {
         case 'ready': {
           active.ready = true;
@@ -495,6 +452,26 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
         case 'selectionChanged':
           await this.updateActiveSelection(key, message.anchor, message.clipboardSelection);
           break;
+        case 'openQuery': {
+          const navigation = message.navigation;
+          if (!navigation || typeof navigation !== 'object') break;
+          const target = navigation as Record<string, unknown>;
+          if (
+            target.kind !== 'query'
+            || typeof target.queryPath !== 'string'
+            || path.isAbsolute(target.queryPath)
+            || target.queryPath.includes('\\')
+            || target.queryPath.split('/').includes('..')
+            || !target.queryPath.toLowerCase().endsWith('.md')
+            || !isQueryPagePath(target.queryPath)
+          ) break;
+          await vscode.commands.executeCommand(
+            'llm-wiki.openLinkTarget',
+            target.queryPath,
+            pdfUri,
+          );
+          break;
+        }
         case 'pdfOutline':
           active.outlineLoading = message.loading === true;
           active.outline = active.outlineLoading
@@ -535,7 +512,6 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
         'llmWikiPdfHasAgentClipboardSelection',
         Boolean(active.agentClipboardContext),
       );
-      await this.sendPdfDiscussionState(webview, pdfUri);
       this.firePdfOutlineChanged(pdfUri);
     });
 
@@ -570,14 +546,61 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
   private async loadPdf(active: ActivePdfWebview): Promise<void> {
     try {
       const bytes = await vscode.workspace.fs.readFile(active.pdfUri);
+      active.pdfBytes = bytes;
       active.pdfSha256 = createHash('sha256').update(bytes).digest('hex');
       active.postMessage({
         type: 'loadPdf',
         data: Buffer.from(bytes).toString('base64'),
       });
-      await this.sendPdfDiscussionState(active.panel.webview, active.pdfUri);
+      await this.postQueryAnnotations(active);
     } catch (error) {
       vscode.window.showErrorMessage(`Failed to load PDF: ${String(error)}`);
+    }
+  }
+
+  private async postQueryAnnotations(active: ActivePdfWebview): Promise<void> {
+    if (!this.queryAnnotationIndex || !active.pdfBytes) {
+      active.postMessage({ type: 'setQueryAnnotations', annotations: [] });
+      return;
+    }
+    try {
+      const sourcePath = vscode.workspace.asRelativePath(active.pdfUri, false);
+      const annotations = await this.queryAnnotationIndex.listAnnotationsForSource(sourcePath);
+      const diagnostics: vscode.Diagnostic[] = [];
+      const resolved = annotations.flatMap(annotation => {
+        if (annotation.anchor.kind !== 'pdf') return [];
+        const resolution = resolvePdfAnchor(annotation.anchor, active.pdfBytes!);
+        if (!resolution.geometry) {
+          if (resolution.diagnostic) {
+            const diagnostic = new vscode.Diagnostic(
+              new vscode.Range(0, 0, 0, 1),
+              resolution.diagnostic.message,
+              vscode.DiagnosticSeverity.Warning,
+            );
+            diagnostic.source = 'llm-wiki-query';
+            diagnostic.code = resolution.diagnostic.code;
+            diagnostics.push(diagnostic);
+          }
+          return [];
+        }
+        return [{
+          annotationId: `${annotation.queryPath}#${annotation.anchor.sourceId}`,
+          queryPath: annotation.queryPath,
+          title: annotation.title,
+          status: annotation.status,
+          condensedSummary: annotation.condensedSummary,
+          ...(annotation.project ? { project: annotation.project } : {}),
+          updatedTime: annotation.updatedTime,
+          navigationTarget: annotation.navigationTarget,
+          page: resolution.geometry.page,
+          rects: resolution.geometry.rects,
+        }];
+      });
+      this.queryDiagnostics?.set(active.pdfUri, diagnostics);
+      active.postMessage({ type: 'setQueryAnnotations', annotations: resolved });
+    } catch {
+      this.queryDiagnostics?.delete(active.pdfUri);
+      active.postMessage({ type: 'setQueryAnnotations', annotations: [] });
     }
   }
 
@@ -629,394 +652,6 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
       cursorAgent: capabilities?.cursorAgent === true,
       providers,
     };
-  }
-
-  private getDiscussionStore(pdfUri: vscode.Uri): PdfDiscussionStore | undefined {
-    if (
-      !this.discussionController
-      || !this.globalStoragePath
-      || pdfUri.scheme !== 'file'
-    ) {
-      return undefined;
-    }
-    const key = pdfUri.toString();
-    const before = pdfFileFingerprint(pdfUri.fsPath);
-    const cached = this.discussionStores.get(key);
-    if (cached && samePdfFileFingerprint(cached.fingerprint, before)) {
-      return cached.store;
-    }
-
-    const store = createPdfDiscussionStoreForDocument({
-      pdfPath: pdfUri.fsPath,
-      sourceUri: pdfUri.toString(),
-      vaultRoot: this.vaultRoot,
-      documentRoot: this.documentRoot,
-      globalStoragePath: this.globalStoragePath,
-    }).store;
-    const after = pdfFileFingerprint(pdfUri.fsPath);
-    if (samePdfFileFingerprint(before, after)) {
-      this.discussionStores.set(key, { store, fingerprint: after });
-    } else {
-      this.discussionStores.delete(key);
-    }
-    return store;
-  }
-
-  private async handlePdfDiscussionMessage(
-    webview: vscode.Webview,
-    pdfUri: vscode.Uri,
-    message: PdfDiscussionWebviewToHostMessage,
-  ): Promise<void> {
-    const controller = this.discussionController;
-    try {
-      const store = this.getDiscussionStore(pdfUri);
-      if (!controller || !store) {
-        await this.postDiscussionMessage(webview, {
-          type: 'pdfDiscussionError',
-          message: 'Ask PDF storage is not available for this document.',
-          requestId: message.requestId,
-        });
-        return;
-      }
-      switch (message.type) {
-        case 'pdfDiscussionPrepare': {
-          const prepared = controller.prepare(store, {
-            anchor: this.toDiscussionAnchor(pdfUri, message.selection),
-          });
-          await this.postDiscussionMessage(webview, {
-            type: 'pdfDiscussionPrepared',
-            ...prepared,
-            ...(prepared.annotation
-              ? { annotation: toPdfDiscussionAnnotationSnapshot(prepared.annotation) }
-              : {}),
-            requestId: message.requestId,
-          });
-          return;
-        }
-        case 'pdfDiscussionList':
-          await this.sendPdfDiscussionState(webview, pdfUri, undefined, message.requestId);
-          return;
-        case 'pdfDiscussionOpen':
-          await this.sendPdfDiscussionState(webview, pdfUri, message.annotationId, message.requestId);
-          return;
-        case 'pdfDiscussionLoadSnapshot': {
-          const annotation = controller.list(store).find(
-            candidate => candidate.id === message.annotationId,
-          );
-          if (!annotation) {
-            throw new Error('PDF discussion annotation was not found.');
-          }
-          if (!annotation.snapshot) {
-            await this.postDiscussionMessage(webview, {
-              type: 'pdfDiscussionSnapshotImage',
-              annotationId: annotation.id,
-              requestId: message.requestId,
-            });
-            return;
-          }
-          let snapshotPng: Buffer | undefined;
-          try {
-            snapshotPng = store.readVerifiedSnapshot(annotation.snapshot);
-          } catch {
-            snapshotPng = undefined;
-          }
-          await this.postDiscussionMessage(webview, {
-            type: 'pdfDiscussionSnapshotImage',
-            annotationId: annotation.id,
-            ...(snapshotPng ? { snapshotPngBase64: snapshotPng.toString('base64') } : {}),
-            requestId: message.requestId,
-          });
-          return;
-        }
-        case 'pdfDiscussionConsent':
-          if (typeof message.accepted !== 'boolean') {
-            throw new Error('Ask PDF consent must be accepted or declined.');
-          }
-          await this.context.globalState.update(PDF_DISCUSSION_CONSENT_KEY, message.accepted);
-          await this.sendPdfDiscussionState(webview, pdfUri, undefined, message.requestId);
-          return;
-        case 'pdfDiscussionListModels': {
-          this.assertPdfDiscussionConsent();
-          try {
-            const models = await controller.listModels();
-            await this.postDiscussionMessage(webview, {
-              type: 'pdfDiscussionModels',
-              models,
-              requestId: message.requestId,
-            });
-          } catch (cause) {
-            await this.postDiscussionMessage(webview, {
-              type: 'pdfDiscussionModels',
-              models: [],
-              error: cause instanceof Error ? cause.message : 'Codex models are unavailable.',
-              requestId: message.requestId,
-            });
-          }
-          return;
-        }
-        case 'pdfDiscussionSubmit': {
-          this.assertPdfDiscussionConsent();
-          const snapshotPng = decodePdfDiscussionSnapshot(message.snapshotPngBase64);
-          const snapshotCapture = decodePdfDiscussionSnapshotCapture(
-            snapshotPng,
-            message.snapshotCropRect,
-            message.snapshotPadding,
-          );
-          const model = normalizePdfDiscussionModel(message.model);
-          const annotation = await controller.submit(store, {
-            ...(message.annotationId ? { annotationId: message.annotationId } : {}),
-            ...(message.selection
-              ? { anchor: this.toDiscussionAnchor(pdfUri, message.selection) }
-              : {}),
-            question: message.question,
-            ...(model ? { model } : {}),
-            ...(snapshotPng ? { snapshotPng } : {}),
-            ...snapshotCapture,
-          });
-          await this.persistPdfLearningNote(pdfUri, annotation);
-          await this.sendPdfDiscussionState(webview, pdfUri, message.annotationId, message.requestId);
-          return;
-        }
-        case 'pdfDiscussionRetry': {
-          this.assertPdfDiscussionConsent();
-          const annotation = await controller.retry(store, { annotationId: message.annotationId });
-          await this.persistPdfLearningNote(pdfUri, annotation);
-          await this.sendPdfDiscussionState(webview, pdfUri, message.annotationId, message.requestId);
-          return;
-        }
-        case 'pdfDiscussionCancel':
-          await controller.cancel(store, { annotationId: message.annotationId });
-          await this.sendPdfDiscussionState(webview, pdfUri, message.annotationId, message.requestId);
-          return;
-        case 'pdfDiscussionPromote': {
-          this.assertPdfDiscussionConsent();
-          const threadId = await controller.promote(store, { annotationId: message.annotationId });
-          await this.sendPdfDiscussionState(webview, pdfUri, message.annotationId);
-          const result = await openCodexThread(threadId);
-          await this.postDiscussionMessage(webview, {
-            type: 'pdfDiscussionPromotionState',
-            annotationId: message.annotationId,
-            ...result,
-            requestId: message.requestId,
-          });
-          return;
-        }
-        case 'pdfDiscussionOpenPromotedTask': {
-          const annotation = controller.list(store).find(
-            candidate => candidate.id === message.annotationId,
-          );
-          if (!annotation?.promotion) {
-            throw new Error('This PDF discussion has not been promoted to a Codex task.');
-          }
-          const result = await openCodexThread(annotation.promotion.threadId);
-          await this.postDiscussionMessage(webview, {
-            type: 'pdfDiscussionPromotionState',
-            annotationId: annotation.id,
-            ...result,
-            requestId: message.requestId,
-          });
-          return;
-        }
-        case 'pdfDiscussionOpenLearningNote': {
-          const annotation = controller.list(store).find(
-            candidate => candidate.id === message.annotationId,
-          );
-          if (!annotation) throw new Error('PDF discussion annotation was not found.');
-          const note = await this.persistPdfLearningNote(pdfUri, annotation)
-            ?? await this.learningNoteStore?.findDiscussion(annotation.id);
-          if (!note) throw new Error('This discussion does not have a learning note yet.');
-          await vscode.commands.executeCommand(
-            'vscode.openWith',
-            vscode.Uri.file(note.absolutePath),
-            'llm-wiki.markdownEditor',
-          );
-          return;
-        }
-        case 'pdfDiscussionCopyPortableLink': {
-          let portableUrl: string | undefined;
-          if (message.annotationId) {
-            portableUrl = controller.list(store).find(
-              candidate => candidate.id === message.annotationId,
-            )?.anchor.portableUrl;
-          } else if (message.selection) {
-            portableUrl = this.toDiscussionAnchor(pdfUri, message.selection).portableUrl;
-          }
-          if (!portableUrl) {
-            throw new Error('A PDF selection is required to copy its portable link.');
-          }
-          await vscode.env.clipboard.writeText(portableUrl);
-          await this.postDiscussionMessage(webview, {
-            type: 'pdfDiscussionPortableLinkCopied',
-            ...(message.annotationId ? { annotationId: message.annotationId } : {}),
-            requestId: message.requestId,
-          });
-          return;
-        }
-        case 'pdfDiscussionOpenLink': {
-          const target = vscode.Uri.parse(message.href);
-          if (target.scheme.toLowerCase() !== 'http' && target.scheme.toLowerCase() !== 'https') {
-            throw new Error('Ask PDF links must use http or https.');
-          }
-          const opened = await vscode.env.openExternal(target);
-          if (!opened) throw new Error('VS Code could not open this link.');
-        }
-      }
-    } catch (cause) {
-      await this.postDiscussionMessage(webview, {
-        type: 'pdfDiscussionError',
-        message: cause instanceof Error ? cause.message : String(cause),
-        requestId: message.requestId,
-        ...('annotationId' in message ? { annotationId: message.annotationId } : {}),
-      });
-    }
-  }
-
-  private toDiscussionAnchor(
-    pdfUri: vscode.Uri,
-    input: unknown,
-  ): PdfDiscussionAnchorV1 {
-    const selection = normalizePdfSelectionAnchor(input);
-    const rects = normalizePdfRects(selection?.rects);
-    if (!selection || !rects?.length) {
-      throw new Error('Ask PDF requires a text selection with rectangle geometry.');
-    }
-    const relPath = vscode.workspace.asRelativePath(pdfUri);
-    return {
-      uri: pdfUri.toString(),
-      page: selection.page,
-      quote: selection.snippet,
-      ...(selection.prefix ? { prefix: selection.prefix } : {}),
-      ...(selection.suffix ? { suffix: selection.suffix } : {}),
-      rects: rects.map(rect => (
-        [rect[0], rect[1], rect[2], rect[3]] as [number, number, number, number]
-      )),
-      ...(selection.textItemIndex !== undefined
-        ? { textItemIndex: selection.textItemIndex }
-        : {}),
-      ...(selection.charOffset !== undefined ? { charOffset: selection.charOffset } : {}),
-      ...(selection.endTextItemIndex !== undefined
-        ? { endTextItemIndex: selection.endTextItemIndex }
-        : {}),
-      ...(selection.endCharOffset !== undefined
-        ? { endCharOffset: selection.endCharOffset }
-        : {}),
-      portableUrl: pdfHref(relPath, {
-        page: selection.page,
-        textFragment: pdfTextFragmentForSelection(selection),
-      }),
-    };
-  }
-
-  private async sendPdfDiscussionState(
-    webview: vscode.Webview,
-    pdfUri: vscode.Uri,
-    activeAnnotationId?: string,
-    requestId?: string,
-  ): Promise<void> {
-    const controller = this.discussionController;
-    const store = this.getDiscussionStore(pdfUri);
-    if (!controller || !store) return;
-    const annotations = await Promise.all(controller.list(store).map(async annotation => {
-      const note = await this.learningNoteStore?.findDiscussion(annotation.id);
-      return toPdfDiscussionAnnotationSnapshot(annotation, note?.relativePath);
-    }));
-    await this.postDiscussionMessage(webview, {
-      type: 'pdfDiscussionSnapshot',
-      annotations,
-      consentGranted: this.discussionConsentGranted(),
-      ...(activeAnnotationId ? { activeAnnotationId } : {}),
-      ...(requestId ? { requestId } : {}),
-    });
-    await this.postDiscussionMessage(webview, {
-      type: 'pdfDiscussionHighlights',
-      highlights: annotations.map(annotation => ({
-        annotationId: annotation.id,
-        page: annotation.anchor.page,
-        rects: annotation.anchor.rects,
-        status: annotation.lastTurn.status,
-        ...(annotation.summaryMarkdown
-          ? { summaryMarkdown: annotation.summaryMarkdown }
-          : {}),
-      })),
-    });
-  }
-
-  private async persistPdfLearningNote(
-    pdfUri: vscode.Uri,
-    annotation: PdfDiscussionAnnotationV1,
-  ): Promise<LearningNoteResult | undefined> {
-    if (
-      !this.learningNoteStore
-      || !annotation.messages.some(message => message.role === 'assistant')
-    ) {
-      return undefined;
-    }
-    const sourcePath = vscode.workspace.asRelativePath(pdfUri, false);
-    const note = await this.learningNoteStore.upsertDiscussion({
-      discussionId: annotation.id,
-      source: {
-        kind: 'pdf',
-        path: sourcePath,
-        link: annotation.anchor.portableUrl,
-        location: `page ${annotation.anchor.page}`,
-        quote: annotation.anchor.quote,
-        ...(annotation.anchor.prefix ? { prefix: annotation.anchor.prefix } : {}),
-        ...(annotation.anchor.suffix ? { suffix: annotation.anchor.suffix } : {}),
-      },
-      messages: annotation.messages.map(message => ({
-        role: message.role,
-        markdown: message.markdown,
-        createdAt: message.createdAt,
-      })),
-      ...(annotation.summaryMarkdown ? { summaryMarkdown: annotation.summaryMarkdown } : {}),
-      createdAt: annotation.createdAt,
-      updatedAt: annotation.updatedAt,
-    });
-    this.getDiscussionStore(pdfUri)?.writePortableAnnotation?.(annotation, note.relativePath);
-    return note;
-  }
-
-  private discussionConsentGranted(): boolean {
-    return this.context.globalState.get<unknown>(PDF_DISCUSSION_CONSENT_KEY, false) === true;
-  }
-
-  private assertPdfDiscussionConsent(): void {
-    if (!this.discussionConsentGranted()) {
-      throw new Error('Accept the Ask PDF first-use notice before sending data to Codex.');
-    }
-  }
-
-  private async postDiscussionMessage(
-    webview: vscode.Webview,
-    message: PdfDiscussionHostToWebviewMessage,
-  ): Promise<void> {
-    await webview.postMessage(message);
-  }
-
-  private forwardDiscussionEvent(event: PdfDiscussionControllerEvent): void {
-    for (const active of this.webviews.values()) {
-      if (path.resolve(active.pdfUri.fsPath) !== path.resolve(event.pdfPath)) continue;
-      if (event.type === 'delta') {
-        void active.panel.webview.postMessage({
-          type: 'pdfDiscussionDelta',
-          annotationId: event.annotationId,
-          delta: event.delta,
-        } satisfies PdfDiscussionHostToWebviewMessage);
-      } else {
-        const annotationId = event.type === 'changed'
-          ? event.annotation.id
-          : event.annotationId;
-        void active.panel.webview.postMessage({
-          type: 'pdfDiscussionTurnState',
-          annotationId,
-          status: event.type === 'changed'
-            ? event.annotation.lastTurn.status
-            : 'failed',
-          ...(event.type === 'error' ? { error: event.error } : {}),
-        } satisfies PdfDiscussionHostToWebviewMessage);
-        void this.sendPdfDiscussionState(active.panel.webview, active.pdfUri);
-      }
-    }
   }
 
   private async lookupSelection(rawText: unknown): Promise<void> {
@@ -1421,6 +1056,14 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
     }
     .rectangle-selection-overlay { position: absolute; z-index: 15; box-sizing: border-box; border: 1px dashed var(--vscode-focusBorder); background: rgba(0, 127, 212, .16); pointer-events: none; }
     .anchor-highlight { position: absolute; background: rgba(0, 150, 255, .35); border-radius: 2px; pointer-events: none; }
+    .pdf-query-highlight { position: absolute; box-sizing: border-box; border-bottom: 2px solid var(--vscode-editorInfo-foreground, #4daafc); background: color-mix(in srgb, var(--vscode-editorInfo-foreground, #4daafc) 18%, transparent); border-radius: 2px; pointer-events: none; }
+    .pdf-query-marker { position: absolute; z-index: 8; padding: 1px 6px; border: 1px solid var(--vscode-widget-border); border-radius: 9px; color: var(--vscode-textLink-foreground); background: var(--vscode-editorWidget-background); font: 11px var(--vscode-font-family); white-space: nowrap; cursor: pointer; pointer-events: auto; }
+    .pdf-query-popover { position: fixed; z-index: 1200; box-sizing: border-box; width: min(380px, calc(100vw - 16px)); max-height: min(280px, calc(100vh - 16px)); padding: 10px 12px; overflow: auto; border: 1px solid var(--vscode-editorHoverWidget-border, var(--vscode-widget-border)); border-radius: 6px; color: var(--vscode-editorHoverWidget-foreground, var(--vscode-editor-foreground)); background: var(--vscode-editorHoverWidget-background, var(--vscode-editorWidget-background)); box-shadow: 0 4px 14px var(--vscode-widget-shadow, rgba(0,0,0,.3)); font: 13px/1.45 var(--vscode-font-family); }
+    .pdf-query-popover[hidden] { display: none; }
+    .pdf-query-popover-item + .pdf-query-popover-item { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--vscode-widget-border); }
+    .pdf-query-popover-meta { margin-top: 2px; color: var(--vscode-descriptionForeground); font-size: 11px; }
+    .pdf-query-popover-summary { margin: 6px 0; }
+    .pdf-query-popover button { padding: 3px 8px; border: 1px solid var(--vscode-button-border, transparent); border-radius: 3px; color: var(--vscode-button-foreground); background: var(--vscode-button-background); cursor: pointer; }
     .pdf-destination-focus {
       position: absolute;
       z-index: 13;
@@ -1524,44 +1167,11 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
   </div>
   <script nonce="${nonce}">
     window.__pdfiumWasmUrl = "${wasmUri.toString()}";
-    window.__llmWikiAskPdfEnabled = ${this.discussionController !== undefined};
   </script>
   <script nonce="${nonce}" src="${scriptUri.toString()}?v=${nonce}"></script>
 </body>
 </html>`;
   }
-}
-
-function pdfFileFingerprint(pdfPath: string): PdfFileFingerprint | undefined {
-  try {
-    const stat = statSync(pdfPath, { bigint: true });
-    return {
-      dev: stat.dev,
-      ino: stat.ino,
-      size: stat.size,
-      mtimeNs: stat.mtimeNs,
-      ctimeNs: stat.ctimeNs,
-      birthtimeNs: stat.birthtimeNs,
-    };
-  } catch {
-    return undefined;
-  }
-}
-
-function samePdfFileFingerprint(
-  left: PdfFileFingerprint | undefined,
-  right: PdfFileFingerprint | undefined,
-): boolean {
-  return Boolean(
-    left
-    && right
-    && left.dev === right.dev
-    && left.ino === right.ino
-    && left.size === right.size
-    && left.mtimeNs === right.mtimeNs
-    && left.ctimeNs === right.ctimeNs
-    && left.birthtimeNs === right.birthtimeNs,
-  );
 }
 
 function normalizePdfToolbarPreference(
@@ -1642,171 +1252,6 @@ function normalizePdfAgentClipboardSelection(
     selection: JSON.parse(selectionKey) as PdfAgentClipboardSelection,
     selectionKey,
   };
-}
-
-function toPdfDiscussionAnnotationSnapshot(
-  annotation: PdfDiscussionAnnotationV1,
-  learningNotePath?: string,
-): PdfDiscussionAnnotationSnapshot {
-  return {
-    id: annotation.id,
-    kind: annotation.kind,
-    selectionKey: annotation.selectionKey,
-    anchor: {
-      page: annotation.anchor.page,
-      quote: annotation.anchor.quote,
-      ...(annotation.anchor.prefix !== undefined ? { prefix: annotation.anchor.prefix } : {}),
-      ...(annotation.anchor.suffix !== undefined ? { suffix: annotation.anchor.suffix } : {}),
-      rects: annotation.anchor.rects.map(rect => (
-        [rect[0], rect[1], rect[2], rect[3]] as [number, number, number, number]
-      )),
-      ...(annotation.anchor.textItemIndex !== undefined
-        ? { textItemIndex: annotation.anchor.textItemIndex }
-        : {}),
-      ...(annotation.anchor.charOffset !== undefined
-        ? { charOffset: annotation.anchor.charOffset }
-        : {}),
-      ...(annotation.anchor.endTextItemIndex !== undefined
-        ? { endTextItemIndex: annotation.anchor.endTextItemIndex }
-        : {}),
-      ...(annotation.anchor.endCharOffset !== undefined
-        ? { endCharOffset: annotation.anchor.endCharOffset }
-        : {}),
-    },
-    ...(annotation.snapshot
-      ? {
-          snapshot: {
-            sha256: annotation.snapshot.sha256,
-            width: annotation.snapshot.width,
-            height: annotation.snapshot.height,
-            mimeType: annotation.snapshot.mimeType,
-            ...(annotation.snapshot.cropRect
-              ? {
-                  cropRect: annotation.snapshot.cropRect,
-                  padding: annotation.snapshot.padding,
-                  unit: annotation.snapshot.unit,
-                }
-              : {}),
-          },
-        }
-      : {}),
-    messages: annotation.messages.map(message => ({
-      id: message.id,
-      role: message.role,
-      markdown: message.markdown,
-      createdAt: message.createdAt,
-      ...(message.codexTurnId !== undefined ? { codexTurnId: message.codexTurnId } : {}),
-      ...(message.codexModel !== undefined ? { codexModel: message.codexModel } : {}),
-    })),
-    ...(annotation.summaryMarkdown !== undefined
-      ? { summaryMarkdown: annotation.summaryMarkdown }
-      : {}),
-    ...(learningNotePath ? { learningNotePath } : {}),
-    lastTurn: {
-      status: annotation.lastTurn.status,
-      ...(annotation.lastTurn.questionMessageId !== undefined
-        ? { questionMessageId: annotation.lastTurn.questionMessageId }
-        : {}),
-      ...(annotation.lastTurn.model !== undefined ? { model: annotation.lastTurn.model } : {}),
-      ...(annotation.lastTurn.error !== undefined ? { error: annotation.lastTurn.error } : {}),
-    },
-    ...(annotation.promotion
-      ? {
-          promotion: {
-            threadId: annotation.promotion.threadId,
-            promotedAt: annotation.promotion.promotedAt,
-          },
-        }
-      : {}),
-    createdAt: annotation.createdAt,
-    updatedAt: annotation.updatedAt,
-  };
-}
-
-const BASE64_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
-
-function decodePdfDiscussionSnapshot(value: unknown): Buffer | undefined {
-  if (value === undefined) return undefined;
-  if (typeof value !== 'string') throw invalidPdfDiscussionSnapshotEncoding();
-  const maxEncodedLength = Math.ceil(PDF_DISCUSSION_MAX_PNG_BYTES / 3) * 4;
-  if (value.length > maxEncodedLength) throw oversizedPdfDiscussionSnapshot();
-  if (!isCanonicalBase64(value)) throw invalidPdfDiscussionSnapshotEncoding();
-  const paddingLength = value.endsWith('==') ? 2 : value.endsWith('=') ? 1 : 0;
-  const decodedLength = (value.length / 4) * 3 - paddingLength;
-  if (decodedLength > PDF_DISCUSSION_MAX_PNG_BYTES) throw oversizedPdfDiscussionSnapshot();
-  return Buffer.from(value, 'base64');
-}
-
-function decodePdfDiscussionSnapshotCapture(
-  png: Buffer | undefined,
-  rect: unknown,
-  padding: unknown,
-): { snapshotCropRect?: [number, number, number, number]; snapshotPadding?: number } {
-  if (rect === undefined && padding === undefined) return {};
-  const cropRect = normalizePdfRects([rect])?.[0];
-  if (
-    !png
-    || !cropRect
-    || typeof padding !== 'number'
-    || !Number.isFinite(padding)
-    || padding < 0
-  ) {
-    throw new Error('Ask PDF snapshot crop metadata is invalid.');
-  }
-  return {
-    snapshotCropRect: [cropRect[0]!, cropRect[1]!, cropRect[2]!, cropRect[3]!],
-    snapshotPadding: padding,
-  };
-}
-
-function isCanonicalBase64(value: string): boolean {
-  if (value.length % 4 !== 0) return false;
-  const paddingLength = value.endsWith('==') ? 2 : value.endsWith('=') ? 1 : 0;
-  const unpaddedLength = value.length - paddingLength;
-  for (let index = 0; index < unpaddedLength; index++) {
-    if (BASE64_ALPHABET.indexOf(value[index]!) < 0) return false;
-  }
-  for (let index = unpaddedLength; index < value.length; index++) {
-    if (value[index] !== '=') return false;
-  }
-  if (paddingLength === 2) {
-    return (BASE64_ALPHABET.indexOf(value[value.length - 3]!) & 0x0f) === 0;
-  }
-  if (paddingLength === 1) {
-    return (BASE64_ALPHABET.indexOf(value[value.length - 2]!) & 0x03) === 0;
-  }
-  return true;
-}
-
-function invalidPdfDiscussionSnapshotEncoding(): Error {
-  return new Error('Ask PDF snapshots must use canonical base64-encoded PNG bytes.');
-}
-
-function oversizedPdfDiscussionSnapshot(): Error {
-  return new Error('PDF discussion snapshots cannot exceed 5 MiB.');
-}
-
-function isPdfDiscussionMessage(
-  message: unknown,
-): message is PdfDiscussionWebviewToHostMessage {
-  if (!message || typeof message !== 'object') return false;
-  const type = (message as { type?: unknown }).type;
-  return typeof type === 'string' && new Set<string>([
-    'pdfDiscussionPrepare',
-    'pdfDiscussionList',
-    'pdfDiscussionOpen',
-    'pdfDiscussionLoadSnapshot',
-    'pdfDiscussionListModels',
-    'pdfDiscussionSubmit',
-    'pdfDiscussionRetry',
-    'pdfDiscussionCancel',
-    'pdfDiscussionPromote',
-    'pdfDiscussionOpenPromotedTask',
-    'pdfDiscussionOpenLearningNote',
-    'pdfDiscussionCopyPortableLink',
-    'pdfDiscussionOpenLink',
-    'pdfDiscussionConsent',
-  ]).has(type);
 }
 
 function pdfTextFragmentForSelection(selection: PdfSelectionAnchor): PdfTextFragment {
@@ -1932,18 +1377,6 @@ function normalizePdfMessageText(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined;
   const text = value.replace(/\s+/g, ' ').trim();
   return text || undefined;
-}
-
-function normalizePdfDiscussionModel(value: unknown): string | undefined {
-  if (value === undefined) return undefined;
-  if (typeof value !== 'string') {
-    throw new Error('Ask PDF requires a valid Codex model identifier.');
-  }
-  const model = value.trim();
-  if (!model || Buffer.byteLength(model, 'utf8') > PDF_DISCUSSION_MAX_QUESTION_BYTES) {
-    throw new Error('Ask PDF requires a valid Codex model identifier.');
-  }
-  return model;
 }
 
 function normalizeLookupText(value: unknown): string | undefined {

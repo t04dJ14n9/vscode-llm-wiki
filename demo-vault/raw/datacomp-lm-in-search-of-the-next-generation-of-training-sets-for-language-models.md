@@ -13,10 +13,10 @@ source_url: "https://arxiv.org/abs/2406.11794v4"
 ingested: "2026-08-13"
 submitted: "2024-06-17"
 revised: "2025-04-21"
-sha256: "a7dcd3dcf3112b452ffbaf157f43bf10c5f1ddce5e9db33c8a12a136ac61040d"
+sha256: "a40aa721aaffca91d3749fb4fa6acdee542b2c09892a848b999b7c5cf70e3db5"
 arxiv: {"id": "2406.11794", "version": 4}
 license: {"id": "CC-BY-4.0", "url": "https://creativecommons.org/licenses/by/4.0/"}
-attachment: {"resource": "assets/datacomp-lm-in-search-of-the-next-generation-of-training-sets-for-language-models.pdf", "media_type": "application/pdf", "bytes": 1656647, "sha256": "af8fc884ccd601f8c6fbbba8f8e381de652fce1233949c0c64f64b4ab4b0f5b2"}
+attachment: {"resource": "../assets/datacomp-lm-in-search-of-the-next-generation-of-training-sets-for-language-models.pdf", "media_type": "application/pdf", "bytes": 1656647, "sha256": "af8fc884ccd601f8c6fbbba8f8e381de652fce1233949c0c64f64b4ab4b0f5b2", "role": "original"}
 extraction: {"tool": "pdftotext", "version": "pdftotext version 26.04.0"}
 ---
 
@@ -29,7 +29,7 @@ extraction: {"tool": "pdftotext", "version": "pdftotext version 26.04.0"}
 - **Submitted:** 2024-06-17
 - **Revised:** 2025-04-21
 - **License:** [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)
-- **Local attachment:** [Open the archived PDF](assets/datacomp-lm-in-search-of-the-next-generation-of-training-sets-for-language-models.pdf)
+- **Local attachment:** [Open the archived PDF](../assets/datacomp-lm-in-search-of-the-next-generation-of-training-sets-for-language-models.pdf)
 
 > Extraction notice: The text below was produced mechanically with
 > `pdftotext version 26.04.0`. Reading order, equations, tables, figures, and

@@ -3,9 +3,11 @@ type: "Comparison"
 title: "AdamW versus Muon"
 description: "Why Nanochat assigns adaptive and orthogonalized updates to different parameter shapes."
 tags: ["distributed-training", "optimization"]
-status: "stable"
-generated: { "by": "codex/gpt-5.6", "at": "2026-08-13T00:00:00Z" }
-sources: [{"id":"muon-paper","resource":"https://arxiv.org/abs/2502.16982v1","title":"Muon is Scalable for LLM Training"},{"id":"optimizer","resource":"../projects/code/nanochat/nanochat/optim.py","title":"Nanochat mixed optimizer","commit":"92d63d4e8bb4df75c3b71618f31ddde2378b2bcd"}]
+status: "draft"
+scope: "vault"
+generated: {"by": "codex/gpt-5.6", "at": "2026-08-13T00:00:00Z"}
+sources: [{"id": "muon-paper", "resource": "https://arxiv.org/abs/2502.16982v1", "title": "Muon is Scalable for LLM Training"}, {"id": "optimizer", "resource": "../projects/code/nanochat/nanochat/optim.py", "title": "Nanochat mixed optimizer", "repository": "nanochat", "revision": "92d63d4e8bb4df75c3b71618f31ddde2378b2bcd", "path": "nanochat/optim.py"}]
+source_state: "awaiting-source"
 ---
 
 # AdamW versus Muon

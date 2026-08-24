@@ -3,9 +3,11 @@ type: "Comparison"
 title: "DPO versus on-policy reinforcement learning"
 description: "Offline preference-pair optimization compared with Nanochat's reward-driven online sampling loop."
 tags: ["alignment", "post-training", "reinforcement-learning"]
-status: "stable"
+status: "draft"
+scope: "vault"
 generated: {"by": "codex/gpt-5.6", "at": "2026-08-13T00:00:00Z"}
-sources: [{"id": "dpo-paper", "resource": "../raw/direct-preference-optimization-your-language-model-is-secretly-a-reward-model.md", "title": "Direct Preference Optimization"}, {"id": "deepseekmath", "resource": "https://arxiv.org/abs/2402.03300v3", "title": "DeepSeekMath"}, {"id": "chat-rl", "resource": "../projects/code/nanochat/scripts/chat_rl.py", "title": "Nanochat on-policy reinforcement learning", "commit": "92d63d4e8bb4df75c3b71618f31ddde2378b2bcd"}]
+sources: [{"id": "dpo-paper", "resource": "../raw/direct-preference-optimization-your-language-model-is-secretly-a-reward-model.md", "title": "Direct Preference Optimization"}, {"id": "deepseekmath", "resource": "https://arxiv.org/abs/2402.03300v3", "title": "DeepSeekMath"}, {"id": "chat-rl", "resource": "../projects/code/nanochat/scripts/chat_rl.py", "title": "Nanochat on-policy reinforcement learning", "repository": "nanochat", "revision": "92d63d4e8bb4df75c3b71618f31ddde2378b2bcd", "path": "scripts/chat_rl.py"}]
+source_state: "awaiting-source"
 ---
 
 # DPO versus on-policy reinforcement learning

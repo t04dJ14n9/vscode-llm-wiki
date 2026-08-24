@@ -1,8 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import Module from 'node:module';
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
@@ -28,24 +27,13 @@ function loadTsModule(relativePath, mocks = {}) {
     if (Object.prototype.hasOwnProperty.call(mocks, request)) {
       return mocks[request];
     }
-    if (request === './codexAppServerClient') {
-      return {
-        CodexAppServerClient: class {
-          dispose() {}
-        },
-      };
-    }
-    if (request === './pdfDiscussionController') {
-      return {
-        PdfDiscussionController: class {
-          dispose() {}
-        },
-        createPdfDiscussionStoreForDocument: () => {
-          throw new Error('PDF discussion storage is not configured in this legacy provider test');
-        },
-      };
-    }
+    if (request === './pdfPngConstraints') return { MAX_PNG_BYTES: 5 * 1024 * 1024 };
     if (request === './agentClipboard') return agentClipboard;
+    if (request === './queryAnnotationIndex') {
+      return mocks['./queryAnnotationIndex'] ?? {
+        resolvePdfAnchor: (anchor) => ({ geometry: { page: anchor.page, rects: anchor.rects } }),
+      };
+    }
     if (request === './cursorCrop') return cursorCrop;
     return originalLoad.call(this, request, parent, isMain);
   };
@@ -58,9 +46,7 @@ function loadTsModule(relativePath, mocks = {}) {
 }
 
 const cursorCrop = loadTsModule('src/cursorCrop.ts', {
-  './pdfDiscussionController': {
-    PDF_DISCUSSION_MAX_PNG_BYTES: 5 * 1024 * 1024,
-  },
+  './pdfPngConstraints': { MAX_PNG_BYTES: 5 * 1024 * 1024 },
 });
 
 const agentClipboard = loadTsModule('src/agentClipboard.ts', {
@@ -1116,9 +1102,9 @@ test('PDF provider queues anchor navigation until a newly opened webview is read
 
   assert.deepEqual(
     posted.map(message => message.type),
-    ['agentHandoffCapabilities', 'pdfToolbarPreference', 'loadPdf', 'goToAnchor'],
+    ['agentHandoffCapabilities', 'pdfToolbarPreference', 'loadPdf', 'setQueryAnnotations', 'goToAnchor'],
   );
-  assert.deepEqual(posted[3], {
+  assert.deepEqual(posted[4], {
     type: 'goToAnchor',
     anchor: { page: 7, textFragment },
   });
@@ -1291,123 +1277,6 @@ test('PDF provider does not schedule delayed loads that can outlive disposed web
   } finally {
     globalThis.setTimeout = originalSetTimeout;
   }
-});
-
-test('combined PDF provider loads global Ask PDF state outside a vault', async () => {
-  const tempRoot = mkdtempSync(join(tmpdir(), 'llm-wiki-combined-pdf-no-vault-'));
-  const pdfPath = join(tempRoot, 'paper.pdf');
-  writeFileSync(pdfPath, Buffer.from('%PDF-no-vault', 'utf8'));
-
-  const posted = [];
-  const warnings = [];
-  const errors = [];
-  const discussionRoutes = [];
-  const fakeStore = { pdfPath };
-  const annotation = {
-    id: 'ann-global-1',
-    kind: 'agent_discussion',
-    selectionKey: 'selection-global-1',
-    anchor: {
-      uri: `file://${pdfPath}`,
-      page: 1,
-      quote: 'Selected text',
-      rects: [[1, 2, 3, 4]],
-      portableUrl: 'paper.pdf#page=1:~:text=Selected%20text',
-    },
-    messages: [],
-    lastTurn: { status: 'idle' },
-    createdAt: '2026-01-01T00:00:00.000Z',
-    updatedAt: '2026-01-01T00:00:00.000Z',
-  };
-  const discussionController = {
-    onEvent: () => ({ dispose() {} }),
-    list(store) {
-      assert.equal(store, fakeStore);
-      return [annotation];
-    },
-  };
-  const vscode = {
-    workspace: {
-      asRelativePath: uri => uri.fsPath.replace(`${tempRoot}/`, ''),
-      fs: {
-        readFile: async () => new Uint8Array([1, 2, 3]),
-      },
-    },
-    commands: {
-      executeCommand: async () => undefined,
-    },
-    env: {
-      clipboard: { writeText: async () => undefined },
-    },
-    window: {
-      visibleTextEditors: [],
-      showWarningMessage: message => { warnings.push(message); },
-      showInformationMessage: () => undefined,
-      showErrorMessage: message => { errors.push(message); },
-    },
-    Uri: {
-      joinPath: (...parts) => ({ parts }),
-    },
-  };
-  const { PdfEditorProvider } = loadTsModule('src/pdfEditorProvider.ts', {
-    vscode,
-    '@llm-wiki/core': {
-      pdfHref: portablePdfHref,
-    },
-    './pdfDiscussionController': {
-      createPdfDiscussionStoreForDocument(options) {
-        discussionRoutes.push(options);
-        return { store: fakeStore, layout: 'global' };
-      },
-    },
-  });
-  const context = {
-    extensionUri: { fsPath: '/extension' },
-    subscriptions: [],
-    globalState: {
-      get: () => false,
-      update: async () => undefined,
-    },
-  };
-  const provider = new PdfEditorProvider(context, {
-    documentRoot: tempRoot,
-    globalStoragePath: join(tempRoot, 'global-storage'),
-    discussionController,
-  });
-  const pdfUri = {
-    scheme: 'file',
-    fsPath: pdfPath,
-    toString: () => `file://${pdfPath}`,
-  };
-  const webview = {
-    postMessage: async message => {
-      posted.push(message);
-      return true;
-    },
-  };
-  provider.webviews.set(pdfUri.toString(), {
-    panel: { webview },
-    pdfUri,
-    postMessage: message => webview.postMessage(message),
-  });
-  provider.activeKey = pdfUri.toString();
-
-  await provider.loadPdf(provider.webviews.get(pdfUri.toString()));
-
-  assert.equal(discussionRoutes.length, 1);
-  assert.equal(discussionRoutes[0].vaultRoot, undefined);
-  assert.equal(discussionRoutes[0].globalStoragePath, join(tempRoot, 'global-storage'));
-  assert.ok(posted.some(message => message.type === 'loadPdf'));
-  assert.ok(posted.some(message => (
-    message.type === 'pdfDiscussionSnapshot'
-    && message.annotations[0]?.id === 'ann-global-1'
-  )));
-  assert.ok(posted.some(message => (
-    message.type === 'pdfDiscussionHighlights'
-    && message.highlights[0]?.annotationId === 'ann-global-1'
-  )));
-  assert.deepEqual(errors, []);
-  assert.deepEqual(warnings, []);
 });
 
 test('PDF rectangle embed formatter remains available but its selection action is removed', async () => {

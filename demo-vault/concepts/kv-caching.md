@@ -3,9 +3,12 @@ type: "Concept"
 title: "KV caching"
 description: "Reuse of attention keys and values from earlier tokens during autoregressive decoding."
 tags: ["attention", "inference", "training-systems"]
-status: "stable"
+status: "draft"
+scope: "vault"
 generated: {"by": "codex/gpt-5.6", "at": "2026-08-13T00:00:00Z"}
-sources: [{"id": "engine", "resource": "../projects/code/nanochat/nanochat/engine.py", "title": "Nanochat generation engine", "commit": "92d63d4e8bb4df75c3b71618f31ddde2378b2bcd"}, {"id": "gpt-source", "resource": "../projects/code/nanochat/nanochat/gpt.py", "title": "Nanochat GPT implementation", "commit": "92d63d4e8bb4df75c3b71618f31ddde2378b2bcd"}]
+sources: [{"id": "engine", "resource": "../projects/code/nanochat/nanochat/engine.py", "title": "Nanochat generation engine", "repository": "nanochat", "revision": "92d63d4e8bb4df75c3b71618f31ddde2378b2bcd", "path": "nanochat/engine.py"}, {"id": "gpt-source", "resource": "../projects/code/nanochat/nanochat/gpt.py", "title": "Nanochat GPT implementation", "repository": "nanochat", "revision": "92d63d4e8bb4df75c3b71618f31ddde2378b2bcd", "path": "nanochat/gpt.py"}]
+created: {"by": "process:project-scope-migration", "at": "2026-08-23T00:00:00Z"}
+source_state: "awaiting-source"
 ---
 
 # KV caching

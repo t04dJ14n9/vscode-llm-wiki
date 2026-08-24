@@ -207,10 +207,13 @@ function markdownOutlineItemId(uri: vscode.Uri, node: HeadingNode): string {
 function parseMarkdownHeadings(text: string): HeadingEntry[] {
   const headings: HeadingEntry[] = [];
   const lines = text.split(/\r?\n/);
+  const frontmatterEndLine = markdownFrontmatterEndLine(lines);
   let fencedBy: string | null = null;
   let fenceLength = 0;
 
   for (const [index, line] of lines.entries()) {
+    if (frontmatterEndLine != null && index <= frontmatterEndLine) continue;
+
     const fence = line.match(/^ {0,3}(`{3,}|~{3,})/);
     if (fence) {
       const marker = fence[1]![0]!;
@@ -269,6 +272,16 @@ function parseMarkdownHeadings(text: string): HeadingEntry[] {
   }
 
   return headings;
+}
+
+function markdownFrontmatterEndLine(lines: readonly string[]): number | undefined {
+  if (lines[0]?.trim() !== '---') return undefined;
+
+  for (let index = 1; index < lines.length; index += 1) {
+    if (lines[index]?.trim() === '---') return index;
+  }
+
+  return undefined;
 }
 
 function buildHeadingTree(headings: HeadingEntry[]): HeadingNode[] {

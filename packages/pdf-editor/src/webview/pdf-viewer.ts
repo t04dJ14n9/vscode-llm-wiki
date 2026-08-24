@@ -104,17 +104,10 @@ import {
   renderPdfTextLayer,
 } from './pdfTextLayer';
 import { showObsidianContextMenu } from './obsidianContextMenu';
-import {
-  createPdfAskPanel,
-  type PdfAskPanel,
-  type PdfAskSelection,
-} from './pdfAskPanel';
 import { normalizePdfTextBands, type PdfRect } from './pdfTextBands';
+import { PdfQueryAnnotationLayer } from './pdfQueryAnnotations';
 
 const vscode = acquireVsCodeApi();
-const askPdfEnabled =
-  (window as typeof window & { __llmWikiAskPdfEnabled?: unknown })
-    .__llmWikiAskPdfEnabled === true;
 
 type PdfReduceAnimationSetting = 'on' | 'off' | 'system';
 type PdfTextSelectionAction = 'addToCursorChat';
@@ -533,7 +526,10 @@ export class PdfViewer {
     previousDescribedBy: string | null;
   } | undefined;
   private readonly viewerResizeObserver: ResizeObserver | null;
-  private readonly askPanel?: PdfAskPanel;
+  private readonly queryAnnotationLayer = new PdfQueryAnnotationLayer(
+    this.pages,
+    message => vscode.postMessage(message),
+  );
 
   constructor() {
     this.container.tabIndex = -1;
@@ -542,47 +538,6 @@ export class PdfViewer {
     this.applyPdfToolbarPreference(this.pdfToolbarPreference);
     document.body.classList.toggle('pdf-adapt-theme', this.adaptToTheme);
     this.applyReduceAnimationSetting();
-    this.askPanel = askPdfEnabled ? createPdfAskPanel({
-      vscode,
-      toolbar: document.getElementById('toolbar')!,
-      viewerShell: document.getElementById('viewer-shell')!,
-      getPageSurface: pageNumber => {
-        const page = this.pages.get(pageNumber);
-        if (!page) return undefined;
-        return {
-          canvas: page.canvas,
-          pageWidth: Number(page.pageObj.size.width),
-          pageHeight: Number(page.pageObj.size.height),
-        };
-      },
-      getAnchorViewportRect: (pageNumber, rects) => {
-        const page = this.pages.get(pageNumber);
-        const valid = normalizePdfTextBands(rects);
-        if (!page || !valid.length) return undefined;
-        const wrapper = page.wrapper.getBoundingClientRect();
-        const shell = document.getElementById('viewer-shell')!.getBoundingClientRect();
-        return {
-          left: wrapper.left - shell.left + Math.min(...valid.map(rect => rect[0])) * this.scale,
-          top: wrapper.top - shell.top + Math.min(...valid.map(rect => rect[1])) * this.scale,
-          right: wrapper.left - shell.left + Math.max(...valid.map(rect => rect[2])) * this.scale,
-          bottom: wrapper.top - shell.top + Math.max(...valid.map(rect => rect[3])) * this.scale,
-        };
-      },
-      navigateTo: async (page, _rects, annotationId) => {
-        const navigationCurrent = await this.goToPage(page);
-        if (!navigationCurrent) return;
-        if (annotationId) {
-          this.pages.get(page)?.highlightLayer
-            .querySelector<HTMLElement>(`[data-annotation-id="${CSS.escape(annotationId)}"]`)
-            ?.scrollIntoView({
-              behavior: this.navigationScrollBehavior(),
-              block: 'center',
-              inline: 'center',
-            });
-        }
-      },
-      redrawMarkers: () => this.redrawAllDiscussionMarkers(),
-    }) : undefined;
     this.setupMessages();
     this.setupToolbar();
     this.setupSearch();
@@ -608,11 +563,22 @@ export class PdfViewer {
       this.scheduleSelectionUpdate();
     });
     document.addEventListener('copy', event => this.copyNativeSelection(event), true);
+    document.addEventListener('pointerdown', event => {
+      this.queryAnnotationLayer.handleDocumentPointerDown(event.target);
+    }, true);
     document.addEventListener('keydown', event => {
-      if (event.key !== 'Escape' || !this.pdfLinkPreview) return;
+      if (event.key !== 'Escape') return;
+      if (this.queryAnnotationLayer.active) {
+        this.queryAnnotationLayer.dismiss();
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+      if (!this.pdfLinkPreview) return;
       event.preventDefault();
       event.stopPropagation();
       this.dismissPdfLinkPreview();
+      this.queryAnnotationLayer.dismiss();
     }, true);
     this.container.addEventListener('scroll', () => {
       // Preview dismisses the transient selection controls when the document
@@ -693,6 +659,9 @@ export class PdfViewer {
         case 'pdfToolbarPreference':
           this.applyPdfToolbarPreference(message.preference);
           break;
+        case 'setQueryAnnotations':
+          this.queryAnnotationLayer.set(message.annotations);
+          break;
         case 'goToAnchor':
           void this.goToAnchor(message.anchor ?? {
             page: Number(message.page),
@@ -725,9 +694,6 @@ export class PdfViewer {
         case 'toggleTwoPageView':
           void this.toggleTwoPageView();
           break;
-        case 'pdfDiscussionOpenForSelection':
-          if (askPdfEnabled) this.openAskPdfForNativeSelection();
-          break;
         case 'addSelectionToCursorChat': {
           if (this.agentCapabilities.cursorAgent) this.addCurrentSelectionToCursorChat();
           break;
@@ -737,7 +703,6 @@ export class PdfViewer {
           break;
         }
         default:
-          this.askPanel?.handleHostMessage(message);
           break;
       }
     });
@@ -1242,16 +1207,31 @@ export class PdfViewer {
     if (!state.selectionLines.length) return undefined;
     let bestLine: PdfSelectionLine | undefined;
     let bestLineDistance = Number.POSITIVE_INFINITY;
+    let bestLineHorizontalDistance = Number.POSITIVE_INFINITY;
     let bestLineCenterDistance = Number.POSITIVE_INFINITY;
     for (const line of state.selectionLines) {
       const verticalDistance = y < line.top ? line.top - y : y > line.bottom ? y - line.bottom : 0;
+      const horizontalDistance = Math.min(...line.glyphs.map(({ glyph }) => {
+        const [left, , right] = glyph.hitRect;
+        return x < left ? left - x : x > right ? x - right : 0;
+      }));
       const centerDistance = Math.abs(y - line.center);
       if (
         verticalDistance < bestLineDistance
-        || (verticalDistance === bestLineDistance && centerDistance < bestLineCenterDistance)
+        || (
+          verticalDistance === bestLineDistance
+          && (
+            horizontalDistance < bestLineHorizontalDistance
+            || (
+              horizontalDistance === bestLineHorizontalDistance
+              && centerDistance < bestLineCenterDistance
+            )
+          )
+        )
       ) {
         bestLine = line;
         bestLineDistance = verticalDistance;
+        bestLineHorizontalDistance = horizontalDistance;
         bestLineCenterDistance = centerDistance;
       }
     }
@@ -2426,9 +2406,9 @@ export class PdfViewer {
       if (renderGeneration !== state.renderGeneration) return;
       state.rendered = true;
       this.drawSearchHighlightsForPage(state.pageNum);
-      this.drawDiscussionMarkersForPage(state.pageNum);
       this.restoreSelectionForPage(state.pageNum);
       this.redrawPdfDestinationFocus(state.pageNum);
+      this.queryAnnotationLayer.drawPage(state.pageNum);
     } catch (error) {
       console.error(`Failed to render page ${state.pageNum}`, error);
       if (renderGeneration === state.renderGeneration) state.rendered = sharpCanvasInstalled;
@@ -3322,9 +3302,6 @@ export class PdfViewer {
       clientY,
       items: [
         { label: 'Look up ...', onSelect: () => vscode.postMessage({ type: 'lookupSelection', text: anchor.snippet }) },
-        ...(askPdfEnabled
-          ? [{ label: 'Ask about selection…', onSelect: () => this.openAskPdfForSelection(anchor) }]
-          : []),
         ...(this.agentCapabilities.cursorAgent
           ? [{
               label: `${cursorSelectionShortcutLabel()}  Add to Chat`,
@@ -3351,40 +3328,6 @@ export class PdfViewer {
     if (!anchor || anchor.multiPage) return false;
     this.postTextSelectionAction('addToCursorChat', anchor);
     return true;
-  }
-
-  private openAskPdfForNativeSelection(): void {
-    if (!this.askPanel) return;
-    const current = this.selectionAnchorFromNativeRange();
-    if (!current) {
-      this.askPanel.showSelectionError('Select text on one page');
-      return;
-    }
-    this.openAskPdfForSelection(current.anchor);
-  }
-
-  private openAskPdfForSelection(anchor: PdfAnchor): void {
-    if (!this.askPanel) return;
-    const rects = validPdfRects(anchor.rects);
-    if (!anchor.snippet?.trim() || !rects.length) {
-      this.askPanel.showSelectionError('Select text on one page');
-      return;
-    }
-    const selection: PdfAskSelection = {
-      page: anchor.page,
-      snippet: anchor.snippet,
-      quote: anchor.snippet,
-      rects,
-      ...(anchor.prefix ? { prefix: anchor.prefix } : {}),
-      ...(anchor.suffix ? { suffix: anchor.suffix } : {}),
-      ...(anchor.textItemIndex !== undefined ? { textItemIndex: anchor.textItemIndex } : {}),
-      ...(anchor.charOffset !== undefined ? { charOffset: anchor.charOffset } : {}),
-      ...(anchor.endTextItemIndex !== undefined ? { endTextItemIndex: anchor.endTextItemIndex } : {}),
-      ...(anchor.endCharOffset !== undefined ? { endCharOffset: anchor.endCharOffset } : {}),
-    };
-    this.askPanel.openForSelection(selection);
-    window.getSelection()?.removeAllRanges();
-    this.clearSelection();
   }
 
   private showSelectionToolbar(anchor: PdfAnchor, rect: DOMRect): void {
@@ -3611,18 +3554,6 @@ export class PdfViewer {
       page.highlightLayer.querySelectorAll('.anchor-highlight').forEach(element => element.remove());
     }, 2200);
     return highlights[0];
-  }
-
-  private drawDiscussionMarkersForPage(pageNum: number): void {
-    const page = this.pages.get(pageNum);
-    if (!page?.rendered || !this.askPanel) return;
-    this.askPanel.renderMarkersForPage(pageNum, page.highlightLayer, this.scale);
-  }
-
-  private redrawAllDiscussionMarkers(): void {
-    for (const [pageNum, page] of this.pages) {
-      if (page.rendered) this.drawDiscussionMarkersForPage(pageNum);
-    }
   }
 
   private drawSearchHighlightsForPage(pageNum: number): void {
@@ -4790,7 +4721,6 @@ export class PdfViewer {
     }
     this.currentPage = activePage;
     this.redrawAllSearchHighlights();
-    this.redrawAllDiscussionMarkers();
     this.refreshSelectionAfterRender();
     this.updatePageInfo();
     this.releaseCurrentPageTrackingLock(trackingToken, 'auto');

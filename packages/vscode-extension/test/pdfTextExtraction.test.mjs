@@ -662,6 +662,334 @@ test('a full-width heading does not bridge otherwise separate PDF text lanes', (
   ]);
 });
 
+test('a multi-row full-width masthead does not bridge neighboring PDF columns', () => {
+  const normalized = extraction.normalizeBasicPdfTextRects([
+    { content: 'title', rect: rect(0, 0, 120, 10) },
+    { content: 'authors', rect: rect(20, 14, 80, 10) },
+    { content: 'affiliation', rect: rect(10, 28, 100, 10) },
+    { content: 'left 1', rect: rect(0, 50, 50, 10) },
+    { content: 'right 1', rect: rect(70, 50, 50, 10) },
+    { content: 'left 2', rect: rect(0, 62, 50, 10) },
+    { content: 'right 2', rect: rect(70, 62, 50, 10) },
+    { content: 'left 3', rect: rect(0, 74, 50, 10) },
+    { content: 'right 3', rect: rect(70, 74, 50, 10) },
+  ]);
+
+  assert.deepEqual(normalized.map(item => item.content), [
+    'title',
+    'authors',
+    'affiliation',
+    'left 1',
+    'left 2',
+    'left 3',
+    'right 1',
+    'right 2',
+    'right 3',
+  ]);
+});
+
+test('a fragmented three-column author grid stays row-major before shared metadata and body text', () => {
+  const nameFont = {
+    familyName: 'Nimbus Roman No9 L',
+    weight: 700,
+    italic: false,
+  };
+  const markerFont = {
+    familyName: 'Computer Modern',
+    weight: 245,
+    italic: true,
+  };
+  const bodyFont = {
+    familyName: 'Nimbus Roman No9 L',
+    weight: 425,
+    italic: false,
+  };
+  const run = (text, left, top, width, height, font, fontSize = height) => ({
+    text,
+    rect: rect(left, top, width, height),
+    font,
+    fontSize,
+  });
+  const normalized = extraction.normalizePdfTextRuns([
+    run('Direct Preference Optimization:\r\n', 189, 97, 237, 22, nameFont, 17.2),
+    run('Your Language Model is Secretly a Reward Model\r\n', 120, 116, 371, 23, nameFont, 17.2),
+    run('Rafael Rafailov', 155, 179, 66, 13, nameFont, 10),
+    run('∗† ', 221, 180, 7, 12, markerFont, 7),
+    run('Archit Sharma', 277, 179, 64, 13, nameFont, 10),
+    run('∗† ', 341, 180, 7, 12, markerFont, 7),
+    run('Eric Mitchell', 397, 179, 57, 13, nameFont, 10),
+    run('∗†\r\n', 454, 180, 7, 12, markerFont, 7),
+    run('Stefano Ermon', 147, 207, 64, 13, nameFont, 10),
+    run('†‡ ', 211, 208, 7, 12, markerFont, 7),
+    run('Christopher D. Manning', 259, 207, 106, 13, nameFont, 10),
+    run('† ', 365, 208, 3, 12, markerFont, 7),
+    run('Chelsea Finn', 410, 207, 55, 13, nameFont, 10),
+    run('†\r\n', 465, 208, 4, 12, markerFont, 7),
+    run('†', 239, 236, 4, 12, markerFont, 7),
+    run('Stanford University ', 243, 236, 78, 12, bodyFont, 10),
+    run('‡', 324, 236, 3, 12, markerFont, 7),
+    run('CZ Biohub\r\n', 328, 236, 45, 12, bodyFont, 10),
+    run('{rafailov,architsh,eric.mitchell}@cs.stanford.edu\r\n', 178, 248, 256, 12, {
+      familyName: 'Computer Modern',
+      weight: 250,
+      italic: false,
+    }, 10),
+    run('Abstract\r\n', 284, 286, 44, 15, nameFont, 12),
+    run('While large-scale unsupervised language models (LMs) learn broad world knowl', 143, 313, 327, 12, bodyFont, 10),
+  ]);
+
+  assert.deepEqual(normalized.map(item => item.content), [
+    'Direct Preference Optimization:',
+    'Your Language Model is Secretly a Reward Model',
+    'Rafael Rafailov',
+    '∗† ',
+    'Archit Sharma',
+    '∗† ',
+    'Eric Mitchell',
+    '∗†',
+    'Stefano Ermon',
+    '†‡ ',
+    'Christopher D. Manning',
+    '† ',
+    'Chelsea Finn',
+    '†',
+    '†',
+    'Stanford University ',
+    '‡',
+    'CZ Biohub',
+    '{rafailov,architsh,eric.mitchell}@cs.stanford.edu',
+    'Abstract',
+    'While large-scale unsupervised language models (LMs) learn broad world knowl',
+  ]);
+});
+
+test('a centered multi-affiliation masthead stays source-contiguous before abstract body text', () => {
+  const regularFont = {
+    familyName: 'Nimbus Roman No9 L',
+    weight: 425,
+    italic: false,
+  };
+  const authorFont = {
+    familyName: 'Nimbus Roman No9 L',
+    weight: 700,
+    italic: false,
+  };
+  const emailFont = {
+    familyName: 'Computer Modern',
+    weight: 250,
+    italic: false,
+  };
+  const run = (text, left, top, width, height, font, fontSize = height) => ({
+    text,
+    rect: rect(left, top, width, height),
+    font,
+    fontSize,
+  });
+  const normalized = extraction.normalizePdfTextRuns([
+    run('FP8 F', 172, 95, 44, 21, regularFont, 14),
+    run('ORMATS ', 217, 98, 60, 17, regularFont, 11),
+    run('F', 282, 95, 9, 21, regularFont, 14),
+    run('OR ', 292, 98, 20, 17, regularFont, 11),
+    run('D', 317, 95, 13, 21, regularFont, 14),
+    run('EEP ', 331, 98, 26, 17, regularFont, 11),
+    run('L', 362, 95, 11, 21, regularFont, 14),
+    run('EARNING\r\n', 373, 98, 67, 17, regularFont, 11),
+    run(
+      'Paulius Micikevicius, Dusan Stosic, Patrick Judd, John Kamalu, Stuart Oberman, Mohammad Shoeybi,\r\n',
+      87,
+      162,
+      441,
+      13,
+      authorFont,
+      10,
+    ),
+    run('Michael Siu, Hao Wu\r\n', 261, 173, 90, 13, authorFont, 10),
+    run('NVIDIA\r\n', 288, 184, 36, 12, regularFont, 10),
+    run(
+      '{pauliusm, dstosic, pjudd, jkamalu, soberman, mshoeybi, msiu, skyw}@nvidia.com\r\n',
+      102,
+      196,
+      407,
+      12,
+      emailFont,
+      10,
+    ),
+    run('Neil Burgess, Sangwon Ha, Richard Grisenthwaite\r\n', 199, 223, 214, 13, authorFont, 10),
+    run('Arm\r\n', 297, 234, 18, 12, regularFont, 10),
+    run(
+      '{neil.burgess, sangwon.ha, richard.grisenthwaite}@arm.com\r\n',
+      157,
+      246,
+      298,
+      12,
+      emailFont,
+      10,
+    ),
+    run(
+      'Naveen Mellempudi, Marius Cornea, Alexander Heinecke, Pradeep Dubey\r\n',
+      148,
+      273,
+      316,
+      13,
+      authorFont,
+      10,
+    ),
+    run('Intel\r\n', 297, 284, 18, 12, regularFont, 10),
+    run(
+      '{naveen.k.mellempudi, marius.cornea, alexander.heinecke, pradeep.dubey}@intel.com\r\n',
+      94,
+      296,
+      423,
+      12,
+      emailFont,
+      10,
+    ),
+    run('A', 277, 345, 9, 15, authorFont, 12),
+    run('BSTRACT\r\n', 287, 347, 48, 12, authorFont, 10),
+    run(
+      'FP8 is a natural progression for accelerating deep learning training inference beyond the 16-bit',
+      72,
+      371,
+      468,
+      12,
+      regularFont,
+      10,
+    ),
+  ]);
+
+  assert.deepEqual(normalized.map(item => item.content), [
+    'FP8 F',
+    'ORMATS ',
+    'F',
+    'OR ',
+    'D',
+    'EEP ',
+    'L',
+    'EARNING',
+    'Paulius Micikevicius, Dusan Stosic, Patrick Judd, John Kamalu, Stuart Oberman, Mohammad Shoeybi,',
+    'Michael Siu, Hao Wu',
+    'NVIDIA',
+    '{pauliusm, dstosic, pjudd, jkamalu, soberman, mshoeybi, msiu, skyw}@nvidia.com',
+    'Neil Burgess, Sangwon Ha, Richard Grisenthwaite',
+    'Arm',
+    '{neil.burgess, sangwon.ha, richard.grisenthwaite}@arm.com',
+    'Naveen Mellempudi, Marius Cornea, Alexander Heinecke, Pradeep Dubey',
+    'Intel',
+    '{naveen.k.mellempudi, marius.cornea, alexander.heinecke, pradeep.dubey}@intel.com',
+    'A',
+    'BSTRACT',
+    'FP8 is a natural progression for accelerating deep learning training inference beyond the 16-bit',
+  ]);
+});
+
+test('a fragmented numeric table keeps every value in its visual row', () => {
+  const regularFont = {
+    familyName: 'Nimbus Roman No9 L',
+    weight: 425,
+    italic: false,
+  };
+  const boldFont = {
+    familyName: 'Nimbus Roman No9 L',
+    weight: 700,
+    italic: false,
+  };
+  const numberFont = {
+    familyName: 'Computer Modern',
+    weight: 345,
+    italic: false,
+  };
+  const decimalFont = {
+    familyName: 'Computer Modern',
+    weight: 360,
+    italic: true,
+  };
+  const run = (text, left, top, width, height, font) => ({
+    text,
+    rect: rect(left, top, width, height),
+    font,
+    fontSize: 9.962599754333496,
+  });
+  const normalized = extraction.normalizePdfTextRuns([
+    run('Model Dataset (metric) 16-bit FP int8 E4M3\r\n', 165, 510, 280, 12, regularFont),
+    run('BERT Base SQuAD v1.1 (F1) ', 165, 526, 134, 12, regularFont),
+    run('88', 343, 528, 10, 10, numberFont),
+    run('.', 353, 528, 3, 10, decimalFont),
+    run('19 76', 356, 528, 39, 10, numberFont),
+    run('.', 395, 528, 3, 10, decimalFont),
+    run('89 ', 398, 528, 10, 10, numberFont),
+    run('88.09\r\n', 422, 526, 23, 13, boldFont),
+    run('BERT Large SQuAD v1.1 (F1) ', 165, 537, 134, 12, regularFont),
+    run('90', 343, 539, 10, 10, numberFont),
+    run('.', 353, 539, 3, 10, decimalFont),
+    run('87 89', 356, 539, 39, 10, numberFont),
+    run('.', 395, 539, 3, 10, decimalFont),
+    run('65 ', 398, 539, 10, 10, numberFont),
+    run('90.94\r\n', 422, 537, 23, 13, boldFont),
+    run('GPT3 126M wikitext103 (perplexity) ', 165, 548, 159, 12, regularFont),
+    run('19', 343, 550, 10, 10, numberFont),
+    run('.', 353, 550, 3, 10, decimalFont),
+    run('01 28', 356, 550, 39, 10, numberFont),
+    run('.', 395, 550, 3, 10, decimalFont),
+    run('37 ', 398, 550, 10, 10, numberFont),
+    run('19.43\r\n', 422, 548, 23, 13, boldFont),
+    run('GPT3 1.3B wikitext103 (perplexity) ', 165, 559, 159, 12, regularFont),
+    run('10', 343, 561, 10, 10, numberFont),
+    run('.', 353, 561, 3, 10, decimalFont),
+    run('19 12', 356, 561, 39, 10, numberFont),
+    run('.', 395, 561, 3, 10, decimalFont),
+    run('74 ', 398, 561, 10, 10, numberFont),
+    run('10.29\r\n', 422, 559, 23, 13, boldFont),
+    run('GPT3 6.7B wikitext103 (perplexity) ', 165, 570, 159, 12, regularFont),
+    run('8', 348, 572, 5, 10, numberFont),
+    run('.', 353, 572, 3, 10, decimalFont),
+    run('51 10', 356, 572, 39, 10, numberFont),
+    run('.', 395, 572, 3, 10, decimalFont),
+    run('29 ', 398, 572, 10, 10, numberFont),
+    run('8.41\r\n', 427, 570, 18, 13, boldFont),
+    run('4.3 Per-tensor scaling factors\r\n', 72, 603, 130, 13, boldFont),
+  ]);
+
+  assert.deepEqual(normalized.map(item => item.content), [
+    'Model Dataset (metric) 16-bit FP int8 E4M3',
+    'BERT Base SQuAD v1.1 (F1) ',
+    '88',
+    '.',
+    '19 76',
+    '.',
+    '89 ',
+    '88.09',
+    'BERT Large SQuAD v1.1 (F1) ',
+    '90',
+    '.',
+    '87 89',
+    '.',
+    '65 ',
+    '90.94',
+    'GPT3 126M wikitext103 (perplexity) ',
+    '19',
+    '.',
+    '01 28',
+    '.',
+    '37 ',
+    '19.43',
+    'GPT3 1.3B wikitext103 (perplexity) ',
+    '10',
+    '.',
+    '19 12',
+    '.',
+    '74 ',
+    '10.29',
+    'GPT3 6.7B wikitext103 (perplexity) ',
+    '8',
+    '.',
+    '51 10',
+    '.',
+    '29 ',
+    '8.41',
+    '4.3 Per-tensor scaling factors',
+  ]);
+});
+
 test('source-adjacent runs on one visual line stay together across a wide word gap', () => {
   const normalized = extraction.normalizeBasicPdfTextRects([
     { content: 'Page', rect: rect(0, 0, 10, 8) },
@@ -676,6 +1004,44 @@ test('source-adjacent runs on one visual line stay together across a wide word g
   ]);
 });
 
+test('a forward styled fragment stays ahead of the following body line', () => {
+  const normalized = extraction.normalizeBasicPdfTextRects([
+    { content: 'body 1', rect: rect(0, 0, 10, 8), font: { weight: 400 } },
+    { content: 'body 2', rect: rect(0, 10, 10, 8), font: { weight: 400 } },
+    { content: 'part A', rect: rect(0, 20, 10, 8), font: { weight: 400 } },
+    { content: 'part B', rect: rect(34, 20, 10, 8), font: { weight: 700 } },
+    { content: 'body 4', rect: rect(0, 30, 10, 8), font: { weight: 400 } },
+  ]);
+
+  assert.deepEqual(normalized.map(item => item.content), [
+    'body 1',
+    'body 2',
+    'part A',
+    'part B',
+    'body 4',
+  ]);
+});
+
+test('a forward style change does not outrank an aligned neighboring column', () => {
+  const normalized = extraction.normalizeBasicPdfTextRects([
+    { content: 'left 1', rect: rect(0, 0, 50, 10), font: { weight: 400 } },
+    { content: 'right 1', rect: rect(70, 0, 50, 10), font: { weight: 400 } },
+    { content: 'left 2', rect: rect(0, 12, 50, 10), font: { weight: 400 } },
+    { content: 'right 2', rect: rect(70, 12, 50, 10), font: { weight: 700 } },
+    { content: 'left 3', rect: rect(0, 24, 50, 10), font: { weight: 400 } },
+    { content: 'right 3', rect: rect(70, 24, 50, 10), font: { weight: 700 } },
+  ]);
+
+  assert.deepEqual(normalized.map(item => item.content), [
+    'left 1',
+    'left 2',
+    'left 3',
+    'right 1',
+    'right 2',
+    'right 3',
+  ]);
+});
+
 test('row-major source order still keeps neighboring PDF columns separate', () => {
   const normalized = extraction.normalizeBasicPdfTextRects([
     { content: 'left 1', rect: rect(0, 0, 50, 8) },
@@ -684,6 +1050,66 @@ test('row-major source order still keeps neighboring PDF columns separate', () =
     { content: 'right 2', rect: rect(70, 10, 50, 8) },
     { content: 'left 3', rect: rect(0, 20, 50, 8) },
     { content: 'right 3', rect: rect(70, 20, 50, 8) },
+  ]);
+
+  assert.deepEqual(normalized.map(item => item.content), [
+    'left 1',
+    'left 2',
+    'left 3',
+    'right 1',
+    'right 2',
+    'right 3',
+  ]);
+});
+
+test('reverse-x source transitions do not pull neighboring columns into one PDF reading lane', () => {
+  const normalized = extraction.normalizeBasicPdfTextRects([
+    { content: 'left 1', rect: rect(0, 8, 315, 17.36) },
+    { content: 'right 1', rect: rect(339, 0, 315, 17.36) },
+    { content: 'left 2', rect: rect(0, 28, 315, 17.36) },
+    { content: 'right 2', rect: rect(339, 20, 315, 17.36) },
+    { content: 'right 3', rect: rect(339, 40, 315, 17.36) },
+    { content: 'left 3', rect: rect(0, 48, 315, 17.36) },
+  ]);
+
+  assert.deepEqual(normalized.map(item => item.content), [
+    'left 1',
+    'left 2',
+    'left 3',
+    'right 1',
+    'right 2',
+    'right 3',
+  ]);
+});
+
+test('large text keeps an aligned lane ahead of a relaxed reverse-x match', () => {
+  const normalized = extraction.normalizeBasicPdfTextRects([
+    { content: 'left 1', rect: rect(0, 8, 20, 30) },
+    { content: 'right 1', rect: rect(150, 0, 20, 30) },
+    { content: 'left 2', rect: rect(0, 42, 20, 30) },
+    { content: 'right 2', rect: rect(150, 34, 20, 30) },
+    { content: 'right 3', rect: rect(150, 68, 20, 30) },
+    { content: 'left 3', rect: rect(60, 76, 48, 30) },
+  ]);
+
+  assert.deepEqual(normalized.map(item => item.content), [
+    'left 1',
+    'left 2',
+    'left 3',
+    'right 1',
+    'right 2',
+    'right 3',
+  ]);
+});
+
+test('relaxed reverse support rows do not outrank a sparse aligned lane', () => {
+  const normalized = extraction.normalizeBasicPdfTextRects([
+    { content: 'left 1', rect: rect(0, 0, 5, 10) },
+    { content: 'right 1', rect: rect(66, 0, 20, 10) },
+    { content: 'left 2', rect: rect(0, 12, 5, 10) },
+    { content: 'right 2', rect: rect(66, 12, 20, 10) },
+    { content: 'right 3', rect: rect(70, 24, 20, 10) },
+    { content: 'left 3', rect: rect(20, 24, 40, 10) },
   ]);
 
   assert.deepEqual(normalized.map(item => item.content), [
@@ -735,6 +1161,38 @@ test('row-major source order keeps three neighboring PDF columns contiguous', ()
     'right 1',
     'right 2',
     'right 3',
+  ]);
+});
+
+test('four neighboring prose columns do not become a compact grid from run count alone', () => {
+  const normalized = extraction.normalizeBasicPdfTextRects([
+    { content: 'one 1', rect: rect(0, 0, 20, 8), font: { weight: 400 } },
+    { content: 'two 1', rect: rect(35, 0, 20, 8), font: { weight: 400 } },
+    { content: 'three 1', rect: rect(70, 0, 20, 8), font: { weight: 400 } },
+    { content: 'four 1', rect: rect(105, 0, 20, 8), font: { weight: 400 } },
+    { content: 'one 2', rect: rect(0, 10, 20, 8), font: { weight: 400 } },
+    { content: 'two 2', rect: rect(35, 10, 20, 8), font: { weight: 400 } },
+    { content: 'three 2', rect: rect(70, 10, 20, 8), font: { weight: 400 } },
+    { content: 'four 2', rect: rect(105, 10, 20, 8), font: { weight: 400 } },
+    { content: 'one 3', rect: rect(0, 20, 20, 8), font: { weight: 400 } },
+    { content: 'two 3', rect: rect(35, 20, 20, 8), font: { weight: 400 } },
+    { content: 'three 3', rect: rect(70, 20, 20, 8), font: { weight: 400 } },
+    { content: 'four 3', rect: rect(105, 20, 20, 8), font: { weight: 400 } },
+  ]);
+
+  assert.deepEqual(normalized.map(item => item.content), [
+    'one 1',
+    'one 2',
+    'one 3',
+    'two 1',
+    'two 2',
+    'two 3',
+    'three 1',
+    'three 2',
+    'three 3',
+    'four 1',
+    'four 2',
+    'four 3',
   ]);
 });
 

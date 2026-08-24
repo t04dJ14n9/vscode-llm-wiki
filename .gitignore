@@ -39,6 +39,9 @@ artifacts/
 demos/
 reference/
 
+# In-place code working copies registered by project ID
+/demo-vault/projects/code/
+
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal

@@ -13,10 +13,10 @@ source_url: "https://arxiv.org/abs/2305.18290v3"
 ingested: "2026-08-13"
 submitted: "2023-05-29"
 revised: "2024-07-29"
-sha256: "29e208085b140272b7e56b0df40a6d46ca0b73e39d4356751194ac4a989500bd"
+sha256: "848cdcc2b178873ddc35ca322f76e98016577175eeb12211254d5feca6c28fc2"
 arxiv: {"id": "2305.18290", "version": 3}
 license: {"id": "CC-BY-4.0", "url": "https://creativecommons.org/licenses/by/4.0/"}
-attachment: {"resource": "assets/direct-preference-optimization-your-language-model-is-secretly-a-reward-model.pdf", "media_type": "application/pdf", "bytes": 1299212, "sha256": "92cb3a2b71362acda98a789b03d88688fd33cf5fcf13f81d2b1de30ee7d3b67a"}
+attachment: {"resource": "../assets/direct-preference-optimization-your-language-model-is-secretly-a-reward-model.pdf", "media_type": "application/pdf", "bytes": 1299212, "sha256": "92cb3a2b71362acda98a789b03d88688fd33cf5fcf13f81d2b1de30ee7d3b67a", "role": "original"}
 extraction: {"tool": "pdftotext", "version": "pdftotext version 26.04.0"}
 ---
 
@@ -29,7 +29,7 @@ extraction: {"tool": "pdftotext", "version": "pdftotext version 26.04.0"}
 - **Submitted:** 2023-05-29
 - **Revised:** 2024-07-29
 - **License:** [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)
-- **Local attachment:** [Open the archived PDF](assets/direct-preference-optimization-your-language-model-is-secretly-a-reward-model.pdf)
+- **Local attachment:** [Open the archived PDF](../assets/direct-preference-optimization-your-language-model-is-secretly-a-reward-model.pdf)
 
 > Extraction notice: The text below was produced mechanically with
 > `pdftotext version 26.04.0`. Reading order, equations, tables, figures, and

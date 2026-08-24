@@ -9,6 +9,11 @@ import type {
   ExternalAgentId,
 } from './agentHandoff';
 import { resolveLinkPreviewTarget } from './linkPreviewResolver';
+import {
+  isQueryPagePath,
+  resolveMarkdownAnchor,
+  type QueryAnnotationIndex,
+} from './queryAnnotationIndex';
 
 interface ActiveMarkdownWebview {
   panel: vscode.WebviewPanel;
@@ -44,6 +49,8 @@ interface PendingSelectionRequest {
 export interface MarkdownEditorProviderOptions {
   agentCapabilities?: () => AgentSurfaceCapabilities;
   onDidChangeAgentCapabilities?: vscode.Event<void>;
+  queryAnnotationIndex?: Pick<QueryAnnotationIndex, 'listAnnotationsForSource'>;
+  queryDiagnostics?: vscode.DiagnosticCollection;
 }
 
 function inclusiveLineRange(
@@ -72,15 +79,23 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
   private readonly pendingReveals = new Map<string, RevealSelection>();
   private readonly pendingInsertions = new Map<string, PendingInsertion>();
   private readonly pendingSelectionRequests = new Map<string, PendingSelectionRequest>();
+  private readonly markdownNotePathCache = new Map<string, {
+    expiresAt: number;
+    paths: Promise<string[]>;
+  }>();
   private activePanel: vscode.WebviewPanel | undefined;
   private vimModeEnabled: boolean;
   private readonly agentCapabilities: () => AgentSurfaceCapabilities;
+  private readonly queryAnnotationIndex?: Pick<QueryAnnotationIndex, 'listAnnotationsForSource'>;
+  private readonly queryDiagnostics?: vscode.DiagnosticCollection;
 
   constructor(
     private readonly context: vscode.ExtensionContext,
     private readonly learningNoteStore?: LearningNoteStore,
     options: MarkdownEditorProviderOptions = {},
   ) {
+    this.queryAnnotationIndex = options.queryAnnotationIndex;
+    this.queryDiagnostics = options.queryDiagnostics;
     this.agentCapabilities = options.agentCapabilities ?? (() => ({
       cursorAgent: false,
       providers: [],
@@ -98,8 +113,12 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
   }
 
   async refreshLearningAnnotations(): Promise<void> {
+    await this.refreshQueryAnnotations();
+  }
+
+  async refreshQueryAnnotations(): Promise<void> {
     await Promise.all([...this.webviews.values()].map(async active => {
-      await this.postLearningAnnotations(active.document, active.postMessage);
+      await this.postQueryAnnotations(active.document, active.postMessage);
     }));
   }
 
@@ -234,7 +253,7 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
 
     let applyingWebviewEdit = false;
     let pendingWebviewText: string | undefined;
-    let latestWebviewDocumentText: string | undefined;
+    let latestWebviewDocumentText: string | undefined = document.getText();
     const recentWebviewDocumentTexts = new Set<string>();
     const recentWebviewDocumentTextOrder: string[] = [];
     let suppressedWebviewDocumentChanges = 0;
@@ -242,6 +261,8 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
     let closingEditorTab = false;
     let panelViewColumn = webviewPanel.viewColumn;
     let unappliedWebviewText: string | undefined;
+    let initialTextPush: Promise<void> | undefined;
+    let initialTextTimeout: ReturnType<typeof setTimeout> | undefined;
 
     const pushSettings = () => {
       webviewPanel.webview.postMessage({
@@ -251,19 +272,29 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
     };
 
     const pushText = async () => {
+      const text = document.getText();
+      latestWebviewDocumentText = text;
       await webviewPanel.webview.postMessage({
         type: 'setText',
-        text: document.getText(),
+        text,
         title: noteTitleFromUri(document.uri),
         currentNotePath: documentRelativePath(document.uri),
-        notePaths: await markdownNotePaths(document.uri),
+        notePaths: await this.markdownNotePaths(document.uri),
         resourceBaseUri: webviewResourceUriString(webviewPanel.webview, documentDirectoryUri(document.uri)),
         resourceRootUri: webviewResourceUriString(webviewPanel.webview, workspaceRootUri(document.uri)),
       });
-      await this.postLearningAnnotations(
+      await this.postQueryAnnotations(
         document,
         message => webviewPanel.webview.postMessage(message),
       );
+    };
+
+    const ensureInitialText = (): Promise<void> => {
+      initialTextPush ??= pushText().catch(error => {
+        initialTextPush = undefined;
+        throw error;
+      });
+      return initialTextPush;
     };
 
     const pushVimMode = () => {
@@ -424,6 +455,7 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
     webviewPanel.onDidDispose(() => changeSub.dispose());
     webviewPanel.onDidDispose(() => configSub.dispose());
     webviewPanel.onDidDispose(() => {
+      if (initialTextTimeout !== undefined) clearTimeout(initialTextTimeout);
       this.webviews.delete(webviewPanel);
       if (this.activePanel === webviewPanel) {
         this.activePanel = [...this.webviews.keys()].find(panel => panel.active);
@@ -451,18 +483,28 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
           this.updateSelectionContext();
           break;
         case 'ready':
+          if (initialTextTimeout !== undefined) {
+            clearTimeout(initialTextTimeout);
+            initialTextTimeout = undefined;
+          }
           webviewPanel.reveal(undefined, false);
           this.postAgentHandoffCapabilities(webviewPanel.webview);
           pushSettings();
           pushVimMode();
-          void pushText();
+          void ensureInitialText();
           pushPendingReveal();
           requestFocus();
           break;
         case 'edit':
-          if (typeof message.text !== 'string') return;
-          rememberWebviewDocumentText(message.text);
-          pendingWebviewText = message.text;
+          {
+            const nextText = webviewEditText(message, latestWebviewDocumentText);
+            if (nextText === undefined) {
+              void webviewPanel.webview.postMessage({ type: 'requestText' });
+              return;
+            }
+            rememberWebviewDocumentText(nextText);
+            pendingWebviewText = nextText;
+          }
           void queueWebviewEdits().catch(reportWebviewEditFailure);
           break;
         case 'selectionChanged': {
@@ -560,6 +602,38 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
             discussionId: message.discussionId,
           });
           break;
+        case 'openQuery': {
+          const navigation = message.navigation;
+          if (!navigation || typeof navigation !== 'object') return;
+          const target = navigation as Record<string, unknown>;
+          if (target.kind === 'legacy') {
+            if (
+              typeof target.notePath !== 'string'
+              || typeof target.discussionId !== 'string'
+              || path.isAbsolute(target.notePath)
+            ) return;
+            await vscode.commands.executeCommand('llm-wiki.openLearningDiscussion', {
+              notePath: target.notePath,
+              discussionId: target.discussionId,
+            });
+            break;
+          }
+          if (
+            target.kind !== 'query'
+            || typeof target.queryPath !== 'string'
+            || path.isAbsolute(target.queryPath)
+            || target.queryPath.includes('\\')
+            || target.queryPath.split('/').includes('..')
+            || !target.queryPath.toLowerCase().endsWith('.md')
+            || !isQueryPagePath(target.queryPath)
+          ) return;
+          await vscode.commands.executeCommand(
+            'llm-wiki.openLinkTarget',
+            target.queryPath,
+            document.uri,
+          );
+          break;
+        }
         case 'copyText':
           if (typeof message.text === 'string') {
             await vscode.env.clipboard.writeText(message.text);
@@ -575,8 +649,21 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
           break;
         case 'copySelectionForAgent':
           this.activePanel = webviewPanel;
+          {
+            const selection = normalizeSelectionMessage(message.selection);
+            if (selection) activeWebview.selection = selection;
+          }
           this.updateSelectionContext();
-          await vscode.commands.executeCommand('llm-wiki.copySelectionForAgent');
+          {
+            const selection = normalizeSelectionMessage(message.selection);
+            const suppliedSelection = selection && selection.from !== selection.to
+              ? this.getActiveSelectionContext()
+              : undefined;
+            await vscode.commands.executeCommand<boolean>(
+              'llm-wiki.copySelectionForAgent',
+              suppliedSelection,
+            );
+          }
           break;
         case 'renameTitle': {
           if (document.isUntitled) return;
@@ -598,7 +685,10 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
     this.postAgentHandoffCapabilities(webviewPanel.webview);
     pushSettings();
     pushVimMode();
-    setTimeout(() => void pushText(), 250);
+    initialTextTimeout = setTimeout(() => {
+      initialTextTimeout = undefined;
+      void ensureInitialText();
+    }, 250);
     setTimeout(pushPendingReveal, 260);
   }
 
@@ -630,6 +720,13 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
         to: lineRangeTo,
       },
     };
+  }
+
+  async postCopySelectionForAgentResult(ok: boolean): Promise<void> {
+    await this.getActiveWebview()?.postMessage({
+      type: 'copySelectionForAgentResult',
+      ok,
+    });
   }
 
   private updateVimModeContext(): void {
@@ -703,10 +800,55 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
     return active;
   }
 
-  private async postLearningAnnotations(
+  private async postQueryAnnotations(
     document: vscode.TextDocument,
     postMessage: (message: unknown) => Thenable<boolean>,
   ): Promise<void> {
+    if (this.queryAnnotationIndex) {
+      try {
+        const sourcePath = vscode.workspace.asRelativePath(document.uri, false);
+        const annotations = await this.queryAnnotationIndex.listAnnotationsForSource(sourcePath);
+        const diagnostics: vscode.Diagnostic[] = [];
+        const resolved = annotations.flatMap(annotation => {
+          if (annotation.anchor.kind !== 'markdown') return [];
+          const resolution = resolveMarkdownAnchor(annotation.anchor, document.getText());
+          if (!resolution.range) {
+            if (resolution.diagnostic) {
+              const line = Math.max(0, (annotation.anchor.startLine ?? 1) - 1);
+              const diagnostic = new vscode.Diagnostic(
+                new vscode.Range(line, 0, line, 1),
+                resolution.diagnostic.message,
+                vscode.DiagnosticSeverity.Warning,
+              );
+              diagnostic.source = 'llm-wiki-query';
+              diagnostic.code = resolution.diagnostic.code;
+              diagnostics.push(diagnostic);
+            }
+            return [];
+          }
+          return [{
+            annotationId: `${annotation.queryPath}#${annotation.anchor.sourceId}`,
+            queryPath: annotation.queryPath,
+            title: annotation.title,
+            status: annotation.status,
+            condensedSummary: annotation.condensedSummary,
+            ...(annotation.project ? { project: annotation.project } : {}),
+            updatedTime: annotation.updatedTime,
+            navigationTarget: annotation.navigationTarget,
+            ...(annotation.compatibility ? { compatibility: annotation.compatibility } : {}),
+            ...(annotation.anchor.quote ? { quote: annotation.anchor.quote } : {}),
+            from: resolution.range.from,
+            to: resolution.range.to,
+          }];
+        });
+        this.queryDiagnostics?.set(document.uri, diagnostics);
+        await postMessage({ type: 'setQueryAnnotations', annotations: resolved });
+      } catch {
+        this.queryDiagnostics?.delete(document.uri);
+        await postMessage({ type: 'setQueryAnnotations', annotations: [] });
+      }
+      return;
+    }
     if (!this.learningNoteStore) {
       await postMessage({ type: 'setLearningAnnotations', annotations: [] });
       return;
@@ -718,6 +860,37 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
     } catch {
       await postMessage({ type: 'setLearningAnnotations', annotations: [] });
     }
+  }
+
+  private async markdownNotePaths(documentUri: vscode.Uri): Promise<string[]> {
+    const workspaceRoot = workspaceRootUri(documentUri);
+    const currentPath = documentRelativePath(documentUri);
+    if (!workspaceRoot) return currentPath ? [currentPath] : [];
+
+    const cacheKey = workspaceRoot.toString();
+    const now = Date.now();
+    let cached = this.markdownNotePathCache.get(cacheKey);
+    if (!cached || cached.expiresAt <= now) {
+      const created: {
+        expiresAt: number;
+        paths: Promise<string[]>;
+      } = {
+        expiresAt: now + 30_000,
+        paths: Promise.resolve([]),
+      };
+      created.paths = discoverMarkdownNotePaths(workspaceRoot).catch(() => {
+        if (this.markdownNotePathCache.get(cacheKey) === created) {
+          this.markdownNotePathCache.delete(cacheKey);
+        }
+        return [];
+      });
+      cached = created;
+      this.markdownNotePathCache.set(cacheKey, created);
+    }
+
+    const paths = await cached.paths;
+    if (!currentPath || paths.includes(currentPath)) return paths;
+    return [...paths, currentPath].sort((left, right) => left.localeCompare(right));
   }
 
   private resolvePendingInsertion(requestId: string, applied: boolean): void {
@@ -795,16 +968,47 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
 }
 
 async function replaceDocument(document: vscode.TextDocument, text: string): Promise<void> {
+  const current = document.getText();
+  if (current === text) return;
+  const replacement = minimalDocumentReplacement(current, text);
   const edit = new vscode.WorkspaceEdit();
-  const lastLine = document.lineAt(document.lineCount - 1);
   edit.replace(
     document.uri,
-    new vscode.Range(0, 0, document.lineCount - 1, lastLine.text.length),
-    text,
+    new vscode.Range(
+      document.positionAt(replacement.from),
+      document.positionAt(replacement.to),
+    ),
+    replacement.text,
   );
   if (!await vscode.workspace.applyEdit(edit)) {
     throw new Error('The editor rejected the markdown update.');
   }
+}
+
+function minimalDocumentReplacement(
+  current: string,
+  next: string,
+): { from: number; to: number; text: string } {
+  let from = 0;
+  const sharedLength = Math.min(current.length, next.length);
+  while (from < sharedLength && current[from] === next[from]) from++;
+
+  let currentTo = current.length;
+  let nextTo = next.length;
+  while (
+    currentTo > from
+    && nextTo > from
+    && current[currentTo - 1] === next[nextTo - 1]
+  ) {
+    currentTo--;
+    nextTo--;
+  }
+
+  return {
+    from,
+    to: currentTo,
+    text: next.slice(from, nextTo),
+  };
 }
 
 function markdownEditorTabForDocument(
@@ -983,23 +1187,16 @@ export function resolveMarkdownEditorLink(
   return `${resolvedPath}${suffix}`;
 }
 
-async function markdownNotePaths(documentUri: vscode.Uri): Promise<string[]> {
-  const workspaceRoot = workspaceRootUri(documentUri);
-  const currentPath = documentRelativePath(documentUri);
-  if (!workspaceRoot) return currentPath ? [currentPath] : [];
-
+async function discoverMarkdownNotePaths(workspaceRoot: vscode.Uri): Promise<string[]> {
   const noteUris = await vscode.workspace.findFiles(
     new vscode.RelativePattern(workspaceRoot, '**/*.md'),
     new vscode.RelativePattern(workspaceRoot, '**/{.git,node_modules}/**'),
     10_000,
   );
-  const paths = noteUris
+  return noteUris
     .map(documentRelativePath)
-    .filter((notePath): notePath is string => Boolean(notePath));
-  if (currentPath && !paths.includes(currentPath)) {
-    paths.push(currentPath);
-  }
-  return paths.sort((a, b) => a.localeCompare(b));
+    .filter((notePath): notePath is string => Boolean(notePath))
+    .sort((a, b) => a.localeCompare(b));
 }
 
 function webviewResourceUriString(webview: vscode.Webview, uri: vscode.Uri | undefined): string | undefined {
@@ -1076,6 +1273,38 @@ function asMessageRecord(message: unknown): Record<string, unknown> | undefined 
   return message && typeof message === 'object'
     ? message as Record<string, unknown>
     : undefined;
+}
+
+function webviewEditText(
+  message: Record<string, unknown>,
+  currentText: string | undefined,
+): string | undefined {
+  if (typeof message.text === 'string') return message.text;
+  if (
+    currentText === undefined
+    || message.baseLength !== currentText.length
+    || !Array.isArray(message.changes)
+  ) return undefined;
+
+  let cursor = 0;
+  let result = '';
+  for (const candidate of message.changes) {
+    if (!candidate || typeof candidate !== 'object') return undefined;
+    const change = candidate as Record<string, unknown>;
+    if (
+      typeof change.from !== 'number'
+      || typeof change.to !== 'number'
+      || typeof change.text !== 'string'
+      || !Number.isSafeInteger(change.from)
+      || !Number.isSafeInteger(change.to)
+      || change.from < cursor
+      || change.to < change.from
+      || change.to > currentText.length
+    ) return undefined;
+    result += currentText.slice(cursor, change.from) + change.text;
+    cursor = change.to;
+  }
+  return result + currentText.slice(cursor);
 }
 
 function isExternalAgentId(value: unknown): value is ExternalAgentId {

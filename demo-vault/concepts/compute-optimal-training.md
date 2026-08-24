@@ -3,9 +3,12 @@ type: "Concept"
 title: "Compute-optimal training"
 description: "Choosing model size and token budget to use a fixed training-compute envelope effectively."
 tags: ["optimization", "pretraining", "small-models", "training-systems"]
-status: "stable"
+status: "draft"
+scope: "vault"
 generated: {"by": "codex/gpt-5.6", "at": "2026-08-13T00:00:00Z"}
-sources: [{"id": "dclm-paper", "resource": "../raw/datacomp-lm-in-search-of-the-next-generation-of-training-sets-for-language-models.md", "title": "DataComp-LM"}, {"id": "base-train", "resource": "../projects/code/nanochat/scripts/base_train.py", "title": "Nanochat base training", "commit": "92d63d4e8bb4df75c3b71618f31ddde2378b2bcd"}, {"id": "scaling-run", "resource": "../projects/code/nanochat/runs/scaling_laws.sh", "title": "Nanochat scaling-law run", "commit": "92d63d4e8bb4df75c3b71618f31ddde2378b2bcd"}]
+sources: [{"id": "dclm-paper", "resource": "../raw/datacomp-lm-in-search-of-the-next-generation-of-training-sets-for-language-models.md", "title": "DataComp-LM"}, {"id": "base-train", "resource": "../projects/code/nanochat/scripts/base_train.py", "title": "Nanochat base training", "repository": "nanochat", "revision": "92d63d4e8bb4df75c3b71618f31ddde2378b2bcd", "path": "scripts/base_train.py"}, {"id": "scaling-run", "resource": "../projects/code/nanochat/runs/scaling_laws.sh", "title": "Nanochat scaling-law run", "repository": "nanochat", "revision": "92d63d4e8bb4df75c3b71618f31ddde2378b2bcd", "path": "runs/scaling_laws.sh"}]
+created: {"by": "process:project-scope-migration", "at": "2026-08-23T00:00:00Z"}
+source_state: "awaiting-source"
 ---
 
 # Compute-optimal training
@@ -35,7 +38,7 @@ be used interchangeably.
 
 ## Related pages
 
-- [What dominates a Nanochat training run](../queries/what-dominates-a-nanochat-training-run.md)
+- [What dominates a Nanochat training run](../projects/nanochat/queries/what-dominates-a-nanochat-training-run.md)
 - [Gradient accumulation and distributed training](gradient-accumulation-and-distributed-training.md)
 - [Pretraining data curation](pretraining-data-curation.md)
 

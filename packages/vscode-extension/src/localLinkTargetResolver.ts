@@ -89,12 +89,14 @@ function vaultRelativeTarget(
   const direct = containedVaultPath(vaultRoot, bundlePath);
   if (direct && probe.exists(direct)) {
     if (probe.isDirectory(direct)) {
-      const indexPath = containedVaultPath(
-        vaultRoot,
-        `${bundlePath.replace(/[\\/]+$/, '')}/_index.md`,
-      );
-      if (indexPath && probe.exists(indexPath)) {
-        return { uri: `${vaultRelativePath(vaultRoot, indexPath)}${suffix}`, origin: 'vault' };
+      for (const indexName of ['_index.md']) {
+        const indexPath = containedVaultPath(
+          vaultRoot,
+          `${bundlePath.replace(/[\\/]+$/, '')}/${indexName}`,
+        );
+        if (indexPath && probe.exists(indexPath)) {
+          return { uri: `${vaultRelativePath(vaultRoot, indexPath)}${suffix}`, origin: 'vault' };
+        }
       }
       return undefined;
     }

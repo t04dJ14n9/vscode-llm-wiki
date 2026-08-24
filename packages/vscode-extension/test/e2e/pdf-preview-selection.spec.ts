@@ -6,6 +6,10 @@ const outOfOrderUrl = `${viewerOrigin}/pdf-viewer.html?fixture=out-of-order-text
 const mixedStyleUrl = `${viewerOrigin}/pdf-viewer.html?fixture=mixed-style-selection`;
 const shortRowUrl = `${viewerOrigin}/pdf-viewer.html?fixture=short-row-selection`;
 const formulaUrl = `${viewerOrigin}/pdf-viewer.html?fixture=formula-selection`;
+const twoColumnRegressionUrl = `${viewerOrigin}/pdf-viewer.html?fixture=two-column-selection-regression`;
+const authorGridRegressionUrl = `${viewerOrigin}/pdf-viewer.html?fixture=author-grid-selection-regression`;
+const numericTableRegressionUrl = `${viewerOrigin}/pdf-viewer.html?fixture=numeric-table-selection-regression`;
+const centeredMastheadRegressionUrl = `${viewerOrigin}/pdf-viewer.html?fixture=centered-masthead-selection-regression`;
 const twoPageUrl = `${viewerOrigin}/pdf-viewer.html?fixture=two-page`;
 const fourPageUrl = `${viewerOrigin}/pdf-viewer.html?fixture=four-page`;
 
@@ -185,6 +189,104 @@ test.describe('Preview-compatible PDF text selection', () => {
     const bands = await normalizedSelectionBands(page);
     expect(bands).toHaveLength(2);
     expect(bands[1]!.x + bands[1]!.width).toBeLessThan(short.x + short.width + 1);
+  });
+
+  test('a drag through one prose column excludes the neighboring column', async ({ page }) => {
+    await page.goto(twoColumnRegressionUrl);
+    await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 1/, { timeout: 10_000 });
+    await expect(page.locator('#page-1 .text-layer span[data-item-index]')).toHaveCount(6);
+    const start = await textItemBox(page, 'Left line one.');
+    const end = await textItemBox(page, 'Left line three.');
+
+    await resetMessages(page);
+    await dragSelection(
+      page,
+      { x: start.x + 1, y: start.y + start.height / 2 },
+      { x: end.x + end.width - 1, y: end.y + end.height / 2 },
+    );
+
+    const expected = 'Left line one. Left line two. Left line three.';
+    await expectSelectionSnippet(page, expected);
+    expect(await canonicalNativeSelection(page)).toBe(expected);
+    expect(await canonicalNativeSelection(page)).not.toContain('Right line');
+  });
+
+  test('a drag from the first author through shared metadata includes the complete author grid', async ({ page }) => {
+    await page.goto(authorGridRegressionUrl);
+    await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 1/, { timeout: 10_000 });
+    await expect(page.locator('#page-1 .text-layer span[data-item-index]')).toHaveCount(7);
+    const start = await textItemBox(page, 'Rafael Alpha');
+    const end = await textItemBox(page, 'authors@example.test');
+
+    await resetMessages(page);
+    await dragSelection(
+      page,
+      { x: start.x + 1, y: start.y + start.height / 2 },
+      { x: end.x + end.width - 1, y: end.y + end.height / 2 },
+    );
+
+    const expected = [
+      'Rafael Alpha',
+      'Archit Beta',
+      'Eric Gamma',
+      'Stefano Delta',
+      'Christopher Epsilon',
+      'Chelsea Zeta',
+      'authors@example.test',
+    ].join(' ');
+    await expectSelectionSnippet(page, expected);
+    expect(await canonicalNativeSelection(page)).toBe(expected);
+  });
+
+  test('a drag through a fragmented numeric table includes every value in visual-row order', async ({ page }) => {
+    await page.goto(numericTableRegressionUrl);
+    await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 1/, { timeout: 10_000 });
+    await expect(page.locator('#page-1 .text-layer span[data-item-index]')).toHaveCount(36);
+    const start = await textItemBox(page, 'BERT Base Score');
+    const end = await textItemBox(page, '8.41');
+
+    await resetMessages(page);
+    await dragSelection(
+      page,
+      { x: start.x + 1, y: start.y + start.height / 2 },
+      { x: end.x + end.width - 1, y: end.y + end.height / 2 },
+    );
+
+    const expected = [
+      'BERT Base Score 88.19 76.89 88.09',
+      'BERT Large Score 90.87 89.65 90.94',
+      'GPT3 126M Score 19.01 28.37 19.43',
+      'GPT3 1.3B Score 10.19 12.74 10.29',
+      'GPT3 6.7B Score 8.51 10.29 8.41',
+    ].join(' ');
+    await expectSelectionSnippet(page, expected);
+    expect(await canonicalNativeSelection(page)).toBe(expected);
+  });
+
+  test('a drag through a centered affiliation masthead includes preceding author rows', async ({ page }) => {
+    await page.goto(centeredMastheadRegressionUrl);
+    await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 1/, { timeout: 10_000 });
+    await expect(page.locator('#page-1 .text-layer span[data-item-index]')).toHaveCount(19);
+    const start = await textItemBox(page, 'FP8 F');
+    const end = await textItemBox(page, 'Neil Burgess, Sangwon Ha, Richard Grisenthwaite');
+
+    await resetMessages(page);
+    await dragSelection(
+      page,
+      { x: start.x + 1, y: start.y + start.height / 2 },
+      { x: end.x + end.width - 1, y: end.y + end.height / 2 },
+    );
+
+    const expected = [
+      'FP8 F ORMATS FOR D EEP L EARNING',
+      'Paulius Micikevicius, Dusan Stosic, Patrick Judd, John Kamalu, Stuart Oberman, Mohammad Shoeybi,',
+      'Michael Siu, Hao Wu',
+      'NVIDIA',
+      '{pauliusm, dstosic, pjudd, jkamalu, soberman, mshoeybi, msiu, skyw}@nvidia.com',
+      'Neil Burgess, Sangwon Ha, Richard Grisenthwaite',
+    ].join(' ');
+    await expectSelectionSnippet(page, expected);
+    expect(await canonicalNativeSelection(page)).toBe(expected);
   });
 
   test('rapid repeated character drags never escalate into word or line selection', async ({ page }) => {

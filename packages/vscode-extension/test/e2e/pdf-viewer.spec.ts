@@ -33,6 +33,53 @@ test('pdf viewer renders the demo PDF into a visible canvas', async ({ page }) =
   expect(pixelStats.nonWhite, errors.join('\n')).toBeGreaterThan(0);
 });
 
+test('PDF source rectangles expose aggregated Query summaries and navigation', async ({ page }) => {
+  await page.goto('http://localhost:8979/pdf-viewer.html');
+  await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 1/, { timeout: 10_000 });
+  await page.evaluate(() => {
+    window.__mockMessages = [];
+    window.postMessage({
+      type: 'setQueryAnnotations',
+      annotations: [
+        {
+          annotationId: 'stable',
+          queryPath: 'queries/stable.md',
+          title: 'Why does this matter?',
+          status: 'stable',
+          condensedSummary: 'The selected mechanism keeps the pipeline reproducible.',
+          project: 'nanochat',
+          updatedTime: '2026-08-23T00:00:00Z',
+          navigationTarget: { kind: 'query', queryPath: 'queries/stable.md' },
+          page: 1,
+          rects: [[20, 20, 120, 40]],
+        },
+        {
+          annotationId: 'draft',
+          queryPath: 'queries/draft.md',
+          title: 'What remains uncertain?',
+          status: 'draft',
+          condensedSummary: 'The performance boundary still needs measurement.',
+          updatedTime: '2026-08-24T00:00:00Z',
+          navigationTarget: { kind: 'query', queryPath: 'queries/draft.md' },
+          page: 1,
+          rects: [[20, 20, 120, 40]],
+        },
+      ],
+    }, '*');
+  });
+
+  await expect(page.locator('#page-1 .pdf-query-highlight')).toHaveCount(1);
+  const marker = page.locator('#page-1 .pdf-query-marker');
+  await expect(marker).toHaveText('✦ 2 Queries');
+  await marker.click();
+  const popover = page.locator('.pdf-query-popover');
+  await expect(popover).toContainText('Why does this matter?');
+  await expect(popover).toContainText('What remains uncertain?');
+  await popover.getByRole('button', { name: 'Open Query' }).first().click();
+  await expect.poll(() => page.evaluate(() => window.__mockMessages
+    ?.some(message => message.type === 'openQuery' && message.navigation?.queryPath === 'queries/stable.md'))).toBe(true);
+});
+
 test('pdf viewer keeps canvas and overlay geometry aligned to exact scaled size', async ({ page }) => {
   await page.goto('http://localhost:8979/pdf-viewer.html');
   await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 1/, { timeout: 10_000 });
@@ -334,7 +381,7 @@ test('pdf viewer keeps the latest page navigation when an older render finishes 
 
 test('pdf viewer retains continuous-scroll page state across separate intersection batches', async ({ page }) => {
   await installIntersectionObserverHarness(page);
-  await page.goto('http://localhost:8979/pdf-viewer.html?fixture=four-page&askPdf=1');
+  await page.goto('http://localhost:8979/pdf-viewer.html?fixture=four-page');
   await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 4/, { timeout: 10_000 });
   await page.waitForTimeout(50);
 
@@ -351,71 +398,6 @@ test('pdf viewer retains continuous-scroll page state across separate intersecti
     (window as any).__emitPdfPageIntersections([[3, 0.6]]);
   });
   await expect(page.locator('#page-info')).toHaveText(/Page 2 \/ 4/);
-
-  const pageTwo = discussionAnnotation('discussion-page-2', 2, 'Question anchored on page 2');
-  await page.evaluate(annotation => {
-    (window as any).__mockMessages = [];
-    window.postMessage({
-      type: 'pdfDiscussionSnapshot',
-      annotations: [annotation],
-      consentGranted: true,
-    }, '*');
-  }, pageTwo);
-  await page.getByRole('button', { name: 'PDF discussions (1)' }).click();
-  await page.getByRole('region', { name: 'PDF discussion overview' }).getByRole('button').click();
-
-  const panel = page.getByRole('complementary', { name: 'Ask about selection' });
-  await expect(page.locator('#page-info')).toHaveText(/Page 2 \/ 4/);
-  await expect(page.locator('#page-input')).toHaveValue('2');
-  await expect(panel.getByRole('link', { name: 'Page 2' })).toBeVisible();
-  await expect(page.locator('#page-2 .pdf-discussion-marker[data-annotation-id="discussion-page-2"]')).toBeVisible();
-  await expect(page.locator('#page-2 canvas.pdf-canvas')).toBeVisible();
-  await panel.getByRole('button', { name: 'Copy portable selection link' }).click();
-  await expect.poll(() => page.evaluate(() => (window as any).__mockMessages
-    .filter(message => message.type === 'pdfDiscussionCopyPortableLink')
-    .at(-1)?.annotationId)).toBe(pageTwo.id);
-});
-
-test('Ask PDF keeps the latest annotation marker navigation when an older page render finishes last', async ({ page }) => {
-  await page.setViewportSize({ width: 900, height: 220 });
-  await installNavigationRaceHarness(page);
-  await page.goto('http://localhost:8979/pdf-viewer.html?fixture=four-page&askPdf=1');
-  await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 4/, { timeout: 10_000 });
-  const zoomInput = page.getByRole('spinbutton', { name: 'Zoom' });
-  await zoomInput.fill('200');
-  await zoomInput.press('Enter');
-  await expect(zoomInput).toHaveValue('200');
-
-  const annotations = [
-    discussionAnnotation('discussion-a', 2, 'Question A'),
-    discussionAnnotation('discussion-b', 3, 'Question B'),
-  ];
-  await page.evaluate(snapshot => {
-    window.postMessage({
-      type: 'pdfDiscussionSnapshot',
-      annotations: snapshot,
-      consentGranted: true,
-    }, '*');
-  }, annotations);
-  await expect(page.getByRole('button', { name: 'PDF discussions (2)' })).toBeVisible();
-
-  await page.evaluate(() => {
-    const state = window as any;
-    state.__navigationScrollTargets = [];
-    state.__delayNextPdfImageLoadMs = 200;
-    const count = document.querySelector<HTMLButtonElement>('#ask-pdf-count')!;
-    count.click();
-    document.querySelectorAll<HTMLButtonElement>('.ask-pdf-overview-item')[0]!.click();
-    count.click();
-    document.querySelectorAll<HTMLButtonElement>('.ask-pdf-overview-item')[1]!.click();
-  });
-
-  await expect(page.locator('#page-info')).toHaveText(/Page 3 \/ 4/);
-  await expect.poll(() => page.evaluate(() => (window as any).__delayedPdfImageLoadsCompleted)).toBe(1);
-  expect(await page.evaluate(() => (window as any).__navigationScrollTargets)).toEqual([
-    'page-3',
-    'marker:discussion-b',
-  ]);
 });
 
 test('pdf viewer sidebar renders page thumbnails and navigates like PDF++', async ({ page }) => {
@@ -784,7 +766,7 @@ test('pdf viewer preserves original PDF colors by default in a dark theme', asyn
   await expect.poll(() => thumbnail.evaluate(element => getComputedStyle(element).filter)).toBe('none');
 });
 
-test('pdf viewer production surface exposes only live selection actions and keeps Ask PDF dormant', async ({ page }) => {
+test('pdf viewer production surface exposes only live selection actions', async ({ page }) => {
   await page.goto('http://localhost:8979/pdf-viewer.html?host=cursor');
   await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 1/, { timeout: 10_000 });
   await expect(page.locator('.text-layer span[data-item-index="0"]')).toBeVisible();
@@ -823,13 +805,6 @@ test('pdf viewer production surface exposes only live selection actions and keep
   await expect(page.getByRole('button', { name: 'Copy link format' })).toHaveCount(0);
 
   await expect(page.getByRole('button', { name: 'Copy embed link to rectangular selection' })).toHaveCount(0);
-
-  await page.evaluate(() => window.postMessage({
-    type: 'pdfDiscussionSnapshot',
-    annotations: [],
-    consentGranted: true,
-  }, '*'));
-  await expect(page.locator('.ask-pdf-panel, .pdf-discussion-marker')).toHaveCount(0);
 
   await page.evaluate(() => {
     const selection = window.getSelection();
@@ -2699,24 +2674,6 @@ async function installIntersectionObserverHarness(page): Promise<void> {
       observer.emit(entries);
     };
   });
-}
-
-function discussionAnnotation(id: string, page: number, question: string) {
-  const createdAt = '2026-07-15T12:00:00.000Z';
-  return {
-    id,
-    kind: 'agent_discussion',
-    selectionKey: `selection-${page}`,
-    anchor: {
-      page,
-      quote: `Selection on page ${page}`,
-      rects: [[72, 90, 230, 112]],
-    },
-    messages: [{ id: `question-${page}`, role: 'user', markdown: question, createdAt }],
-    lastTurn: { status: 'idle' },
-    createdAt,
-    updatedAt: createdAt,
-  };
 }
 
 function collectPageErrors(page) {

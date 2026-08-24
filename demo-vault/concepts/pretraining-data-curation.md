@@ -3,9 +3,12 @@ type: "Concept"
 title: "Pretraining data curation"
 description: "Selecting, cleaning, deduplicating, mixing, and validating documents before language-model training."
 tags: ["data", "data-curation", "datasets", "pretraining"]
-status: "stable"
+status: "draft"
+scope: "vault"
 generated: {"by": "codex/gpt-5.6", "at": "2026-08-13T00:00:00Z"}
-sources: [{"id": "fineweb-paper", "resource": "../raw/the-fineweb-datasets-decanting-the-web-for-the-finest-text-data-at-scale.md", "title": "The FineWeb Datasets"}, {"id": "dclm-paper", "resource": "../raw/datacomp-lm-in-search-of-the-next-generation-of-training-sets-for-language-models.md", "title": "DataComp-LM"}, {"id": "dataset-source", "resource": "../projects/code/nanochat/nanochat/dataset.py", "title": "Nanochat dataset loader", "commit": "92d63d4e8bb4df75c3b71618f31ddde2378b2bcd"}]
+sources: [{"id": "fineweb-paper", "resource": "../raw/the-fineweb-datasets-decanting-the-web-for-the-finest-text-data-at-scale.md", "title": "The FineWeb Datasets"}, {"id": "dclm-paper", "resource": "../raw/datacomp-lm-in-search-of-the-next-generation-of-training-sets-for-language-models.md", "title": "DataComp-LM"}, {"id": "dataset-source", "resource": "../projects/code/nanochat/nanochat/dataset.py", "title": "Nanochat dataset loader", "repository": "nanochat", "revision": "92d63d4e8bb4df75c3b71618f31ddde2378b2bcd", "path": "nanochat/dataset.py"}]
+created: {"by": "process:project-scope-migration", "at": "2026-08-23T00:00:00Z"}
+source_state: "awaiting-source"
 ---
 
 # Pretraining data curation
@@ -37,7 +40,7 @@ as research context rather than claiming either is the active corpus.
 
 - [FineWeb versus DataComp-LM](../comparisons/fineweb-vs-datacomp-lm.md)
 - [Compute-optimal training](compute-optimal-training.md)
-- [Nanochat end-to-end training pipeline](../summaries/nanochat-end-to-end-training-pipeline.md)
+- [Nanochat end-to-end training pipeline](../projects/nanochat/summaries/nanochat-end-to-end-training-pipeline.md)
 
 [^fineweb-paper]: The FineWeb Datasets
 [^dclm-paper]: DataComp-LM

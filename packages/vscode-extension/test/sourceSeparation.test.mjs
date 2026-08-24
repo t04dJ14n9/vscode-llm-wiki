@@ -15,13 +15,9 @@ test('combined extension owns both editors and uses the shared PDF implementatio
   for (const file of [
     'package.json',
     'src/webview/pdf-viewer.ts',
-    'src/webview/pdfAskPanel.ts',
-    'src/webview/pdfAskPanelStyles.ts',
-    'src/webview/pdfAskPanelView.ts',
     'src/webview/pdfTextBands.ts',
     'src/webview/pdfTextLayer.ts',
     'src/webview/pdfLayout.ts',
-    'src/webview/domain/pdfAskState.ts',
     'src/webview/domain/pdfNavigation.ts',
     'src/webview/domain/pdfOutline.ts',
     'src/webview/domain/pdfSearch.ts',
@@ -77,7 +73,7 @@ test('combined build resolves the canonical shared PDF webview entry', () => {
 
 test('combined delivery does not duplicate shared PDF implementation modules', async () => {
   const combinedFiles = await sourceFiles(extensionRoot);
-  const sharedImplementationFiles = /(^|\/)(pdfAskPanel|pdfAskPanelStyles|pdfAskPanelView|pdfTextBands|pdfTextLayer|pdfLayout|pdfAskState|pdfNavigation|pdfOutline|pdfSearch|pdfSelection|pdfTextExtraction)\.ts$/;
+  const sharedImplementationFiles = /(^|\/)(pdfTextBands|pdfTextLayer|pdfLayout|pdfNavigation|pdfOutline|pdfSearch|pdfSelection|pdfTextExtraction)\.ts$/;
 
   assertNoFile(combinedFiles, sharedImplementationFiles);
   assert.equal(

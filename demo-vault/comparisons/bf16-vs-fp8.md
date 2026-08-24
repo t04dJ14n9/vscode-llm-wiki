@@ -3,9 +3,11 @@ type: "Comparison"
 title: "BF16 versus FP8"
 description: "A practical comparison of robust mixed-precision defaults and more aggressive low-precision acceleration."
 tags: ["numerics", "optimization", "training-systems"]
-status: "stable"
+status: "draft"
+scope: "vault"
 generated: {"by": "codex/gpt-5.6", "at": "2026-08-13T00:00:00Z"}
-sources: [{"id": "fp8-paper", "resource": "../raw/fp8-formats-for-deep-learning.md", "title": "FP8 Formats for Deep Learning"}, {"id": "base-train", "resource": "../projects/code/nanochat/scripts/base_train.py", "title": "Nanochat base training", "commit": "92d63d4e8bb4df75c3b71618f31ddde2378b2bcd"}, {"id": "fp8-source", "resource": "../projects/code/nanochat/nanochat/fp8.py", "title": "Nanochat FP8 operations", "commit": "92d63d4e8bb4df75c3b71618f31ddde2378b2bcd"}]
+sources: [{"id": "fp8-paper", "resource": "../raw/fp8-formats-for-deep-learning.md", "title": "FP8 Formats for Deep Learning"}, {"id": "base-train", "resource": "../projects/code/nanochat/scripts/base_train.py", "title": "Nanochat base training", "repository": "nanochat", "revision": "92d63d4e8bb4df75c3b71618f31ddde2378b2bcd", "path": "scripts/base_train.py"}, {"id": "fp8-source", "resource": "../projects/code/nanochat/nanochat/fp8.py", "title": "Nanochat FP8 operations", "repository": "nanochat", "revision": "92d63d4e8bb4df75c3b71618f31ddde2378b2bcd", "path": "nanochat/fp8.py"}]
+source_state: "awaiting-source"
 ---
 
 # BF16 versus FP8
@@ -42,7 +44,7 @@ comparison.
 
 - [Low-precision training](../concepts/low-precision-training.md)
 - [FlashAttention](../concepts/flash-attention.md)
-- [What dominates a Nanochat training run](../queries/what-dominates-a-nanochat-training-run.md)
+- [What dominates a Nanochat training run](../projects/nanochat/queries/what-dominates-a-nanochat-training-run.md)
 
 [^fp8-paper]: FP8 Formats for Deep Learning
 [^base-train]: Nanochat base training

@@ -1,273 +1,198 @@
-# LLM Wiki
+# LLM Wiki for VS Code
 
-LLM Wiki is a local-first learning and research workspace for VS Code and
-Cursor. Open a normal Git repository, study Markdown, PDFs, source code, and
-selected web passages, hand exact source context to an installed coding agent,
-and keep durable learning notes connected to the material that produced them.
+LLM Wiki for VS Code is a local-first, source-grounded knowledge workbench for
+Markdown, PDFs, and code repositories. The combined VS Code/Cursor extension
+keeps knowledge as ordinary Git-backed Markdown while giving source passages
+precise links back to durable Query answers.
 
-The combined VS Code extension is the product. It is local-first,
-filesystem-first, and intentionally has no separate web service, account,
-database, or mobile app.
-
-For the complete design and integration guide, see
-[Architecture and VS Code Integration](docs/architecture-and-vscode-integration.md).
+There is no required web service, account, database, vector store, or
+`llm-wiki-compiler` runtime.
 
 ## Learning loop
 
-1. Open a Markdown file or PDF in VS Code or Cursor.
-2. Select the passage you want to understand.
-3. Use **Add to Chat**, an explicit provider button, the context menu, or
-   `Cmd+L` / `Ctrl+L` to add the passage to a supported agent draft without
-   submitting it.
-4. For a PDF, optionally use the separate Ask PDF panel for a durable,
-   multi-turn discussion.
-5. Reopen a source annotation later to review its Markdown learning note.
-6. Use the daily note and concept graph to decide what to revisit next.
+1. Open a Markdown file or PDF and select an exact passage.
+2. Use **Add to Chat** or **Copy for Agent**. The extension creates an immutable
+   `.llm_wiki/agent/exports/<selection-id>/selection.{md,json,png}` snapshot and
+   adds it to a supported agent draft without pressing Send.
+3. Discuss the source in the agent session. The extension never scrapes or
+   submits the conversation.
+4. The repository `llm-wiki` skill files a substantial grounded answer as an
+   ordinary OKF Query; trivial questions remain read-only and borderline cases
+   ask first.
+5. The original Markdown range or PDF rectangles show `✦ Query` or
+   `✦ N Queries`. Hover/focus displays every condensed answer and opens its
+   Markdown Query page.
 
-Codex powers the built-in Ask PDF flow and its durable note creation.
-**Send Selection to Agent…** exports exact Markdown text or the canonical PDF
-quote and hands the immutable snapshot to an installed Codex, Claude Code,
-Cursor Agent, or CodeBuddy draft. Explicit PDF actions can target Codex,
-Claude Code, or CodeBuddy directly. Those external agent surfaces own their
-conversation; LLM Wiki does not submit the draft or scrape its answer into a
-learning note.
+Queries store synthesis and provenance, not transcripts. Markdown anchors use
+hashes, quotes, context, and offsets with unique relocation after edits. PDF
+geometry is shown only when the current PDF hash matches the stored anchor.
 
-**Add to Chat** is the compact action in the Markdown and PDF selection UI;
-`Cmd+L` on macOS or `Ctrl+L` elsewhere invokes the same shared handoff. It
-prefers an active Codex or Claude editor chat through stable VS Code APIs, then
-uses a selected Cursor composer when Cursor exposes that capability. Ambiguous
-sidebar-only cases show a provider picker instead of guessing. The command
-refreshes `.llm_wiki/agent/selection.{md,json,png}` and attaches immutable files from
-`.llm_wiki/agent/exports/<id>/`; optional visual evidence falls back to text context
-if it cannot be saved or attached. LLM Wiki only updates the draft and
-never submits it.
+## Agent handoff
 
-Cursor Browser selections can also be captured with bounded surrounding text
-and a real selection crop. Stock VS Code cannot inspect Simple Browser, so the
-separate **Experimental Web Reader** safely fetches and sanitizes public pages
-and can attach a synthetic selection-context image; it does not support page
-scripts, authentication, cookies, forms, or remote media.
-
-## Agent handoff design
-
-Every handoff first writes an immutable, inspectable export:
+The immutable export is the handoff contract:
 
 ```text
 .llm_wiki/agent/
-├── selection.md                 # latest Markdown alias
-├── selection.json               # latest structured alias
-├── selection.png                # latest optional visual-evidence alias
-└── exports/<id>/
-    ├── selection.md             # immutable exact passage + source link
-    ├── selection.json           # immutable structured selection context
-    └── selection.png            # immutable optional PDF/web selection crop
+├── selection.md
+├── selection.json
+├── selection.png                  # optional latest crop
+└── exports/<selection-id>/
+    ├── selection.md
+    ├── selection.json
+    └── selection.png              # optional immutable crop
 ```
 
-The latest aliases are convenient for local workflows; agent drafts receive
-the immutable path so a later selection cannot change context that has already
-been referenced.
+Codex, Claude Code, Cursor Agent, and CodeBuddy integrations add context to a
+draft using the capabilities their installed extensions expose. Optional crop
+failure never discards verified text context.
 
-Provider adapters use the capabilities exposed by installed extensions:
-
-| Target | Draft handoff | Optional image behavior |
-| --- | --- | --- |
-| Codex | Adds each immutable local file to the current thread draft | Adds `selection.png` separately when supported |
-| Claude Code | Inserts a full-file semantic reference such as `@.llm_wiki/agent/exports/<id>/selection.md#1-10`; VS Code targets the Claude sidebar, while Cursor opens the full Claude editor beside the source | Makes the crop available through the relative `[selection.png](./selection.png)` link inside the Markdown; no native image-attachment API is claimed |
-| Cursor Agent | Adds the immutable files to the selected composer as exact resources | Adds the validated crop separately |
-| CodeBuddy | Adds `selection.md` as the primary context and sends one attachment batch | Includes the validated crop in that batch |
-
-Claude's VS Code sidebar command derives an at-mention from an active native
-text-editor selection rather than accepting a file URI. In stock VS Code,
-LLM Wiki opens the immutable export in a separate temporary editor group, uses
-that supported command, closes only the tab it created, and explicitly restores
-the source PDF or Markdown editor. A `selection.md` tab that was already open is
-left alone.
-
-Cursor reserves its right-side **Agents Window** for native agents. The
-visible Claude Code tab there is Claude's session list, not its message
-composer. In Cursor, LLM Wiki therefore opens Claude's full editor composer
-beside the source and supplies the immutable reference as the initial draft.
-This path never opens `selection.md` as a temporary text editor.
-
-Handoffs are deliberately draft-only. LLM Wiki never presses Send, and an
-optional crop failure does not discard the verified text context.
-
-For local selections, chat responses should reuse the exact clickable
-`open_uri` host link from `.llm_wiki/agent/selection.json` (also shown as the
-**Source** link in `selection.md`). Use the emitted `cursor://` or `vscode://`
-form verbatim; do not construct its versioned payload or expose the internal
-`file:///…/.llm_wiki_anchor` bridge. Persisted vault notes continue to use
-portable relative Markdown links and wikilinks, while web selections retain
-their direct `https://` source.
-
-The generated host links have this shape:
+For chat navigation, reuse the exact `open_uri` emitted by `selection.json`:
 
 ```text
 cursor://llm-wiki.llm-wiki-vscode/open-anchor?target=v1.<generated-payload>
 vscode://llm-wiki.llm-wiki-vscode/open-anchor?target=v1.<generated-payload>
 ```
 
-## Current desktop features
+Never manufacture the payload or expose the internal `.llm_wiki_anchor` or
+`chat_uri` bridge as a user-facing source link. Persisted vault pages use
+portable relative Markdown links and wikilinks.
 
-- A CodeMirror-based Markdown editor with rendered headings, links, math,
-  Mermaid, tables, code, images, callouts, tasks, footnotes, and optional Vim
-  mode.
-- An EmbedPDF/PDFium viewer with local rendering, page navigation, selection,
-  highlights, and multi-turn passage discussions.
-- **Add to Chat** for exact Markdown selections and canonical PDF
-  extracted quotes through an
-  automatic selection prompt, context menu, or `Cmd+L` / `Ctrl+L`; PDF also
-  has a selection-toolbar action and optional crop attachment.
-- Explicit selection context export to available Codex, Claude Code, Cursor
-  Agent, and CodeBuddy drafts, with immutable snapshots and provider-specific
-  attachment behavior.
-- Durable learning notes containing a portable source link, selected quote,
-  concise summary, full transcript, and fixed review dates.
-- Source annotations: Markdown displays a **✦ Note** link and PDF restores
-  page-aligned highlights. Hovering the Markdown annotation, focusing its
-  marker, or moving the caret into its exact range shows the previous question
-  and concise answer; the marker opens the full durable note. PDF discussions
-  can be reopened and continued in Ask PDF.
-- Backlinks and forward links in the LLM Wiki activity view, contextual
-  **Markdown Outline** and **PDF Outline** panels in the main Explorer sidebar,
-  broken-link detection, and a concept graph parsed directly from repository
-  Markdown.
-- Explicit graph concepts and entities through YAML frontmatter.
-- Daily notes with manual sections, unchecked TODO carry-forward, and review
-  dates at 1, 3, 7, 14, 30, 60, and 90 days.
-- Conservative Git updates: fetch, fast-forward when safe, and ask before a
-  true merge. Dirty worktrees are left untouched.
-
-## Files and Git are the source of truth
-
-The active extension does not require SQLite or a generated database. A
-repository is usable immediately after opening or cloning it.
+## Project-scoped vault
 
 ```text
-my-learning-repo/
-├── notes/                         # authored Markdown, anywhere in the repo
-├── papers/                        # source PDFs, anywhere in the repo
-├── wiki/
-│   ├── learning/                  # human-readable discussion records
-│   └── daily/                     # daily plans and review checklists
-├── .llm_wiki/
-│   ├── agent/
-│   │   ├── selection.md           # latest exact-selection alias
-│   │   ├── selection.json         # latest structured-selection alias
-│   │   ├── selection.png          # latest optional crop alias
-│   │   └── exports/<id>/          # immutable agent context snapshots
-│   └── annotations/
-│       └── pdf/
-│           ├── <pdf-sha256>.json  # runtime discussion state
-│           ├── <pdf-sha256>/      # portable annotation JSON-LD
-│           └── assets/            # padded selection screenshots
-└── .git/
+vault/
+├── _index.md
+├── _log.md
+├── AGENTS.md
+├── SCHEMA.md
+├── projects/
+│   ├── repositories.yaml
+│   ├── code/                       # ignored in-place working copies
+│   │   └── <project-id>/           # Git/P4/SVN checkout, never vault-owned
+│   ├── <project-id>.md             # flat repository overview and status
+│   └── <project-id>/               # self-contained project OKF vault
+│       ├── _index.md
+│       ├── AGENTS.md
+│       ├── SCHEMA.md
+│       ├── _log.md
+│       ├── inbox/
+│       ├── raw/                    # flat immutable Markdown evidence
+│       ├── assets/                 # flat binary Git LFS evidence
+│       ├── tasks/current.md
+│       ├── scratch/
+│       ├── summaries/
+│       ├── concepts/
+│       ├── entities/
+│       ├── playbooks/
+│       ├── comparisons/
+│       ├── queries/
+│       ├── output/
+│       └── examples/
+├── raw/                            # higher-level immutable Markdown evidence
+├── assets/                         # higher-level flat binary evidence, Git LFS
+├── examples/
+└── concepts|entities|summaries|playbooks|comparisons|queries/... # vault-level learning
 ```
 
-Markdown learning notes are the readable study record: source quote, summary,
-and complete Q&A. PDF highlight rectangles and the state needed to reopen the
-PDF discussion are stored in a content-addressed JSON sidecar under
-`.llm_wiki/annotations/pdf/` when the PDF is inside the repository. Each asked
-annotation also gets a W3C-shaped JSON-LD mirror containing the exact text,
-page, rectangles, PDF hash, learning-note link, and available screenshot metadata.
-Markdown alone does not reconstruct page geometry. All forms are ordinary
-files and can be reviewed, merged, and recovered with Git.
+The outer catalog and each registered code vault carry `okf_version: "0.2"` on
+their own regular `_index.md`; indexes below either root are generated and
+frontmatter-free. `_index.md` and `_log.md` are the only accepted navigation
+and log names. Assets, registered code working copies, hidden runtime state,
+and skill packages are opaque to OKF traversal.
 
-Markdown annotations use the exact quote plus line and character offsets
-stored in the learning note; no separate annotation database is needed.
+`projects/repositories.yaml` records VCS identity and pairs each flat card with
+its project vault and canonical ignored `projects/code/<id>/` working copy. Code is always
+synchronized in place by Git, P4, or SVN; the vault never automatically clones
+or syncs it. Project code is never represented by `.gitmodules` or a Git
+submodule gitlink.
+Stable code claims bind to repository, immutable revision, path, and verified
+content hash; a newer checkout creates currentness debt without invalidating a
+matching historical claim.
 
-## Architecture
+The project vault is code-oriented: implementation guides, code Queries,
+repository tasks, and imported DeepWiki-style documentation belong there.
+Papers and higher-level concepts, entities, comparisons, and synthesis belong
+to the outer vault.
 
-```mermaid
-flowchart LR
-    Learner["Learner"]
-    Host["VS Code / Cursor<br/>extension host"]
-    Markdown["Markdown editor"]
-    PDF["PDF viewer"]
-    AskPDF["Ask PDF panel"]
-    Browser["Cursor Browser / Experimental Web Reader"]
-    Agent["Supported agent draft"]
-    Codex["Local Codex app-server"]
-    Repo["Repository files<br/>Markdown + PDF JSON sidecars"]
-    Git["Git remote"]
+The reusable DeepWiki importer downloads every embedded page as a separate
+draft Summary:
 
-    Learner --> Markdown
-    Learner --> PDF
-    Learner --> Browser
-    Markdown --> Host
-    PDF --> Host
-    Browser --> Host
-    Host --> Agent
-    PDF --> AskPDF
-    AskPDF <--> Host
-    Host <--> Codex
-    Host <--> Repo
-    Host <--> Git
+```bash
+python3 tools/llm-wiki/import_deepwiki.py --vault demo-vault --project nanochat
 ```
 
-Webviews render documents and collect bounded user interaction. The trusted
-extension host owns path validation, atomic filesystem writes, Git, capability
-discovery, agent handoff, and local process access. Provider-specific adapters
-are isolated behind one host boundary instead of being implemented inside
-Markdown, PDF, or browser webviews. Codex threads are read-only; the extension
-performs the explicit, atomic learning-note write after an answer finishes.
+## Query contract
 
-## Focused product surface
+An OKF Query contains:
 
-The repository contains only the combined desktop extension and the shared
-libraries it executes. The retired `llm_wiki` CLI, MCP server, SQLite index,
-database-backed services, and standalone editor packages have been removed.
-If a future headless or MCP integration has a concrete consumer, it should be
-built on the same filesystem-first APIs instead of reviving a parallel
-persistence layer.
+- a direct answer, evidence, limitations, and related durable pages;
+- `condensed_summary` of one or two sentences and at most 360 Unicode code
+  points;
+- lifecycle and generated metadata;
+- optional project ID;
+- immutable `conversation.selection_id`;
+- provenance `sources[]`;
+- exact `anchors[]`, each bound to a unique source through `source_id`.
+
+The local `QueryAnnotationIndex` scans root/project Query directories and a
+one-release read-only `wiki/learning` compatibility directory. It refreshes on
+file changes and performs no network or model calls.
+
+## Raw evidence, assets, and workbench
+
+- `raw/` stores flat immutable Markdown source records.
+- `assets/` stores flat immutable PDFs/images/audio/video/archives/datasets and
+  derived renders through Git LFS. Attachments record role, media type, bytes,
+  and SHA-256.
+- `inbox/` is unprocessed material; `scratch/` is immature reasoning;
+  `tasks/` is thorough operational state; none is durable evidence.
+- `output/` is polished deliverables. `examples/` is stable runnable teaching
+  code; exploratory demo code stays in scratch/tasks.
+- There is no `revisions/` directory in v1.
 
 ## Repository packages
 
 ```text
 packages/
-├── vscode-extension/          # active combined VS Code/Cursor extension
-├── pdf-editor/                # PDF webview shared by the combined extension
-└── core/                      # portable references and PDF discussion storage
+├── vscode-extension/              # extension host and Markdown webview
+├── pdf-editor/                    # shared PDF viewer and selection model
+└── core/                          # portable reference primitives
+tools/llm-wiki/                    # deterministic producers and validators
+.agents/skills/llm-wiki/           # Hermes-derived vault workflow
+demo-vault/                        # project-scoped example vault
 ```
 
-The combined extension ships `extension.js`, the Markdown, PDF, and
-experimental web-reader bundles, plus `pdfium.wasm`. It does not ship
-`sql.js`, `sql-wasm.wasm`, or require `.llm_wiki/index.sqlite`.
+The active skill is derived from NousResearch Hermes Agent's MIT-licensed
+`llm-wiki` skill at the pinned commit recorded in
+`.agents/skills/THIRD_PARTY_NOTICES.md`. The upstream snapshot is retained as a
+read-only reference; the active workflow is adapted for OKF, registered code,
+Git LFS, workbench state, and Markdown/PDF Query annotations.
 
 ## Development
 
-Requirements: Node.js 20.19 or newer, pnpm 10, and VS Code or Cursor.
-
 ```bash
-pnpm install
+pnpm install --frozen-lockfile
+pnpm lint
+pnpm typecheck
+pnpm test
+pnpm build
 
-# Type-check and test the repository
-pnpm check
-
-# Run browser-level webview tests
-pnpm exec playwright test --config playwright.config.ts
+python3 -m unittest discover -s tools/llm-wiki/tests -v
+python3 tools/llm-wiki/rebuild_indexes.py --vault demo-vault --check
+python3 tools/llm-wiki/validate_vault.py --vault demo-vault
 ```
 
-In VS Code, open this repository and run the **Launch LLM Wiki
-Extension** debug configuration (`F5`). It builds the combined package and
-opens `demo-vault` in an Extension Development Host. The same extension entry
-point can be launched in Cursor.
+Browser and VS Code-host tests are available through the extension package:
 
-The root `pnpm build`, `pnpm test`, and `pnpm check` commands cover the complete
-repository.
+```bash
+pnpm --filter llm-wiki-vscode test:e2e
+pnpm --filter llm-wiki-vscode test:playwright
+pnpm --filter llm-wiki-vscode test:vscode-e2e
+```
 
-## Documentation
-
-- [Architecture and VS Code Integration](docs/architecture-and-vscode-integration.md)
-- [Current Feature List](docs/feature%20list.md)
-- [Current Implementation Detail](docs/implementation%20detail.md)
-- [TODO and Roadmap](docs/TODO.md)
-
-The remaining proposals, assessments, timelines, reference notes, and files
-under `docs/superpowers/` are historical design records. They may describe
-database-backed, mobile, or split-package designs that are not part of the
-current combined release.
+The extension resolves directory navigation through `_index.md` only and reads
+legacy `wiki/learning` notes without creating new ones.
 
 ## License
 
-MIT
+MIT. See `LICENSE` and `.agents/skills/THIRD_PARTY_NOTICES.md`.

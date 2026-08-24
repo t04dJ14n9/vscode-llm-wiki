@@ -13,10 +13,10 @@ source_url: "https://arxiv.org/abs/2502.02737v1"
 ingested: "2026-08-13"
 submitted: "2025-02-04"
 revised: "2025-02-04"
-sha256: "e983cc66a5c964f62f29ae2723fdda6cd71d61fbed58db5541ff1e2f31da1536"
+sha256: "9efc96de4971c862cfac03ac03c6367a6ab0b83fa67290a525e580e977e680fd"
 arxiv: {"id": "2502.02737", "version": 1}
 license: {"id": "CC-BY-4.0", "url": "https://creativecommons.org/licenses/by/4.0/"}
-attachment: {"resource": "assets/smollm2-when-smol-goes-big-data-centric-training-of-a-small-language-model.pdf", "media_type": "application/pdf", "bytes": 640228, "sha256": "a95fbda201d21cd25c89e949636373d36c288bd2d287e3cabd208e2041ea36d3"}
+attachment: {"resource": "../assets/smollm2-when-smol-goes-big-data-centric-training-of-a-small-language-model.pdf", "media_type": "application/pdf", "bytes": 640228, "sha256": "a95fbda201d21cd25c89e949636373d36c288bd2d287e3cabd208e2041ea36d3", "role": "original"}
 extraction: {"tool": "pdftotext", "version": "pdftotext version 26.04.0"}
 ---
 
@@ -29,7 +29,7 @@ extraction: {"tool": "pdftotext", "version": "pdftotext version 26.04.0"}
 - **Submitted:** 2025-02-04
 - **Revised:** 2025-02-04
 - **License:** [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)
-- **Local attachment:** [Open the archived PDF](assets/smollm2-when-smol-goes-big-data-centric-training-of-a-small-language-model.pdf)
+- **Local attachment:** [Open the archived PDF](../assets/smollm2-when-smol-goes-big-data-centric-training-of-a-small-language-model.pdf)
 
 > Extraction notice: The text below was produced mechanically with
 > `pdftotext version 26.04.0`. Reading order, equations, tables, figures, and

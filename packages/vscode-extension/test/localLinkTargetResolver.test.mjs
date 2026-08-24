@@ -176,7 +176,7 @@ test('without a vault root every target is left unchanged', () => {
   );
 });
 
-test('vault directories resolve to their underscore index and concept IDs gain the Markdown suffix', () => {
+test('vault directories prefer _index.md and concept IDs gain the Markdown suffix', () => {
   const probe = probeFor(
     ['/vault/summaries/_index.md', '/vault/concepts/tokenization.md'],
     ['/vault/summaries'],
@@ -189,18 +189,6 @@ test('vault directories resolve to their underscore index and concept IDs gain t
   assert.deepEqual(
     resolveLocalLinkTarget('/vault', 'concepts/tokenization', probe),
     { uri: 'concepts/tokenization.md', origin: 'vault' },
-  );
-});
-
-test('vault directories do not fall back to index.md', () => {
-  const probe = probeFor(
-    ['/vault/summaries/index.md'],
-    ['/vault/summaries'],
-  );
-
-  assert.deepEqual(
-    resolveLocalLinkTarget('/vault', 'summaries/', probe),
-    { uri: 'summaries/', origin: 'unchanged' },
   );
 });
 

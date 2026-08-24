@@ -138,6 +138,65 @@ test('markdown outline provider includes Setext headings like Obsidian', () => {
   );
 });
 
+test('markdown document symbols exclude YAML frontmatter properties', () => {
+  const vscode = createVscodeMock();
+  const { MarkdownOutlineProvider } = loadTsModule('src/markdownSymbols.ts', { vscode });
+  const provider = new MarkdownOutlineProvider();
+  const lines = [
+    '---',
+    'type: iWiki Page',
+    'extraction: {"tool": "iwiki_bulk_snapshot.py", "version": "1.0"}',
+    '---',
+    '# 开发指南',
+    'Body',
+    'Actual Setext Section',
+    '---------------------',
+  ];
+  const document = {
+    getText: () => lines.join('\n'),
+    lineAt: line => ({ text: lines[line] }),
+    lineCount: lines.length,
+  };
+
+  const symbols = provider.provideDocumentSymbols(document);
+
+  assert.deepEqual(symbols.map(symbol => symbol.name), ['开发指南']);
+  assert.deepEqual(symbols[0].children.map(child => child.name), ['Actual Setext Section']);
+});
+
+test('markdown outline tree excludes YAML frontmatter properties', async () => {
+  const uri = {
+    scheme: 'file',
+    fsPath: '/vault/raw/开发指南-1102047953.md',
+    toString: () => 'file:///vault/raw/%E5%BC%80%E5%8F%91%E6%8C%87%E5%8D%97-1102047953.md',
+  };
+  const lines = [
+    '---',
+    'type: iWiki Page',
+    'extraction: {"tool": "iwiki_bulk_snapshot.py", "version": "1.0"}',
+    '---',
+    '# 开发指南',
+    'Body',
+    'Actual Setext Section',
+    '---------------------',
+  ];
+  const vscode = createVscodeMock({
+    activeTabUri: uri,
+    openDocument: {
+      uri,
+      getText: () => lines.join('\n'),
+      offsetAt: position => position.line * 100 + position.character,
+    },
+  });
+  const { MarkdownOutlineTreeProvider } = loadTsModule('src/markdownSymbols.ts', { vscode });
+  const provider = new MarkdownOutlineTreeProvider();
+
+  const roots = await provider.getChildren();
+
+  assert.deepEqual(roots.map(item => item.label), ['开发指南']);
+  assert.deepEqual(roots[0].children.map(item => item.label), ['Actual Setext Section']);
+});
+
 test('registerMarkdownOutlineProvider contributes a markdown document-symbol provider', () => {
   const registrations = [];
   const vscode = createVscodeMock({ registrations });

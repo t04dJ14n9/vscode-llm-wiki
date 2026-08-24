@@ -1,187 +1,107 @@
 ---
 type: "Playbook"
-title: "Nanochat wiki operator handbook"
-description: "Executable workflows for orienting, ingesting, compiling, querying, linting, and maintaining this bundle."
-tags: ["operations", "project-nanochat", "reproducibility"]
+title: "LLM Wiki operator handbook"
+description: "Project-scoped workflows for orienting, ingesting, compiling, querying, and validating this bundle."
+tags: ["operations", "open-knowledge-format", "reproducibility"]
 status: "stable"
-generated: {"by": "codex/gpt-5.6", "at": "2026-08-13T00:00:00Z"}
+generated: {"by": "process:project-scope-migration", "at": "2026-08-23T13:38:07Z"}
+scope: "cross-project"
 ---
 
-# Nanochat wiki operator handbook
+# LLM Wiki operator handbook
 
-Run commands from this bundle root unless a command says otherwise. Producer
-tools live in `../tools/demo-vault/`; the reusable workflow is in
-`../.agents/skills/llm-wiki/`. The vault-local `.agents/skills/pdf/` skill
-extracts and renders portable PDF selections without retaining screenshots.
+Run commands from this vault root. Producer tools live in `../tools/llm-wiki/`;
+the reusable workflow lives in `../.agents/skills/llm-wiki/`.
 
-## Initialize or audit a vault
+## Orient before editing
 
-For an existing vault, preserve content and establish its current state before
-editing:
+1. Read [the schema](SCHEMA.md), [the root index](_index.md), the target
+   [project card](projects/nanochat.md), and the newest [log](_log.md)
+   entry.
+2. Search existing pages before creating a new durable page.
+3. Read `projects/repositories.yaml`. A registered `projects/code/<id>/` working copy may be
+   absent and is always synchronized in place by its declared VCS. Never sync
+   it as part of validation.
+4. Keep repository implementation, code Queries, and generated repository
+   documentation below `projects/<id>/`. Keep papers and higher-level learning
+   at the root with `scope: vault` or `scope: cross-project`.
 
-```bash
-git status --short
-git submodule status -- projects/code/nanochat
-git lfs ls-files
-python3 ../tools/demo-vault/rebuild_indexes.py --vault . --check
-python3 ../tools/demo-vault/validate_vault.py --vault .
-```
+## Ingest an arXiv snapshot
 
-For a new vault, establish the root, reserved files, evidence/project layers,
-compiled categories, and one local index per visible directory. Keep producer
-tools outside the bundle; install default agent skills as hidden operational
-metadata with `python3 ../tools/demo-vault/install_agent_skills.py --vault .`.
-
-## Orientation
-
-1. Read [the schema](SCHEMA.md).
-2. Read the [root index](_index.md), [project index](projects/_index.md), and
-   [raw index](raw/_index.md).
-3. Read the newest date group in [the log](log.md).
-4. Search existing titles, aliases, tags, and bodies before creating a page.
-5. Run `git submodule update --init --recursive` before relying on code.
-
-## Ingest a source
-
-For arXiv, use an exact version and the canonical ingester:
+Use an exact version and an explicit project:
 
 ```bash
-python3 ../tools/demo-vault/ingest_arxiv.py \
+python3 ../tools/llm-wiki/ingest_arxiv.py \
   --vault . \
   --id 1508.07909v5
 ```
 
-Confirm the exact arXiv record grants the accepted redistribution license.
-Verify title, authors, version dates, local attachment, extraction notice, byte
-size, and hashes. Never hand-edit or overwrite an existing raw snapshot.
+The producer writes a flat companion to outer `raw/` and its original PDF to
+outer `assets/`. Use `--project <id>` only for evidence whose authority is the
+repository itself. Do not overwrite immutable evidence. Collision names use
+the first twelve characters of the asset digest.
 
-For a web clip, save the canonical URL, retrieval time, page title, author when
-known, license/usage boundary, content hash, and mechanically captured body in
-a typed raw companion. Store large local media in `raw/assets/`.
+## Compile knowledge
 
-For a user-supplied file, preserve its original bytes, record origin and
-receipt time, hash the asset, and state whether text extraction was lossy.
-Never claim a license that the supplied material does not provide.
+- Put codebase architecture, implementation behavior, repository playbooks,
+  code Queries, and imported DeepWiki summaries inside the code vault.
+- Put higher-level concepts, entities, comparisons, paper summaries, and
+  synthesis at the root with `scope: vault` or `scope: cross-project`.
+- Give every Entity and Concept explicit `created.by` and `created.at` values.
+- Join sourced claims to `sources[].id` with footnotes.
+- Code sources record repository ID, full revision, repository-relative path,
+  and a verified SHA-256 before a page can be stable. If source is missing,
+  keep the page `draft` with `source_state: awaiting-source`.
+- Keep exactly one `tasks/current.md` per project.
 
-After capture, compile durable takeaways into a substantive page; do not put
-synthesis in raw evidence.
-
-## Compile and update knowledge
-
-1. Search for existing coverage.
-2. Choose the smallest durable role: summary, entity, concept, comparison, or
-   saved query.
-3. Add source entries before writing sourced claims.
-4. Join each claim to `sources[].id` with a nearby footnote.
-5. Link to exact Nanochat files and record the pinned commit for code claims.
-6. Distinguish source facts, synthesis, uncertainty, and further reading.
-7. Add at least two useful related compiled links without manufacturing links
-   solely to satisfy the validator.
-8. Rebuild, validate, inspect the diff, and update the log.
-
-Do not duplicate project orientation as an entity. Update
-`projects/nanochat.md` when project-level orientation changes.
-
-## Answer and file a query
-
-Read compiled pages first. Follow provenance into raw companions, PDFs, or
-project source only as needed. State the direct answer, evidence trail, and
-limits.
-
-File under `queries/` only when the answer is recurring, substantial, and
-expensive to reconstruct. Keep reusable mechanisms in concepts and link to
-them instead of duplicating their prose.
-
-## Agent chat links
-
-When an agent needs to point a reader back to the current note or selected
-range, reuse the exact `open_uri` generated by LLM Wiki. Cursor chat links use
-`cursor://llm-wiki.llm-wiki-vscode/open-anchor?target=v1.<generated-payload>`;
-stock VS Code chat links use the same path with the `vscode://` scheme. Do not
-replace these with `file://` links to `.llm_wiki_anchor` files or manufacture a
-new payload. Persisted vault notes should continue to use relative Markdown
-links and Obsidian wikilinks.
-
-## Lint and rebuild
-
-Check without mutation:
+Refresh every Nanochat DeepWiki page as draft code-vault Summaries with:
 
 ```bash
-python3 ../tools/demo-vault/rebuild_indexes.py --vault . --check
-python3 ../tools/demo-vault/validate_vault.py --vault .
-python3 -m unittest discover -s ../tools/demo-vault/tests -v
+python3 ../tools/llm-wiki/import_deepwiki.py \
+  --vault . \
+  --project nanochat
 ```
 
-Intentionally regenerate:
+The importer refuses a DeepWiki revision that does not match the project card,
+preserves source-page metadata, and rewrites navigational/source links without
+marking generated claims verified.
+
+## File a Query
+
+A durable Query stores a direct answer, evidence, limitations, related pages,
+a one- or two-sentence `condensed_summary` of at most 360 Unicode code points,
+the originating `conversation.selection_id`, and exact Markdown/PDF/code
+anchors. Every anchor carries a `source_id` matching one unique `sources[]`
+entry and a kind-specific exact location. It stores synthesis, not a transcript.
+
+For a Markdown or PDF viewer conversation, file automatically only when the
+answer is substantial, grounded, supported, durable, novel, clearly scoped,
+complete about limits, and safe. Ask for borderline cases; keep trivial
+lookups read-only. Reuse `conversation.selection_id`, update the living project
+guide when understanding materially improves, and refresh source annotations.
+
+Create or enrich Entities and Concepts only under the repository-root gates.
+Functions, files, RPCs, passing mentions, and temporary objects do not become
+Entities. Ask before a change fans out to ten or more pages.
+
+## Rebuild and validate
 
 ```bash
-python3 ../tools/demo-vault/rebuild_indexes.py --vault .
-python3 ../tools/demo-vault/rebuild_indexes.py --vault . --check
-python3 ../tools/demo-vault/validate_vault.py --vault .
+python3 ../tools/llm-wiki/rebuild_indexes.py --vault .
+python3 ../tools/llm-wiki/rebuild_indexes.py --vault . --check
+python3 ../tools/llm-wiki/validate_vault.py --vault .
+python3 -m unittest discover -s ../tools/llm-wiki/tests -v
+git lfs ls-files
 ```
 
-A base-OKF parse is not the complete gate; this repository's validator also
-checks evidence integrity, project pins, LFS, links, and editorial profile.
-
-## Handle conflicts
-
-Keep both sourced positions and their dates. Mark affected compiled pages
-`status: draft`; add structured conflict entries with `resource`, `observed`,
-and `reason`; make counterpart links symmetric.
-
-Do not invent `status: contested`, silently choose a winner, or claim human
-review. Ask for human direction when policy or ambiguous evidence cannot
-resolve the disagreement.
-
-## Maintain the Nanochat submodule
-
-Inspect agreement:
-
-```bash
-git ls-files --stage projects/code/nanochat
-git -C projects/code/nanochat rev-parse HEAD
-git config -f ../.gitmodules --get-regexp \
-  '^submodule\..*\.\(path\|url\)$'
-```
-
-An intentional advance requires reviewing the upstream diff, checking out one
-exact commit, updating `projects/nanochat.md`, rechecking all code citations,
-rebuilding indexes, validating, and logging the change. Never copy the source
-tree into `raw/`.
-
-## Test reading through the extension
-
-Build the extension from the parent repository:
-
-```bash
-cd ..
-pnpm --filter llm-wiki-vscode build
-LLM_WIKI_E2E_VAULT=../../demo-vault \
-  pnpm --filter llm-wiki-vscode test:vscode-e2e \
-  --grep "demo vault reading"
-cd demo-vault
-```
-
-Acceptance follows two paths:
-
-1. Root index → summary → concept → raw companion → local PDF.
-2. Root index → project card → code index → exact Nanochat file.
-
-Also verify `child/` index links, extensionless concept IDs, bundle-relative
-paths, Obsidian image embeds, Quick Open/search, outlines, backlinks, long raw
-Markdown, PDF rendering, and ignored runtime state in both VS Code and Cursor.
+The outer catalog and each registered code vault put `okf_version: "0.2"` on
+their own regular root `_index.md`; indexes below either root are generated and
+frontmatter-free. `assets/`, `projects/code/`, `.llm_wiki/`, hidden runtime directories,
+and `.agents/skills/` are opaque. `_index.md` and `_log.md` are the only
+accepted navigation and log filenames.
 
 ## Finish a material mutation
 
-Run:
-
-```bash
-python3 ../tools/demo-vault/rebuild_indexes.py --vault .
-python3 ../tools/demo-vault/rebuild_indexes.py --vault . --check
-python3 ../tools/demo-vault/validate_vault.py --vault .
-git diff --check
-git status --short
-```
-
-Add a newest-first log entry only after the mutation and its validation are
-understood.
+Rebuild, run check mode, validate, inspect hashes and the diff, then add a
+newest-first log entry. Never claim source verification when the registered
+checkout is absent.

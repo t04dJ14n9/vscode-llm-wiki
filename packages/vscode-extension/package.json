@@ -1,9 +1,9 @@
 {
   "name": "llm-wiki-vscode",
-  "displayName": "LLM Wiki",
+  "displayName": "LLM Wiki for VS Code",
   "version": "0.2.0",
   "private": true,
-  "description": "LLM Wiki — a local-first VS Code vault for agentic study",
+  "description": "Local-first, source-grounded Markdown, PDF, and code knowledge workbench",
   "publisher": "llm-wiki",
   "license": "MIT",
   "repository": {
@@ -177,6 +177,12 @@
       }
     ],
     "keybindings": [
+      {
+        "command": "llm-wiki.copySelectionForAgent",
+        "key": "ctrl+alt+c",
+        "mac": "cmd+alt+c",
+        "when": "(activeCustomEditorId == 'llm-wiki.markdownEditor' && llmWikiMarkdownHasSelection) || (llmWikiPdfOpen && llmWikiPdfHasAgentClipboardSelection) || (editorLangId == markdown && editorHasSelection)"
+      },
       {
         "command": "llm-wiki.consumeVimHostShortcut",
         "key": "ctrl+o",
@@ -427,6 +433,7 @@
     "@types/prismjs": "1.26.5",
     "@types/turndown": "^5.0.6",
     "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^3.9.2",
     "copy-webpack-plugin": "^12.0.0",
     "ts-loader": "^9.5.0",
     "typescript": "^5.4.0",

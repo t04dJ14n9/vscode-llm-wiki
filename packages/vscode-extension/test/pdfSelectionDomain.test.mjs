@@ -31,6 +31,10 @@ const viewerSource = join(
   packageRoot,
   '../pdf-editor/src/webview/pdf-viewer.ts',
 );
+const queryAnnotationsSource = join(
+  packageRoot,
+  '../pdf-editor/src/webview/pdfQueryAnnotations.ts',
+);
 
 function compileTsModule(filename, mocks = {}) {
   const source = readFileSync(filename, 'utf8');
@@ -62,6 +66,7 @@ const pdfSearch = compileTsModule(searchSource);
 const pdfToolbarLayout = compileTsModule(toolbarLayoutSource);
 const pdfAreaSelection = compileTsModule(areaSelectionSource);
 const pdfTextExtraction = compileTsModule(extractionSource);
+const pdfQueryAnnotations = compileTsModule(queryAnnotationsSource);
 const pdfSelection = compileTsModule(selectionSource, {
   './pdfSearch': pdfSearch,
   './pdfTextExtraction': pdfTextExtraction,
@@ -104,8 +109,8 @@ const pdfViewer = compileTsModule(viewerSource, {
   './pdfLayout': {},
   './pdfTextLayer': {},
   './obsidianContextMenu': {},
-  './pdfAskPanel': {},
   './pdfTextBands': {},
+  './pdfQueryAnnotations': pdfQueryAnnotations,
 });
 if (originalWindow === undefined) delete globalThis.window;
 else globalThis.window = originalWindow;
@@ -125,6 +130,37 @@ function deferred() {
     reject: rejectPromise,
   };
 }
+
+test('PDF Query annotations validate, bound, and sort viewer-safe geometry', () => {
+  const annotations = pdfQueryAnnotations.normalizePdfQueryAnnotations([
+    {
+      annotationId: 'draft',
+      queryPath: 'queries/draft.md',
+      title: 'Draft answer',
+      status: 'draft',
+      condensedSummary: 'Draft summary.',
+      updatedTime: '2026-08-24T00:00:00Z',
+      navigationTarget: { kind: 'query', queryPath: 'queries/draft.md' },
+      page: 2,
+      rects: [[10, 20, 40, 30]],
+    },
+    {
+      annotationId: 'stable',
+      queryPath: 'queries/stable.md',
+      title: 'Stable answer',
+      status: 'stable',
+      condensedSummary: 'Stable summary.',
+      updatedTime: '2026-08-23T00:00:00Z',
+      navigationTarget: { kind: 'query', queryPath: 'queries/stable.md' },
+      page: 2,
+      rects: [[10, 20, 40, 30]],
+    },
+    { status: 'stable', page: 0, rects: [[0, 0, 0, 0]] },
+  ]);
+
+  assert.deepEqual(annotations.map(annotation => annotation.annotationId), ['stable', 'draft']);
+  assert.deepEqual(annotations[0].rects, [[10, 20, 40, 30]]);
+});
 
 function resetPdfAgentClipboardState() {
   const pendingPng = deferred();
@@ -669,6 +705,42 @@ test('pointer selection intent uses text only near a glyph unless area is forced
     horizontalDistance: 0,
     verticalDistance: 0,
   }, 12, true), 'area');
+});
+
+test('PDF glyph hit testing prefers the nearby column over a closer neighboring baseline', () => {
+  const viewer = Object.create(pdfViewer.PdfViewer.prototype);
+  const state = {
+    wrapper: {
+      getBoundingClientRect: () => ({
+        left: 0,
+        top: 0,
+        width: 120,
+        height: 200,
+      }),
+    },
+    pageObj: { size: { width: 120, height: 200 } },
+    selectionLines: [
+      {
+        top: 95,
+        bottom: 105,
+        center: 100,
+        height: 10,
+        glyphs: [{ glyph: glyph(0, 95, 50, 10), itemIndex: 0 }],
+      },
+      {
+        top: 97,
+        bottom: 107,
+        center: 102,
+        height: 10,
+        glyphs: [{ glyph: glyph(70, 97, 50, 10), itemIndex: 1 }],
+      },
+    ],
+  };
+
+  const hit = viewer.hitTestSelectionGlyph(state, 49, 102.5);
+
+  assert.equal(hit?.caret.itemIndex, 0);
+  assert.equal(hit?.horizontalDistance, 0);
 });
 
 test('area page intersections clip one marquee into ordered page-local rectangles', () => {
