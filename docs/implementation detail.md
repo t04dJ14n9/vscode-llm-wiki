@@ -16,17 +16,15 @@ packages/vscode-extension
   dist/                   combined release bundle
 
 packages/pdf-editor
-  src/webview/            PDF viewer and Ask PDF user interface
+  src/webview/            PDF viewer and selection UI
 
 packages/core
-  src/index.ts            canonical types/store used by the extension
+  src/index.ts            canonical types used by the extension
   src/links/              portable reference parsing and serialization
-  src/pdf-discussions/    v1 sidecar, portable JSON-LD mirror, and scan API
 ```
 
 The extension build compiles core first and consumes its one canonical entry.
-Core exports portable-link classification, the file-backed PDF discussion
-store, and the portable annotation mapper/scanner API. Database, ingestion,
+Core exports portable-link classification. Database, ingestion,
 search, embeddings, activity, CLI, MCP, and split-extension surfaces have been
 removed.
 
@@ -82,53 +80,12 @@ The active runtime has no opaque knowledge database. Durable state is:
 | user-chosen `*.pdf` | original PDF sources |
 | `wiki/learning/*.md` | readable source quote, summary, full Q&A, and review dates |
 | `wiki/daily/*.md` | manual daily plan, carried TODOs, and due reviews |
-| `.llm_wiki/annotations/pdf/<sha256>.json` | current v1 PDF discussion/viewer state |
-| `.llm_wiki/annotations/pdf/<sha256>/<annotation-id>.jsonld` | portable per-annotation mirror |
 | `.llm_wiki/annotations/pdf/assets/…` | best-effort bounded PNG selection screenshots |
 | `.llm_wiki/agent/selection.{md,json,png}` | latest handoff aliases; PNG exists only for a validated PDF crop |
 
 These are ordinary files. Git provides diff, history, merge, remote update, and
 recovery. There is no required ingest step: commands retaining the old
 “refresh/ingest” wording simply rescan filesystem content.
-
-### Three coordinated PDF records
-
-The current migration state deliberately writes three representations:
-
-1. `wiki/learning/*.md` is the Q&A authority. It contains the exact Markdown
-   quote or canonical PDF extracted quote, portable source link, concise
-   answer, full transcript, and review schedule.
-2. `.llm_wiki/annotations/pdf/<pdf-sha256>.json` is the v1 runtime sidecar used by
-   the PDF UI. It contains geometry, text offsets, selection identity,
-   transcript/turn state, summary state, and snapshot metadata.
-3. `.llm_wiki/annotations/pdf/<pdf-sha256>/<annotation-id>.jsonld` is the portable
-   W3C-shaped mirror. It stores relative repository IRIs, quote/page/geometry
-   selectors, the learning-note body link when available, and snapshot
-   metadata.
-
-The v1 sidecar remains the viewer/controller compatibility store; JSON-LD is
-not yet its replacement. `scanPortablePdfAnnotations()` is a core
-migration/interchange API that reads `TextQuoteSelector.exact`, page, and
-geometry from mirrors. `filesystemWiki`, `KnowledgeGraphPanel`, and
-`PdfEditorProvider` do not consume that scan result.
-
-The overlap keeps the learning record readable, the current viewer stable, and
-the source anchor portable. All three are filesystem/Git state rather than a
-database or generated SQLite index.
-
-[`portable.ts`](../packages/core/src/pdf-discussions/portable.ts) serializes
-the mirror with:
-
-- `TextQuoteSelector.exact` plus prefix/suffix when available;
-- an RFC 8118 `FragmentSelector` whose value is `page=N`;
-- `llm_wiki:PdfRectSelector` rectangles in `pt`, top-left origin, with
-  `left,top,right,bottom` coordinates;
-- optional PDF text-item offsets and `llm_wiki:snapshot` metadata.
-
-For a PDF outside the repository, v1 runtime state is stored below the
-extension's host-controlled global storage. If that PDF later opens inside a
-repository, the store can import matching content-addressed state; portable
-JSON-LD mirrors are emitted only for repository-managed PDFs.
 
 ## 5. Markdown custom editor
 
@@ -232,14 +189,13 @@ temporary file and atomically renamed. Existing manual-note content is
 preserved during regeneration. Local `file://` URIs are removed from persisted
 workspace links.
 
-## 8. PDF viewer and discussion path
+## 8. PDF viewer
 
 [`src/pdfEditorProvider.ts`](../packages/vscode-extension/src/pdfEditorProvider.ts)
 reads bytes with `vscode.workspace.fs` and sends them to the PDF webview.
 EmbedPDF/PDFium renders locally.
 
-Ask PDF uses a single-page text selection with non-empty rectangle geometry.
-The webview supplies:
+A PDF selection carries:
 
 - page and quote;
 - prefix/suffix context;
@@ -247,52 +203,18 @@ The webview supplies:
   top-left origin;
 - start/end text-item and character offsets when available;
 - a portable page/text-fragment URL;
-- a best-effort, size-limited PNG screenshot for a new asked annotation.
+- a best-effort, size-limited PNG screenshot when a crop is requested.
 
 The screenshot attempt covers the union of the selection rectangles with 24
 PDF points of padding, clamped to the page. A successful snapshot stores
 `cropRect: [left, top, right, bottom]`, `padding: 24`, and `unit: "pt"` together
 with its repository-relative file, SHA-256, MIME type, and pixel dimensions.
-Capture failure leaves the text/page/rectangle anchor valid and submits
+Capture failure leaves the text/page/rectangle anchor valid and continues with
 text-only context.
 
-[`src/pdfDiscussionController.ts`](../packages/vscode-extension/src/pdfDiscussionController.ts)
-validates input, manages Codex turns, streams deltas, and updates the sidecar.
-The underlying
-[`PdfDiscussionStore`](../packages/core/src/pdf-discussions/store.ts):
+## 9. Agent handoff
 
-- validates a versioned schema;
-- keys repository sidecars by PDF SHA-256;
-- uses a lock and conflict checks for concurrent writers;
-- writes atomically;
-- verifies snapshot path, hash, size, dimensions, and all-or-none crop
-  metadata;
-- writes or refreshes the per-annotation JSON-LD mirror for repository PDFs;
-- leaves malformed sidecars untouched and reports an error.
-
-After an assistant message exists, `PdfEditorProvider` also upserts the
-corresponding `wiki/learning/*.md` and refreshes the mirror with its relative
-body link. Opening the PDF later still reloads the v1 JSON rectangles and
-discussion state, reconstructs page highlights, and exposes the learning-note
-link. Follow-ups in the PDF Ask panel coordinate the Markdown note, v1
-sidecar, and portable mirror.
-
-## 9. Agent transport
-
-[`src/codexAppServerClient.ts`](../packages/vscode-extension/src/codexAppServerClient.ts)
-starts `codex app-server --listen stdio://` lazily for Ask PDF and communicates
-through JSON-RPC.
-
-Ask PDF uses:
-
-- a read-only sandbox;
-- no approval requests;
-- explicit source/context prompts;
-- incremental answer deltas;
-- bounded input validation and cancellation/error handling.
-
-The extension, not the agent, owns Ask PDF's durable file writes. A separate
-[`agentHandoff.ts`](../packages/vscode-extension/src/agentHandoff.ts) path
+[`src/agentHandoff.ts`](../packages/vscode-extension/src/agentHandoff.ts)
 exports exact Markdown text or the canonical PDF extracted quote to
 `.llm_wiki/agent/selection.*` and attaches the immutable Markdown export to an
 available Codex, Claude Code, Cursor Agent, or CodeBuddy sidebar.
@@ -319,10 +241,6 @@ feeds the link trees.
 renders a CSP-safe SVG with distinct note, concept, and entity nodes, an honest
 legend, and accessible text fallback. The graph contains only explicit
 Markdown/frontmatter relationships.
-
-The separate core `scanPortablePdfAnnotations()` API walks only
-`.llm_wiki/annotations/pdf/<sha256>/*.jsonld`. It is tested as a migration and
-interchange surface but is not wired into this Markdown wiki or graph path.
 
 ## 11. Daily notes
 
@@ -413,9 +331,8 @@ pnpm exec playwright test --config playwright.config.ts
 
 The build should contain only the combined host/webview artifacts and
 `pdfium.wasm`. Unit tests cover filesystem parsing, learning-note persistence,
-annotation opening, daily regeneration, Git decisions, graph rendering, Codex transport,
-PDF sidecars, portable annotation mapping/scanning, crop metadata, and
-host/webview messages. Playwright covers the rendered Markdown and PDF
+annotation opening, daily regeneration, Git decisions, graph rendering, crop
+metadata, and host/webview messages. Playwright covers the rendered Markdown and PDF
 interactions.
 
 The final release gate is a real-host smoke test in both VS Code and Cursor,

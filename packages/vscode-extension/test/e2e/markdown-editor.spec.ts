@@ -166,6 +166,72 @@ test.describe('LLM Wiki — E2E Bidirectional Links', () => {
     expect(count).toBeGreaterThanOrEqual(1);
   });
 
+  test('markdown diagnostics and git diff markers render a native-looking hop-over demo', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+    await waitForEditorBootstrap(page);
+
+    const testDoc = [
+      '# Diagnostics demo',
+      '',
+      'Open [the missing note](notes/missing.md) before continuing.',
+      'This line was changed in the working tree.',
+      'This line is unchanged.',
+    ].join('\n');
+
+    await page.evaluate(text => {
+      window.postMessage({ type: 'setText', text }, '*');
+      window.postMessage({
+        type: 'setDiagnostics',
+        diagnostics: [{
+          from: text.indexOf('notes/missing.md'),
+          to: text.indexOf('notes/missing.md') + 'notes/missing.md'.length,
+          line: 3,
+          message: 'Cannot find linked file "notes/missing.md".',
+          source: 'markdown-link',
+          code: 'MD-LINK',
+          severity: 'error',
+        }],
+      }, '*');
+      window.postMessage({
+        type: 'setGitDiff',
+        available: true,
+        lines: [
+          { line: 3, kind: 'modified', before: 'Open [the old note](notes/old.md).', after: 'Open [the missing note](notes/missing.md).' },
+          { line: 4, kind: 'added', after: 'This line was changed in the working tree.' },
+        ],
+      }, '*');
+    }, testDoc);
+
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+    await expect(page.locator('.cm-llm-wiki-diagnostic')).toHaveCount(1);
+    await expect(page.locator('.cm-llm-wiki-diagnostic-gutter .cm-llm-wiki-diagnostic-error')).toHaveCount(1);
+    await expect(page.locator('.cm-llm-wiki-git-diff-gutter .cm-llm-wiki-git-diff-modified')).toHaveCount(1);
+    await expect(page.locator('.cm-llm-wiki-git-diff-gutter .cm-llm-wiki-git-diff-added')).toHaveCount(1);
+
+    await page.locator('.cm-llm-wiki-diagnostic').hover();
+    await expect(page.locator('#cm-markdown-diagnostic-popover')).toBeVisible();
+    await expect(page.locator('#cm-markdown-diagnostic-popover')).toContainText('Cannot find linked file');
+
+    const diagnosticStyles = await page.locator('.cm-llm-wiki-diagnostic').evaluate(element => ({
+      decoration: getComputedStyle(element).textDecorationLine,
+      color: getComputedStyle(element).textDecorationColor,
+    }));
+    expect(diagnosticStyles.decoration).toContain('underline');
+    expect(diagnosticStyles.color).not.toBe('');
+
+    await page.locator('.cm-llm-wiki-git-diff-modified').hover();
+    await expect(page.locator('#cm-git-diff-popover')).toBeVisible();
+    await expect(page.locator('#cm-git-diff-popover')).toContainText('Modified line 3');
+    await expect(page.locator('#cm-git-diff-popover')).toContainText('- Open [the old note](notes/old.md).');
+    await expect(page.locator('#cm-git-diff-popover')).toContainText('+ Open [the missing note](notes/missing.md).');
+
+    const diffGutterClasses = await page.locator('.cm-llm-wiki-git-diff-gutter span').evaluateAll(
+      elements => elements.map(element => element.className),
+    );
+    expect(diffGutterClasses.join(' ')).toContain('cm-llm-wiki-git-diff-modified');
+    expect(diffGutterClasses.join(' ')).toContain('cm-llm-wiki-git-diff-added');
+  });
+
   test('fenced code selection remains visible over the code surface', async ({ page }) => {
     await page.goto('http://localhost:8979/test.html');
     await waitForEditorBootstrap(page);
@@ -259,6 +325,8 @@ test.describe('LLM Wiki — E2E Bidirectional Links', () => {
 
     const image = page.locator('.cm-hybrid-image');
     await expect(image).toBeVisible();
+    await expect(image.locator('.cm-hybrid-image-img')).toHaveAttribute('loading', 'lazy');
+    await expect(image.locator('.cm-hybrid-image-img')).toHaveAttribute('decoding', 'async');
     const expand = image.getByRole('button', { name: 'Expand image' });
     await expect(expand).toBeVisible();
     await expand.click();
@@ -771,7 +839,7 @@ test.describe('LLM Wiki — E2E Bidirectional Links', () => {
     await expect(smollm2).toBeVisible();
   });
 
-  test('editor sends edit messages on document change', async ({ page }) => {
+  test('editor sends incremental edit messages on document change', async ({ page }) => {
     await page.goto('http://localhost:8979/test.html');
     await waitForEditorBootstrap(page);
 
@@ -783,9 +851,14 @@ test.describe('LLM Wiki — E2E Bidirectional Links', () => {
     // Wait for editor
     await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
 
-    // Type in the editor
-    await page.click('.cm-content');
-    await page.keyboard.type(' added text');
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      window.__mockMessages = [];
+      view.dispatch({
+        changes: { from: view.state.doc.length, insert: ' added text' },
+        userEvent: 'input.type',
+      });
+    });
 
     // Wait and verify edit message was sent
     await page.waitForFunction(() =>
@@ -797,8 +870,36 @@ test.describe('LLM Wiki — E2E Bidirectional Links', () => {
       window.__mockMessages?.filter((m) => m.type === 'edit')
     );
 
-    expect(editMessages.length).toBeGreaterThan(0);
-    expect(editMessages[editMessages.length - 1].text).toContain('added text');
+    expect(editMessages).toEqual([{
+      type: 'edit',
+      baseLength: '# Initial'.length,
+      changes: [{ from: '# Initial'.length, to: '# Initial'.length, text: ' added text' }],
+    }]);
+  });
+
+  test('editor provides full text only when the host requests a resync', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+    await waitForEditorBootstrap(page);
+
+    await page.evaluate(text => {
+      window.postMessage({ type: 'setText', text }, '*');
+    }, '# Initial');
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+
+    const editMessage = await page.evaluate(() => {
+      window.__mockMessages = [];
+      window.postMessage({ type: 'requestText' }, '*');
+      return new Promise(resolve => {
+        const check = () => {
+          const message = window.__mockMessages.find(candidate => candidate.type === 'edit');
+          if (message) resolve(message);
+          else requestAnimationFrame(check);
+        };
+        check();
+      });
+    });
+
+    expect(editMessage).toEqual({ type: 'edit', text: '# Initial' });
   });
 
   test('editor sends raw source selection offsets when selection changes', async ({ page }) => {
@@ -1174,15 +1275,35 @@ test.describe('LLM Wiki — E2E Bidirectional Links', () => {
       const from = view.state.doc.toString().indexOf('beta');
       view.dispatch({ selection: { anchor: from, head: from + 'beta'.length } });
     });
+    const expectedSelection = await page.evaluate(() => {
+      const selection = window.__cmView.state.selection.main;
+      return { from: selection.from, to: selection.to };
+    });
 
     const prompt = page.locator('.llm-wiki-cursor-selection-prompt');
-    await expect(prompt.getByRole('button', { name: 'Copy for Agent' })).toHaveText('Copy for Agent');
+    const copyButton = prompt.locator('button.llm-wiki-cursor-selection-copy');
+    await expect(copyButton).toHaveAccessibleName('Copy for Agent');
+    await expect(copyButton.locator('.copy-for-agent-label')).toHaveText('Copy for Agent');
+    await expect(copyButton.locator('.copy-for-agent-shortcut')).toHaveText(/^(?:⌥⌘C|Ctrl\+Alt\+C)$/);
     await expect(prompt.getByRole('button', { name: /Add to Chat/ })).toHaveCount(0);
     await expect(prompt.getByRole('button', { name: /Claude/ })).toHaveCount(0);
-    await prompt.getByRole('button', { name: 'Copy for Agent' }).click();
+    await copyButton.click();
     await expect.poll(() => page.evaluate(() =>
       window.__mockMessages?.filter(message => message.type === 'copySelectionForAgent').at(-1)
-    )).toEqual({ type: 'copySelectionForAgent' });
+    )).toEqual({
+      type: 'copySelectionForAgent',
+      selection: expectedSelection,
+    });
+    await page.evaluate(() => {
+      window.postMessage({ type: 'copySelectionForAgentResult', ok: true }, '*');
+    });
+    await expect(copyButton).toHaveAccessibleName('Copied');
+    await expect(copyButton.locator('.copy-for-agent-label')).toHaveText('Copied');
+    await expect(copyButton.locator('.copy-for-agent-shortcut')).toBeHidden();
+    await page.waitForTimeout(1_100);
+    await expect(copyButton).toHaveAccessibleName('Copy for Agent');
+    await expect(copyButton.locator('.copy-for-agent-label')).toHaveText('Copy for Agent');
+    await expect(copyButton.locator('.copy-for-agent-shortcut')).toBeVisible();
 
     await page.evaluate(() => {
       window.postMessage({ type: 'agentHandoffCapabilities', cursorAgent: true, providers: [{ id: 'claude', label: 'Claude Code' }] }, '*');
@@ -2221,6 +2342,61 @@ test.describe('LLM Wiki — E2E Bidirectional Links', () => {
     expect(editorState.text).toContain('---\n\nIntro # Math and Code');
   });
 
+  test('large markdown documents start in source mode but can enable live preview', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+
+    const doc = [
+      '---',
+      'type: raw',
+      'status: draft',
+      '---',
+      '',
+      '# Large note',
+      ...Array.from({ length: 600 }, (_, index) => `Line ${index + 1}`),
+    ].join('\n');
+
+    await page.evaluate(text => {
+      window.postMessage({ type: 'setText', text, title: 'Large note' }, '*');
+    }, doc);
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+
+    await expect(page.locator('.cm-hybrid-properties')).toHaveCount(0);
+    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+e' : 'Control+e');
+    await expect(page.locator('.cm-hybrid-properties')).toBeVisible();
+  });
+
+  test('frontmatter properties do not become a text-cursor destination when moving upward', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+
+    const doc = [
+      '---',
+      'id: concept_math_code',
+      'tags: [test, math, code]',
+      'title: Math and Code',
+      '---',
+      '',
+      '# Math and Code',
+      '',
+      'Body copy',
+    ].join('\n');
+
+    await page.evaluate((text) => {
+      window.postMessage({ type: 'setText', text }, '*');
+    }, doc);
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+    await page.evaluate(() => window.__cmView.focus());
+
+    await page.keyboard.press('ArrowUp');
+    await page.keyboard.press('ArrowUp');
+    const selectionHead = await page.evaluate(() => window.__cmView.state.selection.main.head);
+    expect(selectionHead).toBe(doc.indexOf('# Math and Code'));
+    await page.keyboard.type('Inserted ');
+
+    const text = await page.evaluate(() => window.__cmView.state.doc.toString());
+    expect(text).toContain('---\n\nInserted # Math and Code');
+    expect(text).not.toContain('---\nInserted ');
+  });
+
   test('frontmatter property icons and removable chips match Obsidian controls', async ({ page }) => {
     await page.goto('http://localhost:8979/test.html');
     const doc = [
@@ -2808,6 +2984,36 @@ test.describe('LLM Wiki — E2E Bidirectional Links', () => {
       await expect(image).toBeVisible();
       await expect(image.locator('.cm-hybrid-image-img')).toBeVisible();
     }
+  });
+
+  test('public Markdown images keep their HTTPS URL and render', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+    await waitForEditorBootstrap(page);
+
+    const publicUrl = 'https://public.example.test/image.gif';
+    await page.route(publicUrl, route => route.fulfill({
+      status: 200,
+      contentType: 'image/gif',
+      body: Buffer.from(
+        'R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==',
+        'base64',
+      ),
+    }));
+
+    await page.evaluate((text) => {
+      window.postMessage({ type: 'setText', text, title: 'Public image' }, '*');
+    }, `![Public image](${publicUrl})`);
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      view.dispatch({ selection: { anchor: view.state.doc.length } });
+    });
+
+    const image = page.locator('.cm-hybrid-image');
+    await expect(image).toBeVisible();
+    await expect(image).toHaveAttribute('data-resolved-src', publicUrl);
+    await expect(image.locator('.cm-hybrid-image-img')).toHaveJSProperty('naturalWidth', 1);
+    await expect(image.locator('.cm-hybrid-image-img')).toHaveJSProperty('naturalHeight', 1);
   });
 
   test('copying rendered inline formatting preserves raw markdown delimiters', async ({ page }) => {
@@ -3711,7 +3917,7 @@ test.describe('LLM Wiki — E2E Bidirectional Links', () => {
 
     expect(state.text).toContain('title: Updated Math Note');
     expect(state.text).not.toContain('title: Math and Code');
-    expect(state.editMessages.at(-1)?.text).toContain('title: Updated Math Note');
+    expect(state.editMessages.at(-1)?.changes.at(-1)?.text).toContain('title: Updated Math Note');
     expect(state.errorMessages).toEqual([]);
     expect(state.focusedValue).toBe('title property value');
 
@@ -6149,6 +6355,45 @@ test.describe('LLM Wiki — E2E Bidirectional Links', () => {
     expect(activeAffordance).toBe('"↗"');
   });
 
+  test('long external URL widgets use the available line width before wrapping', async ({ page }) => {
+    await page.setViewportSize({ width: 1_000, height: 700 });
+    await page.goto('http://localhost:8979/test.html');
+    await waitForEditorBootstrap(page);
+
+    const url = 'https://cloudtest.woa.com/console/hkl-1563/load-master/report/detail?testId=eQYj0XeDvkyOomy6';
+    const doc = ['# Note', '', `报告：[${url}](${url})`].join('\n');
+    await page.evaluate(text => {
+      window.postMessage({ type: 'setText', text }, '*');
+    }, doc);
+    await page.waitForSelector('.cm-llm-wiki-link', { timeout: 10_000 });
+
+    const measure = () => page.locator('.cm-llm-wiki-link').evaluate(element => {
+      const link = element.getBoundingClientRect();
+      const lineElement = element.closest<HTMLElement>('.cm-line');
+      if (!lineElement) throw new Error('Missing link source line');
+      const line = lineElement.getBoundingClientRect();
+      return {
+        availableWidth: line.right - link.left,
+        defaultLineHeight: window.__cmView.defaultLineHeight,
+        lineHeight: line.height,
+        linkHeight: link.height,
+        linkRight: link.right,
+        lineRight: line.right,
+      };
+    });
+
+    const wide = await measure();
+    expect(wide.availableWidth).toBeGreaterThan(700);
+    expect(wide.linkHeight).toBeLessThanOrEqual(wide.defaultLineHeight + 0.5);
+    expect(wide.lineHeight).toBeLessThanOrEqual(wide.defaultLineHeight + 0.5);
+
+    await page.setViewportSize({ width: 700, height: 700 });
+    const narrow = await measure();
+    expect(narrow.availableWidth).toBeLessThan(600);
+    expect(narrow.linkRight).toBeLessThanOrEqual(narrow.lineRight + 0.5);
+    expect(narrow.linkHeight).toBeGreaterThan(narrow.defaultLineHeight + 0.5);
+  });
+
   test('link widgets keep Obsidian-like inline link styling without a highlight pill', async ({ page }) => {
     await page.goto('http://localhost:8979/test.html');
 
@@ -7300,7 +7545,10 @@ test.describe('LLM Wiki — E2E Bidirectional Links', () => {
       expect(state.lineNumber, key).toBe(3);
       expect(state.lineText, key).toBe(`Alpha beta${key}`);
       expect(state.column, key).toBe(`Alpha beta${key}`.length);
-      expect(state.editMessages.map(message => message.text), key).toEqual([expectedText]);
+      const insertFrom = baseDoc.indexOf('Alpha beta') + 'Alpha beta'.length;
+      expect(state.editMessages.map(message => message.changes), key).toEqual([[
+        { from: insertFrom, to: insertFrom, text: key },
+      ]]);
     }
   });
 
@@ -7436,7 +7684,8 @@ test.describe('LLM Wiki — E2E Bidirectional Links', () => {
     expect(finalState.text).toBe(expectedDoc);
     expect(finalState.lineNumber).toBe(11);
     expect(finalState.lineText).toBe('| Table preview | matches Obsidian |');
-    expect(finalState.editMessages.at(-1)?.text).toBe(expectedDoc);
+    expect(finalState.editMessages.at(-1)?.text).toBeUndefined();
+    expect(finalState.editMessages.at(-1)?.changes.length).toBeGreaterThan(0);
     expect(consoleErrors).toEqual([]);
   });
 

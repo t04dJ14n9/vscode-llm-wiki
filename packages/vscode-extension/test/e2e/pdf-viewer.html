@@ -572,7 +572,6 @@
     window.__mockState = {};
     window.__pdfiumWasmUrl = '/dist/pdfium.wasm';
     const params = new URLSearchParams(window.location.search);
-    window.__llmWikiAskPdfEnabled = params.get('askPdf') === '1';
     window.acquireVsCodeApi = () => ({
       postMessage: async (message) => {
         window.__mockMessages.push(message);

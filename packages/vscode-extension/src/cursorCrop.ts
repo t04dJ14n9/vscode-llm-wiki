@@ -1,4 +1,4 @@
-import { PDF_DISCUSSION_MAX_PNG_BYTES } from './pdfDiscussionController';
+import { MAX_PNG_BYTES } from './pdfPngConstraints';
 import { inflateSync } from 'node:zlib';
 
 const PNG_SIGNATURE = [137, 80, 78, 71, 13, 10, 26, 10] as const;
@@ -13,14 +13,14 @@ const CRC_TABLE = Uint32Array.from({ length: 256 }, (_, value) => {
 
 export function decodeCursorCropPngBase64(value: unknown): Uint8Array | undefined {
   if (typeof value !== 'string') return undefined;
-  if (value.length > Math.ceil(PDF_DISCUSSION_MAX_PNG_BYTES / 3) * 4) return undefined;
+  if (value.length > Math.ceil(MAX_PNG_BYTES / 3) * 4) return undefined;
   const bytes = Buffer.from(value, 'base64');
   if (bytes.toString('base64') !== value) return undefined;
   return validateCursorCropPng(bytes);
 }
 
 export function validateCursorCropPng(value: unknown): Uint8Array | undefined {
-  if (!(value instanceof Uint8Array) || value.byteLength > PDF_DISCUSSION_MAX_PNG_BYTES) {
+  if (!(value instanceof Uint8Array) || value.byteLength > MAX_PNG_BYTES) {
     return undefined;
   }
   const bytes = Buffer.from(value.buffer, value.byteOffset, value.byteLength);

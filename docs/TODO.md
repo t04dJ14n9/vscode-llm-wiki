@@ -179,7 +179,7 @@ appropriate.
 
 ### [x] Current PDF selection workflow
 
-- Text selection, page/range links, selection crop, Ask PDF, explicit provider
+- Text selection, page/range links, selection crop, explicit provider
   buttons, and correlated concurrent capture requests.
 - Text-only fallback for crop failures and immutable export files.
 

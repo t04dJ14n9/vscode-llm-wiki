@@ -1,5 +1,5 @@
 import { undo } from '@codemirror/commands';
-import type { Text } from '@codemirror/state';
+import type { Text, Transaction } from '@codemirror/state';
 import { WidgetType } from '@codemirror/view';
 import type { EditorView } from '@codemirror/view';
 import { isMap, isScalar, isSeq, parse as parseYamlValue, parseDocument } from 'yaml';
@@ -490,6 +490,22 @@ export function findFrontmatterBlock(doc: Text): FrontmatterBlock | null {
   }
 
   return null;
+}
+
+export function updateFrontmatterBlock(
+  current: FrontmatterBlock | null,
+  transaction: Transaction,
+): FrontmatterBlock | null {
+  if (!transaction.docChanged) return current;
+
+  const frontmatterEnd = current?.to ?? 0;
+  let touchesFrontmatter = false;
+  transaction.changes.iterChangedRanges((from) => {
+    if (from <= frontmatterEnd) touchesFrontmatter = true;
+  });
+  return touchesFrontmatter
+    ? findFrontmatterBlock(transaction.newDoc)
+    : current;
 }
 
 export function initialBodyPositionAfterFrontmatter(text: string): number | null {

@@ -104,17 +104,9 @@ import {
   renderPdfTextLayer,
 } from './pdfTextLayer';
 import { showObsidianContextMenu } from './obsidianContextMenu';
-import {
-  createPdfAskPanel,
-  type PdfAskPanel,
-  type PdfAskSelection,
-} from './pdfAskPanel';
 import { normalizePdfTextBands, type PdfRect } from './pdfTextBands';
 
 const vscode = acquireVsCodeApi();
-const askPdfEnabled =
-  (window as typeof window & { __llmWikiAskPdfEnabled?: unknown })
-    .__llmWikiAskPdfEnabled === true;
 
 type PdfReduceAnimationSetting = 'on' | 'off' | 'system';
 type PdfTextSelectionAction = 'addToCursorChat';
@@ -533,7 +525,6 @@ export class PdfViewer {
     previousDescribedBy: string | null;
   } | undefined;
   private readonly viewerResizeObserver: ResizeObserver | null;
-  private readonly askPanel?: PdfAskPanel;
 
   constructor() {
     this.container.tabIndex = -1;
@@ -542,47 +533,6 @@ export class PdfViewer {
     this.applyPdfToolbarPreference(this.pdfToolbarPreference);
     document.body.classList.toggle('pdf-adapt-theme', this.adaptToTheme);
     this.applyReduceAnimationSetting();
-    this.askPanel = askPdfEnabled ? createPdfAskPanel({
-      vscode,
-      toolbar: document.getElementById('toolbar')!,
-      viewerShell: document.getElementById('viewer-shell')!,
-      getPageSurface: pageNumber => {
-        const page = this.pages.get(pageNumber);
-        if (!page) return undefined;
-        return {
-          canvas: page.canvas,
-          pageWidth: Number(page.pageObj.size.width),
-          pageHeight: Number(page.pageObj.size.height),
-        };
-      },
-      getAnchorViewportRect: (pageNumber, rects) => {
-        const page = this.pages.get(pageNumber);
-        const valid = normalizePdfTextBands(rects);
-        if (!page || !valid.length) return undefined;
-        const wrapper = page.wrapper.getBoundingClientRect();
-        const shell = document.getElementById('viewer-shell')!.getBoundingClientRect();
-        return {
-          left: wrapper.left - shell.left + Math.min(...valid.map(rect => rect[0])) * this.scale,
-          top: wrapper.top - shell.top + Math.min(...valid.map(rect => rect[1])) * this.scale,
-          right: wrapper.left - shell.left + Math.max(...valid.map(rect => rect[2])) * this.scale,
-          bottom: wrapper.top - shell.top + Math.max(...valid.map(rect => rect[3])) * this.scale,
-        };
-      },
-      navigateTo: async (page, _rects, annotationId) => {
-        const navigationCurrent = await this.goToPage(page);
-        if (!navigationCurrent) return;
-        if (annotationId) {
-          this.pages.get(page)?.highlightLayer
-            .querySelector<HTMLElement>(`[data-annotation-id="${CSS.escape(annotationId)}"]`)
-            ?.scrollIntoView({
-              behavior: this.navigationScrollBehavior(),
-              block: 'center',
-              inline: 'center',
-            });
-        }
-      },
-      redrawMarkers: () => this.redrawAllDiscussionMarkers(),
-    }) : undefined;
     this.setupMessages();
     this.setupToolbar();
     this.setupSearch();
@@ -725,9 +675,6 @@ export class PdfViewer {
         case 'toggleTwoPageView':
           void this.toggleTwoPageView();
           break;
-        case 'pdfDiscussionOpenForSelection':
-          if (askPdfEnabled) this.openAskPdfForNativeSelection();
-          break;
         case 'addSelectionToCursorChat': {
           if (this.agentCapabilities.cursorAgent) this.addCurrentSelectionToCursorChat();
           break;
@@ -737,7 +684,6 @@ export class PdfViewer {
           break;
         }
         default:
-          this.askPanel?.handleHostMessage(message);
           break;
       }
     });
@@ -1242,16 +1188,31 @@ export class PdfViewer {
     if (!state.selectionLines.length) return undefined;
     let bestLine: PdfSelectionLine | undefined;
     let bestLineDistance = Number.POSITIVE_INFINITY;
+    let bestLineHorizontalDistance = Number.POSITIVE_INFINITY;
     let bestLineCenterDistance = Number.POSITIVE_INFINITY;
     for (const line of state.selectionLines) {
       const verticalDistance = y < line.top ? line.top - y : y > line.bottom ? y - line.bottom : 0;
+      const horizontalDistance = Math.min(...line.glyphs.map(({ glyph }) => {
+        const [left, , right] = glyph.hitRect;
+        return x < left ? left - x : x > right ? x - right : 0;
+      }));
       const centerDistance = Math.abs(y - line.center);
       if (
         verticalDistance < bestLineDistance
-        || (verticalDistance === bestLineDistance && centerDistance < bestLineCenterDistance)
+        || (
+          verticalDistance === bestLineDistance
+          && (
+            horizontalDistance < bestLineHorizontalDistance
+            || (
+              horizontalDistance === bestLineHorizontalDistance
+              && centerDistance < bestLineCenterDistance
+            )
+          )
+        )
       ) {
         bestLine = line;
         bestLineDistance = verticalDistance;
+        bestLineHorizontalDistance = horizontalDistance;
         bestLineCenterDistance = centerDistance;
       }
     }
@@ -1471,55 +1432,126 @@ export class PdfViewer {
     if (page < start.page || page > end.page) return [];
     const startItemIndex = page === start.page ? start.itemIndex : 0;
     const endItemIndex = page === end.page ? end.itemIndex : Math.max(0, state.textRects.length - 1);
-    const lines = [...state.selectionLines].sort((left, right) => (
-      left.center - right.center || left.glyphs[0]!.glyph.looseRect[0] - right.glyphs[0]!.glyph.looseRect[0]
-    ));
-    const output: PdfRect[] = [];
-    for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
-      const line = lines[lineIndex]!;
-      const selected = line.glyphs.filter(({ glyph, itemIndex }) => {
-        if (itemIndex < startItemIndex || itemIndex > endItemIndex) return false;
+    type SelectedBandItem = {
+      itemIndex: number;
+      left: number;
+      right: number;
+      top: number;
+      bottom: number;
+    };
+    const selectedItems = new Map<number, SelectedBandItem>();
+    for (const line of state.selectionLines) {
+      for (const { glyph, itemIndex } of line.glyphs) {
+        if (itemIndex < startItemIndex || itemIndex > endItemIndex) continue;
         const from = page === start.page && itemIndex === start.itemIndex ? start.offset : 0;
         const contentLength = String(state.textRects[itemIndex]?.content ?? '').length;
         const to = page === end.page && itemIndex === end.itemIndex ? end.offset : contentLength;
-        return glyph.offsetEnd > from && glyph.offsetStart < to;
-      });
-      if (!selected.length) continue;
-
-      let top = Math.min(
-        line.center - line.height / 2,
-        ...selected.map(({ glyph }) => glyph.looseRect[1]),
-      );
-      let bottom = Math.max(
-        line.center + line.height / 2,
-        ...selected.map(({ glyph }) => glyph.looseRect[3]),
-      );
-      const previous = lines[lineIndex - 1];
-      const next = lines[lineIndex + 1];
-      if (previous) top = Math.max(top, (previous.center + line.center) / 2 + 0.25);
-      if (next) bottom = Math.min(bottom, (line.center + next.center) / 2 - 0.25);
-      if (bottom <= top) {
-        top = line.center - 0.125;
-        bottom = line.center + 0.125;
-      }
-
-      const segments: Array<[number, number]> = [];
-      for (const { glyph } of selected.sort((left, right) => (
-        left.glyph.looseRect[0] - right.glyph.looseRect[0]
-        || left.glyph.looseRect[2] - right.glyph.looseRect[2]
-      ))) {
-        const [left, , right] = glyph.looseRect;
-        const segment = segments[segments.length - 1];
-        if (!segment || left - segment[1] > Math.max(4, line.height * 1.2)) {
-          segments.push([left, right]);
+        if (!(glyph.offsetEnd > from && glyph.offsetStart < to)) continue;
+        const itemRect = finitePdfTextRect(state.textRects[itemIndex]?.rect);
+        const fullySelected = from <= 0 && to >= contentLength;
+        const left = fullySelected && itemRect ? itemRect.left : glyph.looseRect[0];
+        const right = fullySelected && itemRect ? itemRect.left + itemRect.width : glyph.looseRect[2];
+        const top = itemRect
+          ? itemRect.top
+          : Math.min(line.center - line.height / 2, glyph.looseRect[1]);
+        const bottom = itemRect
+          ? itemRect.top + itemRect.height
+          : Math.max(line.center + line.height / 2, glyph.looseRect[3]);
+        const selected = selectedItems.get(itemIndex);
+        if (selected) {
+          selected.left = Math.min(selected.left, left);
+          selected.right = Math.max(selected.right, right);
+          selected.top = Math.min(selected.top, top);
+          selected.bottom = Math.max(selected.bottom, bottom);
         } else {
-          segment[0] = Math.min(segment[0], left);
-          segment[1] = Math.max(segment[1], right);
+          selectedItems.set(itemIndex, { itemIndex, left, right, top, bottom });
         }
       }
-      for (const [left, right] of segments) output.push([left, top, right, bottom]);
     }
-    return output;
+
+    const rows: Array<{
+      candidates: SelectedBandItem[];
+      left: number;
+      right: number;
+      center: number;
+      height: number;
+      count: number;
+    }> = [];
+    const dominantFirst = [...selectedItems.values()].sort((left, right) => (
+      (right.bottom - right.top) - (left.bottom - left.top)
+      || left.top - right.top
+      || left.left - right.left
+      || left.itemIndex - right.itemIndex
+    ));
+    for (const candidate of dominantFirst) {
+      const center = (candidate.top + candidate.bottom) / 2;
+      const height = candidate.bottom - candidate.top;
+      let matchingRow: (typeof rows)[number] | undefined;
+      let matchingDistance = Number.POSITIVE_INFINITY;
+      let satellite = false;
+      for (const row of rows) {
+        const centerDistance = Math.abs(row.center - center);
+        const minimumHeight = Math.min(row.height, height);
+        const horizontalGap = candidate.left > row.right
+          ? candidate.left - row.right
+          : row.left > candidate.right
+            ? row.left - candidate.right
+            : 0;
+        if (horizontalGap > Math.max(4, minimumHeight * 1.2)) continue;
+        const sameRow = centerDistance <= Math.max(0.75, minimumHeight * 0.68);
+        const overlap = Math.min(row.center + row.height / 2, candidate.bottom)
+          - Math.max(row.center - row.height / 2, candidate.top);
+        const isSatellite = height <= row.height * 0.82
+          && overlap > 0
+          && centerDistance <= row.height * 0.8;
+        if ((sameRow || isSatellite) && centerDistance < matchingDistance) {
+          matchingRow = row;
+          matchingDistance = centerDistance;
+          satellite = isSatellite;
+        }
+      }
+      if (!matchingRow) {
+        rows.push({
+          candidates: [candidate],
+          left: candidate.left,
+          right: candidate.right,
+          center,
+          height,
+          count: 1,
+        });
+        continue;
+      }
+      matchingRow.candidates.push(candidate);
+      matchingRow.left = Math.min(matchingRow.left, candidate.left);
+      matchingRow.right = Math.max(matchingRow.right, candidate.right);
+      if (!satellite) {
+        matchingRow.center = (matchingRow.center * matchingRow.count + center) / (matchingRow.count + 1);
+        matchingRow.height = (matchingRow.height * matchingRow.count + height) / (matchingRow.count + 1);
+      }
+      matchingRow.count++;
+    }
+
+    const rawRects: PdfRect[] = [];
+    for (const row of rows) {
+      const segments: PdfRect[] = [];
+      for (const candidate of row.candidates.sort((left, right) => (
+        left.left - right.left
+        || left.right - right.right
+        || left.itemIndex - right.itemIndex
+      ))) {
+        const segment = segments[segments.length - 1];
+        if (!segment || candidate.left - segment[2] > Math.max(4, row.height * 1.2)) {
+          segments.push([candidate.left, candidate.top, candidate.right, candidate.bottom]);
+        } else {
+          segment[0] = Math.min(segment[0], candidate.left);
+          segment[1] = Math.min(segment[1], candidate.top);
+          segment[2] = Math.max(segment[2], candidate.right);
+          segment[3] = Math.max(segment[3], candidate.bottom);
+        }
+      }
+      rawRects.push(...segments);
+    }
+    return normalizePdfTextBands(rawRects);
   }
 
   private selectionAutoScrollDelta(clientX: number, clientY: number): { left: number; top: number } {
@@ -2426,7 +2458,6 @@ export class PdfViewer {
       if (renderGeneration !== state.renderGeneration) return;
       state.rendered = true;
       this.drawSearchHighlightsForPage(state.pageNum);
-      this.drawDiscussionMarkersForPage(state.pageNum);
       this.restoreSelectionForPage(state.pageNum);
       this.redrawPdfDestinationFocus(state.pageNum);
     } catch (error) {
@@ -3322,9 +3353,6 @@ export class PdfViewer {
       clientY,
       items: [
         { label: 'Look up ...', onSelect: () => vscode.postMessage({ type: 'lookupSelection', text: anchor.snippet }) },
-        ...(askPdfEnabled
-          ? [{ label: 'Ask about selection…', onSelect: () => this.openAskPdfForSelection(anchor) }]
-          : []),
         ...(this.agentCapabilities.cursorAgent
           ? [{
               label: `${cursorSelectionShortcutLabel()}  Add to Chat`,
@@ -3351,40 +3379,6 @@ export class PdfViewer {
     if (!anchor || anchor.multiPage) return false;
     this.postTextSelectionAction('addToCursorChat', anchor);
     return true;
-  }
-
-  private openAskPdfForNativeSelection(): void {
-    if (!this.askPanel) return;
-    const current = this.selectionAnchorFromNativeRange();
-    if (!current) {
-      this.askPanel.showSelectionError('Select text on one page');
-      return;
-    }
-    this.openAskPdfForSelection(current.anchor);
-  }
-
-  private openAskPdfForSelection(anchor: PdfAnchor): void {
-    if (!this.askPanel) return;
-    const rects = validPdfRects(anchor.rects);
-    if (!anchor.snippet?.trim() || !rects.length) {
-      this.askPanel.showSelectionError('Select text on one page');
-      return;
-    }
-    const selection: PdfAskSelection = {
-      page: anchor.page,
-      snippet: anchor.snippet,
-      quote: anchor.snippet,
-      rects,
-      ...(anchor.prefix ? { prefix: anchor.prefix } : {}),
-      ...(anchor.suffix ? { suffix: anchor.suffix } : {}),
-      ...(anchor.textItemIndex !== undefined ? { textItemIndex: anchor.textItemIndex } : {}),
-      ...(anchor.charOffset !== undefined ? { charOffset: anchor.charOffset } : {}),
-      ...(anchor.endTextItemIndex !== undefined ? { endTextItemIndex: anchor.endTextItemIndex } : {}),
-      ...(anchor.endCharOffset !== undefined ? { endCharOffset: anchor.endCharOffset } : {}),
-    };
-    this.askPanel.openForSelection(selection);
-    window.getSelection()?.removeAllRanges();
-    this.clearSelection();
   }
 
   private showSelectionToolbar(anchor: PdfAnchor, rect: DOMRect): void {
@@ -3611,18 +3605,6 @@ export class PdfViewer {
       page.highlightLayer.querySelectorAll('.anchor-highlight').forEach(element => element.remove());
     }, 2200);
     return highlights[0];
-  }
-
-  private drawDiscussionMarkersForPage(pageNum: number): void {
-    const page = this.pages.get(pageNum);
-    if (!page?.rendered || !this.askPanel) return;
-    this.askPanel.renderMarkersForPage(pageNum, page.highlightLayer, this.scale);
-  }
-
-  private redrawAllDiscussionMarkers(): void {
-    for (const [pageNum, page] of this.pages) {
-      if (page.rendered) this.drawDiscussionMarkersForPage(pageNum);
-    }
   }
 
   private drawSearchHighlightsForPage(pageNum: number): void {
@@ -4790,7 +4772,6 @@ export class PdfViewer {
     }
     this.currentPage = activePage;
     this.redrawAllSearchHighlights();
-    this.redrawAllDiscussionMarkers();
     this.refreshSelectionAfterRender();
     this.updatePageInfo();
     this.releaseCurrentPageTrackingLock(trackingToken, 'auto');

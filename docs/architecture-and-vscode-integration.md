@@ -58,7 +58,6 @@ flowchart LR
         Host["Extension host<br/>commands and orchestration"]
         MD["Markdown editor<br/>CodeMirror"]
         PDF["PDF viewer<br/>EmbedPDF + PDFium"]
-        AskPDF["Embedded Ask PDF panel"]
         Graph["Concept graph<br/>webview panel"]
         WebReader["Experimental Web Reader<br/>sanitized public pages"]
         Trees["LLM Wiki activity<br/>Backlinks and forward links"]
@@ -85,8 +84,6 @@ flowchart LR
     MD -->|"selected text + exact offsets"| Host
     PDF -->|"selected text + page geometry"| Host
     WebReader -->|"selected text + bounded context"| Host
-    PDF --> AskPDF
-    AskPDF <-->|"validated host messages"| Host
     Host <-->|"multi-turn JSON-RPC"| Codex
     Host --> Handoff
     Handoff -->|"attach on request"| Sidebars
@@ -116,11 +113,10 @@ There are three clean boundaries:
 | --- | --- | --- |
 | Markdown viewer/editor | Yes | VS Code custom text editor backed by CodeMirror |
 | PDF viewer | Yes | VS Code custom readonly editor backed by EmbedPDF/PDFium |
-| Ask about selected text | Yes | External supported agent for Markdown; built-in Ask PDF panel for PDF |
+| Ask about selected text | Yes | External supported agent for Markdown and PDF |
 | Direct agent handoff | Yes | Automatic selection prompt, context menus, `Cmd+L` / `Ctrl+L`, and PDF selection toolbar |
 | Web selection handoff | Experimental | Cursor Browser capture when private commands exist; extension-owned sanitized reader on stock VS Code |
-| Multi-turn discussion | Yes | Ask PDF only; no Learning Chat sidebar |
-| Durable answer | Yes | One Markdown learning note per Ask PDF discussion |
+| Durable answer | Yes | One Markdown learning note per discussion, surfaced as a source annotation |
 | Source highlight and note link | Yes | Markdown offset/quote annotation with **✦ Note** open; PDF Web Annotation JSON-LD mirror plus current v1 viewer state |
 | Concept/entity graph | Yes | Markdown links plus explicit `concepts` and `entities` YAML frontmatter |
 | Backlinks/forward links | Yes | Parsed directly from repository Markdown |
@@ -358,14 +354,9 @@ agent thread.
 reads PDF bytes through `vscode.workspace.fs` and sends them to the PDF webview.
 PDFium renders locally; no document is uploaded by the renderer.
 
-The learner selects a passage and opens Ask PDF. The webview attempts the
-24 pt padded PNG crop before the first submission. Submitting the first
-question creates the asked annotation, persists the crop and metadata when
-available, and writes its portable JSON-LD mirror. A missing crop is non-fatal:
-text, page, and rectangle selectors still identify the source. After a
-successful answer, the provider also writes the repository learning note. The
-Ask panel exposes **Open learning note**. Its source link is
-repository-relative and carries the PDF page fragment.
+The learner selects a passage in the PDF and hands it to an external agent via
+**Add to Chat** (see below). PDF annotations and their portable JSON-LD mirror
+persist independently of any in-editor conversation.
 
 During migration, reopening the PDF restores precise geometry and
 discussion/transcript UI state from the tracked v1
@@ -437,7 +428,6 @@ sequenceDiagram
     participant Viewer as Markdown or PDF viewer
     participant Host as Extension host
     participant Cursor as Cursor composer
-    participant AskPDF as Ask PDF panel
     participant Agent as Codex app-server
     participant Note as wiki/learning note
     participant Mirror as PDF JSON-LD mirror
@@ -450,16 +440,6 @@ sequenceDiagram
         Host->>Host: Write immutable selection export
         Host->>Cursor: Attach selection.md (+ optional PDF crop)
         Note over Cursor: Composer opens; nothing is submitted
-    else Ask PDF
-        Learner->>AskPDF: Ask about the PDF selection
-        Viewer->>Viewer: Attempt 24 pt padded PNG crop
-        AskPDF->>Host: Source packet + question + crop when available
-        Host->>Agent: Transcript + source + question
-        Agent-->>Host: Stream answer
-        Host-->>AskPDF: Stream answer
-        Host->>Mirror: Write portable selectors + crop metadata when available
-        Host->>Runtime: Update current viewer/discussion state
-        Host->>Note: Upsert summary, source, and full Q&A
     end
     Runtime-->>Viewer: Restore current PDF geometry and UI state
     Viewer-->>Learner: Markdown ✦ Note or PDF highlight
@@ -680,13 +660,12 @@ selection prompt, shortcuts, menus, PDF crop attachment, or composer behavior.
 - Filesystem-first wiki and graph
 - Markdown/PDF/web selection handoff to a supported agent draft without
   automatic submission
-- Ask PDF multi-turn questions, durable learning notes, and source annotations
+- Durable learning notes and source annotations
 - Portable per-annotation PDF JSON-LD mirrors alongside v1 runtime
   compatibility state
 - Best-effort 24 pt padded PDF selection crops
 - Fixed review schedule and daily notes
 - Safe Git sync
-- Codex-backed Ask PDF
 
 ### Phase 2: deeper provider integration and retrieval
 
@@ -716,13 +695,12 @@ selection prompt, shortcuts, menus, PDF crop attachment, or composer behavior.
 | Change Markdown host synchronization | [`markdownEditorProvider.ts`](../packages/vscode-extension/src/markdownEditorProvider.ts) |
 | Change Markdown rendering or annotations | [`webview-src/markdown-editor.ts`](../packages/vscode-extension/webview-src/markdown-editor.ts) |
 | Change PDF host behavior | [`pdfEditorProvider.ts`](../packages/vscode-extension/src/pdfEditorProvider.ts) |
-| Change PDF rendering or Ask UI | [`packages/pdf-editor/src/webview`](../packages/pdf-editor/src/webview) |
+| Change PDF rendering or selection UI | [`packages/pdf-editor/src/webview`](../packages/pdf-editor/src/webview) |
 | Change durable discussion notes | [`learningNoteStore.ts`](../packages/vscode-extension/src/learningNoteStore.ts) |
 | Change daily reviews | [`dailyNotes.ts`](../packages/vscode-extension/src/dailyNotes.ts) |
 | Change links or graph extraction | [`filesystemWiki.ts`](../packages/vscode-extension/src/filesystemWiki.ts) |
 | Change Git update behavior | [`repositorySync.ts`](../packages/vscode-extension/src/repositorySync.ts) |
 | Change agent handoff | [`agentHandoff.ts`](../packages/vscode-extension/src/agentHandoff.ts) |
-| Change Ask PDF Codex transport | [`codexAppServerClient.ts`](../packages/vscode-extension/src/codexAppServerClient.ts) |
 
 The design rule is simple: keep durable learning state in readable repository
 files, keep privileged operations in the extension host, and keep webviews

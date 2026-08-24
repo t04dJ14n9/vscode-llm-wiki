@@ -25,8 +25,8 @@ function loadCursorCrop() {
   mod.filename = filename;
   mod.paths = Module._nodeModulePaths(dirname(filename));
   const originalLoad = Module._load;
-  Module._load = request => request === './pdfDiscussionController'
-    ? { PDF_DISCUSSION_MAX_PNG_BYTES: MAX_BYTES }
+  Module._load = request => request === './pdfPngConstraints'
+    ? { MAX_PNG_BYTES: MAX_BYTES }
     : originalLoad(request);
   try {
     mod._compile(outputText, filename);

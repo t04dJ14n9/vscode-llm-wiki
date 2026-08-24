@@ -14,38 +14,6 @@ const testFiles = [
   '**/*.spec.ts',
   '**/*.test.{js,mjs,cjs,ts}',
 ];
-const intentionalAskPdfDeferralMarker =
-  'TODO(ask-pdf): Re-enable after the provider-neutral “More detail” workflow and backend policy are specified.';
-const warningCommentTerm = /\b(?:todo|fixme|hack|xxx)\b/i;
-const intentionalAskPdfDeferralPlugin = {
-  rules: {
-    'only-intentional-todo': {
-      meta: {
-        type: 'problem',
-        schema: [],
-        messages: {
-          unexpectedWarningComment: 'Unexpected warning comment.',
-        },
-      },
-      create(context) {
-        return {
-          Program() {
-            for (const comment of context.sourceCode.getAllComments()) {
-              const text = comment.value.trim();
-              if (text === intentionalAskPdfDeferralMarker) continue;
-              if (warningCommentTerm.test(text)) {
-                context.report({
-                  loc: comment.loc,
-                  messageId: 'unexpectedWarningComment',
-                });
-              }
-            }
-          },
-        };
-      },
-    },
-  },
-};
 
 // These integration boundaries still expose untyped third-party data. Keep the
 // exception list explicit so new modules start with no-explicit-any enabled.
@@ -54,10 +22,8 @@ const legacyUntypedFiles = [
   'packages/pdf-editor/src/webview/domain/pdfSearch.ts',
   'packages/pdf-editor/src/webview/domain/pdfSelection.ts',
   'packages/pdf-editor/src/webview/domain/pdfTextExtraction.ts',
-  'packages/pdf-editor/src/webview/pdfAskPanel.ts',
   'packages/pdf-editor/src/webview/pdf-viewer.ts',
   'packages/vscode-extension/src/markdownEditorProvider.ts',
-  'packages/vscode-extension/src/pdfDiscussionController.ts',
   'packages/vscode-extension/src/pdfEditorProvider.ts',
   'packages/vscode-extension/webview-src/extensions/hybridMath.ts',
   'packages/vscode-extension/webview-src/markdown-editor.ts',
@@ -187,17 +153,6 @@ export default [
       'prefer-object-spread': 'error',
       'prefer-promise-reject-errors': ['error', { allowEmptyReject: false }],
       'radix': 'error',
-    },
-  },
-  {
-    name: 'workspace/intentional-ask-pdf-deferral-marker',
-    files: ['packages/vscode-extension/src/extension.ts'],
-    plugins: {
-      'workspace-deferral': intentionalAskPdfDeferralPlugin,
-    },
-    rules: {
-      'no-warning-comments': 'off',
-      'workspace-deferral/only-intentional-todo': 'error',
     },
   },
   {

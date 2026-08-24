@@ -12,6 +12,7 @@ import {
   EditorSelection,
   EditorState,
   Prec,
+  RangeSet,
   StateEffect,
   StateField,
 } from '@codemirror/state';
@@ -24,10 +25,12 @@ import {
   Decoration,
   type DecorationSet,
   EditorView,
+  GutterMarker,
   ViewPlugin,
   type ViewUpdate,
   WidgetType,
   drawSelection,
+  gutter,
   keymap,
   lineNumbers,
 } from '@codemirror/view';
@@ -66,6 +69,8 @@ class HlLinkWidget extends WidgetType {
     readonly sourceFrom: number,
     readonly sourceTo: number,
     readonly relativeToDocument = false,
+    readonly diagnosticIndex?: number,
+    readonly diagnosticSeverity?: MarkdownDiagnostic['severity'],
   ) {
     super();
   }
@@ -81,6 +86,13 @@ class HlLinkWidget extends WidgetType {
     button.ariaLabel = this.label || this.uri;
     if (this.relativeToDocument) {
       button.dataset.linkPreviewRelativeToDocument = 'true';
+    }
+    if (this.diagnosticIndex !== undefined) {
+      button.dataset.markdownDiagnosticIndex = String(this.diagnosticIndex);
+      button.classList.add('cm-llm-wiki-diagnostic');
+      if (this.diagnosticSeverity) {
+        button.classList.add(`cm-llm-wiki-diagnostic-${this.diagnosticSeverity}`);
+      }
     }
     if (isExternalUri(this.uri)) {
       button.classList.add('cm-external-link');
@@ -110,7 +122,9 @@ class HlLinkWidget extends WidgetType {
       && this.label === other.label
       && this.sourceFrom === other.sourceFrom
       && this.sourceTo === other.sourceTo
-      && this.relativeToDocument === other.relativeToDocument;
+      && this.relativeToDocument === other.relativeToDocument
+      && this.diagnosticIndex === other.diagnosticIndex
+      && this.diagnosticSeverity === other.diagnosticSeverity;
   }
 
   override ignoreEvent(): boolean {
@@ -159,6 +173,461 @@ interface ResolvedLearningAnnotation extends LearningAnnotation {
 }
 
 const setLearningAnnotations = StateEffect.define<readonly LearningAnnotation[]>();
+
+interface MarkdownDiagnostic {
+  from: number;
+  to: number;
+  line: number;
+  message: string;
+  source: string;
+  code: string;
+  severity: 'error' | 'warning' | 'info';
+}
+
+interface GitDiffLine {
+  line: number;
+  kind: 'added' | 'modified' | 'deleted';
+  before?: string;
+  after?: string;
+}
+
+const setMarkdownDiagnostics = StateEffect.define<readonly MarkdownDiagnostic[]>();
+const setGitDiffLines = StateEffect.define<readonly GitDiffLine[]>();
+
+class DiagnosticGutterMarker extends GutterMarker {
+  constructor(readonly severity: MarkdownDiagnostic['severity']) {
+    super();
+  }
+
+  override toDOM(): HTMLElement {
+    const element = document.createElement('span');
+    element.className = `cm-llm-wiki-diagnostic-gutter cm-llm-wiki-diagnostic-${this.severity}`;
+    element.textContent = '●';
+    element.setAttribute('aria-hidden', 'true');
+    return element;
+  }
+
+  override eq(other: DiagnosticGutterMarker): boolean {
+    return this.severity === other.severity;
+  }
+}
+
+class GitDiffGutterMarker extends GutterMarker {
+  constructor(
+    readonly kind: GitDiffLine['kind'],
+    readonly line: number,
+  ) {
+    super();
+  }
+
+  override toDOM(): HTMLElement {
+    const element = document.createElement('span');
+    element.className = `cm-llm-wiki-git-diff-gutter cm-llm-wiki-git-diff-${this.kind}`;
+    element.textContent = this.kind === 'deleted' ? '‹' : '';
+    element.dataset.gitDiffLine = String(this.line);
+    element.title = `${this.kind[0]!.toUpperCase()}${this.kind.slice(1)} line ${this.line}`;
+    element.setAttribute('aria-hidden', 'true');
+    return element;
+  }
+
+  override eq(other: GitDiffGutterMarker): boolean {
+    return this.kind === other.kind && this.line === other.line;
+  }
+}
+
+const markdownDiagnosticsField = StateField.define<readonly MarkdownDiagnostic[]>({
+  create: () => [],
+  update(diagnostics, transaction) {
+    let next = diagnostics.flatMap(diagnostic => {
+      const from = transaction.changes.mapPos(diagnostic.from, 1);
+      const to = transaction.changes.mapPos(diagnostic.to, -1);
+      return to > from ? [{ ...diagnostic, from, to }] : [];
+    });
+    for (const effect of transaction.effects) {
+      if (effect.is(setMarkdownDiagnostics)) next = [...effect.value];
+    }
+    return next;
+  },
+});
+
+const markdownDiagnosticDecorations = ViewPlugin.fromClass(class {
+  decorations: DecorationSet;
+
+  constructor(view: EditorView) {
+    this.decorations = buildDiagnosticDecorations(view);
+  }
+
+  update(update: ViewUpdate): void {
+    if (
+      update.docChanged
+      || update.viewportChanged
+      || update.transactions.some(transaction =>
+        transaction.effects.some(effect => effect.is(setMarkdownDiagnostics))
+      )
+    ) {
+      this.decorations = buildDiagnosticDecorations(update.view);
+    }
+  }
+}, {
+  decorations: plugin => plugin.decorations,
+});
+
+const markdownDiagnosticGutter = gutter({
+  class: 'cm-llm-wiki-diagnostic-gutter',
+  markers: view => {
+    const markers: Array<{ from: number; marker: GutterMarker }> = [];
+    for (const diagnostic of view.state.field(markdownDiagnosticsField)) {
+      markers.push({
+        from: view.state.doc.lineAt(diagnostic.from).from,
+        marker: new DiagnosticGutterMarker(diagnostic.severity),
+      });
+    }
+    return RangeSet.of(markers.map(item => item.marker.range(item.from)), true);
+  },
+});
+
+const gitDiffField = StateField.define<readonly GitDiffLine[]>({
+  create: () => [],
+  update(lines, transaction) {
+    for (const effect of transaction.effects) {
+      if (effect.is(setGitDiffLines)) return [...effect.value];
+    }
+    return lines;
+  },
+});
+
+const gitDiffGutter = gutter({
+  class: 'cm-llm-wiki-git-diff-gutter',
+  markers: view => {
+    const markers: Array<{ from: number; marker: GutterMarker }> = [];
+    for (const change of view.state.field(gitDiffField)) {
+      if (change.line < 1 || change.line > view.state.doc.lines) continue;
+      markers.push({
+        from: view.state.doc.line(change.line).from,
+        marker: new GitDiffGutterMarker(change.kind, change.line),
+      });
+    }
+    return RangeSet.of(markers.map(item => item.marker.range(item.from)), true);
+  },
+});
+
+function buildDiagnosticDecorations(view: EditorView): DecorationSet {
+  return Decoration.set(
+    view.state.field(markdownDiagnosticsField).map((diagnostic, index) =>
+      Decoration.mark({
+        class: 'cm-llm-wiki-diagnostic',
+        attributes: {
+          'data-markdown-diagnostic-index': String(index),
+          'aria-label': `${diagnostic.code}: ${diagnostic.message}`,
+        },
+      }).range(
+        diagnostic.from,
+        Math.max(diagnostic.from + 1, diagnostic.to),
+      ),
+    ),
+    true,
+  );
+}
+
+class MarkdownDiagnosticPopover {
+  private readonly popover = document.createElement('div');
+  private hoveredIndex: number | undefined;
+  private hoverAnchor: HTMLElement | undefined;
+  private activeDiagnostic: MarkdownDiagnostic | undefined;
+  private positionFrame: number | undefined;
+
+  private readonly onPointerOver = (event: PointerEvent) => {
+    const target = diagnosticElement(event.target, this.view.dom);
+    if (!target) return;
+    this.hoveredIndex = diagnosticIndex(target);
+    this.hoverAnchor = target;
+    this.sync();
+  };
+
+  private readonly onPointerOut = (event: PointerEvent) => {
+    const current = diagnosticElement(event.target, this.view.dom);
+    if (!current) return;
+    const related = diagnosticElement(event.relatedTarget, this.view.dom);
+    if (related && diagnosticIndex(related) === diagnosticIndex(current)) {
+      this.hoverAnchor = related;
+      return;
+    }
+    this.hoveredIndex = undefined;
+    this.hoverAnchor = undefined;
+    this.sync();
+  };
+
+  private readonly onFocusIn = (event: FocusEvent) => {
+    const target = diagnosticElement(event.target, this.view.dom);
+    if (!target) return;
+    this.hoveredIndex = diagnosticIndex(target);
+    this.hoverAnchor = target;
+    this.sync();
+  };
+
+  private readonly onFocusOut = (event: FocusEvent) => {
+    const current = diagnosticElement(event.target, this.view.dom);
+    if (!current) return;
+    const related = diagnosticElement(event.relatedTarget, this.view.dom);
+    if (related && diagnosticIndex(related) === diagnosticIndex(current)) return;
+    this.hoveredIndex = undefined;
+    this.hoverAnchor = undefined;
+    this.sync();
+  };
+
+  private readonly onKeyDown = (event: KeyboardEvent) => {
+    if (event.key !== 'Escape' || this.popover.hidden) return;
+    this.hide();
+    event.preventDefault();
+    event.stopPropagation();
+  };
+
+  private readonly reposition = () => this.schedulePosition();
+
+  constructor(private readonly view: EditorView) {
+    this.popover.id = 'cm-markdown-diagnostic-popover';
+    this.popover.className = 'cm-markdown-diagnostic-popover';
+    this.popover.setAttribute('role', 'tooltip');
+    this.popover.hidden = true;
+    this.view.dom.append(this.popover);
+    this.view.dom.addEventListener('pointerover', this.onPointerOver);
+    this.view.dom.addEventListener('pointerout', this.onPointerOut);
+    this.view.dom.addEventListener('focusin', this.onFocusIn);
+    this.view.dom.addEventListener('focusout', this.onFocusOut);
+    this.view.dom.addEventListener('keydown', this.onKeyDown, true);
+    this.view.scrollDOM.addEventListener('scroll', this.reposition);
+    window.addEventListener('resize', this.reposition);
+  }
+
+  update(update: ViewUpdate): void {
+    if (update.docChanged || update.selectionSet || update.geometryChanged) this.sync();
+  }
+
+  destroy(): void {
+    this.view.dom.removeEventListener('pointerover', this.onPointerOver);
+    this.view.dom.removeEventListener('pointerout', this.onPointerOut);
+    this.view.dom.removeEventListener('focusin', this.onFocusIn);
+    this.view.dom.removeEventListener('focusout', this.onFocusOut);
+    this.view.dom.removeEventListener('keydown', this.onKeyDown, true);
+    this.view.scrollDOM.removeEventListener('scroll', this.reposition);
+    window.removeEventListener('resize', this.reposition);
+    if (this.positionFrame !== undefined) cancelAnimationFrame(this.positionFrame);
+    this.popover.remove();
+  }
+
+  private sync(): void {
+    const diagnostics = this.view.state.field(markdownDiagnosticsField);
+    const hovered = this.hoveredIndex === undefined ? undefined : diagnostics[this.hoveredIndex];
+    const caret = this.view.state.selection.main;
+    const underCaret = caret.empty
+      ? diagnostics.find(diagnostic => diagnostic.from <= caret.head && caret.head < diagnostic.to)
+      : undefined;
+    const diagnostic = hovered ?? underCaret;
+    if (!diagnostic) {
+      this.hide();
+      return;
+    }
+    this.show(diagnostic);
+  }
+
+  private show(diagnostic: MarkdownDiagnostic): void {
+    this.activeDiagnostic = diagnostic;
+    this.popover.replaceChildren(
+      popoverText(
+        'cm-markdown-diagnostic-popover-label',
+        `${diagnostic.code} · ${diagnostic.source}`,
+      ),
+      popoverText('cm-markdown-diagnostic-popover-message', diagnostic.message),
+    );
+    this.popover.hidden = false;
+    this.schedulePosition();
+  }
+
+  private hide(): void {
+    if (this.positionFrame !== undefined) {
+      cancelAnimationFrame(this.positionFrame);
+      this.positionFrame = undefined;
+    }
+    this.activeDiagnostic = undefined;
+    this.popover.hidden = true;
+    this.popover.style.removeProperty('visibility');
+  }
+
+  private schedulePosition(): void {
+    if (this.positionFrame !== undefined) cancelAnimationFrame(this.positionFrame);
+    this.popover.style.visibility = 'hidden';
+    this.positionFrame = requestAnimationFrame(() => {
+      this.positionFrame = undefined;
+      this.position();
+    });
+  }
+
+  private position(): void {
+    if (this.popover.hidden || !this.activeDiagnostic) return;
+    let anchor = this.hoverAnchor?.isConnected
+      ? this.hoverAnchor.getBoundingClientRect()
+      : undefined;
+    if (!anchor) {
+      try {
+        const coords = this.view.coordsAtPos(this.activeDiagnostic.from);
+        anchor = coords
+          ? new DOMRect(coords.left, coords.top, coords.right - coords.left, coords.bottom - coords.top)
+          : undefined;
+      } catch {
+        anchor = undefined;
+      }
+    }
+    if (!anchor) {
+      this.hide();
+      return;
+    }
+    positionPopover(this.popover, anchor);
+  }
+}
+
+class GitDiffPopover {
+  private readonly popover = document.createElement('div');
+  private activeLine: number | undefined;
+  private hoverAnchor: HTMLElement | undefined;
+  private positionFrame: number | undefined;
+
+  private readonly onPointerOver = (event: PointerEvent) => {
+    const target = gitDiffElement(event.target, this.view.dom);
+    if (!target) return;
+    this.activeLine = Number(target.dataset.gitDiffLine);
+    this.hoverAnchor = target;
+    this.sync();
+  };
+
+  private readonly onPointerOut = (event: PointerEvent) => {
+    const current = gitDiffElement(event.target, this.view.dom);
+    if (!current) return;
+    const related = gitDiffElement(event.relatedTarget, this.view.dom);
+    if (related && related.dataset.gitDiffLine === current.dataset.gitDiffLine) {
+      this.hoverAnchor = related;
+      return;
+    }
+    this.activeLine = undefined;
+    this.hoverAnchor = undefined;
+    this.hide();
+  };
+
+  private readonly reposition = () => this.schedulePosition();
+
+  constructor(private readonly view: EditorView) {
+    this.popover.id = 'cm-git-diff-popover';
+    this.popover.className = 'cm-git-diff-popover';
+    this.popover.setAttribute('role', 'dialog');
+    this.popover.hidden = true;
+    this.view.dom.append(this.popover);
+    this.view.dom.addEventListener('pointerover', this.onPointerOver);
+    this.view.dom.addEventListener('pointerout', this.onPointerOut);
+    this.view.scrollDOM.addEventListener('scroll', this.reposition);
+    window.addEventListener('resize', this.reposition);
+  }
+
+  update(update: ViewUpdate): void {
+    if (update.docChanged || update.geometryChanged) this.sync();
+  }
+
+  destroy(): void {
+    this.view.dom.removeEventListener('pointerover', this.onPointerOver);
+    this.view.dom.removeEventListener('pointerout', this.onPointerOut);
+    this.view.scrollDOM.removeEventListener('scroll', this.reposition);
+    window.removeEventListener('resize', this.reposition);
+    if (this.positionFrame !== undefined) cancelAnimationFrame(this.positionFrame);
+    this.popover.remove();
+  }
+
+  private sync(): void {
+    if (this.activeLine === undefined) {
+      this.hide();
+      return;
+    }
+    const change = this.view.state.field(gitDiffField)
+      .find(item => item.line === this.activeLine);
+    if (!change) {
+      this.hide();
+      return;
+    }
+    this.popover.replaceChildren(
+      popoverText(
+        'cm-git-diff-popover-label',
+        `${change.kind[0]!.toUpperCase()}${change.kind.slice(1)} line ${change.line}`,
+      ),
+      diffLine(change.before, change.after),
+    );
+    this.popover.hidden = false;
+    this.schedulePosition();
+  }
+
+  private hide(): void {
+    if (this.positionFrame !== undefined) {
+      cancelAnimationFrame(this.positionFrame);
+      this.positionFrame = undefined;
+    }
+    this.popover.hidden = true;
+    this.popover.style.removeProperty('visibility');
+  }
+
+  private schedulePosition(): void {
+    if (this.positionFrame !== undefined) cancelAnimationFrame(this.positionFrame);
+    this.popover.style.visibility = 'hidden';
+    this.positionFrame = requestAnimationFrame(() => {
+      this.positionFrame = undefined;
+      if (!this.hoverAnchor?.isConnected) return;
+      positionPopover(this.popover, this.hoverAnchor.getBoundingClientRect());
+    });
+  }
+}
+
+const markdownDiagnosticPopover = ViewPlugin.fromClass(MarkdownDiagnosticPopover);
+const gitDiffPopover = ViewPlugin.fromClass(GitDiffPopover);
+
+function diagnosticElement(target: EventTarget | null, root: HTMLElement): HTMLElement | undefined {
+  if (!(target instanceof Element)) return undefined;
+  const element = target.closest<HTMLElement>('[data-markdown-diagnostic-index]');
+  return element && root.contains(element) ? element : undefined;
+}
+
+function diagnosticIndex(element: HTMLElement): number | undefined {
+  const value = Number(element.dataset.markdownDiagnosticIndex);
+  return Number.isInteger(value) && value >= 0 ? value : undefined;
+}
+
+function gitDiffElement(target: EventTarget | null, root: HTMLElement): HTMLElement | undefined {
+  if (!(target instanceof Element)) return undefined;
+  const element = target.closest<HTMLElement>('[data-git-diff-line]');
+  return element && root.contains(element) ? element : undefined;
+}
+
+function diffLine(before: string | undefined, after: string | undefined): HTMLElement {
+  const element = document.createElement('pre');
+  element.className = 'cm-git-diff-popover-body';
+  element.textContent = [
+    ...(before === undefined ? [] : [`- ${before}`]),
+    ...(after === undefined ? [] : [`+ ${after}`]),
+  ].join('\n');
+  return element;
+}
+
+function positionPopover(popover: HTMLElement, anchor: DOMRect): void {
+  const gap = 8;
+  const bounds = popover.getBoundingClientRect();
+  const maxLeft = Math.max(gap, window.innerWidth - bounds.width - gap);
+  const left = Math.min(Math.max(gap, anchor.left), maxLeft);
+  let top = anchor.bottom + gap;
+  if (top + bounds.height > window.innerHeight - gap) {
+    top = anchor.top - bounds.height - gap;
+  }
+  top = Math.min(
+    Math.max(gap, top),
+    Math.max(gap, window.innerHeight - bounds.height - gap),
+  );
+  popover.style.left = `${Math.round(left)}px`;
+  popover.style.top = `${Math.round(top)}px`;
+  popover.style.visibility = 'visible';
+}
 
 class LearningNoteWidget extends WidgetType {
   constructor(readonly annotation: LearningAnnotation) {
@@ -555,6 +1024,9 @@ const llmWikiLinkRendering = ViewPlugin.fromClass(class {
       update.docChanged ||
       update.viewportChanged ||
       update.selectionSet ||
+      update.transactions.some(transaction =>
+        transaction.effects.some(effect => effect.is(setMarkdownDiagnostics))
+      ) ||
       isHybridPreviewEnabled(update.startState) !== isHybridPreviewEnabled(update.state)
     ) {
       this.decorations = buildDecorations(update.view);
@@ -957,6 +1429,8 @@ function createView(text: string, title?: string): EditorView {
         : EditorSelection.cursor(initialBodyPosition),
       extensions: [
         lineNumbers({ domEventHandlers: { mousedown: selectSourceLineFromGutter } }),
+        markdownDiagnosticGutter,
+        gitDiffGutter,
         foldGutter({ openText: '⌄', closedText: '›' }),
         vimBacktickGuard,
         vimModeCompartment.of(vimModeEnabled ? [vim()] : []),
@@ -974,6 +1448,11 @@ function createView(text: string, title?: string): EditorView {
         }),
         hybridRendering(),
         llmWikiLinkRendering,
+        markdownDiagnosticsField,
+        markdownDiagnosticDecorations,
+        markdownDiagnosticPopover,
+        gitDiffField,
+        gitDiffPopover,
         learningAnnotationField,
         learningAnnotationPopover,
         EditorView.baseTheme({
@@ -1101,7 +1580,15 @@ function createView(text: string, title?: string): EditorView {
             dismissLinkPreview();
           }
           if (update.docChanged && !applyingHostUpdate) {
-            vscode.postMessage({ type: 'edit', text: update.state.doc.toString() });
+            const changes: Array<{ from: number; to: number; text: string }> = [];
+            update.changes.iterChanges((from, to, _newFrom, _newTo, inserted) => {
+              changes.push({ from, to, text: inserted.toString() });
+            });
+            vscode.postMessage({
+              type: 'edit',
+              baseLength: update.startState.doc.length,
+              changes,
+            });
           }
           if (update.docChanged || update.selectionSet) {
             postSelection(update.view);
@@ -1452,7 +1939,6 @@ function createView(text: string, title?: string): EditorView {
           },
           '.cm-llm-wiki-link': {
             display: 'inline',
-            maxWidth: '32rem',
             border: '0',
             borderRadius: '0',
             padding: '0',
@@ -1466,6 +1952,84 @@ function createView(text: string, title?: string): EditorView {
             textUnderlineOffset: '2px',
             whiteSpace: 'normal',
             verticalAlign: 'baseline',
+          },
+          '.cm-llm-wiki-diagnostic': {
+            textDecorationLine: 'underline',
+            textDecorationStyle: 'wavy',
+            textDecorationColor: 'var(--vscode-errorForeground, #f48771)',
+            textUnderlineOffset: '3px',
+            cursor: 'help',
+          },
+          '.cm-llm-wiki-diagnostic-gutter': {
+            width: '7px',
+            marginLeft: '2px',
+            marginRight: '2px',
+            textAlign: 'center',
+            fontSize: '8px',
+            lineHeight: 'var(--llm-wiki-editor-line-height, 24px)',
+          },
+          '.cm-llm-wiki-diagnostic-error': {
+            color: 'var(--vscode-errorForeground, #f48771)',
+          },
+          '.cm-llm-wiki-diagnostic-warning': {
+            color: 'var(--vscode-editorWarning-foreground, #cca700)',
+          },
+          '.cm-llm-wiki-diagnostic-info': {
+            color: 'var(--vscode-editorInfo-foreground, #75beff)',
+          },
+          '.cm-llm-wiki-git-diff-gutter': {
+            width: '3px',
+            marginLeft: '1px',
+            marginRight: '1px',
+            lineHeight: 'var(--llm-wiki-editor-line-height, 24px)',
+            backgroundColor: 'transparent',
+          },
+          '.cm-llm-wiki-git-diff-added': {
+            borderLeft: '3px solid var(--vscode-gitDecoration-addedResourceForeground, #81b88b)',
+          },
+          '.cm-llm-wiki-git-diff-modified': {
+            borderLeft: '3px solid var(--vscode-gitDecoration-modifiedResourceForeground, #e2c08d)',
+          },
+          '.cm-llm-wiki-git-diff-deleted': {
+            borderLeft: '3px solid var(--vscode-gitDecoration-deletedResourceForeground, #c74e39)',
+            color: 'var(--vscode-gitDecoration-deletedResourceForeground, #c74e39)',
+          },
+          '.cm-markdown-diagnostic-popover, .cm-git-diff-popover': {
+            position: 'fixed',
+            zIndex: '1200',
+            boxSizing: 'border-box',
+            width: 'min(420px, calc(100vw - 16px))',
+            maxHeight: 'min(280px, calc(100vh - 16px))',
+            padding: '10px 12px',
+            overflow: 'auto',
+            border: '1px solid var(--vscode-editorHoverWidget-border, var(--vscode-widget-border))',
+            borderRadius: '6px',
+            color: 'var(--vscode-editorHoverWidget-foreground, var(--vscode-editor-foreground))',
+            backgroundColor: 'var(--vscode-editorHoverWidget-background, var(--vscode-editorWidget-background))',
+            boxShadow: '0 4px 14px var(--vscode-widget-shadow, rgba(0, 0, 0, .32))',
+            font: '13px/1.42 var(--vscode-font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif)',
+            whiteSpace: 'normal',
+            pointerEvents: 'none',
+          },
+          '.cm-markdown-diagnostic-popover[hidden], .cm-git-diff-popover[hidden]': {
+            display: 'none',
+          },
+          '.cm-markdown-diagnostic-popover-label, .cm-git-diff-popover-label': {
+            marginBottom: '4px',
+            color: 'var(--vscode-descriptionForeground)',
+            fontSize: '11px',
+            fontWeight: '600',
+            letterSpacing: '.02em',
+            textTransform: 'uppercase',
+          },
+          '.cm-markdown-diagnostic-popover-message': {
+            fontWeight: '600',
+          },
+          '.cm-git-diff-popover-body': {
+            margin: '6px 0 0',
+            whiteSpace: 'pre-wrap',
+            color: 'var(--vscode-editor-foreground)',
+            font: '12px/1.45 var(--vscode-editor-font-family, ui-monospace, Menlo, monospace)',
           },
           '.cm-llm-wiki-link:hover': {
             color: 'var(--vscode-textLink-activeForeground, var(--vscode-textLink-foreground))',
@@ -1938,7 +2502,13 @@ function copySelectionForAgent(editorView: EditorView): boolean {
   syncNativeSelectionToEditorSelection(editorView);
   const selection = editorView.state.selection.main;
   if (selection.empty) return false;
-  vscode.postMessage({ type: 'copySelectionForAgent' });
+  vscode.postMessage({
+    type: 'copySelectionForAgent',
+    selection: {
+      from: selection.from,
+      to: selection.to,
+    },
+  });
   return true;
 }
 
@@ -1947,20 +2517,51 @@ let cursorSelectionPrompt:
     container: HTMLDivElement;
     editorView: EditorView;
     capabilityKey: string;
+    copyButton: HTMLButtonElement;
+    copyButtonLabel: HTMLSpanElement;
+    copyButtonShortcut: HTMLSpanElement;
+    copyTimer?: number;
   }
   | undefined;
+
+function removeCursorSelectionPrompt(): void {
+  const prompt = cursorSelectionPrompt;
+  if (!prompt) return;
+  if (prompt.copyTimer !== undefined) {
+    window.clearTimeout(prompt.copyTimer);
+  }
+  prompt.container.remove();
+  cursorSelectionPrompt = undefined;
+}
+
+function showCopySucceeded(): void {
+  const prompt = cursorSelectionPrompt;
+  if (!prompt) return;
+  if (prompt.copyTimer !== undefined) {
+    window.clearTimeout(prompt.copyTimer);
+  }
+  prompt.copyButtonLabel.textContent = 'Copied';
+  prompt.copyButtonShortcut.hidden = true;
+  prompt.copyButton.setAttribute('aria-label', 'Copied');
+  prompt.copyTimer = window.setTimeout(() => {
+    if (!cursorSelectionPrompt || cursorSelectionPrompt !== prompt) return;
+    prompt.copyButtonLabel.textContent = 'Copy for Agent';
+    prompt.copyButtonShortcut.hidden = false;
+    prompt.copyButton.setAttribute('aria-label', 'Copy for Agent');
+    prompt.copyTimer = undefined;
+  }, 1000);
+}
 
 function updateCursorSelectionPrompt(editorView: EditorView): void {
   const selection = editorView.state.selection.main;
   if (selection.empty || !editorView.dom.isConnected) {
-    cursorSelectionPrompt?.container.remove();
-    cursorSelectionPrompt = undefined;
+    removeCursorSelectionPrompt();
     return;
   }
 
   const capabilityKey = String(agentCapabilities.cursorAgent);
   if (!cursorSelectionPrompt || cursorSelectionPrompt.capabilityKey !== capabilityKey) {
-    cursorSelectionPrompt?.container.remove();
+    removeCursorSelectionPrompt();
     const container = document.createElement('div');
     container.className = 'llm-wiki-cursor-selection-prompt';
     container.setAttribute('role', 'toolbar');
@@ -1998,7 +2599,14 @@ function updateCursorSelectionPrompt(editorView: EditorView): void {
     copyButton.type = 'button';
     copyButton.className = 'llm-wiki-cursor-selection-copy';
     copyButton.setAttribute('aria-label', 'Copy for Agent');
-    copyButton.textContent = 'Copy for Agent';
+    const copyButtonLabel = document.createElement('span');
+    copyButtonLabel.className = 'copy-for-agent-label';
+    copyButtonLabel.textContent = 'Copy for Agent';
+    const copyButtonShortcut = document.createElement('span');
+    copyButtonShortcut.className = 'copy-for-agent-shortcut';
+    copyButtonShortcut.textContent = copyForAgentShortcutLabel();
+    copyButtonShortcut.setAttribute('aria-hidden', 'true');
+    copyButton.append(copyButtonLabel, copyButtonShortcut);
     copyButton.addEventListener('pointerdown', event => {
       event.preventDefault();
       event.stopPropagation();
@@ -2013,7 +2621,14 @@ function updateCursorSelectionPrompt(editorView: EditorView): void {
     container.appendChild(copyButton);
     ensureCursorSelectionPromptStyles();
     document.body.appendChild(container);
-    cursorSelectionPrompt = { container, editorView, capabilityKey };
+    cursorSelectionPrompt = {
+      container,
+      editorView,
+      capabilityKey,
+      copyButton,
+      copyButtonLabel,
+      copyButtonShortcut,
+    };
   } else {
     cursorSelectionPrompt.editorView = editorView;
   }
@@ -2039,6 +2654,10 @@ function updateCursorSelectionPrompt(editorView: EditorView): void {
 
 function cursorSelectionShortcutLabel(): string {
   return /Mac|iPhone|iPad/u.test(navigator.platform) ? '⌘L' : 'Ctrl+L';
+}
+
+function copyForAgentShortcutLabel(): string {
+  return /Mac|iPhone|iPad/u.test(navigator.platform) ? '⌥⌘C' : 'Ctrl+Alt+C';
 }
 
 function ensureCursorSelectionPromptStyles(): void {
@@ -2095,8 +2714,25 @@ function ensureCursorSelectionPromptStyles(): void {
       padding: 0 2px 0 3px;
     }
     .llm-wiki-cursor-selection-prompt .llm-wiki-cursor-selection-copy {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
       padding: 0 7px;
       color: var(--vscode-descriptionForeground, inherit);
+    }
+    .llm-wiki-cursor-selection-prompt .copy-for-agent-shortcut {
+      display: inline-flex;
+      align-items: center;
+      height: 18px;
+      padding: 0 4px;
+      border: 0;
+      border-radius: 4px;
+      background: var(--vscode-toolbar-hoverBackground, rgba(127, 127, 127, .16));
+      color: var(--vscode-input-placeholderForeground, var(--vscode-descriptionForeground, inherit));
+      font: 11px var(--vscode-font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
+    }
+    .llm-wiki-cursor-selection-prompt .copy-for-agent-shortcut[hidden] {
+      display: none;
     }
     .llm-wiki-cursor-selection-prompt .add-to-chat-shortcut {
       display: inline-flex;
@@ -3087,6 +3723,12 @@ window.addEventListener('message', event => {
       break;
     }
 
+    case 'requestText':
+      if (view) {
+        vscode.postMessage({ type: 'edit', text: view.state.doc.toString() });
+      }
+      break;
+
     case 'linkPreview':
       applyResolvedLinkPreview(message);
       break;
@@ -3118,6 +3760,20 @@ window.addEventListener('message', event => {
       if (!view) return;
       view.dispatch({
         effects: setLearningAnnotations.of(normalizeLearningAnnotations(message.annotations)),
+      });
+      break;
+
+    case 'setDiagnostics':
+      if (!view || !Array.isArray(message.diagnostics)) return;
+      view.dispatch({
+        effects: setMarkdownDiagnostics.of(normalizeMarkdownDiagnostics(message.diagnostics)),
+      });
+      break;
+
+    case 'setGitDiff':
+      if (!view || !Array.isArray(message.lines)) return;
+      view.dispatch({
+        effects: setGitDiffLines.of(normalizeGitDiffLines(message.lines)),
       });
       break;
 
@@ -3168,6 +3824,10 @@ window.addEventListener('message', event => {
     case 'agentHandoffCapabilities':
       agentCapabilities = normalizeAgentSurfaceCapabilities(message);
       if (view) updateCursorSelectionPrompt(view);
+      break;
+
+    case 'copySelectionForAgentResult':
+      if (message.ok === true) showCopySucceeded();
       break;
 
     case 'revealPosition':
@@ -3223,6 +3883,57 @@ function normalizeLearningAnnotations(value: unknown): LearningAnnotation[] {
       summary: raw.summary,
       ...(from !== undefined ? { from } : {}),
       ...(to !== undefined ? { to } : {}),
+    }];
+  });
+}
+
+function normalizeMarkdownDiagnostics(value: unknown): MarkdownDiagnostic[] {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, 2_000).flatMap(candidate => {
+    if (!candidate || typeof candidate !== 'object') return [];
+    const raw = candidate as Record<string, unknown>;
+    if (
+      typeof raw.from !== 'number'
+      || typeof raw.to !== 'number'
+      || typeof raw.line !== 'number'
+      || typeof raw.message !== 'string'
+      || typeof raw.source !== 'string'
+      || typeof raw.code !== 'string'
+      || !Number.isFinite(raw.from)
+      || !Number.isFinite(raw.to)
+      || !Number.isFinite(raw.line)
+    ) return [];
+    const severity = raw.severity === 'error' || raw.severity === 'info'
+      ? raw.severity
+      : 'warning';
+    return [{
+      from: Math.max(0, Math.trunc(raw.from)),
+      to: Math.max(0, Math.trunc(raw.to)),
+      line: Math.max(1, Math.trunc(raw.line)),
+      message: raw.message.slice(0, 4_000),
+      source: raw.source.slice(0, 200),
+      code: raw.code.slice(0, 200),
+      severity,
+    }];
+  });
+}
+
+function normalizeGitDiffLines(value: unknown): GitDiffLine[] {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, 10_000).flatMap(candidate => {
+    if (!candidate || typeof candidate !== 'object') return [];
+    const raw = candidate as Record<string, unknown>;
+    if (
+      typeof raw.line !== 'number'
+      || !Number.isSafeInteger(raw.line)
+      || raw.line < 1
+    ) return [];
+    const kind = raw.kind === 'added' || raw.kind === 'deleted' ? raw.kind : 'modified';
+    return [{
+      line: raw.line,
+      kind,
+      ...(typeof raw.before === 'string' ? { before: raw.before.slice(0, 4_000) } : {}),
+      ...(typeof raw.after === 'string' ? { after: raw.after.slice(0, 4_000) } : {}),
     }];
   });
 }
@@ -3368,7 +4079,13 @@ function buildDecorations(view: EditorView): DecorationSet {
       if (activeLines.has(line.number)) {
         collectActiveLineDecorations(line.from, line.text, referenceDefinitions, activeSelectionRanges, decorations);
       } else {
-        collectLineDecorations(line.from, line.text, referenceDefinitions, decorations);
+        collectLineDecorations(
+          line.from,
+          line.text,
+          referenceDefinitions,
+          view.state.field(markdownDiagnosticsField),
+          decorations,
+        );
       }
       pos = line.to + 1;
     }
@@ -3407,6 +4124,7 @@ function collectLineDecorations(
   lineFrom: number,
   text: string,
   referenceDefinitions: ReturnType<typeof markdownReferenceDefinitions>,
+  diagnostics: readonly MarkdownDiagnostic[],
   decorations: Range<Decoration>[],
 ): void {
   const inlineCodeSpans = inlineCodeSourceSpans(lineFrom, text);
@@ -3425,6 +4143,11 @@ function collectLineDecorations(
     }
     const uri = parseMarkdownLinkDestination(link.destination);
     if (!uri) continue;
+    const diagnostic = diagnosticForRange(
+      sourceFrom,
+      sourceTo,
+      diagnostics,
+    );
     decorations.push(Decoration.replace({
       widget: new HlLinkWidget(
         uri,
@@ -3432,6 +4155,8 @@ function collectLineDecorations(
         sourceFrom,
         sourceTo,
         isDocumentRelativeUri(uri),
+        diagnostic?.index,
+        diagnostic?.value.severity,
       ),
     }).range(sourceFrom, sourceTo));
     occupied.push({ from: sourceFrom, to: sourceTo });
@@ -3448,6 +4173,11 @@ function collectLineDecorations(
       occupied.push({ from: sourceFrom, to: sourceTo });
       continue;
     }
+    const diagnostic = diagnosticForRange(
+      sourceFrom,
+      sourceTo,
+      diagnostics,
+    );
     decorations.push(Decoration.replace({
       widget: new HlLinkWidget(
         link.definition.destination,
@@ -3455,6 +4185,8 @@ function collectLineDecorations(
         sourceFrom,
         sourceTo,
         isDocumentRelativeUri(link.definition.destination),
+        diagnostic?.index,
+        diagnostic?.value.severity,
       ),
     }).range(sourceFrom, sourceTo));
     occupied.push({ from: sourceFrom, to: sourceTo });
@@ -3488,6 +4220,18 @@ function collectLineDecorations(
     }).range(sourceFrom, sourceTo));
     occupied.push({ from: sourceFrom, to: sourceTo });
   }
+}
+
+function diagnosticForRange(
+  from: number,
+  to: number,
+  diagnostics: readonly MarkdownDiagnostic[],
+): { index: number; value: MarkdownDiagnostic } | undefined {
+  for (let index = 0; index < diagnostics.length; index++) {
+    const value = diagnostics[index]!;
+    if (value.from < to && value.to > from) return { index, value };
+  }
+  return undefined;
 }
 
 /** True when the whole link is literal text inside an inline-code run. */

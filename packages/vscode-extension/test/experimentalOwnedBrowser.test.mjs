@@ -39,7 +39,7 @@ function loadTsModule(relativePath, mocks = {}) {
 
 const protocol = loadTsModule('src/experimentalOwnedBrowserProtocol.ts');
 const cursorCrop = loadTsModule('src/cursorCrop.ts', {
-  './pdfDiscussionController': { PDF_DISCUSSION_MAX_PNG_BYTES: MAX_PNG_BYTES },
+  './pdfPngConstraints': { MAX_PNG_BYTES },
 });
 const registeredCommands = [];
 const vscode = {

@@ -79,6 +79,46 @@ const server = createServer((_req, res) => {
     return;
   }
 
+  if (url.pathname === '/fixtures/two-column-selection-regression.pdf') {
+    serveBuffer(twoColumnSelectionRegressionPdfFixture(), 'application/pdf', res);
+    return;
+  }
+
+  if (url.pathname === '/fixtures/source-aligned-column-continuation-regression.pdf') {
+    serveBuffer(sourceAlignedColumnContinuationRegressionPdfFixture(), 'application/pdf', res);
+    return;
+  }
+
+  if (url.pathname === '/fixtures/stacked-equation-selection-regression.pdf') {
+    serveBuffer(stackedEquationSelectionRegressionPdfFixture(), 'application/pdf', res);
+    return;
+  }
+
+  if (url.pathname === '/fixtures/preview-footnote-selection-regression.pdf') {
+    serveBuffer(previewFootnoteSelectionRegressionPdfFixture(), 'application/pdf', res);
+    return;
+  }
+
+  if (url.pathname === '/fixtures/staggered-band-bridge-regression.pdf') {
+    serveBuffer(staggeredBandBridgeRegressionPdfFixture(), 'application/pdf', res);
+    return;
+  }
+
+  if (url.pathname === '/fixtures/author-grid-selection-regression.pdf') {
+    serveBuffer(authorGridSelectionRegressionPdfFixture(), 'application/pdf', res);
+    return;
+  }
+
+  if (url.pathname === '/fixtures/numeric-table-selection-regression.pdf') {
+    serveBuffer(numericTableSelectionRegressionPdfFixture(), 'application/pdf', res);
+    return;
+  }
+
+  if (url.pathname === '/fixtures/centered-masthead-selection-regression.pdf') {
+    serveBuffer(centeredMastheadSelectionRegressionPdfFixture(), 'application/pdf', res);
+    return;
+  }
+
   if (url.pathname === '/fixtures/unicode-selector.pdf') {
     serveBuffer(unicodeSelectorPdfFixture(), 'application/pdf', res);
     return;
@@ -358,6 +398,175 @@ function formulaSelectionPdfFixture() {
   return pdfFixture(objects);
 }
 
+function twoColumnSelectionRegressionPdfFixture() {
+  return positionedTextPdfFixture({
+    mediaBox: [0, 0, 640, 400],
+    fonts: ['Helvetica'],
+    runs: [
+      'BT /F1 16 Tf 48 280 Td (Left line one.) Tj ET',
+      'BT /F1 16 Tf 350 280 Td (Right line one.) Tj ET',
+      'BT /F1 16 Tf 48 250 Td (Left line two.) Tj ET',
+      'BT /F1 16 Tf 350 250 Td (Right line two.) Tj ET',
+      'BT /F1 16 Tf 48 220 Td (Left line three.) Tj ET',
+      'BT /F1 16 Tf 350 220 Td (Right line three.) Tj ET',
+    ],
+  });
+}
+
+function sourceAlignedColumnContinuationRegressionPdfFixture() {
+  return positionedTextPdfFixture({
+    mediaBox: [0, 0, 640, 440],
+    fonts: ['Helvetica'],
+    runs: [
+      'BT /F1 10 Tf 48 380 Td (A wide heading overlaps both prose columns for repeated lane evidence.) Tj ET',
+      'BT /F1 10 Tf 48 360 Td (A second wide heading also overlaps both prose columns for lane evidence.) Tj ET',
+      'BT /F1 10 Tf 48 340 Td (A third wide heading supplies another overlapping row for lane evidence.) Tj ET',
+      'BT /F1 10 Tf 48 300 Td (Left section label.) Tj ET',
+      'BT /F1 10 Tf 48 270 Td (Left paragraph line.) Tj ET',
+      'BT /F1 10 Tf 350 300 Td (Right continuation one.) Tj ET',
+      'BT /F1 10 Tf 350 283 Td (Right continuation two.) Tj ET',
+      'BT /F1 10 Tf 350 266 Td (Right continuation three.) Tj ET',
+    ],
+  });
+}
+
+function stackedEquationSelectionRegressionPdfFixture() {
+  return positionedTextPdfFixture({
+    mediaBox: [0, 0, 420, 260],
+    fonts: ['Helvetica', 'Helvetica-Oblique'],
+    runs: [
+      'BT /F1 14 Tf 48 180 Td (states ) Tj ET',
+      'BT /F1 14 Tf 91 180 Td (OPEN) Tj ET',
+      'BT /F1 9 Tf 98 190 Td (FA) Tj ET',
+      'BT /F2 14 Tf 111 180 Td (h) Tj ET',
+      'BT /F1 8 Tf 121 176 Td (1) Tj ET',
+      'BT /F1 14 Tf 128 180 Td (, ..., ) Tj ET',
+      'BT /F1 9 Tf 163 190 Td (FB) Tj ET',
+      'BT /F2 14 Tf 177 180 Td (h) Tj ET',
+      'BT /F1 8 Tf 187 176 Td (m) Tj ET',
+      'BT /F1 14 Tf 196 180 Td (CLOSE and a backward sequence) Tj ET',
+      'BT /F1 14 Tf 48 156 Td (OPEN) Tj ET',
+      'BT /F1 9 Tf 55 166 Td (BA) Tj ET',
+      'BT /F2 14 Tf 69 156 Td (k) Tj ET',
+      'BT /F1 8 Tf 79 152 Td (1) Tj ET',
+      'BT /F1 14 Tf 86 156 Td (, ..., ) Tj ET',
+      'BT /F1 9 Tf 121 166 Td (BB) Tj ET',
+      'BT /F2 14 Tf 135 156 Td (k) Tj ET',
+      'BT /F1 8 Tf 145 152 Td (m) Tj ET',
+      'BT /F1 14 Tf 154 156 Td (CLOSE. The hidden states) Tj ET',
+      'BT /F1 14 Tf 48 132 Td (continue in prose.) Tj ET',
+    ],
+  });
+}
+
+function previewFootnoteSelectionRegressionPdfFixture() {
+  return positionedTextPdfFixture({
+    mediaBox: [0, 0, 640, 420],
+    fonts: ['Helvetica', 'Times-Roman'],
+    runs: [
+      'BT /F1 16 Tf 48 300 Td (Left body line one.) Tj ET',
+      'BT /F1 16 Tf 48 275 Td (Left body line two.) Tj ET',
+      'BT /F1 16 Tf 48 250 Td (Left body line three.) Tj ET',
+      'BT /F2 10 Tf 48 190 Td (Footnote line one.) Tj ET',
+      'BT /F2 10 Tf 48 178.8 Td (Footnote line two.) Tj ET',
+      'BT /F1 16 Tf 350 298 Td (Right continuation one.) Tj ET',
+      'BT /F1 16 Tf 350 273 Td (Right continuation two.) Tj ET',
+      'BT /F1 16 Tf 350 248 Td (Right continuation three.) Tj ET',
+    ],
+  });
+}
+
+function staggeredBandBridgeRegressionPdfFixture() {
+  return positionedTextPdfFixture({
+    mediaBox: [0, 0, 640, 400],
+    fonts: ['Helvetica'],
+    runs: [
+      'BT /F1 10 Tf 48 300 Td (Left local row one has complete coverage.) Tj ET',
+      'BT /F1 10 Tf 48 286 Td (Left local row two has complete coverage.) Tj ET',
+      'BT /F1 10 Tf 48 272 Td (Left local row three has complete coverage.) Tj ET',
+      'BT /F1 10 Tf 350 294 Td (Right staggered row one remains independent.) Tj ET',
+      'BT /F1 10 Tf 350 280 Td (Right staggered row two remains independent.) Tj ET',
+      'BT /F1 10 Tf 350 266 Td (Right staggered row three remains independent.) Tj ET',
+    ],
+  });
+}
+
+function authorGridSelectionRegressionPdfFixture() {
+  return positionedTextPdfFixture({
+    mediaBox: [0, 0, 640, 360],
+    fonts: ['Helvetica-Bold', 'Helvetica'],
+    runs: [
+      'BT /F1 16 Tf 48 260 Td (Rafael Alpha) Tj ET',
+      'BT /F1 16 Tf 250 260 Td (Archit Beta) Tj ET',
+      'BT /F1 16 Tf 500 260 Td (Eric Gamma) Tj ET',
+      'BT /F1 16 Tf 48 235 Td (Stefano Delta) Tj ET',
+      'BT /F1 16 Tf 250 235 Td (Christopher Epsilon) Tj ET',
+      'BT /F1 16 Tf 500 235 Td (Chelsea Zeta) Tj ET',
+      'BT /F2 14 Tf 48 210 Td (authors@example.test) Tj ET',
+    ],
+  });
+}
+
+function numericTableSelectionRegressionPdfFixture() {
+  const rows = [
+    ['BERT Base Score ', '88', '19 76', '89', '88.09'],
+    ['BERT Large Score ', '90', '87 89', '65', '90.94'],
+    ['GPT3 126M Score ', '19', '01 28', '37', '19.43'],
+    ['GPT3 1.3B Score ', '10', '19 12', '74', '10.29'],
+    ['GPT3 6.7B Score ', '8', '51 10', '29', '8.41'],
+  ];
+  const runs = ['BT /F1 12 Tf 80 310 Td (Model Metric FP16 int8 FP8) Tj ET'];
+  rows.forEach((row, index) => {
+    const baseline = 280 - index * 24;
+    const firstDot = row[1].length === 1 ? 367 : 373;
+    const middleValue = firstDot + 4;
+    const secondDot = middleValue + 30;
+    const finalPlainValue = secondDot + 4;
+    runs.push(
+      `BT /F1 12 Tf 80 ${baseline} Td (${row[0]}) Tj ET`,
+      `BT /F1 12 Tf 360 ${baseline} Td (${row[1]}) Tj ET`,
+      `BT /F2 12 Tf ${firstDot} ${baseline} Td (.) Tj ET`,
+      `BT /F1 12 Tf ${middleValue} ${baseline} Td (${row[2]}) Tj ET`,
+      `BT /F2 12 Tf ${secondDot} ${baseline} Td (.) Tj ET`,
+      `BT /F1 12 Tf ${finalPlainValue} ${baseline} Td (${row[3]}) Tj ET`,
+      `BT /F3 12 Tf 446 ${baseline} Td (${row[4]}) Tj ET`,
+    );
+  });
+  return positionedTextPdfFixture({
+    mediaBox: [0, 0, 640, 420],
+    fonts: ['Helvetica', 'Times-Italic', 'Courier-Bold'],
+    runs,
+  });
+}
+
+function centeredMastheadSelectionRegressionPdfFixture() {
+  return positionedTextPdfFixture({
+    mediaBox: [0, 0, 612, 500],
+    fonts: ['Helvetica', 'Helvetica-Bold', 'Courier'],
+    runs: [
+      'BT /F1 14 Tf 172 410 Td (FP8 F) Tj ET',
+      'BT /F1 11 Tf 217 407 Td (ORMATS ) Tj ET',
+      'BT /F1 14 Tf 282 410 Td (F) Tj ET',
+      'BT /F1 11 Tf 292 407 Td (OR ) Tj ET',
+      'BT /F1 14 Tf 317 410 Td (D) Tj ET',
+      'BT /F1 11 Tf 331 407 Td (EEP ) Tj ET',
+      'BT /F1 14 Tf 362 410 Td (L) Tj ET',
+      'BT /F1 11 Tf 373 407 Td (EARNING) Tj ET',
+      'BT /F2 9 Tf 87 338 Td (Paulius Micikevicius, Dusan Stosic, Patrick Judd, John Kamalu, Stuart Oberman, Mohammad Shoeybi,) Tj ET',
+      'BT /F2 9 Tf 261 327 Td (Michael Siu, Hao Wu) Tj ET',
+      'BT /F1 11 Tf 288 316 Td (NVIDIA) Tj ET',
+      'BT /F3 8.7 Tf 102 304 Td ({pauliusm, dstosic, pjudd, jkamalu, soberman, mshoeybi, msiu, skyw}@nvidia.com) Tj ET',
+      'BT /F2 9 Tf 199 277 Td (Neil Burgess, Sangwon Ha, Richard Grisenthwaite) Tj ET',
+      'BT /F1 11 Tf 297 266 Td (Arm) Tj ET',
+      'BT /F3 8.7 Tf 157 254 Td ({neil.burgess, sangwon.ha, richard.grisenthwaite}@arm.com) Tj ET',
+      'BT /F2 9 Tf 148 227 Td (Naveen Mellempudi, Marius Cornea, Alexander Heinecke, Pradeep Dubey) Tj ET',
+      'BT /F1 11 Tf 297 216 Td (Intel) Tj ET',
+      'BT /F3 8.7 Tf 94 204 Td ({naveen.k.mellempudi, marius.cornea, alexander.heinecke, pradeep.dubey}@intel.com) Tj ET',
+      'BT /F2 12 Tf 276 150 Td (Abstract) Tj ET',
+    ],
+  });
+}
+
 function unicodeSelectorPdfFixture() {
   const toUnicode = [
     '/CIDInit /ProcSet findresource begin',
@@ -545,6 +754,24 @@ function pdfFixture(objects) {
   body += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\n`;
   body += `startxref\n${xrefOffset}\n%%EOF\n`;
   return Buffer.from(body, 'ascii');
+}
+
+function positionedTextPdfFixture({ mediaBox, fonts, runs }) {
+  const firstContentObject = 4;
+  const firstFontObject = firstContentObject + runs.length;
+  const contents = runs
+    .map((_, index) => `${firstContentObject + index} 0 R`)
+    .join(' ');
+  const resources = fonts
+    .map((_, index) => `/F${index + 1} ${firstFontObject + index} 0 R`)
+    .join(' ');
+  return pdfFixture([
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    `<< /Type /Page /Parent 2 0 R /MediaBox [${mediaBox.join(' ')}] /Resources << /Font << ${resources} >> >> /Contents [${contents}] >>`,
+    ...runs.map(pdfStream),
+    ...fonts.map(font => `<< /Type /Font /Subtype /Type1 /BaseFont /${font} >>`),
+  ]);
 }
 
 function pdfStream(content) {

@@ -81,13 +81,8 @@ export function activate(context: vscode.ExtensionContext): void {
   });
   pdfEditorProvider = new PdfEditorProvider(context, {
     ...(workspaceRoot ? { vaultRoot: workspaceRoot, documentRoot: workspaceRoot } : {}),
-    globalStoragePath: context.globalStorageUri?.fsPath
-      ?? context.extensionUri?.fsPath
-      ?? workspaceRoot,
-    learningNoteStore: learningNotes,
     agentCapabilities: () => agentCapabilitySource.read(),
     onDidChangeAgentCapabilities: agentCapabilitySource.onDidChange,
-    // TODO(ask-pdf): Re-enable after the provider-neutral “More detail” workflow and backend policy are specified.
   });
   void vscode.commands.executeCommand(
     'setContext',
@@ -274,11 +269,30 @@ function registerCommands(
     }),
     vscode.commands.registerCommand(
       'llm-wiki.copySelectionForAgent',
-      (selection?: SelectionContext) => (
-        isPdfUri(activeTabUri())
-          ? pdfEditorProvider?.copySelectionForAgent() ?? false
-          : copyMarkdownSelectionForAgent(selection)
-      ),
+      async (selection?: SelectionContext) => {
+        const activeUri = activeTabUri();
+        const isPdf = isPdfUri(activeUri);
+        const shouldNotifyMarkdownWebview =
+          !isPdf
+          && activeTabCustomViewType() === MarkdownEditorProvider.viewType;
+        let copied = false;
+        try {
+          copied = isPdf
+            ? await pdfEditorProvider?.copySelectionForAgent() ?? false
+            : await copyMarkdownSelectionForAgent(selection);
+          return copied;
+        } finally {
+          if (shouldNotifyMarkdownWebview) {
+            try {
+              await markdownEditorProvider?.postCopySelectionForAgentResult(copied);
+            } catch {
+              // Clipboard success must not be turned into a command failure by
+              // a webview that is closing or otherwise unable to receive the
+              // cosmetic confirmation message.
+            }
+          }
+        }
+      },
     ),
     vscode.commands.registerCommand(
       'llm-wiki.addSelectionToChat',
@@ -650,9 +664,14 @@ interface MarkdownSelectionActionMessages {
   saveFailureMessage: string;
 }
 
+interface PrepareMarkdownSelectionOptions {
+  selectionIsFresh?: boolean;
+}
+
 async function prepareMarkdownSelectionForAction(
   selection: SelectionContext | undefined,
   messages: MarkdownSelectionActionMessages,
+  options: PrepareMarkdownSelectionOptions = {},
 ): Promise<SelectionContext | undefined> {
   if (!isMarkdownSelection(selection)) return undefined;
   if (!selection.text) {
@@ -670,7 +689,7 @@ async function prepareMarkdownSelectionForAction(
     activeTabCustomViewType() === MarkdownEditorProvider.viewType
     && typeof markdownEditorProvider?.flushActiveEditsBeforeSave === 'function'
   ) {
-    shouldRecapture = true;
+    shouldRecapture = options.selectionIsFresh !== true;
     try {
       if (!await markdownEditorProvider.flushActiveEditsBeforeSave(selectedUri)) {
         vscode.window.showWarningMessage(messages.saveFailureMessage);
@@ -731,6 +750,8 @@ export async function copyMarkdownSelectionForAgent(
     emptySelectionMessage: 'Select Markdown text before copying for agent.',
     unsavedSelectionMessage: 'Save this Markdown note before copying for agent.',
     saveFailureMessage: 'Save the Markdown note before copying for agent.',
+  }, {
+    selectionIsFresh: suppliedSelection !== undefined,
   });
   if (!selection) return false;
 

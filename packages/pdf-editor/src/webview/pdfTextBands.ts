@@ -12,8 +12,10 @@ interface PdfTextBandCandidate {
   weight: number;
 }
 
-interface PdfTextBand {
+interface PdfTextBandSegment {
   candidates: PdfTextBandCandidate[];
+  left: number;
+  right: number;
   center: number;
   height: number;
 }
@@ -26,9 +28,11 @@ const PDF_TEXT_BAND_CENTER_TOLERANCE = 0.68;
  *
  * PDF font metrics can move or resize loose boxes for bold glyphs even when
  * those glyphs share a baseline with surrounding text. Grouping by robust
- * line centers prevents those runs from becoming nested sub-boxes. Neighbor
- * midpoints then cap the vertical extent so tightly-spaced lines never paint
- * on top of each other.
+ * line centers prevents those runs from becoming nested sub-boxes. Each
+ * disjoint horizontal segment is normalized independently. Midpoints with
+ * the nearest horizontally overlapping segments then cap its vertical extent,
+ * so tightly-spaced lines cannot overlap and a staggered neighboring column
+ * cannot shrink or shift the band.
  */
 export function normalizePdfTextBands(value: unknown): PdfRect[] {
   const candidates = validPdfTextBandRects(value).map(rect => {
@@ -55,74 +59,90 @@ export function normalizePdfTextBands(value: unknown): PdfRect[] {
     || left.right - right.right
   ));
 
-  const bands: PdfTextBand[] = [];
+  const segments: PdfTextBandSegment[] = [];
   for (const candidate of candidates) {
-    let match: PdfTextBand | undefined;
+    let match: PdfTextBandSegment | undefined;
     let matchDistance = Number.POSITIVE_INFINITY;
-    for (const band of bands) {
-      const distance = Math.abs(candidate.center - band.center);
+    let matchGap = Number.POSITIVE_INFINITY;
+    for (const segment of segments) {
+      const distance = Math.abs(candidate.center - segment.center);
       const tolerance = Math.max(
         0.75,
-        Math.min(candidate.height, band.height) * PDF_TEXT_BAND_CENTER_TOLERANCE,
+        Math.min(candidate.height, segment.height) * PDF_TEXT_BAND_CENTER_TOLERANCE,
       );
-      if (distance <= tolerance && distance < matchDistance) {
-        match = band;
+      const horizontalGap = candidate.left > segment.right
+        ? candidate.left - segment.right
+        : segment.left > candidate.right
+          ? segment.left - candidate.right
+          : 0;
+      const mergeThreshold = Math.max(4, segment.height * 1.2);
+      if (
+        distance <= tolerance
+        && horizontalGap <= mergeThreshold
+        && (distance < matchDistance || (distance === matchDistance && horizontalGap < matchGap))
+      ) {
+        match = segment;
         matchDistance = distance;
+        matchGap = horizontalGap;
       }
     }
     if (!match) {
-      bands.push({
+      segments.push({
         candidates: [candidate],
+        left: candidate.left,
+        right: candidate.right,
         center: candidate.center,
         height: candidate.height,
       });
       continue;
     }
     match.candidates.push(candidate);
+    match.left = Math.min(match.left, candidate.left);
+    match.right = Math.max(match.right, candidate.right);
     match.center = weightedMedian(match.candidates, entry => entry.center);
     match.height = weightedMedian(match.candidates, entry => entry.height);
   }
 
-  bands.sort((left, right) => left.center - right.center);
-  const output: PdfRect[] = [];
-  for (let bandIndex = 0; bandIndex < bands.length; bandIndex++) {
-    const band = bands[bandIndex]!;
-    const previous = bands[bandIndex - 1];
-    const next = bands[bandIndex + 1];
-    const halfGap = PDF_TEXT_BAND_MIN_GAP / 2;
-    let top = band.center - band.height / 2;
-    let bottom = band.center + band.height / 2;
-    if (previous) top = Math.max(top, (previous.center + band.center) / 2 + halfGap);
-    if (next) bottom = Math.min(bottom, (band.center + next.center) / 2 - halfGap);
-    if (bottom <= top) {
-      top = band.center - 0.125;
-      bottom = band.center + 0.125;
-    }
+  segments.sort((left, right) => (
+    left.center - right.center || left.left - right.left || left.right - right.right
+  ));
 
-    const horizontallySorted = [...band.candidates].sort((left, right) => (
-      left.left - right.left || left.right - right.right
-    ));
-    const segments: Array<[number, number]> = [];
-    for (const candidate of horizontallySorted) {
-      const previousSegment = segments[segments.length - 1];
-      if (!previousSegment) {
-        segments.push([candidate.left, candidate.right]);
-        continue;
-      }
-      const gap = candidate.left - previousSegment[1];
-      const mergeThreshold = Math.max(4, band.height * 1.2);
-      if (gap <= mergeThreshold) {
-        previousSegment[0] = Math.min(previousSegment[0], candidate.left);
-        previousSegment[1] = Math.max(previousSegment[1], candidate.right);
-      } else {
-        segments.push([candidate.left, candidate.right]);
-      }
+  const output: PdfRect[] = [];
+  for (const segment of segments) {
+    const previous = nearestOverlappingPdfTextBandSegment(segments, segment, -1);
+    const next = nearestOverlappingPdfTextBandSegment(segments, segment, 1);
+    const halfGap = PDF_TEXT_BAND_MIN_GAP / 2;
+    let top = segment.center - segment.height / 2;
+    let bottom = segment.center + segment.height / 2;
+    if (previous) top = Math.max(top, (previous.center + segment.center) / 2 + halfGap);
+    if (next) bottom = Math.min(bottom, (segment.center + next.center) / 2 - halfGap);
+    if (bottom <= top) {
+      top = segment.center - 0.125;
+      bottom = segment.center + 0.125;
     }
-    for (const [left, right] of segments) {
-      output.push(roundPdfTextBandRect([left, top, right, bottom]));
-    }
+    output.push(roundPdfTextBandRect([segment.left, top, segment.right, bottom]));
   }
   return output;
+}
+
+function nearestOverlappingPdfTextBandSegment(
+  segments: PdfTextBandSegment[],
+  target: PdfTextBandSegment,
+  direction: -1 | 1,
+): PdfTextBandSegment | undefined {
+  let nearest: PdfTextBandSegment | undefined;
+  for (const candidate of segments) {
+    if (candidate === target) continue;
+    const centerDelta = candidate.center - target.center;
+    if ((direction < 0 && centerDelta >= 0) || (direction > 0 && centerDelta <= 0)) continue;
+    const horizontalOverlap = Math.min(candidate.right, target.right)
+      - Math.max(candidate.left, target.left);
+    if (horizontalOverlap <= 0) continue;
+    if (!nearest || Math.abs(centerDelta) < Math.abs(nearest.center - target.center)) {
+      nearest = candidate;
+    }
+  }
+  return nearest;
 }
 
 function weightedMedian(

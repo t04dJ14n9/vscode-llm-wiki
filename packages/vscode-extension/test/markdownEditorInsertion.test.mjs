@@ -28,14 +28,17 @@ function loadTsModule(relativePath, mocks = {}) {
     if (Object.prototype.hasOwnProperty.call(mocks, request)) {
       return mocks[request];
     }
-    if (request === './pdfDiscussionController') {
-      return {
-        PDF_DISCUSSION_MAX_PNG_BYTES: 5 * 1024 * 1024,
-        createPdfDiscussionStoreForDocument: () => {
-          throw new Error('PDF discussion storage is not configured in this legacy provider test');
-        },
+    if (request === './markdownDiagnostics') {
+      return mocks['./markdownDiagnostics'] ?? {
+        collectMarkdownDiagnostics: async () => [],
       };
     }
+    if (request === './gitDiff') {
+      return mocks['./gitDiff'] ?? {
+        getGitDiffForFile: async () => ({ available: false, lines: [] }),
+      };
+    }
+    if (request === './pdfPngConstraints') return { MAX_PNG_BYTES: 5 * 1024 * 1024 };
     if (request === './cursorCrop') return cursorCrop;
     if (request === './linkPreviewResolver') return linkPreviewResolver;
     return originalLoad.call(this, request, parent, isMain);
@@ -49,10 +52,9 @@ function loadTsModule(relativePath, mocks = {}) {
 }
 
 const cursorCrop = loadTsModule('src/cursorCrop.ts', {
-  './pdfDiscussionController': {
-    PDF_DISCUSSION_MAX_PNG_BYTES: 5 * 1024 * 1024,
-  },
+  './pdfPngConstraints': { MAX_PNG_BYTES: 5 * 1024 * 1024 },
 });
+linkPreviewResolver = loadTsModule('src/linkPreviewResolver.ts');
 linkPreviewResolver = loadTsModule('src/linkPreviewResolver.ts');
 
 test('insert helper replaces selections and returns cursor positions', () => {
@@ -129,7 +131,7 @@ test('markdown editor provider posts normalized editor typography settings', asy
   });
 });
 
-test('markdown editor provider keeps automatic VS Code metrics at Obsidian\'s readable minimum', async () => {
+test('markdown editor provider preserves the configured VS Code font size', async () => {
   const messages = [];
   const vscode = createVscodeMock({
     editorConfig: {
@@ -150,9 +152,9 @@ test('markdown editor provider keeps automatic VS Code metrics at Obsidian\'s re
     type: 'updateSettings',
     settings: {
       fontFamily: 'Menlo, Monaco, "Courier New", monospace',
-      fontSize: '16px',
+      fontSize: '14px',
       fontWeight: 'normal',
-      lineHeight: '24px',
+      lineHeight: '21px',
       letterSpacing: '0px',
     },
   });
@@ -234,6 +236,91 @@ test('markdown editor provider sends webview resource roots for note images', as
     asWebviewUriCalls.map(uri => uri.fsPath),
     ['/extension/dist/markdown-editor.js', '/vault/notes/Concepts', '/vault'],
   );
+});
+
+test('markdown editor provider initializes a ready webview only once', async () => {
+  const messages = [];
+  const findFilesCalls = [];
+  const vscode = createVscodeMock({
+    workspaceFolder: { uri: createUri('/vault') },
+    findFiles: [createUri('/vault/notes/Note.md')],
+    findFilesCalls,
+  });
+  const { MarkdownEditorProvider } = loadTsModule('src/markdownEditorProvider.ts', { vscode });
+  const provider = new MarkdownEditorProvider({ extensionUri: createUri('/extension') });
+  const panel = createPanelMock(messages);
+
+  await provider.resolveCustomTextEditor(
+    createDocumentMock({ uri: createUri('/vault/notes/Note.md') }),
+    panel,
+    {},
+  );
+  await panel.fireMessage({ type: 'ready' });
+  await new Promise(resolve => setTimeout(resolve, 300));
+
+  assert.equal(messages.filter(message => message.type === 'setText').length, 1);
+  assert.equal(findFilesCalls.length, 1);
+});
+
+test('markdown editor provider reuses the workspace note index across panels', async () => {
+  const firstMessages = [];
+  const secondMessages = [];
+  const findFilesCalls = [];
+  const vscode = createVscodeMock({
+    workspaceFolder: { uri: createUri('/vault') },
+    findFiles: [
+      createUri('/vault/notes/First.md'),
+      createUri('/vault/notes/Second.md'),
+    ],
+    findFilesCalls,
+  });
+  const { MarkdownEditorProvider } = loadTsModule('src/markdownEditorProvider.ts', { vscode });
+  const provider = new MarkdownEditorProvider({ extensionUri: createUri('/extension') });
+
+  await provider.resolveCustomTextEditor(
+    createDocumentMock({ uri: createUri('/vault/notes/First.md') }),
+    createPanelMock(firstMessages),
+    {},
+  );
+  await provider.resolveCustomTextEditor(
+    createDocumentMock({ uri: createUri('/vault/notes/Second.md') }),
+    createPanelMock(secondMessages),
+    {},
+  );
+  await new Promise(resolve => setTimeout(resolve, 300));
+
+  assert.equal(findFilesCalls.length, 1);
+  assert.deepEqual(firstMessages.find(message => message.type === 'setText')?.notePaths, [
+    'notes/First.md',
+    'notes/Second.md',
+  ]);
+  assert.deepEqual(secondMessages.find(message => message.type === 'setText')?.notePaths, [
+    'notes/First.md',
+    'notes/Second.md',
+  ]);
+});
+
+test('markdown editor provider still initializes when workspace note discovery fails', async () => {
+  const messages = [];
+  const vscode = createVscodeMock({
+    workspaceFolder: { uri: createUri('/vault') },
+    findFilesError: new Error('remote search unavailable'),
+  });
+  const { MarkdownEditorProvider } = loadTsModule('src/markdownEditorProvider.ts', { vscode });
+  const provider = new MarkdownEditorProvider({ extensionUri: createUri('/extension') });
+  const panel = createPanelMock(messages);
+
+  await provider.resolveCustomTextEditor(
+    createDocumentMock({ uri: createUri('/vault/notes/Note.md'), text: '# Note\n' }),
+    panel,
+    {},
+  );
+  await panel.fireMessage({ type: 'ready' });
+  await new Promise(resolve => setImmediate(resolve));
+
+  const setText = messages.find(message => message.type === 'setText');
+  assert.equal(setText?.text, '# Note\n');
+  assert.deepEqual(setText?.notePaths, ['notes/Note.md']);
 });
 
 test('markdown editor webview CSP allows rendered note images', async () => {
@@ -456,13 +543,87 @@ test('markdown editor provider leaves regular edits to VS Code autosave or expli
   assert.equal(saveCalls.length, 1);
 });
 
+test('markdown editor provider applies only the changed document range', async () => {
+  const messages = [];
+  const replacements = [];
+  const vscode = createVscodeMock({
+    applyEdit: async edit => {
+      replacements.push(...edit.replacements);
+      return true;
+    },
+  });
+  const { MarkdownEditorProvider } = loadTsModule('src/markdownEditorProvider.ts', { vscode });
+  const provider = new MarkdownEditorProvider({ extensionUri: { scheme: 'file', path: '/extension' } });
+  const document = createDocumentMock({ text: '# Note\nBody' });
+  const panel = createPanelMock(messages);
+
+  await provider.resolveCustomTextEditor(document, panel, {});
+  await panel.fireMessage({ type: 'edit', text: '# Note\nBrave Body' });
+  await new Promise(resolve => setImmediate(resolve));
+
+  assert.equal(replacements.length, 1);
+  assert.deepEqual(replacements[0].range.start, { line: 1, character: 1 });
+  assert.deepEqual(replacements[0].range.end, { line: 1, character: 1 });
+  assert.equal(replacements[0].text, 'rave B');
+});
+
+test('markdown editor provider accepts incremental webview edits', async () => {
+  const messages = [];
+  const replacements = [];
+  const vscode = createVscodeMock({
+    applyEdit: async edit => {
+      replacements.push(...edit.replacements);
+      return true;
+    },
+  });
+  const { MarkdownEditorProvider } = loadTsModule('src/markdownEditorProvider.ts', { vscode });
+  const provider = new MarkdownEditorProvider({ extensionUri: { scheme: 'file', path: '/extension' } });
+  const document = createDocumentMock({ text: '# Note\nBody' });
+  const panel = createPanelMock(messages);
+
+  await provider.resolveCustomTextEditor(document, panel, {});
+  await panel.fireMessage({
+    type: 'edit',
+    baseLength: '# Note\nBody'.length,
+    changes: [{ from: '# Note\nBody'.length, to: '# Note\nBody'.length, text: '!' }],
+  });
+  await new Promise(resolve => setImmediate(resolve));
+
+  assert.equal(replacements.length, 1);
+  assert.deepEqual(replacements[0].range.start, { line: 1, character: 4 });
+  assert.deepEqual(replacements[0].range.end, { line: 1, character: 4 });
+  assert.equal(replacements[0].text, '!');
+});
+
+test('markdown editor provider requests a full resync for an invalid incremental edit', async () => {
+  const messages = [];
+  const vscode = createVscodeMock();
+  const { MarkdownEditorProvider } = loadTsModule('src/markdownEditorProvider.ts', { vscode });
+  const provider = new MarkdownEditorProvider({ extensionUri: { scheme: 'file', path: '/extension' } });
+  const panel = createPanelMock(messages);
+
+  await provider.resolveCustomTextEditor(
+    createDocumentMock({ text: '# Note\nBody' }),
+    panel,
+    {},
+  );
+  messages.length = 0;
+  await panel.fireMessage({
+    type: 'edit',
+    baseLength: 999,
+    changes: [{ from: 0, to: 0, text: 'stale' }],
+  });
+
+  assert.deepEqual(messages, [{ type: 'requestText' }]);
+});
+
 test('markdown editor provider keeps associated untitled edits until explicit save', async () => {
   const messages = [];
   const saveCalls = [];
   let document;
   const vscode = createVscodeMock({
     applyEdit: async edit => {
-      document.setText(edit.replacements.at(-1).text);
+      document.setText(documentTextAfterReplacement(document, edit.replacements.at(-1)));
       return true;
     },
   });
@@ -499,14 +660,15 @@ test('markdown editor provider flushes queued webview edits through the host sav
   const vscode = createVscodeMock({
     applyEdit: edit => {
       const replacement = edit.replacements.at(-1);
+      const nextText = documentTextAfterReplacement(document, replacement);
       let resolveEdit;
       const applied = new Promise(resolve => {
         resolveEdit = resolve;
       });
       pendingEdits.push({
-        text: replacement.text,
+        text: nextText,
         complete: () => {
-          document.setText(replacement.text);
+          document.setText(nextText);
           resolveEdit(true);
         },
       });
@@ -538,14 +700,15 @@ test('markdown editor provider does not replay stale text while webview edits ar
   const vscode = createVscodeMock({
     applyEdit: edit => {
       const replacement = edit.replacements.at(-1);
+      const nextText = documentTextAfterReplacement(document, replacement);
       let resolveEdit;
       const editApplied = new Promise(resolve => {
         resolveEdit = resolve;
       });
       pendingEdits.push({
-        text: replacement.text,
+        text: nextText,
         complete: () => {
-          document.setText(replacement.text);
+          document.setText(nextText);
           for (const listener of documentChangeListeners) {
             listener({ document });
           }
@@ -891,13 +1054,60 @@ test('markdown editor provider routes Copy for Agent intent through the shared h
     workspaceState: createStorageMock(),
   });
   const panel = createPanelMock(messages);
+  const document = createDocumentMock({
+    text: '# Note\nAlpha **beta** gamma\nOmega\n',
+  });
 
-  await provider.resolveCustomTextEditor(createDocumentMock(), panel, {});
-  await panel.fireMessage({ type: 'copySelectionForAgent' });
+  await provider.resolveCustomTextEditor(document, panel, {});
+  await panel.fireMessage({
+    type: 'copySelectionForAgent',
+    selection: { from: 13, to: 21 },
+  });
 
   assert.deepEqual(executeCommandCalls.at(-1), [
     'llm-wiki.copySelectionForAgent',
+    {
+      uri: document.uri,
+      text: '**beta**',
+      startLine: 2,
+      endLine: 2,
+      metadata: {
+        kind: 'markdown',
+        from: 13,
+        to: 21,
+      },
+    },
   ]);
+});
+
+test('markdown editor provider delegates Copy for Agent result reporting to the shared host command', async () => {
+  const messages = [];
+  const executeCommandCalls = [];
+  const vscode = createVscodeMock({ executeCommandCalls });
+  vscode.commands.executeCommand = async (...args) => {
+    executeCommandCalls.push(args);
+    return args[0] === 'llm-wiki.copySelectionForAgent';
+  };
+  const { MarkdownEditorProvider } = loadTsModule('src/markdownEditorProvider.ts', { vscode });
+  const provider = new MarkdownEditorProvider({
+    extensionUri: { scheme: 'file', path: '/extension' },
+    workspaceState: createStorageMock(),
+  });
+  const panel = createPanelMock(messages);
+  const document = createDocumentMock({
+    text: '# Note\nAlpha **beta** gamma\nOmega\n',
+  });
+
+  await provider.resolveCustomTextEditor(document, panel, {});
+  await panel.fireMessage({
+    type: 'copySelectionForAgent',
+    selection: { from: 13, to: 21 },
+  });
+
+  assert.equal(
+    messages.some(message => message.type === 'copySelectionForAgentResult'),
+    false,
+  );
 });
 
 test('markdown editor provider leaves provider-specific selection routing absent', async () => {
@@ -1212,6 +1422,47 @@ test('markdown editor provider opens macOS Dictionary for webview lookup request
   assert.deepEqual(informationMessages, ['Looking up "bounded context" in Dictionary']);
 });
 
+test('markdown editor provider leaves diagnostics and git diff disabled while editing', async () => {
+  const messages = [];
+  let diagnosticRuns = 0;
+  let gitDiffRuns = 0;
+  const vscode = createVscodeMock({
+    workspaceFolder: { uri: createUri('/workspace') },
+  });
+  const { MarkdownEditorProvider } = loadTsModule('src/markdownEditorProvider.ts', {
+    vscode,
+    './markdownDiagnostics': {
+      collectMarkdownDiagnostics: async () => {
+        diagnosticRuns++;
+        return [];
+      },
+    },
+    './gitDiff': {
+      getGitDiffForFile: async () => {
+        gitDiffRuns++;
+        return { available: true, lines: [{ line: 2, kind: 'modified' }] };
+      },
+    },
+  });
+  const provider = new MarkdownEditorProvider({
+    extensionUri: { scheme: 'file', path: '/extension' },
+  });
+  const document = createDocumentMock({
+    uri: createUri('/workspace/notes/Note.md'),
+    text: '# Note\n[bad](missing.md)\n',
+  });
+  const panel = createPanelMock(messages);
+
+  await provider.resolveCustomTextEditor(document, panel, {});
+  await panel.fireMessage({ type: 'edit', text: '# Updated\n' });
+  await new Promise(resolve => setTimeout(resolve, 300));
+
+  assert.equal(diagnosticRuns, 0);
+  assert.equal(gitDiffRuns, 0);
+  assert.equal(messages.some(message => message.type === 'setDiagnostics'), false);
+  assert.equal(messages.some(message => message.type === 'setGitDiff'), false);
+});
+
 test('markdown editor provider closes the custom editor on webview close messages', async () => {
   const messages = [];
   const disposeCalls = [];
@@ -1345,9 +1596,17 @@ function createVscodeMock(options = {}) {
           pattern: args[0]?.pattern,
           excludePattern: args[1]?.pattern,
         });
+        if (options.findFilesError) throw options.findFilesError;
         return options.findFiles ?? [];
       },
       getWorkspaceFolder: () => options.workspaceFolder,
+    },
+    languages: {
+      createDiagnosticCollection: () => ({
+        set() {},
+        delete() {},
+        dispose() {},
+      }),
     },
     commands: {
       executeCommand: async (...args) => {
@@ -1390,13 +1649,33 @@ function createVscodeMock(options = {}) {
       }
     },
     Range: class Range {
-      constructor() {}
+      constructor(startOrLine, endOrCharacter, endLine, endCharacter) {
+        if (typeof startOrLine === 'number') {
+          this.start = { line: startOrLine, character: endOrCharacter };
+          this.end = { line: endLine, character: endCharacter };
+          return;
+        }
+        this.start = startOrLine;
+        this.end = endOrCharacter;
+      }
     },
     RelativePattern: class RelativePattern {
       constructor(baseUri, pattern) {
         this.baseUri = baseUri;
         this.pattern = pattern;
       }
+    },
+    Diagnostic: class Diagnostic {
+      constructor(range, message, severity) {
+        this.range = range;
+        this.message = message;
+        this.severity = severity;
+      }
+    },
+    DiagnosticSeverity: {
+      Error: 0,
+      Warning: 1,
+      Information: 2,
     },
   };
 }
@@ -1444,8 +1723,23 @@ function createDocumentMock(options = {}) {
         character: before.at(-1).length,
       };
     },
+    offsetAt: position => {
+      const lines = text.split('\n');
+      let offset = 0;
+      for (let line = 0; line < position.line; line++) {
+        offset += (lines[line]?.length ?? 0) + 1;
+      }
+      return offset + position.character;
+    },
     save: options.save ?? (async () => true),
   };
+}
+
+function documentTextAfterReplacement(document, replacement) {
+  const current = document.getText();
+  const from = document.offsetAt(replacement.range.start);
+  const to = document.offsetAt(replacement.range.end);
+  return `${current.slice(0, from)}${replacement.text}${current.slice(to)}`;
 }
 
 function createPanelMock(messages, options = {}) {

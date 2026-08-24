@@ -9,7 +9,6 @@ extension.
   rendering orchestration, selection state, and host messages.
 - `src/webview/domain/` contains pure PDF policies and geometry. Domain modules
   must not import VS Code, browser globals, the PDF engine, or persistence.
-- `src/webview/pdfAskPanel*.ts` owns the annotation-scoped Ask PDF window.
 - `pdfEditorProvider.ts` remains in the combined extension. It is the host
   adapter between VS Code and this browser-side package.
 
@@ -24,4 +23,4 @@ extension provider -> webview bundle -> application shell -> pure domain
 
 Domain code communicates with the application shell through typed values and
 functions. Introduce an interface only at a real boundary (host messaging,
-engine access, discussions, or persistence), not between every helper.
+engine access, or persistence), not between every helper.

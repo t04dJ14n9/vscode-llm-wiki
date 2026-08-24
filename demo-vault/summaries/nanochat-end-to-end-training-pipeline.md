@@ -8,9 +8,6 @@ generated: {"by": "codex/gpt-5.6", "at": "2026-08-13T00:00:00Z"}
 sources: [{"id": "speedrun", "resource": "../projects/code/nanochat/runs/speedrun.sh", "title": "Nanochat speedrun", "commit": "92d63d4e8bb4df75c3b71618f31ddde2378b2bcd"}, {"id": "tokenizer", "resource": "../projects/code/nanochat/nanochat/tokenizer.py", "title": "Nanochat tokenizer implementation", "commit": "92d63d4e8bb4df75c3b71618f31ddde2378b2bcd"}, {"id": "base-train", "resource": "../projects/code/nanochat/scripts/base_train.py", "title": "Nanochat base training script", "commit": "92d63d4e8bb4df75c3b71618f31ddde2378b2bcd"}, {"id": "chat-sft", "resource": "../projects/code/nanochat/scripts/chat_sft.py", "title": "Nanochat supervised finetuning script", "commit": "92d63d4e8bb4df75c3b71618f31ddde2378b2bcd"}]
 ---
 
-ochat.md
-chat.md
-chat.md
 # Nanochat end-to-end training pipeline
 
 ## Scope

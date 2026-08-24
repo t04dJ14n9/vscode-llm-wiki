@@ -19,12 +19,9 @@ For the complete design and integration guide, see
 3. Use **Add to Chat**, an explicit provider button, the context menu, or
    `Cmd+L` / `Ctrl+L` to add the passage to a supported agent draft without
    submitting it.
-4. For a PDF, optionally use the separate Ask PDF panel for a durable,
-   multi-turn discussion.
-5. Reopen a source annotation later to review its Markdown learning note.
-6. Use the daily note and concept graph to decide what to revisit next.
+4. Reopen a source annotation later to review its Markdown learning note.
+5. Use the daily note and concept graph to decide what to revisit next.
 
-Codex powers the built-in Ask PDF flow and its durable note creation.
 **Send Selection to Agent…** exports exact Markdown text or the canonical PDF
 quote and hands the immutable snapshot to an installed Codex, Claude Code,
 Cursor Agent, or CodeBuddy draft. Explicit PDF actions can target Codex,
@@ -126,8 +123,7 @@ vscode://llm-wiki.llm-wiki-vscode/open-anchor?target=v1.<generated-payload>
 - Source annotations: Markdown displays a **✦ Note** link and PDF restores
   page-aligned highlights. Hovering the Markdown annotation, focusing its
   marker, or moving the caret into its exact range shows the previous question
-  and concise answer; the marker opens the full durable note. PDF discussions
-  can be reopened and continued in Ask PDF.
+  and concise answer; the marker opens the full durable note.
 - Backlinks and forward links in the LLM Wiki activity view, contextual
   **Markdown Outline** and **PDF Outline** panels in the main Explorer sidebar,
   broken-link detection, and a concept graph parsed directly from repository
@@ -184,7 +180,6 @@ flowchart LR
     Host["VS Code / Cursor<br/>extension host"]
     Markdown["Markdown editor"]
     PDF["PDF viewer"]
-    AskPDF["Ask PDF panel"]
     Browser["Cursor Browser / Experimental Web Reader"]
     Agent["Supported agent draft"]
     Codex["Local Codex app-server"]
@@ -198,8 +193,6 @@ flowchart LR
     PDF --> Host
     Browser --> Host
     Host --> Agent
-    PDF --> AskPDF
-    AskPDF <--> Host
     Host <--> Codex
     Host <--> Repo
     Host <--> Git

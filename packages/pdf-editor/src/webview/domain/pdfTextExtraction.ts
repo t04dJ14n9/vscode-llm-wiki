@@ -319,10 +319,12 @@ function orderPdfTextItems(items: OrderedPdfTextItem[]): any[] {
       ? [lane]
       : splitPdfTextLaneAtVerticalGaps(lane, typicalHeight, laneGap)
   ));
-  return orderPdfTextLaneRegions(
+  const ordered = orderPdfTextLaneRegions(
     mergeAdjacentPdfTextLanes(segmented, typicalHeight, laneGap, leftAlignmentTolerance),
   )
-    .flatMap(lane => orderSinglePdfTextFlow(lane.items))
+    .flatMap(lane => orderSinglePdfTextFlow(lane.items));
+  const gridOrdered = restoreCompactPdfGridOrder(ordered, items, typicalHeight);
+  return restoreLocalPdfSourceOrder(gridOrdered, items, typicalHeight)
     .map(candidate => candidate.item);
 }
 
@@ -593,28 +595,77 @@ function pdfTextLaneMatch(
   const inlineGap = previousItem
     ? pdfTextIntervalDistance(previousItem.rect, candidate.rect)
     : Number.POSITIVE_INFINITY;
-  const continuesInlineRun = Boolean(
+  const sharesVisualLine = Boolean(
     previousItem
     && pdfTextItemsShareVisualLine(previousItem, candidate)
-    && (
-      inlineGap <= laneGap
-      // Some generators emit styled fragments on one line in reverse x order.
-      // Keep that local reversal together without letting a forward margin
-      // column bootstrap an otherwise multi-row body lane.
-      || (
-        candidate.rect.left < previousItem.rect.left
-        && inlineGap <= Math.max(laneGap, typicalHeight * 1.5)
-      )
-    )
   );
-  if (!aligned && supportRows < 2 && !continuesInlineRun) return undefined;
+  const continuesSourceAlignedRun = Boolean(previousItem && aligned);
+  const continuesInlineRun = sharesVisualLine && inlineGap <= laneGap;
+  const continuesStyledForwardRun = Boolean(
+    sharesVisualLine
+    && previousItem
+    && candidate.rect.left >= previousItem.rect.left
+    && inlineGap > laneGap
+    && inlineGap <= Math.max(laneGap, typicalHeight * 3)
+    && pdfTextItemsHaveDistinctFontStyle(previousItem, candidate)
+  );
+  // Some generators emit styled fragments on one line in reverse x order.
+  // Keep that relaxed reversal eligible, but do not let it outrank a
+  // geometrically aligned lane: alternating columns can have the same shape.
+  const continuesRelaxedReverseRun = Boolean(
+    sharesVisualLine
+    && previousItem
+    && candidate.rect.left < previousItem.rect.left
+    && inlineGap > laneGap
+    && inlineGap <= Math.max(laneGap, typicalHeight * 1.5)
+  );
+  const conflictsWithExistingLine = recent.some(item => (
+    pdfTextItemsShareVisualLine(item, candidate)
+    && pdfTextIntervalDistance(item.rect, candidate.rect) > laneGap
+  ));
+  if (
+    conflictsWithExistingLine
+    && !continuesInlineRun
+    && !continuesStyledForwardRun
+    && !continuesRelaxedReverseRun
+  ) {
+    return undefined;
+  }
+  if (
+    !aligned
+    && supportRows < 2
+    && !continuesInlineRun
+    && !continuesStyledForwardRun
+    && !continuesRelaxedReverseRun
+  ) {
+    return undefined;
+  }
+  const relaxedUnalignedMatch = !aligned
+    && (continuesStyledForwardRun || continuesRelaxedReverseRun);
 
   // Repeated overlap on different rows is stronger evidence than one sparse,
-  // full-width header. Source-adjacent styled runs get the highest priority so
-  // a sentence split across font changes remains in one reading lane.
+  // full-width header. A source-adjacent aligned run must outrank accumulated
+  // header overlap, which can otherwise steal one line from a prose column.
+  // Relaxed style/reversal matches stay below a geometrically aligned lane.
   return (continuesInlineRun ? 10_000 : 0)
-    + supportRows * 100
-    + (aligned ? Math.max(0, 50 - leftDistance) : 0);
+    + (continuesSourceAlignedRun ? 10_000 : 0)
+    + (continuesStyledForwardRun ? 10 : 0)
+    + (continuesRelaxedReverseRun ? 10 : 0)
+    + (relaxedUnalignedMatch ? 0 : supportRows * 100)
+    + (aligned ? 20 + Math.max(0, 50 - leftDistance) : 0);
+}
+
+function pdfTextItemsHaveDistinctFontStyle(
+  left: OrderedPdfTextItem,
+  right: OrderedPdfTextItem,
+): boolean {
+  const leftFont = left.item?.font;
+  const rightFont = right.item?.font;
+  if (!leftFont || !rightFont) return false;
+  return String(leftFont.family ?? '').trim() !== String(rightFont.family ?? '').trim()
+    || String(leftFont.size ?? '') !== String(rightFont.size ?? '')
+    || String(leftFont.weight ?? '') !== String(rightFont.weight ?? '')
+    || (leftFont.italic === true) !== (rightFont.italic === true);
 }
 
 function mergeSingleRowPdfTextLanes(
@@ -732,13 +783,217 @@ function pdfTextIntervalDistance(
   return 0;
 }
 
-function orderSinglePdfTextFlow(items: OrderedPdfTextItem[]): OrderedPdfTextItem[] {
+interface OrderedPdfTextRow {
+  center: number;
+  height: number;
+  items: OrderedPdfTextItem[];
+}
+
+function restoreCompactPdfGridOrder(
+  ordered: OrderedPdfTextItem[],
+  sourceItems: OrderedPdfTextItem[],
+  typicalHeight: number,
+): OrderedPdfTextItem[] {
+  const rows = pdfTextVisualRows(sourceItems);
+  const maximumRowGap = Math.max(3, typicalHeight * 3);
+  const minimumCellGap = Math.max(6, typicalHeight * 3);
+  const maximumFragmentGap = Math.max(6, typicalHeight * 0.7);
+  const coreRows = rows.map(row => {
+    const items = [...row.items].sort((left, right) => left.rect.left - right.rect.left);
+    let largeGaps = 0;
+    let inlineStyleTransitions = 0;
+    for (let index = 1; index < items.length; index++) {
+      const previous = items[index - 1]!;
+      const current = items[index]!;
+      const gap = current.rect.left - (previous.rect.left + previous.rect.width);
+      if (gap > minimumCellGap) {
+        largeGaps++;
+      }
+      if (
+        gap <= maximumFragmentGap
+        && pdfTextItemsHaveDistinctFontStyle(previous, current)
+      ) {
+        inlineStyleTransitions++;
+      }
+    }
+    return largeGaps >= 2 || (items.length >= 4 && inlineStyleTransitions >= 2);
+  });
+  const blocks: Array<{ orders: Set<number>; maximumSourceOrder: number }> = [];
+  for (let start = 0; start < rows.length;) {
+    if (!coreRows[start]) {
+      start++;
+      continue;
+    }
+    let end = start;
+    while (
+      coreRows[end + 1]
+      && rows[end + 1]!.center - rows[end]!.center <= maximumRowGap
+    ) {
+      end++;
+    }
+    if (end === start) {
+      start++;
+      continue;
+    }
+    while (
+      (rows[end + 1]?.items.length ?? 0) >= 2
+      && rows[end + 1]!.center - rows[end]!.center <= maximumRowGap
+    ) {
+      end++;
+    }
+    const blockItems = rows
+      .slice(start, end + 1)
+      .flatMap(row => row.items)
+      .sort((left, right) => left.sourceOrder - right.sourceOrder);
+    const minimumSourceOrder = blockItems[0]!.sourceOrder;
+    const maximumSourceOrder = blockItems.at(-1)!.sourceOrder;
+    if (maximumSourceOrder - minimumSourceOrder + 1 !== blockItems.length) {
+      start = end + 1;
+      continue;
+    }
+    blocks.push({
+      orders: new Set(blockItems.map(item => item.sourceOrder)),
+      maximumSourceOrder,
+    });
+    start = end + 1;
+  }
+
+  let result = [...ordered];
+  for (const block of blocks) {
+    const blockItems = sourceItems
+      .filter(item => block.orders.has(item.sourceOrder))
+      .sort((left, right) => left.sourceOrder - right.sourceOrder);
+    result = result.filter(item => !block.orders.has(item.sourceOrder));
+    const insertionIndex = result.findIndex(item => item.sourceOrder > block.maximumSourceOrder);
+    result.splice(insertionIndex < 0 ? result.length : insertionIndex, 0, ...blockItems);
+  }
+  return result;
+}
+
+// Geometry establishes page lanes, but source order remains authoritative
+// inside a spatially local run. This keeps stacked math fragments semantic
+// without reconnecting broad column jumps or reverse-x plain-text columns.
+function restoreLocalPdfSourceOrder(
+  ordered: OrderedPdfTextItem[],
+  sourceItems: OrderedPdfTextItem[],
+  typicalHeight: number,
+): OrderedPdfTextItem[] {
+  const sourceOrdered = [...sourceItems].sort((left, right) => left.sourceOrder - right.sourceOrder);
+  const groups: OrderedPdfTextItem[][] = [];
+  for (const item of sourceOrdered) {
+    const group = groups[groups.length - 1];
+    if (!group || !pdfTextItemsContinueLocalSourceFlow(group, item, typicalHeight)) {
+      groups.push([item]);
+    } else {
+      group.push(item);
+    }
+  }
+
+  let result = [...ordered];
+  for (const group of groups) {
+    if (group.length < 2) continue;
+    const groupItems = new Set(group);
+    const current = result.filter(item => groupItems.has(item));
+    if (current.length !== group.length || current.every((item, index) => item === group[index])) continue;
+    const firstIndex = Math.min(...group.map(item => result.indexOf(item)).filter(index => index >= 0));
+    const insertionIndex = result
+      .slice(0, firstIndex)
+      .filter(item => !groupItems.has(item))
+      .length;
+    result = result.filter(item => !groupItems.has(item));
+    result.splice(insertionIndex, 0, ...group);
+  }
+  return result;
+}
+
+function pdfTextItemsContinueLocalSourceFlow(
+  group: OrderedPdfTextItem[],
+  candidate: OrderedPdfTextItem,
+  typicalHeight: number,
+): boolean {
+  const previous = group[group.length - 1]!;
+  const previousBottom = previous.rect.top + previous.rect.height;
+  const candidateBottom = candidate.rect.top + candidate.rect.height;
+  const verticalGap = previousBottom < candidate.rect.top
+    ? candidate.rect.top - previousBottom
+    : candidateBottom < previous.rect.top
+      ? previous.rect.top - candidateBottom
+      : 0;
+  if (verticalGap > Math.max(6, typicalHeight * 2.5)) return false;
+
+  const horizontalGap = pdfTextIntervalDistance(previous.rect, candidate.rect);
+  const leftDistance = Math.abs(previous.rect.left - candidate.rect.left);
+  const fullFlowLeft = median(group
+    .filter(item => item.rect.height >= typicalHeight * 0.82)
+    .map(item => item.rect.left));
+  const recentFlowLeft = median(group
+    .slice(-12)
+    .filter(item => item.rect.height >= typicalHeight * 0.82)
+    .map(item => item.rect.left));
+  const wrapsToFlowStart = candidate.rect.top >= previous.rect.top
+    && (
+      Math.abs(candidate.rect.left - fullFlowLeft) <= Math.max(8, typicalHeight * 4)
+      || Math.abs(candidate.rect.left - recentFlowLeft) <= Math.max(8, typicalHeight * 4)
+    );
+  const isEquationNumber = /^\(\s*\d+[a-z]?\s*\)$/iu.test(String(candidate.item?.content ?? '').trim());
+  const followsEquationBand = isEquationNumber
+    && verticalGap <= typicalHeight
+    && Math.abs(
+      (previous.rect.top + previous.rect.height / 2)
+      - (candidate.rect.top + candidate.rect.height / 2)
+    ) <= typicalHeight * 1.5;
+  const groupLeft = Math.min(...group.map(item => item.rect.left));
+  const groupRight = Math.max(...group.map(item => item.rect.left + item.rect.width));
+  const candidateRight = candidate.rect.left + candidate.rect.width;
+  const hasCompactFragments = candidate.rect.height <= typicalHeight * 0.9
+    || group.some(item => item.rect.height <= typicalHeight * 0.9);
+  const stacksWithinFlowSpan = candidate.rect.top > previous.rect.top
+    && verticalGap <= typicalHeight * 0.5
+    && hasCompactFragments
+    && Math.min(groupRight, candidateRight) > Math.max(groupLeft, candidate.rect.left);
+  const startsRaisedMath = candidate.rect.top < previous.rect.top
+    && verticalGap === 0
+    && candidate.rect.height <= previous.rect.height
+    && horizontalGap <= typicalHeight * 4
+    && leftDistance <= typicalHeight * 12;
+  const separatesBroadColumns = leftDistance > Math.max(48, typicalHeight * 6)
+    && horizontalGap > Math.max(6, typicalHeight * 0.7)
+    && !wrapsToFlowStart;
+  if (
+    separatesBroadColumns
+    && !followsEquationBand
+    && !startsRaisedMath
+    && !stacksWithinFlowSpan
+  ) {
+    return false;
+  }
+  const previousCenter = previous.rect.top + previous.rect.height / 2;
+  const candidateCenter = candidate.rect.top + candidate.rect.height / 2;
+  const sameVisualLine = Math.abs(previousCenter - candidateCenter)
+    <= Math.max(1, Math.min(previous.rect.height, candidate.rect.height) * 0.55);
+  const reversesPlainVisualText = candidate.rect.left < previous.rect.left
+    && sameVisualLine
+    && previous.rect.height >= typicalHeight * 0.82
+    && candidate.rect.height >= typicalHeight * 0.82;
+  if (reversesPlainVisualText) return false;
+  const immediatelyAdjacent = horizontalGap <= Math.max(4, typicalHeight * 1.5);
+  const nearbyCluster = horizontalGap <= Math.max(8, typicalHeight * 4)
+    && leftDistance <= Math.max(24, typicalHeight * 6);
+  return immediatelyAdjacent
+    || nearbyCluster
+    || wrapsToFlowStart
+    || followsEquationBand
+    || startsRaisedMath
+    || stacksWithinFlowSpan;
+}
+
+function pdfTextVisualRows(items: OrderedPdfTextItem[]): OrderedPdfTextRow[] {
   const verticallySorted = [...items].sort((left, right) => (
     left.rect.top - right.rect.top
     || left.rect.left - right.rect.left
     || left.sourceOrder - right.sourceOrder
   ));
-  const lines: Array<{ center: number; height: number; items: OrderedPdfTextItem[] }> = [];
+  const lines: OrderedPdfTextRow[] = [];
   for (const item of verticallySorted) {
     const center = item.rect.top + item.rect.height / 2;
     const line = lines[lines.length - 1];
@@ -752,7 +1007,11 @@ function orderSinglePdfTextFlow(items: OrderedPdfTextItem[]): OrderedPdfTextItem
       lines.push({ center, height: item.rect.height, items: [item] });
     }
   }
-  return lines.flatMap(line => line.items.sort((left, right) => (
+  return lines;
+}
+
+function orderSinglePdfTextFlow(items: OrderedPdfTextItem[]): OrderedPdfTextItem[] {
+  return pdfTextVisualRows(items).flatMap(line => line.items.sort((left, right) => (
     left.rect.left - right.rect.left || left.sourceOrder - right.sourceOrder
   )));
 }

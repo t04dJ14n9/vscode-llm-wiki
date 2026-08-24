@@ -6,6 +6,14 @@ const outOfOrderUrl = `${viewerOrigin}/pdf-viewer.html?fixture=out-of-order-text
 const mixedStyleUrl = `${viewerOrigin}/pdf-viewer.html?fixture=mixed-style-selection`;
 const shortRowUrl = `${viewerOrigin}/pdf-viewer.html?fixture=short-row-selection`;
 const formulaUrl = `${viewerOrigin}/pdf-viewer.html?fixture=formula-selection`;
+const twoColumnRegressionUrl = `${viewerOrigin}/pdf-viewer.html?fixture=two-column-selection-regression`;
+const sourceAlignedColumnContinuationRegressionUrl = `${viewerOrigin}/pdf-viewer.html?fixture=source-aligned-column-continuation-regression`;
+const stackedEquationSelectionRegressionUrl = `${viewerOrigin}/pdf-viewer.html?fixture=stacked-equation-selection-regression`;
+const previewFootnoteSelectionRegressionUrl = `${viewerOrigin}/pdf-viewer.html?fixture=preview-footnote-selection-regression`;
+const staggeredBandBridgeRegressionUrl = `${viewerOrigin}/pdf-viewer.html?fixture=staggered-band-bridge-regression`;
+const authorGridRegressionUrl = `${viewerOrigin}/pdf-viewer.html?fixture=author-grid-selection-regression`;
+const numericTableRegressionUrl = `${viewerOrigin}/pdf-viewer.html?fixture=numeric-table-selection-regression`;
+const centeredMastheadRegressionUrl = `${viewerOrigin}/pdf-viewer.html?fixture=centered-masthead-selection-regression`;
 const twoPageUrl = `${viewerOrigin}/pdf-viewer.html?fixture=two-page`;
 const fourPageUrl = `${viewerOrigin}/pdf-viewer.html?fixture=four-page`;
 
@@ -185,6 +193,257 @@ test.describe('Preview-compatible PDF text selection', () => {
     const bands = await normalizedSelectionBands(page);
     expect(bands).toHaveLength(2);
     expect(bands[1]!.x + bands[1]!.width).toBeLessThan(short.x + short.width + 1);
+  });
+
+  test('a drag through one prose column excludes the neighboring column', async ({ page }) => {
+    await page.goto(twoColumnRegressionUrl);
+    await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 1/, { timeout: 10_000 });
+    await expect(page.locator('#page-1 .text-layer span[data-item-index]')).toHaveCount(6);
+    const start = await textItemBox(page, 'Left line one.');
+    const end = await textItemBox(page, 'Left line three.');
+
+    await resetMessages(page);
+    await dragSelection(
+      page,
+      { x: start.x + 1, y: start.y + start.height / 2 },
+      { x: end.x + end.width - 1, y: end.y + end.height / 2 },
+    );
+
+    const expected = 'Left line one. Left line two. Left line three.';
+    await expectSelectionSnippet(page, expected);
+    expect(await canonicalNativeSelection(page)).toBe(expected);
+    expect(await canonicalNativeSelection(page)).not.toContain('Right line');
+  });
+
+  test('a source-aligned column continuation keeps every line after wide page headings', async ({ page }) => {
+    await page.goto(sourceAlignedColumnContinuationRegressionUrl);
+    await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 1/, { timeout: 10_000 });
+    await expect(page.locator('#page-1 .text-layer span[data-item-index]')).toHaveCount(8);
+    const start = await textItemBox(page, 'Right continuation one.');
+    const end = await textItemBox(page, 'Right continuation three.');
+
+    await resetMessages(page);
+    await dragSelection(
+      page,
+      { x: start.x + 1, y: start.y + start.height / 2 },
+      { x: end.x + end.width - 1, y: end.y + end.height / 2 },
+    );
+
+    const expected = 'Right continuation one. Right continuation two. Right continuation three.';
+    await expectSelectionSnippet(page, expected);
+    expect(await canonicalNativeSelection(page)).toBe(expected);
+  });
+
+  test('stacked equation fragments stay in source order through native selection and export', async ({ page }) => {
+    await page.goto(stackedEquationSelectionRegressionUrl);
+    await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 1/, { timeout: 10_000 });
+    const spans = page.locator('#page-1 .text-layer span[data-item-index]');
+    await expect(spans).toHaveCount(20);
+    const expectedItems = [
+      'states', 'OPEN', 'FA', 'h', '1', ', ...,', 'FB', 'h', 'm',
+      'CLOSE and a backward sequence', 'OPEN', 'BA', 'k', '1', ', ...,', 'BB', 'k', 'm',
+      'CLOSE. The hidden states', 'continue in prose.',
+    ];
+    await expect.poll(() => spans.evaluateAll(elements => (
+      elements.map(element => element.textContent?.trim() ?? '')
+    ))).toEqual(expectedItems);
+    const start = await requiredBox(spans.first());
+    const end = await requiredBox(spans.last());
+
+    await resetMessages(page);
+    await dragSelection(
+      page,
+      { x: start.x + 1, y: start.y + start.height / 2 },
+      { x: end.x + end.width - 1, y: end.y + end.height / 2 },
+    );
+
+    const anchor = await waitForSelectionAnchor(page);
+    expect(await canonicalNativeSelection(page)).toBe(anchor.snippet);
+    expect(anchor.snippet).toMatch(/states.*FA.*FB.*backward sequence.*BA.*BB.*hidden states.*continue in prose/su);
+  });
+
+  test('Preview-style body selection includes a smaller footnote with aligned staggered-column bands', async ({ page }) => {
+    await page.goto(previewFootnoteSelectionRegressionUrl);
+    await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 1/, { timeout: 10_000 });
+    const expectedItems = [
+      'Left body line one.',
+      'Left body line two.',
+      'Left body line three.',
+      'Footnote line one.',
+      'Footnote line two.',
+      'Right continuation one.',
+      'Right continuation two.',
+      'Right continuation three.',
+    ];
+    const spans = page.locator('#page-1 .text-layer span[data-item-index]');
+    await expect(spans).toHaveCount(expectedItems.length);
+    await expect.poll(() => spans.evaluateAll(elements => (
+      elements.map(element => element.textContent?.trim() ?? '')
+    ))).toEqual(expectedItems);
+
+    for (const percentage of [100, 144, 200]) {
+      await commitZoomAndWaitForTextLayer(page, percentage, spans.first());
+      const start = await textItemBox(page, expectedItems[0]!);
+      const end = await textItemBox(page, expectedItems.at(-1)!);
+      await resetMessages(page);
+      await dragSelection(
+        page,
+        { x: start.x + 1, y: start.y + start.height / 2 },
+        { x: end.x + end.width - 1, y: end.y + end.height / 2 },
+      );
+
+      const expected = expectedItems.join(' ');
+      await expectSelectionSnippet(page, expected);
+      expect(await canonicalNativeSelection(page)).toBe(expected);
+      await expectFullItemSelectionBands(page, expectedItems, 1);
+    }
+  });
+
+  test('a footnote remains independently selectable and copyable', async ({ page }) => {
+    await page.goto(previewFootnoteSelectionRegressionUrl);
+    await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 1/, { timeout: 10_000 });
+    const start = await textItemBox(page, 'Footnote line one.');
+    const end = await textItemBox(page, 'Footnote line two.');
+    await resetMessages(page);
+    await dragSelection(
+      page,
+      { x: start.x + 1, y: start.y + start.height / 2 },
+      { x: end.x + end.width - 1, y: end.y + end.height / 2 },
+    );
+
+    const expected = 'Footnote line one. Footnote line two.';
+    await expectSelectionSnippet(page, expected);
+    expect(await canonicalNativeSelection(page)).toBe(expected);
+    await expectFullItemSelectionBands(page, ['Footnote line one.', 'Footnote line two.'], 1);
+  });
+
+  test('staggered columns cannot transitively absorb a neighboring local row', async ({ page }) => {
+    await page.goto(staggeredBandBridgeRegressionUrl);
+    await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 1/, { timeout: 10_000 });
+    const expectedItems = [
+      'Left local row one has complete coverage.',
+      'Left local row two has complete coverage.',
+      'Left local row three has complete coverage.',
+      'Right staggered row one remains independent.',
+      'Right staggered row two remains independent.',
+      'Right staggered row three remains independent.',
+    ];
+    const spans = page.locator('#page-1 .text-layer span[data-item-index]');
+    await expect(spans).toHaveCount(expectedItems.length);
+    const start = await textItemBox(page, expectedItems[0]!);
+    const end = await textItemBox(page, expectedItems.at(-1)!);
+    await resetMessages(page);
+    await dragSelection(
+      page,
+      { x: start.x + 1, y: start.y + start.height / 2 },
+      { x: end.x + end.width - 1, y: end.y + end.height / 2 },
+    );
+
+    const expected = expectedItems.join(' ');
+    await expectSelectionSnippet(page, expected);
+    expect(await canonicalNativeSelection(page)).toBe(expected);
+    await expectFullItemSelectionBands(page, expectedItems, 1);
+  });
+
+  test('partial selection endpoints use glyph widths and full text-band heights', async ({ page }) => {
+    await page.goto(previewFootnoteSelectionRegressionUrl);
+    await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 1/, { timeout: 10_000 });
+    const start = await characterTarget(page, 'Left body line one.', 0, 5);
+    const end = await characterTarget(page, 'Right continuation three.', 0, 4);
+    await resetMessages(page);
+    await dragSelection(page, pointWithinCharacter(start, 0), pointWithinCharacter(end, 0));
+    const anchor = await waitForSelectionAnchor(page);
+    expect(anchor.snippet).toMatch(/^body line one\..*Right$/su);
+
+    const firstItem = await textItemBox(page, 'Left body line one.');
+    const lastItem = await textItemBox(page, 'Right continuation three.');
+    const overlays = await normalizedSelectionBands(page);
+    const firstBand = nearestOverlappingBand(overlays, firstItem);
+    const lastBand = nearestOverlappingBand(overlays, lastItem);
+    expect(firstBand.x).toBeGreaterThan(firstItem.x + 1);
+    expect(firstBand.y).toBeCloseTo(firstItem.y, 0);
+    expect(firstBand.y + firstBand.height).toBeCloseTo(firstItem.y + firstItem.height, 0);
+    expect(lastBand.x + lastBand.width).toBeLessThan(lastItem.x + lastItem.width - 1);
+    expect(lastBand.y).toBeCloseTo(lastItem.y, 0);
+    expect(lastBand.y + lastBand.height).toBeCloseTo(lastItem.y + lastItem.height, 0);
+  });
+
+  test('a drag from the first author through shared metadata includes the complete author grid', async ({ page }) => {
+    await page.goto(authorGridRegressionUrl);
+    await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 1/, { timeout: 10_000 });
+    await expect(page.locator('#page-1 .text-layer span[data-item-index]')).toHaveCount(7);
+    const start = await textItemBox(page, 'Rafael Alpha');
+    const end = await textItemBox(page, 'authors@example.test');
+
+    await resetMessages(page);
+    await dragSelection(
+      page,
+      { x: start.x + 1, y: start.y + start.height / 2 },
+      { x: end.x + end.width - 1, y: end.y + end.height / 2 },
+    );
+
+    const expected = [
+      'Rafael Alpha',
+      'Archit Beta',
+      'Eric Gamma',
+      'Stefano Delta',
+      'Christopher Epsilon',
+      'Chelsea Zeta',
+      'authors@example.test',
+    ].join(' ');
+    await expectSelectionSnippet(page, expected);
+    expect(await canonicalNativeSelection(page)).toBe(expected);
+  });
+
+  test('a drag through a fragmented numeric table includes every value in visual-row order', async ({ page }) => {
+    await page.goto(numericTableRegressionUrl);
+    await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 1/, { timeout: 10_000 });
+    await expect(page.locator('#page-1 .text-layer span[data-item-index]')).toHaveCount(36);
+    const start = await textItemBox(page, 'BERT Base Score');
+    const end = await textItemBox(page, '8.41');
+
+    await resetMessages(page);
+    await dragSelection(
+      page,
+      { x: start.x + 1, y: start.y + start.height / 2 },
+      { x: end.x + end.width - 1, y: end.y + end.height / 2 },
+    );
+
+    const expected = [
+      'BERT Base Score 88.19 76.89 88.09',
+      'BERT Large Score 90.87 89.65 90.94',
+      'GPT3 126M Score 19.01 28.37 19.43',
+      'GPT3 1.3B Score 10.19 12.74 10.29',
+      'GPT3 6.7B Score 8.51 10.29 8.41',
+    ].join(' ');
+    await expectSelectionSnippet(page, expected);
+    expect(await canonicalNativeSelection(page)).toBe(expected);
+  });
+
+  test('a drag through a centered affiliation masthead includes preceding author rows', async ({ page }) => {
+    await page.goto(centeredMastheadRegressionUrl);
+    await expect(page.locator('#page-info')).toHaveText(/Page 1 \/ 1/, { timeout: 10_000 });
+    await expect(page.locator('#page-1 .text-layer span[data-item-index]')).toHaveCount(19);
+    const start = await textItemBox(page, 'FP8 F');
+    const end = await textItemBox(page, 'Neil Burgess, Sangwon Ha, Richard Grisenthwaite');
+
+    await resetMessages(page);
+    await dragSelection(
+      page,
+      { x: start.x + 1, y: start.y + start.height / 2 },
+      { x: end.x + end.width - 1, y: end.y + end.height / 2 },
+    );
+
+    const expected = [
+      'FP8 F ORMATS FOR D EEP L EARNING',
+      'Paulius Micikevicius, Dusan Stosic, Patrick Judd, John Kamalu, Stuart Oberman, Mohammad Shoeybi,',
+      'Michael Siu, Hao Wu',
+      'NVIDIA',
+      '{pauliusm, dstosic, pjudd, jkamalu, soberman, mshoeybi, msiu, skyw}@nvidia.com',
+      'Neil Burgess, Sangwon Ha, Richard Grisenthwaite',
+    ].join(' ');
+    await expectSelectionSnippet(page, expected);
+    expect(await canonicalNativeSelection(page)).toBe(expected);
   });
 
   test('rapid repeated character drags never escalate into word or line selection', async ({ page }) => {
@@ -428,6 +687,36 @@ async function normalizedSelectionBands(page: Page): Promise<Box[]> {
       return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
     })
     .sort((left, right) => left.y - right.y || left.x - right.x));
+}
+
+async function expectFullItemSelectionBands(
+  page: Page,
+  itemTexts: string[],
+  tolerance: number,
+): Promise<void> {
+  const overlays = await normalizedSelectionBands(page);
+  for (const text of itemTexts) {
+    const item = await textItemBox(page, text);
+    const band = nearestOverlappingBand(overlays, item);
+    expect(Math.abs(band.x - item.x)).toBeLessThanOrEqual(tolerance);
+    expect(Math.abs(band.y - item.y)).toBeLessThanOrEqual(tolerance);
+    expect(Math.abs((band.x + band.width) - (item.x + item.width))).toBeLessThanOrEqual(tolerance);
+    expect(Math.abs((band.y + band.height) - (item.y + item.height))).toBeLessThanOrEqual(tolerance);
+  }
+}
+
+function nearestOverlappingBand(bands: Box[], item: Box): Box {
+  const horizontalOverlap = (band: Box): number => Math.min(
+    band.x + band.width,
+    item.x + item.width,
+  ) - Math.max(band.x, item.x);
+  const candidates = bands.filter(band => horizontalOverlap(band) > 0);
+  const nearest = candidates.sort((left, right) => (
+    Math.abs((left.y + left.height / 2) - (item.y + item.height / 2))
+    - Math.abs((right.y + right.height / 2) - (item.y + item.height / 2))
+  ))[0];
+  if (!nearest) throw new Error('Expected an overlapping PDF selection band');
+  return nearest;
 }
 
 async function pointInsideText(
