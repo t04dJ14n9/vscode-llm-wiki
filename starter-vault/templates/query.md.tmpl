@@ -1,0 +1,32 @@
+---
+type: "Query"
+title: "{{question}}"
+description: "{{description}}"
+tags: {{canonical_registered_tags}}
+status: "draft"
+scope: "vault"
+generated: {"by": "{{actor}}", "at": "{{timestamp}}"}
+condensed_summary: "{{one_or_two_sentence_answer}}"
+conversation: {"selection_id": "{{selection_id}}"}
+sources: [{"id": "{{source_id}}", "resource": "{{relative_path_or_url}}", "title": "{{source_title}}"}]
+anchors: []
+relations: [{"target": "{{wiki_root_relative_markdown_target}}", "kind": "{{allowed_relation_kind}}", "caption": "{{direct_caption_under_160_code_points}}"}]
+---
+
+# {{question}}
+
+## Answer
+
+{{answer}}
+
+## Evidence
+
+{{evidence}}
+
+## Limitations
+
+{{limitations}}
+
+## Related durable pages
+
+{{links}}

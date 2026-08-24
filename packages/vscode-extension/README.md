@@ -14,6 +14,12 @@ condensed answers on original source ranges, and reads legacy learning notes
 without creating new ones. Agent handoff attaches immutable context to a draft;
 the extension neither submits nor scrapes conversations.
 
+The installed extension also carries `resources/llm-wiki-empty-vault.zip`.
+Extract it into a new directory to start with a knowledge-empty vault containing
+the complete AGENTS workflow, schema, templates, indexes, workbench folders,
+and Git LFS configuration. The archive does not embed a Git repository or any
+sample knowledge.
+
 Source, documentation, development instructions, and issue tracking are in the
 [LLM Wiki repository](https://github.com/t04dJ14n9/vscode-llm-wiki).
 

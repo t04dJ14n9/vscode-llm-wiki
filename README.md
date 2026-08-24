@@ -86,6 +86,23 @@ Canonical Query inputs are `wiki/queries/*.md` and, for directly opened code
 repositories, `docs/llm-wiki/queries/*.md`. Legacy root/project Query paths and
 `wiki/learning` remain one-release read-only inputs.
 
+## Start an empty vault
+
+The extension package includes
+`resources/llm-wiki-empty-vault.zip`. Extract its contents directly into a new
+directory to get a knowledge-empty vault that already follows this layout:
+
+```bash
+mkdir MyVault
+unzip packages/vscode-extension/resources/llm-wiki-empty-vault.zip -d MyVault
+```
+
+The archive includes the complete AGENTS workflow, schema, tag registry,
+authoring templates, generated indexes, workbench directories, ignored
+`projects/code/` binding directory, and an empty Git-LFS-ready `assets/`
+directory. It contains no sample knowledge, nested Git repository, or code
+checkout.
+
 ## Repository packages
 
 ```text
@@ -94,6 +111,7 @@ packages/
 ├── pdf-editor/                    # shared PDF viewer and selection model
 └── core/                          # portable reference primitives
 tools/llm-wiki/                    # deterministic producers and validators
+starter-vault/                     # canonical source for the empty vault ZIP
 .agents/skills/pdf/                # focused PDF selection workflow
 .agents/skills/humanizer/          # evidence-preserving prose polish
 .agents/skills/arxiv/              # version-pinned paper discovery
@@ -114,6 +132,7 @@ pnpm build
 python3 -m unittest discover -s tools/llm-wiki/tests -v
 python3 tools/llm-wiki/rebuild_indexes.py --vault demo-vault --check
 python3 tools/llm-wiki/validate_vault.py --vault demo-vault
+python3 tools/llm-wiki/build_starter_bundle.py --check
 ```
 
 Browser and VS Code-host tests:

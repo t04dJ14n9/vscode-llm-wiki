@@ -1,18 +1,18 @@
 ---
 type: "Playbook"
-title: "LLM Wiki operator handbook"
-description: "Normative AGENTS-only workflow for the graph-ready demo vault."
+title: "Vault agent handbook"
+description: "Normative workflow for maintaining this graph-ready LLM Wiki vault."
 status: "stable"
 scope: "vault"
 vault_timezone: "Asia/Shanghai"
 generated: {"by": "codex/gpt-5.6", "at": "2026-08-25T00:57:53+08:00"}
 ---
 
-# LLM Wiki operator handbook
+# Vault agent handbook
 
 This file is the complete normative workflow. No LLM Wiki skill is required.
 
-Use installed focused skills when their trigger applies: `arxiv` for
+Use focused skills when available and their trigger applies: `arxiv` for
 version-pinned paper discovery, `grounded-citations` for claim-level evidence,
 `research-paper-writing` for academic manuscripts, `pdf` for exact PDF regions,
 and `humanizer` for requested prose polish. The vault workflow in this file
@@ -20,7 +20,7 @@ remains authoritative for placement, metadata, validation, and logging.
 
 ## Start every study or maintenance session
 
-1. Read `SCHEMA.md`, `TAGS.md`, `_index.md`, `tasks/current.md`, and the newest `_log.md` entry.
+1. Read `SCHEMA.md`, `TAGS.md`, `_index.md`, `tasks/current.md`, and the newest `_log.md` entry when one exists.
 2. Use the `Asia/Shanghai` calendar date. Create or refresh `wiki/daily/YYYY-MM-DD.md` from `templates/daily.md.tmpl` if this is the first session that day.
 3. Preserve every human-owned Goals, review-answer, and Notes marker verbatim.
 4. Search titles, tags, bodies, and Query selection IDs before writing.
@@ -121,7 +121,7 @@ Store no local path, workspace alias, YAML registry, submodule, or paired
 project vault in Git. Do not create a separate `workspace/` binding directory,
 search the filesystem for candidates, clone, or sync automatically.
 Repository-specific knowledge belongs in the repository's `docs/llm-wiki/`.
-Nanochat is reference-only in this demo.
+Do not add sample or reference projects unless the user asks for them.
 
 ## File Queries
 
@@ -136,10 +136,11 @@ links or wikilinks.
 ## Finish
 
 Rebuild indexes, validate placement/relations/daily notes/provenance/bindings,
-inspect LFS, run `git diff --check`, and refresh Query annotations. Material
-corpus ingests also complete every semantic gate in the bulk-ingestion playbook
-and retain their report in `tasks` or `output`. Record each
-material event with `tools/llm-wiki/append_log.py`; `_log.md` is oldest-first
-and append-only, so never insert, reorder, condense, or rewrite an earlier
-event. Use `learned`, `changed`, or `maintained` as the event kind. Never commit,
-push, sync a code binding, or write externally without explicit authority.
+inspect LFS when Git is initialized, run `git diff --check`, and refresh Query
+annotations. Material corpus ingests also complete every semantic gate in the
+bulk-ingestion playbook and retain their report in `tasks` or `output`. Append
+material events to `_log.md`; it is oldest-first and
+append-only, so never insert, reorder, condense, or rewrite an earlier event.
+Use `learned`, `changed`, or `maintained` as the event kind and follow the log
+template exactly. Never commit, push, sync a code binding, or write externally
+without explicit authority.

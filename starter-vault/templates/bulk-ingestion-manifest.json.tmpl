@@ -1,0 +1,50 @@
+{
+  "schema_version": "llm-wiki-bulk-ingestion/v1",
+  "corpus": {
+    "id": "{{corpus_id}}",
+    "scope": "{{inclusion_and_exclusion_boundary}}",
+    "source_count": {{source_count}},
+    "prepared_by": "{{actor}}",
+    "prepared_at": "{{timestamp}}"
+  },
+  "status": "{{candidate_or_frozen}}",
+  "pages": [
+    {
+      "target": "wiki/{{collection}}/{{slug}}.md",
+      "action": "{{create_or_extend}}",
+      "type": "{{Summary_Concept_Comparison_or_Entity}}",
+      "title": "{{canonical_title}}",
+      "description": "{{direct_description}}",
+      "aliases": ["{{candidate_alias}}"],
+      "tags": ["{{registered_tag}}"],
+      "admission": {
+        "basis": "{{recurs_across_sources_reused_by_pages_substantial_primary_source_or_explicit_user_scope}}",
+        "evidence": ["{{source_id}}"],
+        "rationale": "{{why_this_requires_a_durable_page}}"
+      },
+      "sources": [
+        {
+          "id": "{{source_id}}",
+          "resource": "{{relative_path_or_url}}",
+          "title": "{{source_title}}",
+          "evidence": ["{{exact_page_line_timestamp_quote_or_region}}"]
+        }
+      ],
+      "relations": [
+        {
+          "target": "{{wiki_root_relative_markdown_target}}",
+          "kind": "{{allowed_relation_kind}}",
+          "caption": "{{direct_caption_under_160_code_points}}"
+        }
+      ]
+    }
+  ],
+  "rejected_candidates": [
+    {
+      "title": "{{candidate_title}}",
+      "aliases": ["{{candidate_alias}}"],
+      "source_ids": ["{{source_id}}"],
+      "reason": "{{duplicate_too_thin_out_of_scope_promotional_or_deferred}}"
+    }
+  ]
+}

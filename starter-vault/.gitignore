@@ -1,0 +1,12 @@
+.DS_Store
+.llm_wiki/
+.omc/
+.cursor/
+.claude/settings.local.json
+.ingest-*/
+projects/code/
+__pycache__/
+*.tmp
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal

@@ -5,9 +5,13 @@ description: "Keep the paper-grounded demo coherent while Nanochat remains a ref
 tags: ["operations", "reproducibility"]
 status: "draft"
 scope: "vault"
-generated: {"by": "codex/gpt-5.6", "at": "2026-08-24T20:14:36+08:00"}
+generated: {"by": "codex/gpt-5.6", "at": "2026-08-25T00:57:53+08:00"}
 ---
 
 # Curate the graph-ready demo vault
 
-Maintain explicit relations, source-backed Queries, and daily review examples. Do not reintroduce a PersonalVault-owned Nanochat code wiki; initialize repository-specific knowledge only in a writable code repository's `docs/llm-wiki/`.
+Maintain explicit relations, source-backed Queries, and daily review examples.
+Use the bulk-ingestion playbook and frozen candidate manifest before expanding
+the paper corpus at scale. Do not reintroduce a PersonalVault-owned Nanochat
+code wiki; initialize repository-specific knowledge only in a writable code
+repository's `docs/llm-wiki/`.

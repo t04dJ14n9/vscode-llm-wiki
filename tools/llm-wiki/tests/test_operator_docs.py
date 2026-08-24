@@ -79,6 +79,25 @@ class OperatorDocumentationTests(unittest.TestCase):
                     (canonical / relative).read_bytes(),
                 )
 
+    def test_bulk_ingestion_materials_match_the_starter_vault(self) -> None:
+        starter = REPOSITORY / "starter-vault"
+        for relative in (
+            "playbooks/bulk-corpus-ingestion.md",
+            "templates/bulk-ingestion-manifest.json.tmpl",
+        ):
+            self.assertEqual(
+                (VAULT / relative).read_bytes(),
+                (starter / relative).read_bytes(),
+            )
+
+        playbook = parse_frontmatter(
+            (VAULT / "playbooks/bulk-corpus-ingestion.md").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertEqual(playbook.metadata["type"], "Playbook")
+        self.assertIn("eba5e31bc628280c546d4828491051c308d550dc", playbook.body)
+
     def test_humanizer_has_no_framework_specific_content(self) -> None:
         humanizer_skill = SKILLS_ROOT / "humanizer"
         text = (humanizer_skill / "SKILL.md").read_text(encoding="utf-8")
@@ -113,6 +132,7 @@ class OperatorDocumentationTests(unittest.TestCase):
     def test_documented_producer_clis_are_runnable(self) -> None:
         for script in (
             "append_log.py",
+            "build_starter_bundle.py",
             "install_agent_skills.py",
             "ingest_arxiv.py",
             "rebuild_indexes.py",

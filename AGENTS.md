@@ -32,6 +32,11 @@ belongs in `inbox/`, `tasks/`, or `scratch/`. `templates/`, `projects/code/`,
 assets, hidden runtime directories, and skill packages are opaque to indexing
 and validation.
 
+`starter-vault/` is the canonical knowledge-empty vault source. Keep
+`packages/vscode-extension/resources/llm-wiki-empty-vault.zip` byte-for-byte
+current with `tools/llm-wiki/build_starter_bundle.py`; the unpacked archive
+must pass the same index and vault validation as the source.
+
 Operational prompts and skills, assets, and `.md.tmpl` templates are outside
 the OKF concept-document set and follow their native formats.
 
@@ -46,6 +51,24 @@ duplicate target/kind edge is allowed.
 Durable templates include complete sample `sources` and `relations` items;
 replace them with real JSON-flow entries or `[]`, and never publish unresolved
 placeholders.
+
+Admit a new Concept, Comparison, Entity, or Summary only after searching for an
+existing durable page and establishing that the candidate is distinct and
+reusable. Normal admission evidence is recurrence across at least two
+independent sources, reuse by at least two durable pages, a substantial primary
+source treatment, or an explicit user-defined durable scope. Otherwise keep the
+material in its source Summary or the workbench. Treat these signals as a
+curation rubric rather than a mechanical count; record the basis for any
+single-source exception in the working task or ingestion manifest.
+
+For a material multi-source ingest, follow the nearest vault's
+`playbooks/bulk-corpus-ingestion.md`.
+Extract evidence-bound candidates before drafting prose, canonicalize aliases
+and page targets in one review step, freeze a workbench manifest, then create or
+extend pages against that manifest. Finish with deterministic validation plus
+answerability, out-of-scope refusal, recall-coverage, citation-integrity, and
+duplicate-content checks. Semantic checks may use agents or optional local
+models, but they must not become a required embeddings or database runtime.
 
 Each vault owns one `TAGS.md` registry. Use its canonical tag headings. Unknown
 tags are advisory warnings, not base OKF failures. `verified` may record
@@ -132,6 +155,7 @@ For material demo-vault changes run:
 python3 tools/llm-wiki/rebuild_indexes.py --vault demo-vault
 python3 tools/llm-wiki/rebuild_indexes.py --vault demo-vault --check
 python3 tools/llm-wiki/validate_vault.py --vault demo-vault
+python3 tools/llm-wiki/build_starter_bundle.py --check
 git lfs ls-files
 git diff --check
 git status --short

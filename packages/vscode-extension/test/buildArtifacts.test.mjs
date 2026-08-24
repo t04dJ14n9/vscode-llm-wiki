@@ -121,6 +121,15 @@ test('VSIX metadata includes package-local documentation, license, and repositor
   });
 });
 
+test('VSIX package includes the ready-to-unpack empty vault', () => {
+  assert.equal(
+    existsSync(join(extensionRoot, 'resources', 'llm-wiki-empty-vault.zip')),
+    true,
+  );
+  const ignore = readFileSync(join(extensionRoot, '.vscodeignore'), 'utf8');
+  assert.doesNotMatch(ignore, /^resources(?:\/|\*\*)/m);
+});
+
 test('webview bundles do not depend on webpack automatic publicPath detection', () => {
   for (const file of [
     'markdown-editor.js',

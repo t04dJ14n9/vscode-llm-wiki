@@ -4,7 +4,7 @@ title: "LLM Wiki demo vault"
 description: "A working example of source-backed reading, durable Queries, repository references, and active recall in LLM Wiki for VS Code."
 status: "stable"
 scope: "vault"
-generated: {"by": "codex/gpt-5.6", "at": "2026-08-25T00:32:09+08:00"}
+generated: {"by": "codex/gpt-5.6", "at": "2026-08-25T00:57:53+08:00"}
 ---
 
 # LLM Wiki demo vault
@@ -30,6 +30,9 @@ than a copied code wiki.
   recall generated from prior learning.
 - Read the [Nanochat project card](projects/nanochat.md) for a high-level
   repository overview and the exact revision tracked by this vault.
+- Read [Bulk corpus ingestion](playbooks/bulk-corpus-ingestion.md) for the
+  extract-canonicalize-write workflow and semantic quality gates used when a
+  source collection is large enough to create duplication and coverage risk.
 
 Maintainers should read [AGENTS.md](AGENTS.md), [SCHEMA.md](SCHEMA.md),
 [TAGS.md](TAGS.md), [tasks/current.md](tasks/current.md), and the latest event in

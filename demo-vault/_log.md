@@ -113,3 +113,7 @@ description: "Oldest-first append-only record of material demo-vault changes."
 ## [2026-08-25] changed | research workflow skills
 
 - **Changed**: Added framework-neutral arXiv discovery, grounded-citation, and research-paper-writing skills with upstream MIT attribution and installed copies.
+
+## [2026-08-25] changed | bulk corpus ingestion workflow
+
+- **Changed**: Added a source-attributed extract-canonicalize-write playbook, frozen candidate manifest, durable-page admission rubric, and semantic gates for answerability, refusal, recall, citation integrity, and duplicate content.

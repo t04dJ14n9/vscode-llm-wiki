@@ -1,20 +1,21 @@
 ---
 type: "Reference"
-title: "Graph-ready LLM Wiki schema"
+title: "Vault schema"
 description: "OKF v0.2 placement, project cards, relations, Queries, templates, and daily-review rules."
 status: "stable"
 scope: "vault"
 generated: {"by": "codex/gpt-5.6", "at": "2026-08-25T00:57:53+08:00"}
 ---
 
-# Graph-ready LLM Wiki schema
+# Vault schema
 
 The root `_index.md` has only `okf_version: "0.2"` frontmatter. Nested `_index.md` files are frontmatter-free immediate-child navigation; `_log.md` is the only log. Assets, templates, `projects/code`, hidden runtime state, and skills are opaque.
 
 Indexes are hierarchical immediate-child catalogs. `_log.md` is an
 oldest-first append-only event stream: each event has a parseable
 `## [YYYY-MM-DD] kind | subject` heading and one categorized bullet. New events
-are appended with `tools/llm-wiki/append_log.py`; prior bytes are immutable.
+are appended at the end using `templates/_log.md.tmpl`; prior bytes are
+immutable. Use a deterministic producer when one is available.
 
 `TAGS.md` is the vault-local central tag registry. Its level-two headings are
 canonical lowercase kebab-case tags and the following prose defines when to use
