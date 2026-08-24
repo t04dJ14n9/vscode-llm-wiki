@@ -32,13 +32,13 @@ artifacts/
 .codegraph/
 .code-review-graph/
 .worktrees/
+.superpower/
 .superpowers/
 .cursor/
 .omc/
 .paperlink/
-.vscode/*
-!.vscode/launch.json
-!.vscode/tasks.json
+.vscode/
+.husky/
 
 demos/
 reference/
