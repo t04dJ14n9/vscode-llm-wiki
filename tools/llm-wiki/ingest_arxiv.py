@@ -375,7 +375,6 @@ def ingest_paper(
     vault_root: Path,
     ref: ArxivRef,
     *,
-    project: str | None = None,
     metadata_loader: Callable[[ArxivRef], PaperMetadata] = fetch_arxiv_metadata,
     pdf_loader: Callable[[ArxivRef, Path], None] = download_arxiv_pdf,
     extractor: Callable[[Path, Path], str] = extract_with_pdftotext,
@@ -384,18 +383,10 @@ def ingest_paper(
 ) -> IngestResult:
     """Fetch and atomically publish one immutable Markdown/PDF pair."""
     vault_root = vault_root.resolve()
-    evidence_root = vault_root
-    if project is not None:
-        if not re.fullmatch(r"[a-z0-9][a-z0-9-]*", project):
-            raise IngestError("project must be a single lowercase project id")
-        evidence_root = vault_root / "projects" / project
-        if not evidence_root.is_dir():
-            raise IngestError(f"project is not registered in this vault: {project}")
-    raw_dir = evidence_root / "raw"
-    assets_dir = evidence_root / "assets"
+    raw_dir = vault_root / "raw"
+    assets_dir = vault_root / "assets"
     if not raw_dir.is_dir() or not assets_dir.is_dir():
-        scope = f"project workbench {project}" if project else "outer vault"
-        raise IngestError(f"evidence directories are incomplete: {scope}")
+        raise IngestError("evidence directories are incomplete: vault root")
 
     paper = metadata_loader(ref)
     normalized_license = _normalize_license_url(paper.license_url)
@@ -539,10 +530,6 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--id", required=True, dest="arxiv_id")
     parser.add_argument(
-        "--project",
-        help="Optional code-vault ID; omit for higher-level outer-vault papers.",
-    )
-    parser.add_argument(
         "--vault",
         type=Path,
         default=default_vault_root(),
@@ -552,7 +539,6 @@ def main(argv: list[str] | None = None) -> int:
         result = ingest_paper(
             arguments.vault,
             parse_arxiv_ref(arguments.arxiv_id),
-            project=arguments.project,
         )
     except (IngestError, OSError, subprocess.CalledProcessError) as error:
         print(f"ERROR: {error}", file=sys.stderr)

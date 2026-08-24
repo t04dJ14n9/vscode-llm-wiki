@@ -877,6 +877,51 @@ test.describe('LLM Wiki — E2E Bidirectional Links', () => {
     }]);
   });
 
+  test('editing a daily review answer preserves every human and agent marker', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+    await waitForEditorBootstrap(page);
+    const occurrence = 'query:selection-1@2026-08-24';
+    const daily = [
+      '# 2026-08-24',
+      '',
+      '## Goals',
+      '<!-- human:goals:start -->',
+      '<!-- human:goals:end -->',
+      '<!-- llm-wiki:reviews:start -->',
+      `<!-- llm-wiki:review id="${occurrence}" -->`,
+      '### Why does the source matter?',
+      `<!-- human:review-answer:start id="${occurrence}" -->`,
+      `<!-- human:review-answer:end id="${occurrence}" -->`,
+      '- [ ] Attempted before opening source',
+      '<!-- llm-wiki:reviews:end -->',
+      '## Notes',
+      '<!-- human:notes:start -->',
+      '<!-- human:notes:end -->',
+    ].join('\n');
+    await page.evaluate(text => window.postMessage({ type: 'setText', text }, '*'), daily);
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+
+    const result = await page.evaluate(({ answer, id }) => {
+      const view = window.__cmView;
+      const endMarker = `<!-- human:review-answer:end id="${id}" -->`;
+      const from = view.state.doc.toString().indexOf(endMarker);
+      view.dispatch({ changes: { from, insert: `${answer}\n` }, userEvent: 'input.type' });
+      return view.state.doc.toString();
+    }, { answer: 'Sharing KV heads reduces cache traffic.', id: occurrence });
+
+    expect(result).toContain('Sharing KV heads reduces cache traffic.');
+    for (const marker of [
+      '<!-- human:goals:start -->',
+      '<!-- human:goals:end -->',
+      '<!-- llm-wiki:reviews:start -->',
+      '<!-- llm-wiki:reviews:end -->',
+      `<!-- human:review-answer:start id="${occurrence}" -->`,
+      `<!-- human:review-answer:end id="${occurrence}" -->`,
+      '<!-- human:notes:start -->',
+      '<!-- human:notes:end -->',
+    ]) expect(result.split(marker)).toHaveLength(2);
+  });
+
   test('editor provides full text only when the host requests a resync', async ({ page }) => {
     await page.goto('http://localhost:8979/test.html');
     await waitForEditorBootstrap(page);

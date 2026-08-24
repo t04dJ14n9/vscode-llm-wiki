@@ -44,7 +44,8 @@ test('agent rules require reusing the generated host link instead of the anchor 
   const repositoryRoot = resolve(extensionRoot, '..', '..');
   for (const relativePath of [
     'README.md',
-    '.agents/skills/llm-wiki/SKILL.md',
+    'AGENTS.md',
+    'demo-vault/AGENTS.md',
   ]) {
     const rules = readFileSync(join(repositoryRoot, relativePath), 'utf8');
     assert.match(rules, /cursor:\/\/llm-wiki\.llm-wiki-vscode\/open-anchor/);

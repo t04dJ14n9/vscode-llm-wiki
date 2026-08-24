@@ -56,7 +56,7 @@
 | Agent context export | 2d | `.llm_wiki/agent/selection.md` + `selection.json` |
 | `llm_wiki context export`, `llm_wiki context current` | 1d | CLI with `--anchor`, `--source`, `--lines` flags |
 | `AGENTS.md` + `CLAUDE.md` generation | 2d | Templates with vault rules, raw protection, citation rules |
-| Codex skill skeleton | 1d | `.agents/skills/llm-wiki/SKILL.md` |
+| Vault AGENTS workflow | 1d | `AGENTS.md`, `demo-vault/AGENTS.md` |
 | Claude commands skeleton | 1d | `.claude/commands/llm-wiki-*.md` |
 
 **Deliverables**:

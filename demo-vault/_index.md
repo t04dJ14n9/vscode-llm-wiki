@@ -6,24 +6,25 @@ okf_version: "0.2"
 # Subdirectories
 
 * [assets](assets/) - Flat binary evidence for the knowledge vault.
-* [comparisons](comparisons/) - Decision-oriented comparisons of related approaches.
-* [concepts](concepts/) - Focused explanations of language-model mechanisms.
-* [entities](entities/) - Named datasets, model families, and other concrete subjects.
-* [examples](examples/) - Stable illustrative examples and viewer fixtures.
-* [playbooks](playbooks/) - Project-specific operational guidance.
-* [projects](projects/) - Repository cards paired with self-contained code vaults.
-* [queries](queries/) - Durable answers to recurring reader questions.
+* [inbox](inbox/) - Unprocessed source candidates.
+* [output](output/) - Polished reports and designs.
+* [playbooks](playbooks/) - Stable operational guidance.
+* [projects](projects/) - Portable repository cards; code knowledge stays with each repository.
 * [raw](raw/) - Flat immutable source companions for the knowledge vault.
-* [summaries](summaries/) - Narrative entry points through the knowledge bundle.
+* [scratch](scratch/) - Ephemeral working notes and hypotheses.
+* [summaries](summaries/) - Narrative entry points through the knowledge vault.
+* [tasks](tasks/) - Current and historical work state.
+* [templates](templates/) - Opaque authoring templates for agents and humans.
+* [wiki](wiki/) - Durable graph-ready knowledge and daily review notes.
 
 # Playbook
 
-* [LLM Wiki operator handbook](AGENTS.md) - Project-scoped workflows for orienting, ingesting, compiling, querying, and validating this bundle.
+* [LLM Wiki operator handbook](AGENTS.md) - Normative AGENTS-only workflow for the graph-ready demo vault.
 
 # Reference
 
-* [Nanochat LLM Wiki](README.md) - Reader orientation for a project-scoped, source-backed Nanochat knowledge bundle.
-* [Project-scoped LLM Wiki schema](SCHEMA.md) - The OKF v0.2 base, Karpathy vault profile, and project policy enforced by this bundle.
+* [Graph-ready LLM Wiki schema](SCHEMA.md) - OKF v0.2 placement, project cards, relations, Queries, templates, and daily-review rules.
+* [LLM Wiki demo vault](README.md) - A source-backed demonstration of graph-ready knowledge, Query annotations, and daily active recall.
 
 # Log
 

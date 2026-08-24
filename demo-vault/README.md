@@ -1,29 +1,15 @@
 ---
 type: "Reference"
-title: "Nanochat LLM Wiki"
-description: "Reader orientation for a project-scoped, source-backed Nanochat knowledge bundle."
-tags: ["language-models", "open-knowledge-format", "project-nanochat"]
+title: "LLM Wiki demo vault"
+description: "A source-backed demonstration of graph-ready knowledge, Query annotations, and daily active recall."
+tags: ["language-models", "open-knowledge-format", "reproducibility"]
 status: "stable"
-generated: {"by": "process:project-scope-migration", "at": "2026-08-23T13:38:07Z"}
-scope: "cross-project"
+scope: "vault"
+generated: {"by": "process:vault-format-v2", "at": "2026-08-24T00:00:00+08:00"}
 ---
 
-# Nanochat LLM Wiki
+# LLM Wiki demo vault
 
-This OKF v0.2 catalog keeps papers and higher-level LLM knowledge at the root,
-while the self-contained Nanochat code vault documents repository code. Its
-optional in-place code working copy is registered but not distributed.
+Start at [_index.md](_index.md), read [AGENTS.md](AGENTS.md), then browse durable [wiki knowledge](wiki/), narrative [summaries](summaries/), immutable [sources](raw/), and the reference-only [Nanochat project card](projects/nanochat.md).
 
-- Start at the [bundle index](_index.md).
-- Read the flat [Nanochat repository card](projects/nanochat.md), then open its
-  paired [Nanochat code vault](projects/nanochat/).
-- Read [project-local queries](projects/nanochat/queries/) for durable answers.
-- Trace paper claims into root [raw evidence](raw/) and flat [binary assets](assets/).
-- Browse reusable [concepts](concepts/), [entities](entities/), and
-  [comparisons](comparisons/).
-
-See [the schema](SCHEMA.md) and [operator handbook](AGENTS.md) before making
-material changes.
-
-`_index.md` and `_log.md` are canonical regular files. The vault does not use
-unprefixed navigation/log files or compatibility aliases.
+The demo includes a paper-grounded [grouped-query attention Query](wiki/queries/why-does-grouped-query-attention-reduce-kv-cache-cost.md) and [daily active-recall example](wiki/daily/2026-08-24.md). Templates live in the opaque `templates/` directory. Code-specific knowledge is not distributed in this vault; writable code repositories own it under `docs/llm-wiki/`.

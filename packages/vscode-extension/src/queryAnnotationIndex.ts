@@ -184,6 +184,8 @@ export interface QueryWatcherOptions {
 }
 
 const QUERY_PATTERNS = [
+  'wiki/queries/*.md',
+  'docs/llm-wiki/queries/*.md',
   'queries/*.md',
   'projects/*/queries/*.md',
   'wiki/learning/*.md',
@@ -766,6 +768,8 @@ function adaptLegacyAnnotation(
 
 async function queryFiles(workspaceRoot: string): Promise<string[]> {
   const results: string[] = [];
+  results.push(...await directMarkdownFiles(resolve(workspaceRoot, 'wiki', 'queries')));
+  results.push(...await directMarkdownFiles(resolve(workspaceRoot, 'docs', 'llm-wiki', 'queries')));
   results.push(...await directMarkdownFiles(resolve(workspaceRoot, 'queries')));
   const projectsRoot = resolve(workspaceRoot, 'projects');
   for (const project of await directDirectories(projectsRoot)) {
@@ -878,7 +882,9 @@ function sourceKey(sourcePath: string): string {
 
 export function isQueryPagePath(queryPath: string): boolean {
   const parts = queryPath.split('/');
-  return parts.length === 2 && parts[0] === 'queries'
+  return parts.length === 3 && parts[0] === 'wiki' && parts[1] === 'queries'
+    || parts.length === 4 && parts[0] === 'docs' && parts[1] === 'llm-wiki' && parts[2] === 'queries'
+    || parts.length === 2 && parts[0] === 'queries'
     || parts.length === 4 && parts[0] === 'projects' && parts[2] === 'queries';
 }
 

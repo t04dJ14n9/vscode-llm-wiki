@@ -5,7 +5,7 @@ import math
 import re
 import subprocess
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Literal, Protocol
 from urllib.parse import urlparse
@@ -13,20 +13,15 @@ from urllib.parse import urlparse
 from rebuild_indexes import INDEX_FILE, LEGACY_INDEX_FILE, LOG_FILE, LEGACY_LOG_FILE, IndexBuildError, build_indexes, owned_directories
 from vaultlib import (
     ALLOWED_STATUSES,
-    RepositoryBinding,
-    RepositoryRegistry,
-    RepositoryRegistryError,
+    RemoteIdentityError,
     markdown_targets,
     normalize_git_remote,
     parse_frontmatter,
-    parse_repository_registry,
     resolve_local_target,
     sha256_bytes,
     strip_fenced_code_blocks,
 )
 
-NANOCHAT_COMMIT = "92d63d4e8bb4df75c3b71618f31ddde2378b2bcd"
-NANOCHAT_REPOSITORY = "https://github.com/karpathy/nanochat.git"
 LAYERS = frozenset({"okf-base", "karpathy-vault-v1", "project-policy"})
 HEX_SHA256 = re.compile(r"^[0-9a-f]{64}$")
 HEX_GIT_OID = re.compile(r"^[0-9a-f]{40}$")
@@ -46,19 +41,38 @@ BINARY_MEDIA_TYPES = {
     ".tar": "application/x-tar",
     ".gz": "application/gzip",
 }
-ROOT_COLLECTIONS = ("summaries", "concepts", "entities", "playbooks", "comparisons", "queries")
-ROOT_EVIDENCE_DIRECTORIES = ("raw", "assets", "examples")
+WIKI_COLLECTIONS = ("concepts", "comparisons", "entities", "queries")
+ROOT_COLLECTIONS = ("summaries", "playbooks")
+ROOT_EVIDENCE_DIRECTORIES = ("raw",)
 WORKBENCH_DIRECTORIES = (
     "inbox", "raw", "assets", "tasks", "scratch", "summaries", "concepts",
-    "entities", "playbooks", "comparisons", "queries", "output", "examples",
+    "entities", "playbooks", "comparisons", "queries", "output",
 )
-REQUIRED_FILES = (".gitattributes", ".gitignore", "README.md", "SCHEMA.md", "AGENTS.md", INDEX_FILE, LOG_FILE, "projects/repositories.yaml")
+REQUIRED_FILES = (".gitattributes", ".gitignore", "README.md", "SCHEMA.md", "AGENTS.md", INDEX_FILE, LOG_FILE)
 PROJECT_REQUIRED_FILES = (".gitattributes", ".gitignore", "README.md", "SCHEMA.md", "AGENTS.md", INDEX_FILE, LOG_FILE)
+TEMPLATE_FILES = (
+    "_index.md.tmpl", "_log.md.tmpl", "AGENTS.md.tmpl", "SCHEMA.md.tmpl",
+    "daily.md.tmpl", "concept.md.tmpl", "entity.md.tmpl",
+    "comparison.md.tmpl", "query.md.tmpl", "summary.md.tmpl",
+    "playbook.md.tmpl", "project-card.md.tmpl", "raw-source.md.tmpl",
+)
 ROOT_TYPES = {"README.md": "Reference", "SCHEMA.md": "Reference", "AGENTS.md": "Playbook"}
 COMPILED_COLLECTION_TYPES = {
     "summaries": "Summary", "concepts": "Concept", "entities": "Entity",
     "playbooks": "Playbook", "comparisons": "Comparison", "queries": "Query",
 }
+RELATION_KINDS = frozenset({
+    "references", "depends-on", "supported-by", "contrasts-with",
+    "extends", "supersedes", "applies-to", "example-of",
+})
+REVIEW_INTERVALS = (1, 3, 7, 14, 30, 60, 90)
+DAILY_MARKERS = (
+    ("<!-- human:goals:start -->", "<!-- human:goals:end -->"),
+    ("<!-- llm-wiki:reviews:start -->", "<!-- llm-wiki:reviews:end -->"),
+    ("<!-- llm-wiki:learned:start -->", "<!-- llm-wiki:learned:end -->"),
+    ("<!-- llm-wiki:review-plan:start -->", "<!-- llm-wiki:review-plan:end -->"),
+    ("<!-- human:notes:start -->", "<!-- human:notes:end -->"),
+)
 
 
 @dataclass(frozen=True, order=True)
@@ -77,7 +91,7 @@ class SourceBindingState:
 
 
 class GitStateReader(Protocol):
-    def source_binding(self, path: Path) -> SourceBindingState: ...
+    def source_binding(self, path: Path, vcs: str = "git") -> SourceBindingState: ...
     def source_blob(self, path: Path, revision: str, repository_path: str) -> bytes | None: ...
     def lfs_filter(self, path: Path) -> str | None: ...
     def is_tracked(self, path: Path) -> bool: ...
@@ -97,13 +111,23 @@ class RealGitState:
             return None
         return result.stdout.strip()
 
-    def source_binding(self, path: Path) -> SourceBindingState:
+    def source_binding(self, path: Path, vcs: str = "git") -> SourceBindingState:
         if path.is_symlink() and not path.exists():
             return SourceBindingState("broken-symlink")
         if not path.exists():
             return SourceBindingState("missing")
         kind: Literal["in-place", "symlink"] = "symlink" if path.is_symlink() else "in-place"
-        if not path.is_dir() or self._run(["git", "-C", str(path), "rev-parse", "--is-inside-work-tree"]) != "true":
+        if not path.is_dir():
+            return SourceBindingState("non-git")
+        if vcs == "svn":
+            remote = self._run(["svn", "info", "--show-item", "url", str(path)])
+            revision = self._run(["svn", "info", "--show-item", "revision", str(path)])
+            return SourceBindingState(kind, remote=remote, revision=revision) if remote and revision else SourceBindingState("non-git")
+        if vcs == "p4":
+            output = self._run(["p4", "-d", str(path), "-ztag", "where", str(path / "...")])
+            depot = next((line.removeprefix("... depotFile ") for line in (output or "").splitlines() if line.startswith("... depotFile ")), None)
+            return SourceBindingState(kind, remote=depot, revision="workspace") if depot else SourceBindingState("non-git")
+        if self._run(["git", "-C", str(path), "rev-parse", "--is-inside-work-tree"]) != "true":
             return SourceBindingState("non-git")
         return SourceBindingState(
             kind,
@@ -174,7 +198,7 @@ def _walk(root: Path, *, hidden: bool = False) -> tuple[Path, ...]:
     for current, directories, files in os.walk(root, followlinks=False):
         current_path = Path(current)
         relative = current_path.relative_to(root)
-        if relative.parts[:2] == ("projects", "code"):
+        if relative.parts[:2] == ("projects", "code") or "templates" in relative.parts:
             directories[:] = []
             continue
         directories[:] = [
@@ -202,29 +226,7 @@ def _read(root: Path, path: Path, *, code: str = "okf.frontmatter"):
 
 
 def _is_project_vault(root: Path) -> bool:
-    return (root / "raw").is_dir() and (root / "tasks").is_dir() and not (root / "projects/repositories.yaml").exists()
-
-
-def _catalog_root(root: Path) -> Path | None:
-    if (root / "projects/repositories.yaml").is_file():
-        return root
-    if (root.parent / "repositories.yaml").is_file():
-        return root.parent.parent
-    return None
-
-
-def _load_registry(root: Path) -> tuple[RepositoryRegistry | None, list[Issue]]:
-    catalog = _catalog_root(root)
-    if catalog is None:
-        if _is_project_vault(root):
-            return None, []
-        path = root / "projects/repositories.yaml"
-        return None, [_issue("project-policy", "registry.schema", root, path, "repository registry is missing")]
-    path = catalog / "projects/repositories.yaml"
-    try:
-        return parse_repository_registry(path.read_text(encoding="utf-8")), []
-    except (OSError, RepositoryRegistryError) as error:
-        return None, [_issue("project-policy", "registry.schema", root, path, str(error))]
+    return not ((root / "projects").is_dir() and (root / "wiki").is_dir())
 
 
 def check_layout(root: Path, state: GitStateReader) -> list[Issue]:
@@ -237,13 +239,25 @@ def check_layout(root: Path, state: GitStateReader) -> list[Issue]:
     required_directories = (
         tuple(name for name in WORKBENCH_DIRECTORIES if name != "assets")
         if project_vault
-        else ("projects", *ROOT_COLLECTIONS, *ROOT_EVIDENCE_DIRECTORIES)
+        else (
+            "projects", "wiki", *(f"wiki/{name}" for name in (*WIKI_COLLECTIONS, "daily")),
+            *ROOT_COLLECTIONS, *ROOT_EVIDENCE_DIRECTORIES,
+            "inbox", "tasks", "scratch", "output", "templates",
+        )
     )
     for relative in required_directories:
         path = root / relative
         if not path.is_dir():
             issues.append(_issue("karpathy-vault-v1", "layout.missing", root, path, f"required directory is missing: {relative}"))
-    forbidden_layouts = ("revisions", "raw/assets")
+    if not project_vault:
+        for filename in TEMPLATE_FILES:
+            path = root / "templates" / filename
+            if not path.is_file():
+                issues.append(_issue("karpathy-vault-v1", "template.missing", root, path, f"required template is missing: {filename}"))
+    forbidden_layouts = (
+        "revisions", "raw/assets", "projects/repositories.yaml",
+        *(name for name in WIKI_COLLECTIONS),
+    )
     for relative in forbidden_layouts:
         path = root / relative
         if path.exists():
@@ -270,7 +284,7 @@ def check_indexes(root: Path, _state: GitStateReader) -> list[Issue]:
         index = directory / INDEX_FILE
         if not index.is_file():
             issues.append(_issue("okf-base", "index.missing", root, index, "every owned directory requires _index.md"))
-    asset_roots = (*root.glob("projects/*/assets"), root / "assets")
+    asset_roots = (root / "assets",)
     for assets in asset_roots:
         if (assets / INDEX_FILE).exists():
             issues.append(_issue("project-policy", "assets.index", root, assets / INDEX_FILE, "assets are opaque and must not have an index"))
@@ -290,11 +304,7 @@ def check_indexes(root: Path, _state: GitStateReader) -> list[Issue]:
         if document and document.metadata != {"okf_version": "0.2"}:
             issues.append(_issue("okf-base", "index.frontmatter", root, root_index, 'root index must contain only okf_version: "0.2"'))
     for path in expected:
-        registered_roots: set[Path] = set()
-        registry, _ = _load_registry(root)
-        if registry:
-            registered_roots = {root / binding.vault / INDEX_FILE for binding in registry.repositories.values()}
-        if path != root_index and path not in registered_roots and path.is_file() and path.read_text(encoding="utf-8").startswith("---\n"):
+        if path != root_index and path.is_file() and path.read_text(encoding="utf-8").startswith("---\n"):
             issues.append(_issue("okf-base", "index.frontmatter", root, path, "nested indexes must be frontmatter-free"))
     return issues
 
@@ -323,19 +333,27 @@ def check_okf_and_profile(root: Path, _state: GitStateReader) -> list[Issue]:
         relative = path.relative_to(root)
         expected_type = ROOT_TYPES.get(path.name) if len(relative.parts) == 1 else None
         if len(relative.parts) >= 2:
-            if relative.parts[0] in COMPILED_COLLECTION_TYPES:
+            if project_vault and relative.parts[0] in COMPILED_COLLECTION_TYPES:
                 expected_type = COMPILED_COLLECTION_TYPES[relative.parts[0]]
-            elif len(relative.parts) >= 4 and relative.parts[0] == "projects" and relative.parts[2] in COMPILED_COLLECTION_TYPES:
-                expected_type = COMPILED_COLLECTION_TYPES[relative.parts[2]]
+            elif not project_vault and relative.parts[0] in {"summaries", "playbooks"}:
+                expected_type = COMPILED_COLLECTION_TYPES[relative.parts[0]]
+            elif not project_vault and len(relative.parts) >= 3 and relative.parts[:2] == ("wiki", "concepts"):
+                expected_type = "Concept"
+            elif not project_vault and len(relative.parts) >= 3 and relative.parts[:2] == ("wiki", "entities"):
+                expected_type = "Entity"
+            elif not project_vault and len(relative.parts) >= 3 and relative.parts[:2] == ("wiki", "comparisons"):
+                expected_type = "Comparison"
+            elif not project_vault and len(relative.parts) >= 3 and relative.parts[:2] == ("wiki", "queries"):
+                expected_type = "Query"
+            elif not project_vault and len(relative.parts) == 3 and relative.parts[:2] == ("wiki", "daily"):
+                expected_type = "Daily Note"
             elif len(relative.parts) == 2 and relative.parts[0] == "projects" and relative.suffix == ".md":
                 expected_type = "Software Project"
-            elif len(relative.parts) == 4 and relative.parts[:3:2] == ("projects", "raw"):
-                expected_type = "Paper"
             elif len(relative.parts) == 2 and relative.parts[0] == "raw":
                 expected_type = "Paper"
         if expected_type and page_type != expected_type:
             issues.append(_issue("project-policy", "placement.type", root, path, f"this path requires type {expected_type}"))
-        if not project_vault and len(relative.parts) >= 2 and relative.parts[0] in COMPILED_COLLECTION_TYPES and data.get("scope") not in {"vault", "cross-project"}:
+        if not project_vault and len(relative.parts) >= 3 and relative.parts[0] == "wiki" and relative.parts[1] in WIKI_COLLECTIONS and data.get("scope") not in {"vault", "cross-project"}:
             issues.append(_issue("project-policy", "placement.scope", root, path, "root compiled pages require scope: vault or cross-project"))
         if project_vault and len(relative.parts) >= 2 and relative.parts[0] in COMPILED_COLLECTION_TYPES and data.get("code_scope") is not True:
             issues.append(_issue("project-policy", "placement.code-scope", root, path, "code-vault compiled pages require code_scope: true"))
@@ -349,9 +367,7 @@ def check_okf_and_profile(root: Path, _state: GitStateReader) -> list[Issue]:
 def check_registry_and_sources(root: Path, state: GitStateReader) -> list[Issue]:
     if _is_project_vault(root):
         return []
-    registry, issues = _load_registry(root)
-    if registry is None:
-        return issues
+    issues: list[Issue] = []
     ignore_file = root / ".gitignore"
     ignore_lines = {
         line.strip()
@@ -360,66 +376,55 @@ def check_registry_and_sources(root: Path, state: GitStateReader) -> list[Issue]
     } if ignore_file.is_file() else set()
     if "projects/code/" not in ignore_lines and "/projects/code/" not in ignore_lines:
         issues.append(_issue("project-policy", "source.ignore", root, ignore_file, "projects/code/ must be ignored by the vault repository"))
-    registered_sources = {binding.code for binding in registry.repositories.values()}
-    for source in root.glob("projects/code/*"):
-        if source.relative_to(root).as_posix() not in registered_sources:
-            issues.append(_issue("project-policy", "source.unregistered", root, source, "code working copy is not registered"))
-    for repository_id, binding in registry.repositories.items():
-        card = root / binding.card
-        studied_revision: str | None = None
-        if not card.is_file():
-            issues.append(_issue("project-policy", "registry.card", root, card, "registered project card is missing"))
+    cards: dict[str, tuple[Path, dict[str, object]]] = {}
+    for card in sorted((root / "projects").glob("*.md")):
+        if card.name == INDEX_FILE:
             continue
         document, read_issues = _read(root, card)
         issues.extend(read_issues)
-        if document:
-            data = document.metadata
-            candidate_revision = data.get("studied_revision")
-            if isinstance(candidate_revision, str) and HEX_GIT_OID.fullmatch(candidate_revision):
-                studied_revision = candidate_revision
-            expected = {
-                "repository": repository_id,
-                "vcs": binding.vcs,
-                "repository_url": binding.url,
-                "default_ref": binding.default_ref,
-                "vault_path": binding.vault.removeprefix("projects/"),
-                "code_path": binding.code.removeprefix("projects/"),
-            }
-            for key, value in expected.items():
-                actual = data.get(key)
-                matches = actual == value
-                if key == "repository_url" and isinstance(actual, str):
-                    try:
-                        matches = normalize_git_remote(actual) == binding.normalized_remote
-                    except RepositoryRegistryError:
-                        matches = False
-                if not matches:
-                    issues.append(_issue("project-policy", "registry.card", root, card, f"project card {key} does not match registry"))
-            if not HEX_GIT_OID.fullmatch(str(data.get("studied_revision", ""))) or not _iso_datetime(data.get("studied_at")):
-                issues.append(_issue("project-policy", "registry.card", root, card, "project card requires studied_revision and studied_at"))
-        source_path = root / binding.code
-        source_state = state.source_binding(source_path)
+        if not document:
+            continue
+        data = document.metadata
+        project_id = data.get("project_id")
+        required = ("vcs", "repository_url", "tracked_ref", "observed_revision", "observed_at", "project_status", "ongoing_change")
+        if (
+            not isinstance(project_id, str)
+            or not re.fullmatch(r"[a-z0-9][a-z0-9-]*", project_id)
+            or card.stem != project_id
+            or data.get("type") != "Software Project"
+            or any(not isinstance(data.get(key), str) or not str(data[key]).strip() for key in required)
+            or data.get("vcs") not in {"git", "p4", "svn"}
+            or not _iso_datetime(data.get("observed_at"))
+        ):
+            issues.append(_issue("project-policy", "project.card", root, card, "project card requires canonical ID, VCS identity, tracked ref, observed revision/time, status, and ongoing change"))
+            continue
+        forbidden = {"local_path", "code_path", "vault_path", "workspace", "binding_state", "studied_revision", "studied_at", "default_ref"}
+        if forbidden.intersection(data):
+            issues.append(_issue("project-policy", "project.card-local", root, card, "project card must not store local or legacy binding fields"))
+        if project_id in cards:
+            issues.append(_issue("project-policy", "project.duplicate", root, card, f"duplicate project ID: {project_id}"))
+        cards[project_id] = (card, data)
+    registered_sources = {f"projects/code/{project_id}" for project_id in cards}
+    for source in root.glob("projects/code/*"):
+        if source.relative_to(root).as_posix() not in registered_sources:
+            issues.append(_issue("project-policy", "source.unregistered", root, source, "code binding has no matching project card"))
+    for project_id, (card, data) in cards.items():
+        source_path = root / "projects" / "code" / project_id
+        vcs = str(data.get("vcs"))
+        source_state = state.source_binding(source_path, vcs)
         if source_state.kind == "missing":
             continue
-        valid = source_state.kind in {"in-place", "symlink"} and source_state.remote and source_state.revision
-        if valid:
+        valid = source_state.kind in {"in-place", "symlink"}
+        if valid and vcs == "git":
             try:
-                valid = binding.vcs == "git" and normalize_git_remote(source_state.remote or "") == binding.normalized_remote
-            except RepositoryRegistryError:
+                valid = bool(source_state.remote and source_state.revision) and normalize_git_remote(source_state.remote or "") == normalize_git_remote(str(data["repository_url"]))
+            except RemoteIdentityError:
                 valid = False
+        elif valid and vcs in {"p4", "svn"}:
+            valid = bool(source_state.remote) and str(source_state.remote).rstrip("/") == str(data["repository_url"]).rstrip("/")
         if not valid:
-            issues.append(_issue("project-policy", "source.binding", root, source_path, f"registered source is {source_state.kind} or has the wrong remote"))
-        elif studied_revision is not None and source_state.revision != studied_revision:
-            issues.append(_issue("project-policy", "source.currentness", root, source_path, f"checkout HEAD {source_state.revision} differs from studied revision {studied_revision}"))
+            issues.append(_issue("project-policy", "source.binding", root, source_path, f"derived binding is {source_state.kind} or has the wrong VCS identity"))
     return issues
-
-
-def _project_roots(root: Path, registry: RepositoryRegistry | None) -> tuple[Path, ...]:
-    if _is_project_vault(root):
-        return (root,)
-    if not registry:
-        return ()
-    return tuple(root / binding.vault for binding in registry.repositories.values())
 
 
 def _check_evidence_root(
@@ -480,31 +485,14 @@ def _check_evidence_root(
 
 
 def check_workbench_raw_assets(root: Path, state: GitStateReader) -> list[Issue]:
-    registry, issues = _load_registry(root)
-    if registry is None and not _is_project_vault(root):
-        return issues
-    project_roots = _project_roots(root, registry)
-    for project in project_roots:
-        for name in WORKBENCH_DIRECTORIES:
-            path = project / name
-            if name != "assets" and not path.is_dir():
-                issues.append(_issue("project-policy", "workbench.missing", root, path, f"project workbench requires {name}/"))
-        current = list((project / "tasks").glob("current.md")) if (project / "tasks").is_dir() else []
-        if len(current) != 1:
-            issues.append(_issue("project-policy", "workbench.current-task", root, project / "tasks", "project requires exactly one tasks/current.md"))
-    evidence_roots = project_roots if _is_project_vault(root) else (root, *project_roots)
-    for evidence_root in evidence_roots:
-        issues.extend(_check_evidence_root(root, evidence_root, state))
+    issues: list[Issue] = []
+    issues.extend(_check_evidence_root(root, root, state))
     attributes = root / ".gitattributes"
     if attributes.is_file():
         text = attributes.read_text(encoding="utf-8")
-        required_lfs = (
-            ("/assets/** filter=lfs",)
-            if _is_project_vault(root)
-            else ("/assets/** filter=lfs", "/projects/*/assets/** filter=lfs")
-        )
+        required_lfs = ("/assets/** filter=lfs",)
         if any(pattern not in text for pattern in required_lfs) or re.search(r"(?:\.md|code).*filter=lfs", text):
-            issues.append(_issue("project-policy", "lfs.attributes", root, attributes, "LFS must cover project assets, not Markdown or code"))
+            issues.append(_issue("project-policy", "lfs.attributes", root, attributes, "LFS must cover vault assets, not Markdown or code"))
     for path in _markdown_files(root):
         if state.lfs_filter(path) == "lfs":
             issues.append(_issue("karpathy-vault-v1", "lfs.markdown", root, path, "Markdown must not be routed through LFS"))
@@ -552,20 +540,9 @@ def _query_anchor_valid(
             and viewrect[2] > 0
             and viewrect[3] > 0
         ) or (isinstance(text_fragment, str) and bool(text_fragment.strip()))
-        try:
-            relative_page = page.resolve().relative_to(root.resolve())
-        except ValueError:
-            return False
-        root_query = len(relative_page.parts) >= 2 and relative_page.parts[0] == "queries"
-        expected_assets = (
-            root / "assets"
-            if root_query or _is_project_vault(root)
-            else root / "projects" / str(project_id) / "assets"
-        )
-        valid_scope = root_query or isinstance(project_id, str)
+        expected_assets = root / "assets"
         return (
-            valid_scope
-            and target is not None
+            target is not None
             and target.is_file()
             and target.suffix.lower() == ".pdf"
             and target.parent.resolve() == expected_assets.resolve()
@@ -579,7 +556,7 @@ def _query_anchor_valid(
             and anchor.get("revision") == source.get("revision")
             and anchor.get("path") == source.get("path")
             and isinstance(anchor.get("repository"), str)
-            and HEX_GIT_OID.fullmatch(str(anchor.get("revision", ""))) is not None
+            and (anchor.get("revision") == "same-tree" or HEX_GIT_OID.fullmatch(str(anchor.get("revision", ""))) is not None)
             and isinstance(anchor.get("path"), str)
             and bool(anchor.get("path"))
             and not Path(str(anchor.get("path"))).is_absolute()
@@ -590,11 +567,19 @@ def _query_anchor_valid(
 
 
 def check_provenance_queries_links(root: Path, state: GitStateReader) -> list[Issue]:
-    registry, issues = _load_registry(root)
-    registered = registry.repositories if registry else {}
-    catalog = _catalog_root(root) or root
-    registered_source_roots = [catalog / binding.code for binding in registered.values()]
+    issues: list[Issue] = []
     project_vault = _is_project_vault(root)
+    registered: dict[str, dict[str, object]] = {}
+    if not project_vault:
+        for card in sorted((root / "projects").glob("*.md")):
+            if card.name == INDEX_FILE:
+                continue
+            document, _ = _read(root, card)
+            project_id = document.metadata.get("project_id") if document else None
+            if isinstance(project_id, str):
+                registered[project_id] = document.metadata
+    catalog = root
+    registered_source_roots = [root / "projects" / "code" / project_id for project_id in registered]
     for path in _concept_files(root):
         document, read_issues = _read(root, path)
         issues.extend(read_issues)
@@ -627,15 +612,15 @@ def check_provenance_queries_links(root: Path, state: GitStateReader) -> list[Is
                     revision, code_path, digest = source.get("revision"), source.get("path"), source.get("sha256")
                     safe_path = isinstance(code_path, str) and code_path and not Path(code_path).is_absolute() and ".." not in Path(code_path).parts
                     known_repository = repository_id in registered or (project_vault and isinstance(repository_id, str) and bool(repository_id))
-                    base_valid = known_repository and HEX_GIT_OID.fullmatch(str(revision or "")) and safe_path
+                    valid_revision = revision == "same-tree" or HEX_GIT_OID.fullmatch(str(revision or "")) is not None
+                    base_valid = known_repository and valid_revision and safe_path
                     stable_valid = data.get("status") != "stable" or HEX_SHA256.fullmatch(str(digest or ""))
                     awaiting_valid = data.get("status") != "draft" or data.get("source_state") == "awaiting-source" or HEX_SHA256.fullmatch(str(digest or ""))
                     if not base_valid or not stable_valid or not awaiting_valid:
                         issues.append(_issue("project-policy", "code.provenance", root, path, "code source requires repository, immutable revision/path, and stable hash; draft omissions require awaiting-source"))
-                    elif data.get("status") == "stable" and repository_id in registered:
-                        binding = registered[str(repository_id)]
-                        source_root = catalog / binding.code
-                        binding_state = state.source_binding(source_root)
+                    elif data.get("status") == "stable" and repository_id in registered and revision != "same-tree":
+                        source_root = root / "projects" / "code" / str(repository_id)
+                        binding_state = state.source_binding(source_root, "git")
                         blob_reader = getattr(state, "source_blob", None)
                         blob = (
                             blob_reader(source_root, str(revision), str(code_path))
@@ -698,6 +683,159 @@ def check_provenance_queries_links(root: Path, state: GitStateReader) -> list[Is
     return issues
 
 
+def _wiki_root(root: Path) -> Path:
+    return root if _is_project_vault(root) else root / "wiki"
+
+
+def _graph_pages(root: Path) -> tuple[Path, ...]:
+    wiki_root = _wiki_root(root)
+    if not wiki_root.is_dir():
+        return ()
+    allowed_roots = (
+        ("concepts", "comparisons", "entities", "queries", "daily")
+        if not _is_project_vault(root)
+        else tuple(COMPILED_COLLECTION_TYPES) + ("daily",)
+    )
+    return tuple(sorted(
+        path for path in wiki_root.rglob("*.md")
+        if path.name != INDEX_FILE
+        and path.relative_to(wiki_root).parts
+        and path.relative_to(wiki_root).parts[0] in allowed_roots
+        and "templates" not in path.parts
+    ))
+
+
+def check_relations_and_daily(root: Path, _state: GitStateReader) -> list[Issue]:
+    issues: list[Issue] = []
+    wiki_root = _wiki_root(root)
+    query_titles: dict[str, str] = {}
+    queries_root = wiki_root / "queries"
+    if queries_root.is_dir():
+        for query_path in queries_root.glob("*.md"):
+            if query_path.name == INDEX_FILE:
+                continue
+            query_document, _ = _read(root, query_path)
+            conversation = query_document.metadata.get("conversation") if query_document else None
+            selection_id = conversation.get("selection_id") if isinstance(conversation, dict) else None
+            title = query_document.metadata.get("title") if query_document else None
+            if isinstance(selection_id, str) and isinstance(title, str):
+                query_titles[selection_id] = title
+    for path in _graph_pages(root):
+        document, read_issues = _read(root, path)
+        issues.extend(read_issues)
+        if not document:
+            continue
+        relations = document.metadata.get("relations")
+        if not isinstance(relations, list):
+            issues.append(_issue("project-policy", "graph.relations", root, path, "graph-visible Markdown requires relations: []"))
+            continue
+        seen: set[tuple[str, str]] = set()
+        for relation in relations:
+            if not isinstance(relation, dict):
+                issues.append(_issue("project-policy", "graph.relation", root, path, "relation entries must be mappings"))
+                continue
+            target, kind, caption = relation.get("target"), relation.get("kind"), relation.get("caption")
+            valid_target = (
+                isinstance(target, str)
+                and target.endswith(".md")
+                and not Path(target).is_absolute()
+                and ".." not in Path(target).parts
+                and "\\" not in target
+            )
+            target_path = wiki_root / str(target) if valid_target else None
+            key = (str(target), str(kind))
+            valid = (
+                valid_target
+                and kind in RELATION_KINDS
+                and isinstance(caption, str)
+                and 0 < len(caption) <= 160
+                and target_path is not None
+                and target_path.is_file()
+                and target_path.resolve() != path.resolve()
+                and key not in seen
+            )
+            if not valid:
+                issues.append(_issue("project-policy", "graph.relation", root, path, "relation requires a unique contained target, allowed kind, and caption of at most 160 code points"))
+            seen.add(key)
+
+        if path.parent.name != "daily":
+            continue
+        date_key = path.stem
+        try:
+            learned_date = date.fromisoformat(date_key)
+        except ValueError:
+            issues.append(_issue("project-policy", "daily.filename", root, path, "daily filename must be YYYY-MM-DD.md"))
+            continue
+        data, body = document.metadata, document.body
+        expected_dates = [(learned_date + timedelta(days=days)).isoformat() for days in REVIEW_INTERVALS]
+        if (
+            data.get("type") != "Daily Note"
+            or data.get("date") != date_key
+            or data.get("timezone") != "Asia/Shanghai"
+            or data.get("review_dates") != expected_dates
+        ):
+            issues.append(_issue("project-policy", "daily.frontmatter", root, path, "daily metadata must match filename, Asia/Shanghai, and the fixed review schedule"))
+        for start, end in DAILY_MARKERS:
+            if body.count(start) != 1 or body.count(end) != 1 or body.index(start) > body.index(end):
+                issues.append(_issue("project-policy", "daily.markers", root, path, f"daily note requires one ordered marker pair: {start} / {end}"))
+        review_ids = re.findall(r'<!-- llm-wiki:review id="([^"]+)"', body)
+        if len(review_ids) > 10 or len(review_ids) != len(set(review_ids)):
+            issues.append(_issue("project-policy", "daily.reviews", root, path, "daily note permits at most ten unique review occurrences"))
+        for review_id in review_ids:
+            identity, separator, scheduled = review_id.rpartition("@")
+            try:
+                date.fromisoformat(scheduled)
+            except ValueError:
+                separator = ""
+            prompt_type = identity.partition(":")[0]
+            if not separator or not identity.partition(":")[2] or prompt_type not in {"query", "concept", "comparison", "entity", "statement"}:
+                issues.append(_issue("project-policy", "daily.review-id", root, path, "review ID must combine a stable typed prompt identity and scheduled YYYY-MM-DD date"))
+        answer_starts = re.findall(r'<!-- human:review-answer:start id="([^"]+)" -->', body)
+        answer_ends = re.findall(r'<!-- human:review-answer:end id="([^"]+)" -->', body)
+        if sorted(answer_starts) != sorted(answer_ends) or len(answer_starts) != len(set(answer_starts)):
+            issues.append(_issue("project-policy", "daily.answers", root, path, "review answer markers must be uniquely paired by ID"))
+        query_review_ids = {review_id for review_id in review_ids if review_id.startswith("query:")}
+        if set(answer_starts) != query_review_ids:
+            issues.append(_issue("project-policy", "daily.answers", root, path, "each Query review needs exactly one human answer region and other prompt types must not use one"))
+        review_positions = [match.start() for match in re.finditer(r'<!-- llm-wiki:review id="', body)] + [len(body)]
+        for review_id, start, end in zip(review_ids, review_positions, review_positions[1:]):
+            block = body[start:end]
+            selected = re.findall(r"^- \[[xX]\] Outcome: (?:Again|Hard|Good|Easy)$", block, re.MULTILINE)
+            if len(selected) > 1:
+                issues.append(_issue("project-policy", "daily.outcome", root, path, "a review occurrence may select at most one outcome"))
+            if review_id.startswith("query:"):
+                selection_id = review_id.removeprefix("query:").rpartition("@")[0]
+                expected_title = query_titles.get(selection_id)
+                valid_query_block = (
+                    expected_title is not None
+                    and f"### {expected_title}" in block
+                    and any(
+                        marker in block
+                        for marker in (
+                            "- [ ] Attempted before opening source",
+                            "- [x] Attempted before opening source",
+                            "- [X] Attempted before opening source",
+                        )
+                    )
+                )
+                outcome_labels = re.findall(r"^- \[[ xX]\] Outcome: (Again|Hard|Good|Easy)$", block, re.MULTILINE)
+                if not valid_query_block or sorted(outcome_labels) != ["Again", "Easy", "Good", "Hard"]:
+                    issues.append(_issue("project-policy", "daily.query", root, path, "Query reviews must repeat the exact title, preserve an answer region, and provide attempted plus four outcome checkboxes"))
+        expected_plan = [f"- [ ] {(learned_date + timedelta(days=days)).isoformat()} (+{days})" for days in REVIEW_INTERVALS]
+        if any(line not in body for line in expected_plan) or "## Carried forward" not in body:
+            issues.append(_issue("project-policy", "daily.plan", root, path, "daily note requires the fixed review-plan lines and carried-forward section"))
+
+    log = root / LOG_FILE
+    if log.is_file():
+        document, read_issues = _read(root, log)
+        issues.extend(read_issues)
+        if document:
+            for line in document.body.splitlines():
+                if line.startswith("- ") and not re.match(r"^- \*\*(?:Learned|Changed|Maintained)\*\*:", line):
+                    issues.append(_issue("project-policy", "log.category", root, log, "log bullets must begin with **Learned**, **Changed**, or **Maintained**"))
+    return issues
+
+
 CHECKS = (
     check_layout,
     check_indexes,
@@ -705,6 +843,7 @@ CHECKS = (
     check_registry_and_sources,
     check_workbench_raw_assets,
     check_provenance_queries_links,
+    check_relations_and_daily,
 )
 
 

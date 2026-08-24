@@ -1,29 +1,17 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import {
-  mkdir,
   readFile,
   readdir,
-  rename,
-  unlink,
-  writeFile,
 } from 'node:fs/promises';
 import {
-  basename,
-  dirname,
   isAbsolute,
   join,
   relative,
   resolve,
 } from 'node:path';
 
-const REVIEW_INTERVALS_DAYS = [1, 3, 7, 14, 30, 60, 90] as const;
 const MESSAGE_MARKER_PREFIX = 'llm-wiki:discussion-message';
 const ENCODED_MESSAGES_KEY = 'discussion_messages_b64';
-
-export const MANUAL_NOTES_START = '<!-- llm-wiki:manual-notes:start -->';
-export const MANUAL_NOTES_END = '<!-- llm-wiki:manual-notes:end -->';
-
-export type LearningNoteDate = string | Date;
 
 export interface LearningNoteSource {
   kind: 'pdf' | 'markdown';
@@ -43,17 +31,7 @@ export interface LearningNoteSource {
 export interface LearningNoteMessage {
   role: 'user' | 'assistant';
   markdown: string;
-  createdAt?: LearningNoteDate;
-}
-
-export interface UpsertDiscussionInput {
-  discussionId: string;
-  source: LearningNoteSource;
-  messages: LearningNoteMessage[];
-  /** Optional concise answer-only Markdown. The store renders the Q/A labels. */
-  summaryMarkdown?: string;
-  createdAt?: LearningNoteDate;
-  updatedAt?: LearningNoteDate;
+  createdAt?: string;
 }
 
 export interface LearningNoteResult {
@@ -92,16 +70,12 @@ interface ExistingNote {
 }
 
 /**
- * Persists one human-readable Markdown learning page per discussion.
- *
- * The discussion id is the only identity/index required. A short hash of it is
- * embedded in the filename, so the same page can be found again after restart
- * without a database or generated index.
+ * Read-only compatibility adapter for one-release `wiki/learning` notes.
+ * New knowledge is written as ordinary Query pages by agents, never here.
  */
 export class LearningNoteStore {
   private readonly workspaceRoot: string;
   private readonly learningDirectory: string;
-  private readonly pendingWrites = new Map<string, Promise<void>>();
 
   constructor(workspaceRoot: string) {
     if (workspaceRoot.trim().length === 0) {
@@ -110,26 +84,6 @@ export class LearningNoteStore {
 
     this.workspaceRoot = resolve(workspaceRoot);
     this.learningDirectory = join(this.workspaceRoot, 'wiki', 'learning');
-  }
-
-  async upsertDiscussion(input: UpsertDiscussionInput): Promise<LearningNoteResult> {
-    validateInput(input);
-
-    const previousWrite = this.pendingWrites.get(input.discussionId) ?? Promise.resolve();
-    const operation = previousWrite.then(() => this.upsertUnlocked(input));
-    const settled = operation.then(
-      () => undefined,
-      () => undefined,
-    );
-    this.pendingWrites.set(input.discussionId, settled);
-
-    try {
-      return await operation;
-    } finally {
-      if (this.pendingWrites.get(input.discussionId) === settled) {
-        this.pendingWrites.delete(input.discussionId);
-      }
-    }
   }
 
   async findDiscussion(discussionId: string): Promise<LearningNoteResult | undefined> {
@@ -229,47 +183,6 @@ export class LearningNoteStore {
     return annotations;
   }
 
-  private async upsertUnlocked(input: UpsertDiscussionInput): Promise<LearningNoteResult> {
-    await mkdir(this.learningDirectory, { recursive: true });
-
-    const shortId = discussionShortId(input.discussionId);
-    const existing = await this.findExistingNote(input.discussionId, shortId);
-    const createdAt = existing?.createdAt
-      ?? normalizeDate(
-        input.createdAt ?? input.messages[0]?.createdAt,
-        'createdAt',
-      );
-    const updatedAt = normalizeDate(
-      input.updatedAt ?? input.messages.at(-1)?.createdAt,
-      'updatedAt',
-    );
-
-    const firstQuestion = firstMessage(input.messages, 'user')?.markdown ?? 'Learning discussion';
-    const relativePath = existing?.relativePath
-      ?? toPosix(join(
-        'wiki',
-        'learning',
-        `${datePart(createdAt)}-${questionSlug(firstQuestion)}-${shortId}.md`,
-      ));
-    const absolutePath = existing?.absolutePath
-      ?? resolve(this.workspaceRoot, ...relativePath.split('/'));
-    const manualNotes = existing === undefined
-      ? defaultManualNotesRegion()
-      : extractManualNotesRegion(existing.markdown) ?? defaultManualNotesRegion();
-
-    const markdown = renderLearningNote({
-      input,
-      absolutePath,
-      createdAt,
-      updatedAt,
-      manualNotes,
-      workspaceRoot: this.workspaceRoot,
-    });
-
-    await atomicWrite(absolutePath, markdown);
-    return { absolutePath, relativePath, markdown };
-  }
-
   private async findExistingNote(
     discussionId: string,
     shortId: string,
@@ -305,152 +218,6 @@ export class LearningNoteStore {
   }
 }
 
-interface RenderLearningNoteOptions {
-  input: UpsertDiscussionInput;
-  absolutePath: string;
-  workspaceRoot: string;
-  createdAt: string;
-  updatedAt: string;
-  manualNotes: string;
-}
-
-function renderLearningNote(options: RenderLearningNoteOptions): string {
-  const { input, absolutePath, workspaceRoot, createdAt, updatedAt, manualNotes } = options;
-  const source = input.source;
-  const firstQuestion = firstMessage(input.messages, 'user')?.markdown ?? 'Learning discussion';
-  const latestQuestion = lastMessage(input.messages, 'user')?.markdown ?? firstQuestion;
-  const latestAnswer = lastMessage(input.messages, 'assistant')?.markdown ?? '';
-  const answerSummary = firstParagraph(input.summaryMarkdown ?? latestAnswer);
-  const portableSourceLink = workspaceSourceLink(source);
-  const sourceTarget = sourceLinkTarget(
-    workspaceRoot,
-    dirname(absolutePath),
-    source,
-  );
-
-  const lines = [
-    '---',
-    `id: ${yamlString(input.discussionId)}`,
-    'type: learning-note',
-    'status: draft',
-    'source:',
-    `  kind: ${yamlString(source.kind)}`,
-    `  path: ${yamlString(toPosix(source.path))}`,
-  ];
-
-  if (source.uri !== undefined && !isFileUri(source.uri)) {
-    lines.push(`  uri: ${yamlString(source.uri)}`);
-  }
-  lines.push(`  link: ${yamlString(portableSourceLink)}`);
-  lines.push(`  location: ${yamlString(source.location)}`);
-  appendOptionalNumber(lines, 'source_start_line', source.startLine);
-  appendOptionalNumber(lines, 'source_end_line', source.endLine);
-  appendOptionalNumber(lines, 'source_from', source.from);
-  appendOptionalNumber(lines, 'source_to', source.to);
-  lines.push(
-    `${ENCODED_MESSAGES_KEY}: ${yamlString(encodeDiscussionMessages(input.messages))}`,
-    `created: ${yamlString(createdAt)}`,
-    `updated: ${yamlString(updatedAt)}`,
-    'review_dates:',
-    ...reviewDates(createdAt).map((date) => `  - ${yamlString(date)}`),
-    '---',
-    '',
-    `# ${questionTitle(firstQuestion)}`,
-    '',
-    '## Summary',
-    '',
-    `**Question:** ${firstParagraph(latestQuestion) || 'Learning discussion'}`,
-    '',
-    `**Answer:** ${answerSummary || 'No assistant answer has been recorded yet.'}`,
-    '',
-    '## Source',
-    '',
-    `[Open source](<${markdownDestination(sourceTarget)}>)`,
-    '',
-    `**Location:** ${source.location}`,
-    '',
-    '### Quoted passage',
-    '',
-    fencedText(source.quote),
-  );
-
-  if (source.prefix !== undefined && source.prefix.length > 0) {
-    lines.push('', '<details>', '<summary>Context before selection</summary>', '', fencedText(source.prefix), '', '</details>');
-  }
-  if (source.suffix !== undefined && source.suffix.length > 0) {
-    lines.push('', '<details>', '<summary>Context after selection</summary>', '', fencedText(source.suffix), '', '</details>');
-  }
-
-  lines.push('', '## Discussion', '');
-  if (input.messages.length === 0) {
-    lines.push('_No messages recorded._', '');
-  } else {
-    let questionNumber = 0;
-    let answerNumber = 0;
-    for (const [messageIndex, message] of input.messages.entries()) {
-      const number = message.role === 'user' ? ++questionNumber : ++answerNumber;
-      const label = message.role === 'user' ? 'Question' : 'Answer';
-      const markerIndex = messageIndex + 1;
-      lines.push(
-        `<!-- ${MESSAGE_MARKER_PREFIX}:${markerIndex}:start -->`,
-        `### ${label} ${number}`,
-        '',
-      );
-      if (message.createdAt !== undefined) {
-        lines.push(`_${normalizeDate(message.createdAt, 'message.createdAt')}_`, '');
-      }
-      lines.push(
-        message.markdown.trim() || '_Empty message._',
-        `<!-- ${MESSAGE_MARKER_PREFIX}:${markerIndex}:end -->`,
-        '',
-      );
-    }
-  }
-
-  lines.push('## Personal notes', '', manualNotes, '');
-  return `${lines.join('\n').replace(/\n+$/u, '')}\n`;
-}
-
-function validateInput(input: UpsertDiscussionInput): void {
-  if (input.discussionId.trim().length === 0) {
-    throw new TypeError('discussionId must not be empty');
-  }
-  if (input.source.path.trim().length === 0) {
-    throw new TypeError('source.path must not be empty');
-  }
-  if (input.source.location.trim().length === 0) {
-    throw new TypeError('source.location must not be empty');
-  }
-  if (typeof input.source.quote !== 'string') {
-    throw new TypeError('source.quote must be a string');
-  }
-  for (const [name, value] of [
-    ['source.startLine', input.source.startLine],
-    ['source.endLine', input.source.endLine],
-    ['source.from', input.source.from],
-    ['source.to', input.source.to],
-  ] as const) {
-    if (value !== undefined && (!Number.isInteger(value) || value < 0)) {
-      throw new TypeError(`${name} must be a non-negative integer`);
-    }
-  }
-  for (const message of input.messages) {
-    if (message.role !== 'user' && message.role !== 'assistant') {
-      throw new TypeError(`Unsupported message role: ${String(message.role)}`);
-    }
-    if (typeof message.markdown !== 'string') {
-      throw new TypeError('message.markdown must be a string');
-    }
-  }
-}
-
-function firstMessage(
-  messages: readonly LearningNoteMessage[],
-  role: LearningNoteMessage['role'],
-): LearningNoteMessage | undefined {
-  return messages.find((message) => message.role === role);
-}
-
 function lastMessage(
   messages: readonly LearningNoteMessage[],
   role: LearningNoteMessage['role'],
@@ -464,24 +231,6 @@ function lastMessage(
 
 function discussionShortId(discussionId: string): string {
   return createHash('sha256').update(discussionId).digest('hex').slice(0, 10);
-}
-
-function questionSlug(markdown: string): string {
-  const slug = plainText(markdown)
-    .normalize('NFKD')
-    .replace(/\p{Mark}+/gu, '')
-    .toLocaleLowerCase('en-US')
-    .replace(/[^\p{Letter}\p{Number}]+/gu, '-')
-    .replace(/^-+|-+$/gu, '')
-    .slice(0, 48)
-    .replace(/-+$/u, '');
-  return slug || 'learning-discussion';
-}
-
-function questionTitle(markdown: string): string {
-  const title = plainText(firstParagraph(markdown)).replace(/\s+/gu, ' ').trim();
-  if (title.length === 0) return 'Learning discussion';
-  return title.length <= 120 ? title : `${title.slice(0, 117).trimEnd()}…`;
 }
 
 function plainText(markdown: string): string {
@@ -501,117 +250,6 @@ function firstParagraph(markdown: string): string {
     .split(/\r?\n[ \t]*\r?\n/u, 1)[0]
     ?.replace(/\r?\n/gu, ' ')
     .trim() ?? '';
-}
-
-function normalizeDate(value: LearningNoteDate | undefined, name: string): string {
-  const date = value === undefined ? new Date() : value instanceof Date ? value : new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    throw new TypeError(`${name} must be a valid date`);
-  }
-  return date.toISOString();
-}
-
-function datePart(isoDate: string): string {
-  const date = new Date(isoDate);
-  if (Number.isNaN(date.getTime())) throw new TypeError('createdAt must be a valid date');
-  return [
-    String(date.getFullYear()).padStart(4, '0'),
-    String(date.getMonth() + 1).padStart(2, '0'),
-    String(date.getDate()).padStart(2, '0'),
-  ].join('-');
-}
-
-function reviewDates(createdAt: string): string[] {
-  const [yearText, monthText, dayText] = datePart(createdAt).split('-');
-  const year = Number(yearText);
-  const month = Number(monthText);
-  const day = Number(dayText);
-  return REVIEW_INTERVALS_DAYS.map((interval) => {
-    const due = new Date(year, month - 1, day + interval);
-    return datePart(due.toISOString());
-  });
-}
-
-function yamlString(value: string): string {
-  return JSON.stringify(value);
-}
-
-function appendOptionalNumber(lines: string[], key: string, value: number | undefined): void {
-  if (value !== undefined) lines.push(`${key}: ${String(value)}`);
-}
-
-function fencedText(value: string): string {
-  const longestFence = Math.max(
-    2,
-    ...Array.from(value.matchAll(/`+/gu), (match) => match[0].length),
-  );
-  const fence = '`'.repeat(longestFence + 1);
-  return `${fence}text\n${value}\n${fence}`;
-}
-
-function defaultManualNotesRegion(): string {
-  return [
-    MANUAL_NOTES_START,
-    '_Add your own notes here. This region is preserved when the discussion updates._',
-    MANUAL_NOTES_END,
-  ].join('\n');
-}
-
-function extractManualNotesRegion(markdown: string): string | undefined {
-  const start = markdown.lastIndexOf(MANUAL_NOTES_START);
-  if (start < 0) return undefined;
-  const end = markdown.indexOf(MANUAL_NOTES_END, start + MANUAL_NOTES_START.length);
-  if (end < 0) return undefined;
-  return markdown.slice(start, end + MANUAL_NOTES_END.length);
-}
-
-function relativeSourceTarget(
-  workspaceRoot: string,
-  noteDirectory: string,
-  sourcePath: string,
-): string {
-  const absoluteSource = isAbsolute(sourcePath)
-    ? sourcePath
-    : resolve(workspaceRoot, sourcePath);
-  return toPosix(relative(noteDirectory, absoluteSource));
-}
-
-function sourceLinkTarget(
-  workspaceRoot: string,
-  noteDirectory: string,
-  source: LearningNoteSource,
-): string {
-  return `${relativeSourceTarget(workspaceRoot, noteDirectory, source.path)}${sourceFragment(source)}`;
-}
-
-function workspaceSourceLink(source: LearningNoteSource): string {
-  return `${toPosix(source.path)}${sourceFragment(source)}`;
-}
-
-function sourceFragment(source: LearningNoteSource): string {
-  if (source.kind === 'markdown' && source.startLine !== undefined) {
-    const endLine = Math.max(source.startLine, source.endLine ?? source.startLine);
-    return `#L${source.startLine}${endLine === source.startLine ? '' : `-L${endLine}`}`;
-  }
-  for (const candidate of [source.link, source.uri]) {
-    const fragmentIndex = candidate?.indexOf('#') ?? -1;
-    if (candidate && fragmentIndex >= 0) return candidate.slice(fragmentIndex);
-  }
-  if (source.kind === 'pdf' && source.startLine !== undefined) {
-    return `#page=${source.startLine}`;
-  }
-  return '';
-}
-
-function isFileUri(value: string): boolean {
-  return /^file:/iu.test(value);
-}
-
-function markdownDestination(value: string): string {
-  return value
-    .replace(/[\r\n]/gu, '')
-    .replace(/</gu, '%3C')
-    .replace(/>/gu, '%3E');
 }
 
 function toPosix(value: string): string {
@@ -823,10 +461,6 @@ function discussionMessages(markdown: string): LearningNoteMessage[] {
   });
 }
 
-function encodeDiscussionMessages(messages: readonly LearningNoteMessage[]): string {
-  return Buffer.from(JSON.stringify(messages), 'utf8').toString('base64url');
-}
-
 function decodeDiscussionMessages(value: string): LearningNoteMessage[] | undefined {
   try {
     const decoded: unknown = JSON.parse(Buffer.from(value, 'base64url').toString('utf8'));
@@ -912,22 +546,6 @@ function fencedBlockText(markdown: string): string | undefined {
 
 function isStoredDate(value: string | undefined): value is string {
   return value !== undefined && !Number.isNaN(new Date(value).getTime());
-}
-
-async function atomicWrite(absolutePath: string, markdown: string): Promise<void> {
-  await mkdir(dirname(absolutePath), { recursive: true });
-  const temporaryPath = join(
-    dirname(absolutePath),
-    `.${basename(absolutePath)}.${process.pid}.${randomUUID()}.tmp`,
-  );
-  try {
-    await writeFile(temporaryPath, markdown, { encoding: 'utf8', flag: 'wx' });
-    await rename(temporaryPath, absolutePath);
-  } finally {
-    await unlink(temporaryPath).catch((error: unknown) => {
-      if (!isNodeError(error, 'ENOENT')) throw error;
-    });
-  }
 }
 
 function isNodeError(error: unknown, code: string): error is NodeJS.ErrnoException {

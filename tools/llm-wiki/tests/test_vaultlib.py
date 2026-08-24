@@ -7,11 +7,9 @@ SCRIPTS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SCRIPTS))
 
 from vaultlib import (
-    RepositoryRegistryError,
     FrontmatterError,
     markdown_targets,
     parse_frontmatter,
-    parse_repository_registry,
     render_frontmatter,
     resolve_local_target,
     sha256_bytes,
@@ -20,135 +18,6 @@ from vaultlib import (
 
 
 class VaultlibTests(unittest.TestCase):
-    def test_repository_registry_parses_the_supported_yaml_subset(self) -> None:
-        registry = parse_repository_registry(
-            """version: 1
-repositories:
-  nanochat:
-    vcs: git
-    url: https://github.com/karpathy/nanochat.git
-    default_ref: master
-    card: projects/nanochat.md
-    vault: projects/nanochat
-    code: projects/code/nanochat
-    workspace: in-place
-    update_strategy: review
-    lfs: auto
-"""
-        )
-
-        self.assertEqual(registry.version, 1)
-        self.assertEqual(tuple(registry.repositories), ("nanochat",))
-        repository = registry.repositories["nanochat"]
-        self.assertEqual(repository.url, "https://github.com/karpathy/nanochat.git")
-        self.assertEqual(repository.code, "projects/code/nanochat")
-
-    def test_repository_registry_rejects_unknown_or_duplicate_fields(self) -> None:
-        with self.assertRaisesRegex(RepositoryRegistryError, "duplicate"):
-            parse_repository_registry(
-                """version: 1
-repositories:
-  nanochat:
-    vcs: git
-    url: https://github.com/karpathy/nanochat.git
-    url: https://example.com/other.git
-    default_ref: master
-    card: projects/nanochat.md
-    vault: projects/nanochat
-    code: projects/code/nanochat
-    workspace: in-place
-    update_strategy: review
-    lfs: auto
-"""
-            )
-
-        with self.assertRaisesRegex(RepositoryRegistryError, "unsupported"):
-            parse_repository_registry(
-                """version: 1
-repositories:
-  nanochat:
-    vcs: git
-    url: https://github.com/karpathy/nanochat.git
-    default_ref: master
-    card: projects/nanochat.md
-    vault: projects/nanochat
-    code: projects/code/nanochat
-    workspace: in-place
-    update_strategy: review
-    lfs: auto
-    token: forbidden
-"""
-            )
-
-    def test_repository_registry_normalizes_equivalent_github_remotes(self) -> None:
-        registry = parse_repository_registry(
-            """version: 1
-repositories:
-  nanochat:
-    vcs: git
-    url: git@github.com:karpathy/nanochat.git
-    default_ref: master
-    card: projects/nanochat.md
-    vault: projects/nanochat
-    code: projects/code/nanochat
-    workspace: in-place
-    update_strategy: review
-    lfs: auto
-"""
-        )
-
-        self.assertEqual(
-            registry.repositories["nanochat"].normalized_remote,
-            "github.com/karpathy/nanochat",
-        )
-
-    def test_repository_registry_rejects_paths_that_escape_canonical_locations(self) -> None:
-        with self.assertRaisesRegex(RepositoryRegistryError, "canonical"):
-            parse_repository_registry(
-                """version: 1
-repositories:
-  nanochat:
-    vcs: git
-    url: https://github.com/karpathy/nanochat.git
-    default_ref: master
-    card: projects/nanochat.md
-    vault: projects/nanochat
-    code: ../../outside
-    workspace: in-place
-    update_strategy: review
-    lfs: auto
-"""
-            )
-
-    def test_repository_registry_accepts_in_place_p4_and_svn_bindings(self) -> None:
-        registry = parse_repository_registry(
-            """version: 1
-repositories:
-  engine:
-    vcs: p4
-    url: p4://perforce.example.com/depot/engine
-    default_ref: //depot/engine/main
-    card: projects/engine.md
-    vault: projects/engine
-    code: projects/code/engine
-    workspace: in-place
-    update_strategy: review
-    lfs: auto
-  docs:
-    vcs: svn
-    url: https://svn.example.com/repos/docs/trunk
-    default_ref: trunk
-    card: projects/docs.md
-    vault: projects/docs
-    code: projects/code/docs
-    workspace: in-place
-    update_strategy: review
-    lfs: auto
-"""
-        )
-        self.assertEqual(registry.repositories["engine"].vcs, "p4")
-        self.assertEqual(registry.repositories["docs"].vcs, "svn")
-
     def test_slugify_title_matches_canonical_paper_filename(self) -> None:
         title = (
             "SmolLM2: When Smol Goes Big -- Data-Centric Training of a "

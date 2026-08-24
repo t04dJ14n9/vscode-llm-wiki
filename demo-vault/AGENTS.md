@@ -1,107 +1,58 @@
 ---
 type: "Playbook"
 title: "LLM Wiki operator handbook"
-description: "Project-scoped workflows for orienting, ingesting, compiling, querying, and validating this bundle."
+description: "Normative AGENTS-only workflow for the graph-ready demo vault."
 tags: ["operations", "open-knowledge-format", "reproducibility"]
 status: "stable"
-generated: {"by": "process:project-scope-migration", "at": "2026-08-23T13:38:07Z"}
-scope: "cross-project"
+scope: "vault"
+vault_timezone: "Asia/Shanghai"
+generated: {"by": "process:vault-format-v2", "at": "2026-08-24T00:00:00+08:00"}
 ---
 
 # LLM Wiki operator handbook
 
-Run commands from this vault root. Producer tools live in `../tools/llm-wiki/`;
-the reusable workflow lives in `../.agents/skills/llm-wiki/`.
+This file is the complete normative workflow. No LLM Wiki skill is required.
 
-## Orient before editing
+## Start every study or maintenance session
 
-1. Read [the schema](SCHEMA.md), [the root index](_index.md), the target
-   [project card](projects/nanochat.md), and the newest [log](_log.md)
-   entry.
-2. Search existing pages before creating a new durable page.
-3. Read `projects/repositories.yaml`. A registered `projects/code/<id>/` working copy may be
-   absent and is always synchronized in place by its declared VCS. Never sync
-   it as part of validation.
-4. Keep repository implementation, code Queries, and generated repository
-   documentation below `projects/<id>/`. Keep papers and higher-level learning
-   at the root with `scope: vault` or `scope: cross-project`.
+1. Read `SCHEMA.md`, `_index.md`, `tasks/current.md`, and the newest `_log.md` entry.
+2. Use the `Asia/Shanghai` calendar date. Create or refresh `wiki/daily/YYYY-MM-DD.md` from `templates/daily.md.tmpl` if this is the first session that day.
+3. Preserve every human-owned Goals, review-answer, and Notes marker verbatim.
+4. Search titles, tags, bodies, and Query selection IDs before writing.
 
-## Ingest an arXiv snapshot
+Daily generation is lazy and filesystem-only: no scheduler or extension command is required. Pull linked `**Learned**` entries from today's log into the cohort. Review older cohorts at +1, +3, +7, +14, +30, +60, and +90 days. Repeat Query titles with blank human answer blocks; use “I can explain…” checkboxes for Concepts, Comparisons, and Entities. Include at most ten unresolved reviews, oldest first and Queries first. Incomplete reviews roll forward; outcomes do not alter the fixed schedule.
 
-Use an exact version and an explicit project:
+## Place knowledge
 
-```bash
-python3 ../tools/llm-wiki/ingest_arxiv.py \
-  --vault . \
-  --id 1508.07909v5
-```
+- `wiki/concepts`, `wiki/comparisons`, `wiki/entities`, and `wiki/queries` contain durable graph-ready knowledge.
+- `wiki/daily` contains daily goals and review cohorts.
+- `summaries` and `playbooks` remain narrative and operational entry points.
+- `raw` is flat immutable textual evidence; `assets` is flat binary evidence through Git LFS.
+- `inbox`, `tasks`, and `scratch` are non-durable workbench state.
+- `templates` is opaque. Copy the closest `.md.tmpl` and replace every required placeholder.
 
-The producer writes a flat companion to outer `raw/` and its original PDF to
-outer `assets/`. Use `--project <id>` only for evidence whose authority is the
-repository itself. Do not overwrite immutable evidence. Collision names use
-the first twelve characters of the asset digest.
+Use OKF actor identities accurately. Agent-authored changes use
+`<producer>/<version>` such as `codex/gpt-5.6`; human-authored or
+human-confirmed events use `human:<id>`; `process:<id>` is reserved for a
+named automated process such as a deterministic importer or index builder.
+Never use a workflow label as a substitute for the agent that authored prose.
 
-## Compile knowledge
+Every graph-visible page has `relations: []` or explicit relations. A relation target is relative to `wiki/`, contained, existing, non-self, and unique by target/kind. Allowed kinds are `references`, `depends-on`, `supported-by`, `contrasts-with`, `extends`, `supersedes`, `applies-to`, and `example-of`; captions are direct and at most 160 code points. Body links do not create graph edges.
 
-- Put codebase architecture, implementation behavior, repository playbooks,
-  code Queries, and imported DeepWiki summaries inside the code vault.
-- Put higher-level concepts, entities, comparisons, paper summaries, and
-  synthesis at the root with `scope: vault` or `scope: cross-project`.
-- Give every Entity and Concept explicit `created.by` and `created.at` values.
-- Join sourced claims to `sources[].id` with footnotes.
-- Code sources record repository ID, full revision, repository-relative path,
-  and a verified SHA-256 before a page can be stable. If source is missing,
-  keep the page `draft` with `source_state: awaiting-source`.
-- Keep exactly one `tasks/current.md` per project.
+## Register code projects
 
-Refresh every Nanochat DeepWiki page as draft code-vault Summaries with:
+Use one portable `projects/<id>.md` card. Its ID implies ignored binding `projects/code/<id>`, which may be a checkout or exact symlink. Store no local path, YAML registry, submodule, or paired project vault. Verify only that binding's Git remote, P4 mapping, or SVN URL; never search for another checkout or sync it automatically. Repository-specific knowledge belongs in the repository's `docs/llm-wiki/`. Nanochat is reference-only in this demo.
 
-```bash
-python3 ../tools/llm-wiki/import_deepwiki.py \
-  --vault . \
-  --project nanochat
-```
+## File Queries
 
-The importer refuses a DeepWiki revision that does not match the project card,
-preserves source-page metadata, and rewrites navigational/source links without
-marking generated claims verified.
+File a Query only when the answer is substantial, grounded, durable, novel, scoped, complete about limits, and safe. Use `templates/query.md.tmpl`; preserve synthesis rather than transcripts. Every Query needs `condensed_summary`, `conversation.selection_id`, unique sources, exact source-ID-bound anchors, answer, evidence, limitations, related pages, and relations. Reuse exact exported Markdown/PDF source URIs.
 
-## File a Query
+Valid exported `open_uri` values begin with
+`cursor://llm-wiki.llm-wiki-vscode/open-anchor` or
+`vscode://llm-wiki.llm-wiki-vscode/open-anchor`. Never manufacture an
+`.llm_wiki_anchor`/`chat_uri` payload; persisted pages use relative Markdown
+links or wikilinks.
 
-A durable Query stores a direct answer, evidence, limitations, related pages,
-a one- or two-sentence `condensed_summary` of at most 360 Unicode code points,
-the originating `conversation.selection_id`, and exact Markdown/PDF/code
-anchors. Every anchor carries a `source_id` matching one unique `sources[]`
-entry and a kind-specific exact location. It stores synthesis, not a transcript.
+## Finish
 
-For a Markdown or PDF viewer conversation, file automatically only when the
-answer is substantial, grounded, supported, durable, novel, clearly scoped,
-complete about limits, and safe. Ask for borderline cases; keep trivial
-lookups read-only. Reuse `conversation.selection_id`, update the living project
-guide when understanding materially improves, and refresh source annotations.
-
-Create or enrich Entities and Concepts only under the repository-root gates.
-Functions, files, RPCs, passing mentions, and temporary objects do not become
-Entities. Ask before a change fans out to ten or more pages.
-
-## Rebuild and validate
-
-```bash
-python3 ../tools/llm-wiki/rebuild_indexes.py --vault .
-python3 ../tools/llm-wiki/rebuild_indexes.py --vault . --check
-python3 ../tools/llm-wiki/validate_vault.py --vault .
-python3 -m unittest discover -s ../tools/llm-wiki/tests -v
-git lfs ls-files
-```
-
-The outer catalog and each registered code vault put `okf_version: "0.2"` on
-their own regular root `_index.md`; indexes below either root are generated and
-frontmatter-free. `assets/`, `projects/code/`, `.llm_wiki/`, hidden runtime directories,
-and `.agents/skills/` are opaque. `_index.md` and `_log.md` are the only
-accepted navigation and log filenames.
-
-## Finish a material mutation
-
-Rebuild, run check mode, validate, inspect hashes and the diff, then add a
-newest-first log entry. Never claim source verification when the registered
-checkout is absent.
+Rebuild indexes, validate placement/relations/daily notes/provenance/bindings, inspect LFS, run `git diff --check`, refresh Query annotations, and add newest-first log entries using `**Learned**`, `**Changed**`, or `**Maintained**`. Never commit, push, sync a code binding, or write externally without explicit authority.

@@ -50,31 +50,8 @@ class FrontmatterError(ValueError):
     """Raised when the vault's dependency-free YAML subset is malformed."""
 
 
-class RepositoryRegistryError(ValueError):
-    """Raised when projects/repositories.yaml is outside the supported subset."""
-
-
-@dataclass(frozen=True)
-class RepositoryBinding:
-    vcs: str
-    url: str
-    default_ref: str
-    card: str
-    vault: str
-    code: str
-    workspace: str
-    update_strategy: str
-    lfs: str
-
-    @property
-    def normalized_remote(self) -> str:
-        return normalize_git_remote(self.url) if self.vcs == "git" else self.url.rstrip("/")
-
-
-@dataclass(frozen=True)
-class RepositoryRegistry:
-    version: int
-    repositories: dict[str, RepositoryBinding]
+class RemoteIdentityError(ValueError):
+    """Raised when a Git remote cannot be compared safely."""
 
 
 @dataclass(frozen=True)
@@ -106,100 +83,12 @@ def normalize_git_remote(remote: str) -> str:
             value,
         )
         if not match:
-            raise RepositoryRegistryError(f"unsupported repository remote: {remote}")
+            raise RemoteIdentityError(f"unsupported repository remote: {remote}")
         host, repository = match.groups()
     repository = repository.removesuffix(".git").strip("/")
     if not host or not repository or ".." in Path(repository).parts:
-        raise RepositoryRegistryError(f"unsupported repository remote: {remote}")
+        raise RemoteIdentityError(f"unsupported repository remote: {remote}")
     return f"{host.lower()}/{repository}"
-
-
-def parse_repository_registry(text: str) -> RepositoryRegistry:
-    """Parse the intentionally small projects/repositories.yaml schema."""
-    lines = text.replace("\r\n", "\n").splitlines()
-    while lines and (not lines[-1].strip() or lines[-1].lstrip().startswith("#")):
-        lines.pop()
-    if len(lines) < 3 or lines[0] != "version: 1" or lines[1] != "repositories:":
-        raise RepositoryRegistryError(
-            "registry must start with version: 1 and repositories:"
-        )
-
-    fields = (
-        "vcs",
-        "url",
-        "default_ref",
-        "card",
-        "vault",
-        "code",
-        "workspace",
-        "update_strategy",
-        "lfs",
-    )
-    repositories: dict[str, RepositoryBinding] = {}
-    repository_id: str | None = None
-    values: dict[str, str] = {}
-
-    def publish() -> None:
-        nonlocal values
-        if repository_id is None:
-            return
-        missing = [field for field in fields if field not in values]
-        if missing:
-            raise RepositoryRegistryError(
-                f"repository {repository_id} missing fields: {', '.join(missing)}"
-            )
-        if values["vcs"] not in {"git", "p4", "svn"}:
-            raise RepositoryRegistryError(
-                f"repository {repository_id} has unsupported vcs {values['vcs']}"
-            )
-        if values["workspace"] != "in-place" or values["update_strategy"] != "review" or values["lfs"] != "auto":
-            raise RepositoryRegistryError(
-                f"repository {repository_id} requires in-place workspace, review updates, and automatic LFS"
-            )
-        if (
-            values["card"] != f"projects/{repository_id}.md"
-            or values["vault"] != f"projects/{repository_id}"
-            or values["code"] != f"projects/code/{repository_id}"
-        ):
-            raise RepositoryRegistryError(
-                f"repository {repository_id} requires canonical card, vault, and code paths"
-            )
-        if values["vcs"] == "git":
-            normalize_git_remote(values["url"])
-        elif not values["url"].strip():
-            raise RepositoryRegistryError(f"repository {repository_id} requires a VCS URL")
-        repositories[repository_id] = RepositoryBinding(
-            **{field: values[field] for field in fields}
-        )
-        values = {}
-
-    for line_number, line in enumerate(lines[2:], start=3):
-        if not line.strip() or line.lstrip().startswith("#"):
-            continue
-        repository_match = re.fullmatch(r"  ([a-z0-9][a-z0-9-]*):", line)
-        if repository_match:
-            publish()
-            repository_id = repository_match.group(1)
-            if repository_id in repositories:
-                raise RepositoryRegistryError(
-                    f"line {line_number}: duplicate repository {repository_id}"
-                )
-            continue
-        field_match = re.fullmatch(r"    ([a-z_]+):\s*(\S(?:.*\S)?)", line)
-        if repository_id is None or not field_match:
-            raise RepositoryRegistryError(f"line {line_number}: unsupported YAML")
-        key, value = field_match.groups()
-        if key not in fields:
-            raise RepositoryRegistryError(f"line {line_number}: unsupported field {key}")
-        if key in values:
-            raise RepositoryRegistryError(f"line {line_number}: duplicate field {key}")
-        if value[:1] in {'"', "'", "[", "{"} or " #" in value or "\t" in value:
-            raise RepositoryRegistryError(f"line {line_number}: unsupported scalar")
-        values[key] = value
-    publish()
-    if not repositories:
-        raise RepositoryRegistryError("registry requires at least one repository")
-    return RepositoryRegistry(version=1, repositories=repositories)
 
 
 def slugify_title(title: str) -> str:

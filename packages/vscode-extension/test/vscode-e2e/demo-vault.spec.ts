@@ -55,7 +55,7 @@ test.skip(
   'Set LLM_WIKI_E2E_VAULT to run the repository demo-vault journey.',
 );
 
-test('demo vault reading journey is smooth from project indexes to evidence', async ({
+test('demo vault reading journey is smooth from project cards to graph-ready knowledge', async ({
   vsCodePage: page,
 }) => {
   test.setTimeout(120_000);
@@ -66,50 +66,41 @@ test('demo vault reading journey is smooth from project indexes to evidence', as
   await screenshot(page, '01-root-index');
 
   await followMarkdownLink('okf_version: "0.2"', 'projects/');
-  await waitForMarkdown('repositories.yaml');
-  await followMarkdownLink('repositories.yaml', 'nanochat.md');
+  await waitForMarkdown('# Software Project');
+  await followMarkdownLink('# Software Project', 'nanochat.md');
   const card = await waitForMarkdown(
     'repository_url: "https://github.com/karpathy/nanochat.git"',
   );
-  expect(card.source).toContain('code_state: "missing"');
+  expect(card.source).toContain('project_status: "reference"');
   await screenshot(page, '02-project-card');
 
-  await followMarkdownLink(
-    'repository_url: "https://github.com/karpathy/nanochat.git"',
-    'nanochat/',
+  await openQuickFile(page, 'why-does-grouped-query-attention-reduce-kv-cache-cost.md');
+  const query = await waitForMarkdown(
+    '# Why does grouped-query attention reduce KV-cache cost?',
   );
-  await waitForMarkdown('Nanochat project-vault agent guidance');
-  await followMarkdownLink('Nanochat project-vault agent guidance', 'summaries/');
-  await waitForMarkdown('# Summary');
-  await followMarkdownLink(
-    '# Summary',
-    'nanochat-end-to-end-training-pipeline.md',
-  );
-  await waitForMarkdown('# Nanochat end-to-end training pipeline');
-  await screenshot(page, '03-pipeline-summary');
+  expect(query.source).toContain('condensed_summary:');
+  expect(query.source).toContain('relations:');
+  await screenshot(page, '03-durable-query');
 
   await followMarkdownLink(
-    '# Nanochat end-to-end training pipeline',
-    '../../../concepts/byte-pair-encoding.md',
+    '# Why does grouped-query attention reduce KV-cache cost?',
+    '../concepts/grouped-query-attention.md',
   );
-  await waitForMarkdown('# Byte-pair encoding');
+  await waitForMarkdown('# Grouped-query attention');
 
   const rawStarted = Date.now();
-  await followMarkdownLink(
-    '# Byte-pair encoding',
-    '../raw/neural-machine-translation-of-rare-words-with-subword-units.md',
-  );
+  await openQuickFile(page, 'gqa-training-generalized-multi-query-transformer-models-from-multi-head-checkpoints.md');
   const raw = await waitForMarkdown(
     '## Mechanically extracted full text',
     20_000,
   );
   expect(raw.source.length).toBeGreaterThan(30_000);
   expect(Date.now() - rawStarted).toBeLessThan(20_000);
-  await screenshot(page, '04-raw-paper');
+  await screenshot(page, '04-paper-source');
 
   await followMarkdownLink(
     '## Mechanically extracted full text',
-    '../assets/neural-machine-translation-of-rare-words-with-subword-units.pdf',
+    '../assets/gqa-training-generalized-multi-query-transformer-models-from-multi-head-checkpoints.pdf',
   );
   const pdf = await waitForPdf();
   expect(pdf.pageCount).toBeGreaterThan(0);
@@ -118,24 +109,11 @@ test('demo vault reading journey is smooth from project indexes to evidence', as
   expect(pdf.hasProductionControls).toBe(true);
   await screenshot(page, '05-local-paper-pdf');
 
-  await openQuickFile(page, 'in-place-code-workflow.md');
-  await waitForMarkdown('# In-place code study workflow');
-  await screenshot(page, '06-workflow-summary');
-
-  await openQuickFile(page, 'nanochat-code-vault.md');
-  await waitForMarkdown('## Identity');
-  await screenshot(page, '07-vault-entity');
-
-  await openQuickFile(
-    page,
-    'where-do-the-paper-ideas-appear-in-nanochat.md',
-  );
-  const query = await waitForMarkdown(
-    '# Where do the paper ideas appear in Nanochat?',
-  );
-  expect(query.source).toContain('| BPE');
-  expect(query.source).toContain('| DPO');
-  await screenshot(page, '08-durable-query');
+  await openQuickFile(page, '2026-08-24.md');
+  const daily = await waitForMarkdown('# 2026-08-24');
+  expect(daily.source).toContain('human:review-answer:start');
+  expect(daily.source).toContain('Attempted before opening source');
+  await screenshot(page, '06-daily-review');
 });
 
 async function openQuickFile(

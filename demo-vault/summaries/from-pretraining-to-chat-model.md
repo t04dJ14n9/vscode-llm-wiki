@@ -38,7 +38,7 @@ extracts final answers, assigns correctness rewards, subtracts the group mean,
 and updates the policy from those on-policy samples.[^rl] It calls itself
 GRPO-inspired but deliberately omits a reference-policy KL term and PPO-style
 ratio clipping. That makes the
-[DPO/on-policy comparison](../comparisons/dpo-vs-on-policy-reinforcement-learning.md)
+[DPO/on-policy comparison](../wiki/comparisons/dpo-vs-on-policy-reinforcement-learning.md)
 especially important.
 
 Finally, the generation engine separates prompt prefill from token-by-token
@@ -56,10 +56,10 @@ easy to conflate.
 
 ## Related pages
 
-- [Supervised finetuning](../concepts/supervised-fine-tuning.md)
-- [Chat formatting](../concepts/chat-formatting.md)
-- [Preference and policy optimization](../concepts/preference-and-policy-optimization.md)
-- [Inference and sampling](../concepts/inference-and-sampling.md)
+- [Supervised finetuning](../wiki/concepts/supervised-fine-tuning.md)
+- [Chat formatting](../wiki/concepts/chat-formatting.md)
+- [Preference and policy optimization](../wiki/concepts/preference-and-policy-optimization.md)
+- [Inference and sampling](../wiki/concepts/inference-and-sampling.md)
 
 [^base]: Nanochat base training
 [^sft]: Nanochat supervised finetuning

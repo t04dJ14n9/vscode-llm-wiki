@@ -19,7 +19,6 @@ import {
   captureActiveCursorBrowserSelection,
   cursorBrowserCaptureToSelectionContext,
 } from './cursorBrowserSelection';
-import { generateDailyNote } from './dailyNotes';
 import {
   registerExperimentalOwnedBrowser,
 } from './experimentalOwnedBrowser';
@@ -347,19 +346,6 @@ function registerCommands(
         );
       },
     ),
-    vscode.commands.registerCommand('llm-wiki.generateDailyNote', async () => {
-      const root = requireWorkspaceRoot(workspaceRoot);
-      if (!root) return;
-      const daily = await generateDailyNote({ workspaceRoot: root });
-      await vscode.commands.executeCommand(
-        'vscode.openWith',
-        vscode.Uri.file(daily.absolutePath),
-        MarkdownEditorProvider.viewType,
-      );
-      vscode.window.showInformationMessage(
-        `Daily note ready: ${daily.dueReviews.length} reviews, ${daily.carriedTodos.length} carried tasks`,
-      );
-    }),
     vscode.commands.registerCommand('llm-wiki.showKnowledgeGraph', async () => {
       const root = requireWorkspaceRoot(workspaceRoot);
       if (!root) return;

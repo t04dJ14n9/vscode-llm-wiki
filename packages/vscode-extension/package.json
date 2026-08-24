@@ -109,11 +109,6 @@
         "icon": "$(comment-discussion)"
       },
       {
-        "command": "llm-wiki.generateDailyNote",
-        "title": "LLM Wiki: Open Today's Learning Note",
-        "icon": "$(calendar)"
-      },
-      {
         "command": "llm-wiki.showKnowledgeGraph",
         "title": "LLM Wiki: Show Knowledge Graph",
         "icon": "$(type-hierarchy-sub)"

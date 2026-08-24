@@ -223,26 +223,27 @@ that are absent from Markdown or frontmatter.
 
 ## 9. Daily note and review plan
 
-**LLM Wiki: Open Today's Learning Note** creates or refreshes:
+At the first study or maintenance session on a local date, the agent follows
+the vault `AGENTS.md` and lazily creates or refreshes:
 
 ```text
 wiki/daily/YYYY-MM-DD.md
 ```
 
-It contains:
+No scheduled task or extension command is required. The note contains:
 
-- a manual **Today** area for priorities, TODOs, and reflection;
-- due learning-note reviews;
+- human-owned Goals and Notes regions;
+- due Query questions and Concept/Comparison/Entity recall statements;
+- linked material learned today;
+- the fixed +1/+3/+7/+14/+30/+60/+90 review plan;
 - unchecked ordinary TODOs carried from the latest earlier daily note.
 
-Every learning note receives fixed review dates 1, 3, 7, 14, 30, 60, and 90
-days after its local creation day. Due items remain visible until checked.
-Later daily notes preserve completed note/date review pairs, while unchecked
-overdue items remain due. Generated review checkboxes are not accidentally
-carried as ordinary TODOs.
-
-Regeneration updates marked generated regions while preserving manual text and
-current checkbox state.
+Only linked `**Learned**` log entries enter a cohort. Query titles repeat as
+active-recall questions with blank human answer regions; other durable learned
+pages use “I can explain…” checkboxes. At most ten unresolved prompts appear,
+oldest first. Incomplete occurrences roll forward, completed occurrences stay
+complete, and Again/Hard/Good/Easy outcomes do not alter the fixed schedule.
+Refreshes preserve every marked human region verbatim.
 
 ## 10. Safe remote update
 

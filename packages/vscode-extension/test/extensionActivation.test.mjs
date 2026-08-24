@@ -123,16 +123,6 @@ function loadTsModule(relativePath, mocks = {}) {
         registerQueryAnnotationWatchers: () => ({ dispose() {} }),
       };
     }
-    if (request === './dailyNotes') {
-      return {
-        generateDailyNote: async () => ({
-          absolutePath: '/vault/wiki/daily/2026-01-01.md',
-          relativePath: 'wiki/daily/2026-01-01.md',
-          dueReviews: [],
-          carriedTodos: [],
-        }),
-      };
-    }
     if (request === './filesystemWiki') {
       return {
         loadFilesystemWiki: async () => ({ documents: [], links: [] }),
@@ -2310,7 +2300,6 @@ test('no-folder activation keeps custom viewers read-only and gates repository l
   let learningNoteStoreCount = 0;
   let backlinksCount = 0;
   let watcherCount = 0;
-  let dailyNoteCount = 0;
   let syncCount = 0;
   let exportedSelectionCount = 0;
   const vscode = createVscodeMock({
@@ -2373,12 +2362,6 @@ test('no-folder activation keeps custom viewers read-only and gates repository l
       }
     },
   };
-  mocks['./dailyNotes'] = {
-    generateDailyNote: async () => {
-      dailyNoteCount += 1;
-      throw new Error('no-folder activation must not generate daily notes');
-    },
-  };
   mocks['./repositorySync'] = {
     syncRepository: async () => {
       syncCount += 1;
@@ -2411,13 +2394,12 @@ test('no-folder activation keeps custom viewers read-only and gates repository l
     'LLM Wiki for VS Code viewers ready — open a folder to enable Queries and repository features.',
   ));
 
-  await vscode.__registeredCommands['llm-wiki.generateDailyNote']();
+  assert.equal(vscode.__registeredCommands['llm-wiki.generateDailyNote'], undefined);
   await vscode.__registeredCommands['llm-wiki.syncRepository']();
   assert.equal(vscode.__registeredCommands['llm-wiki.addSelectionToContext'], undefined);
-  assert.equal(dailyNoteCount, 0);
   assert.equal(syncCount, 0);
   assert.equal(exportedSelectionCount, 0);
-  assert.equal(warningMessages.length, 2);
+  assert.equal(warningMessages.length, 1);
   assert.ok(warningMessages.every(message =>
     message === 'Open a folder to use LLM Wiki Queries and repository features.'
   ));
@@ -2432,7 +2414,7 @@ test('no-folder activation keeps custom viewers read-only and gates repository l
     pdfPath: 'relative.pdf',
   });
   assert.deepEqual(openedPdfTargets, [['/outside/read-only.pdf', 3, undefined]]);
-  assert.equal(warningMessages.length, 3);
+  assert.equal(warningMessages.length, 2);
 });
 
 test('production activation leaves Codex uncomposed', () => {

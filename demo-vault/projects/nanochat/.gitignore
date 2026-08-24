@@ -1,7 +1,0 @@
-.DS_Store
-.llm_wiki/
-.cursor/
-.claude/settings.local.json
-__pycache__/
-*.tmp
-*.sqlite*

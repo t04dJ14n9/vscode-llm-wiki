@@ -1210,7 +1210,7 @@ Deliverables:
 [ ] Include related chunks when search is available.
 [ ] Generate AGENTS.md.
 [ ] Generate CLAUDE.md.
-[ ] Generate .agents/skills/llm-wiki/SKILL.md.
+[x] Consolidate the vault workflow in applicable AGENTS.md files; no general vault skill is required.
 [ ] Generate .claude/commands.
 ```
 

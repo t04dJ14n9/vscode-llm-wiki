@@ -35,22 +35,23 @@ const sha256 = value => createHash('sha256').update(value).digest('hex');
 function makeVault() {
   const root = mkdtempSync(join(tmpdir(), 'llm-wiki-query-e2e-'));
   for (const path of [
-    'queries',
-    'projects/demo/queries',
-    'projects/demo/raw',
-    'projects/demo/assets',
+    'wiki/queries',
+    'raw',
+    'assets',
+    'docs/llm-wiki/queries',
+    'docs/llm-wiki/raw',
   ]) mkdirSync(join(root, path), { recursive: true });
   return root;
 }
 
 test('E2E: Markdown selection → Query page → source annotation → navigation', async () => {
   const root = makeVault();
-  const sourcePath = 'projects/demo/raw/source.md';
+  const sourcePath = 'raw/source.md';
   const source = '# Source\n\nAlpha selected passage Omega\n';
   const quote = 'selected passage';
   const from = source.indexOf(quote);
   writeFileSync(join(root, sourcePath), source);
-  writeFileSync(join(root, 'projects/demo/queries/meaning.md'), `---
+  writeFileSync(join(root, 'wiki/queries/meaning.md'), `---
 type: Query
 title: Why does this passage matter?
 description: A durable explanation of the selected invariant.
@@ -59,8 +60,8 @@ status: stable
 generated: {by: process:test, at: 2026-08-23T00:00:00Z}
 project: demo
 conversation: {selection_id: selection-markdown-1}
-sources: [{id: source, resource: ../raw/source.md, title: Source}]
-anchors: [{source_id: source, kind: markdown, resource: ../raw/source.md, sha256: ${sha256(source)}, quote: selected passage, from: ${from}, to: ${from + quote.length}, start_line: 3, end_line: 3}]
+sources: [{id: source, resource: ../../raw/source.md, title: Source}]
+anchors: [{source_id: source, kind: markdown, resource: ../../raw/source.md, sha256: ${sha256(source)}, quote: selected passage, from: ${from}, to: ${from + quote.length}, start_line: 3, end_line: 3}]
 ---
 
 # Why does this passage matter?
@@ -82,7 +83,7 @@ The passage names the invariant preserved by the update.
     await index.loadNavigationTarget({ selectionId: 'selection-markdown-1' }),
     {
       kind: 'query',
-      queryPath: 'projects/demo/queries/meaning.md',
+      queryPath: 'wiki/queries/meaning.md',
       selectionId: 'selection-markdown-1',
     },
   );
@@ -90,10 +91,10 @@ The passage names the invariant preserved by the update.
 
 test('E2E: PDF Query geometry is available only for the exact binary hash', async () => {
   const root = makeVault();
-  const pdfPath = 'projects/demo/assets/paper.pdf';
+  const pdfPath = 'assets/paper.pdf';
   const pdf = Buffer.from('%PDF-1.7\nquery fixture\n');
   writeFileSync(join(root, pdfPath), pdf);
-  writeFileSync(join(root, 'projects/demo/queries/pdf.md'), `---
+  writeFileSync(join(root, 'wiki/queries/pdf.md'), `---
 type: Query
 title: What does the figure show?
 description: A durable answer tied to an exact PDF region.
@@ -102,8 +103,8 @@ status: stable
 generated: {by: process:test, at: 2026-08-23T00:00:00Z}
 project: demo
 conversation: {selection_id: selection-pdf-1}
-sources: [{id: paper, resource: ../assets/paper.pdf, title: Paper}]
-anchors: [{source_id: paper, kind: pdf, resource: ../assets/paper.pdf, sha256: ${sha256(pdf)}, quote: measured boundary, page: 1, rects: [[20, 30, 120, 48]]}]
+sources: [{id: paper, resource: ../../assets/paper.pdf, title: Paper}]
+anchors: [{source_id: paper, kind: pdf, resource: ../../assets/paper.pdf, sha256: ${sha256(pdf)}, quote: measured boundary, page: 1, rects: [[20, 30, 120, 48]]}]
 ---
 
 # What does the figure show?
@@ -120,4 +121,32 @@ anchors: [{source_id: paper, kind: pdf, resource: ../assets/paper.pdf, sha256: $
     queryIndex.resolvePdfAnchor(annotation.anchor, Buffer.from('%PDF changed')).geometry,
     undefined,
   );
+});
+
+test('E2E: directly opened code repositories discover docs/llm-wiki Queries', async () => {
+  const root = makeVault();
+  const sourcePath = 'src/example.md';
+  const source = '# Code documentation\n\nThe branch-local invariant is explicit.\n';
+  const quote = 'branch-local invariant';
+  const from = source.indexOf(quote);
+  mkdirSync(join(root, 'src'), { recursive: true });
+  writeFileSync(join(root, sourcePath), source);
+  writeFileSync(join(root, 'docs/llm-wiki/queries/invariant.md'), `---
+type: Query
+title: What invariant does this branch preserve?
+description: A code-owned answer stored with the repository branch.
+condensed_summary: This branch preserves the invariant named by its documentation.
+status: stable
+generated: {by: process:test, at: 2026-08-24T00:00:00Z}
+conversation: {selection_id: selection-code-repo-1}
+sources: [{id: source, resource: ../../../src/example.md, title: Code documentation}]
+anchors: [{source_id: source, kind: markdown, resource: ../../../src/example.md, sha256: ${sha256(source)}, quote: branch-local invariant, from: ${from}, to: ${from + quote.length}, start_line: 3, end_line: 3}]
+---
+
+# What invariant does this branch preserve?
+`);
+
+  const index = new queryIndex.QueryAnnotationIndex(root);
+  const [annotation] = await index.listAnnotationsForSource(sourcePath);
+  assert.equal(annotation?.queryPath, 'docs/llm-wiki/queries/invariant.md');
 });

@@ -19,7 +19,7 @@ post-training. Each companion captures one exact arXiv version, its canonical
 metadata, a mechanically extracted text layer, and the original PDF.
 
 The BPE paper supplies the historical subword construction behind the
-[tokenization concept](../concepts/byte-pair-encoding.md).[^bpe] FineWeb and
+[tokenization concept](../wiki/concepts/byte-pair-encoding.md).[^bpe] FineWeb and
 DataComp-LM supply contrasting evidence about turning web crawls into training
 data.[^fineweb][^dclm] SmolLM2 connects data mixtures and staged training to the
 small-model regime.[^smollm2]
@@ -40,7 +40,6 @@ rewarded by answer correctness, not a DPO implementation.
 
 The productive reading order is:
 
-1. use a [summary](../projects/nanochat/summaries/nanochat-end-to-end-training-pipeline.md) to frame a stage;
 2. open the corresponding concept or comparison;
 3. follow its footnote into the immutable raw companion;
 4. open the local PDF when equations, figures, or reading order matter;
@@ -60,10 +59,9 @@ navigation; the PDF remains the visual authority.
 
 ## Related pages
 
-- [Where paper ideas appear in Nanochat](../projects/nanochat/queries/where-do-the-paper-ideas-appear-in-nanochat.md)
-- [FineWeb versus DataComp-LM](../comparisons/fineweb-vs-datacomp-lm.md)
-- [BF16 versus FP8](../comparisons/bf16-vs-fp8.md)
-- [DPO versus on-policy reinforcement learning](../comparisons/dpo-vs-on-policy-reinforcement-learning.md)
+- [FineWeb versus DataComp-LM](../wiki/comparisons/fineweb-vs-datacomp-lm.md)
+- [BF16 versus FP8](../wiki/comparisons/bf16-vs-fp8.md)
+- [DPO versus on-policy reinforcement learning](../wiki/comparisons/dpo-vs-on-policy-reinforcement-learning.md)
 
 [^bpe]: Neural Machine Translation of Rare Words with Subword Units
 [^fineweb]: The FineWeb Datasets

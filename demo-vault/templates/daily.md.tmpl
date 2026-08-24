@@ -1,0 +1,41 @@
+---
+type: "Daily Note"
+title: "{{date}}"
+description: "Goals, learning, and active recall for {{date}}."
+tags: ["daily-review"]
+status: "draft"
+scope: "vault"
+timezone: "Asia/Shanghai"
+date: "{{date}}"
+review_dates: ["{{plus_1}}", "{{plus_3}}", "{{plus_7}}", "{{plus_14}}", "{{plus_30}}", "{{plus_60}}", "{{plus_90}}"]
+generated: {"by": "{{actor}}", "at": "{{timestamp}}"}
+relations: []
+---
+
+# {{date}}
+
+## Goals
+<!-- human:goals:start -->
+<!-- human:goals:end -->
+
+<!-- llm-wiki:reviews:start -->
+## Reviews due
+{{up_to_ten_review_blocks}}
+<!-- llm-wiki:reviews:end -->
+
+<!-- llm-wiki:learned:start -->
+## Learned today
+{{linked_learned_entries}}
+<!-- llm-wiki:learned:end -->
+
+<!-- llm-wiki:review-plan:start -->
+## Review plan
+{{fixed_review_schedule}}
+<!-- llm-wiki:review-plan:end -->
+
+## Carried forward
+{{unchecked_tasks}}
+
+## Notes
+<!-- human:notes:start -->
+<!-- human:notes:end -->

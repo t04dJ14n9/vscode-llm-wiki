@@ -197,15 +197,16 @@ test('returns PDF geometry only for an exact current hash and rejects stale or m
   );
 });
 
-test('discovers root and project Queries, normalizes source paths, and sorts status/update/path', async () => {
+test('discovers canonical and legacy Queries, normalizes source paths, and sorts status/update/path', async () => {
   await withWorkspace(async (root) => {
     const rootText = 'first line\nThe selected source is exact.\nlast line\n';
     const projectText = 'first line\nThe selected source is exact.\nlast line\n';
     await writeWorkspaceFile(root, 'notes/source.md', rootText);
     await writeWorkspaceFile(root, 'projects/alpha/raw/source.md', projectText);
-    const rootFixture = markdownFixture('../notes/source.md', rootText);
+    const rootFixture = markdownFixture('../../notes/source.md', rootText);
+    const legacyRootFixture = markdownFixture('../notes/source.md', rootText);
     const projectFixture = markdownFixture('../raw/source.md', projectText);
-    await writeWorkspaceFile(root, 'queries/draft.md', queryPage({
+    await writeWorkspaceFile(root, 'wiki/queries/draft.md', queryPage({
       ...rootFixture,
       title: 'Draft query',
       status: 'draft',
@@ -213,7 +214,7 @@ test('discovers root and project Queries, normalizes source paths, and sorts sta
       selectionId: 'draft-id',
       extra: { extension_field: { tolerated: true } },
     }));
-    await writeWorkspaceFile(root, 'queries/stable-old.md', queryPage({
+    await writeWorkspaceFile(root, 'wiki/queries/stable-old.md', queryPage({
       ...rootFixture,
       title: 'Stable old',
       status: 'stable',
@@ -229,7 +230,7 @@ test('discovers root and project Queries, normalizes source paths, and sorts sta
       selectionId: 'stable-new-id',
     }));
     await writeWorkspaceFile(root, 'queries/deprecated.md', queryPage({
-      ...rootFixture,
+      ...legacyRootFixture,
       title: 'Deprecated query',
       status: 'deprecated',
       updated: '2026-08-23T00:00:00Z',
@@ -246,7 +247,7 @@ test('discovers root and project Queries, normalizes source paths, and sorts sta
       rootAnnotations.map(annotation => annotation.status),
       ['stable', 'draft', 'deprecated'],
     );
-    assert.equal(rootAnnotations[0].queryPath, 'queries/stable-old.md');
+    assert.equal(rootAnnotations[0].queryPath, 'wiki/queries/stable-old.md');
     assert.equal(rootAnnotations[0].sourcePath, 'notes/source.md');
     assert.equal(rootAnnotations[0].navigationTarget.selectionId, 'stable-old-id');
 
@@ -455,6 +456,8 @@ test('debounces Query and legacy watcher invalidation and disposes timers/watche
   const controller = registerQueryAnnotationWatchers(context, host, index, { debounceMs: 10 });
 
   assert.deepEqual(registrations.map(entry => entry.pattern), [
+    'wiki/queries/*.md',
+    'docs/llm-wiki/queries/*.md',
     'queries/*.md',
     'projects/*/queries/*.md',
     'wiki/learning/*.md',
@@ -471,9 +474,11 @@ test('debounces Query and legacy watcher invalidation and disposes timers/watche
   assert.equal(invalidations, 1);
   for (const subscription of context.subscriptions) subscription.dispose();
   assert.deepEqual(disposed.sort(), [
+    'docs/llm-wiki/queries/*.md',
     'projects/*/queries/*.md',
     'queries/*.md',
     'wiki/learning/*.md',
+    'wiki/queries/*.md',
   ]);
 });
 

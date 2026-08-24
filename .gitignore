@@ -20,6 +20,8 @@ test-results/
 **/test-results/
 e2e-report/
 output/
+!/demo-vault/output/
+!/demo-vault/output/**
 !/demo-vault/projects/*/output/
 !/demo-vault/projects/*/output/**
 artifacts/

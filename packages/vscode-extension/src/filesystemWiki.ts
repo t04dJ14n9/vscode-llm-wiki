@@ -311,7 +311,11 @@ async function collectMarkdownSources(
   for (const entry of entries) {
     const absolutePath = join(directory, entry.name);
     if (entry.isDirectory()) {
-      if (!EXCLUDED_DIRECTORIES.has(entry.name)) {
+      const relativeParts = relative(root, absolutePath).replace(/\\/gu, '/').split('/');
+      const opaqueVaultTree = entry.name === 'templates'
+        || entry.name === 'assets'
+        || (relativeParts[0] === 'projects' && relativeParts[1] === 'code');
+      if (!EXCLUDED_DIRECTORIES.has(entry.name) && !opaqueVaultTree) {
         await collectMarkdownSources(root, absolutePath, output, budget);
       }
       continue;

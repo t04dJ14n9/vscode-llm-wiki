@@ -165,12 +165,16 @@ test('filesystem scan recursively excludes generated and private directories', a
     for (const excluded of ['.git', '.llm_wiki', 'dist', 'node_modules', 'out']) {
       writeMarkdown(root, `${excluded}/Ignored.md`, '# Ignore me');
     }
+    writeMarkdown(root, 'templates/README.md', '# Opaque template instructions');
+    writeMarkdown(root, 'assets/metadata.md', '# Opaque asset companion');
+    writeMarkdown(root, 'projects/code/demo/docs/llm-wiki/queries/ignored.md', '# Opaque bound code');
+    writeMarkdown(root, 'projects/demo.md', '# Portable project card');
 
     const wiki = await filesystemWiki.loadFilesystemWiki(root);
 
     assert.deepEqual(
       wiki.documents.map(document => document.path),
-      ['notes/Included.md', 'README.md'],
+      ['notes/Included.md', 'projects/demo.md', 'README.md'],
     );
   } finally {
     rmSync(root, { recursive: true, force: true });

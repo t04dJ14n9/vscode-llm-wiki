@@ -62,8 +62,8 @@ class IngestArxivTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary_directory = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary_directory.name)
-        (self.root / "projects" / "nanochat" / "raw").mkdir(parents=True)
-        (self.root / "projects" / "nanochat" / "assets").mkdir(parents=True)
+        (self.root / "raw").mkdir(parents=True)
+        (self.root / "assets").mkdir(parents=True)
 
     def tearDown(self) -> None:
         self.temporary_directory.cleanup()
@@ -80,7 +80,6 @@ class IngestArxivTests(unittest.TestCase):
         return ingest_paper(
             self.root,
             ref,
-            project="nanochat",
             metadata_loader=lambda _ref: selected_metadata,
             pdf_loader=pdf_loader_with(pdf_bytes),
             extractor=extractor,
@@ -198,8 +197,6 @@ class IngestArxivTests(unittest.TestCase):
         self.assertNotIn("## Summary", document.body)
 
     def test_ingest_defaults_to_outer_raw_and_assets(self) -> None:
-        (self.root / "raw").mkdir()
-        (self.root / "assets").mkdir()
         result = ingest_paper(
             self.root,
             ArxivRef("1508.07909", 5),
@@ -219,10 +216,8 @@ class IngestArxivTests(unittest.TestCase):
         with self.assertRaisesRegex(IngestError, "CC BY 4.0"):
             self.ingest(metadata=metadata)
 
-        self.assertEqual(
-            [path.relative_to(self.root).as_posix() for path in self.root.rglob("*")],
-            ["projects", "projects/nanochat", "projects/nanochat/assets", "projects/nanochat/raw"],
-        )
+        self.assertEqual(tuple((self.root / "raw").glob("*.md")), ())
+        self.assertEqual(tuple((self.root / "assets").glob("*.pdf")), ())
 
     def test_extraction_failure_leaves_no_markdown_or_pdf(self) -> None:
         def fail_extraction(_pdf: Path, _destination: Path) -> str:
@@ -231,8 +226,8 @@ class IngestArxivTests(unittest.TestCase):
         with self.assertRaises(subprocess.CalledProcessError):
             self.ingest(extractor=fail_extraction)
 
-        self.assertEqual(tuple((self.root / "projects/nanochat/raw").glob("*.md")), ())
-        self.assertEqual(tuple((self.root / "projects/nanochat/assets").glob("*.pdf")), ())
+        self.assertEqual(tuple((self.root / "raw").glob("*.md")), ())
+        self.assertEqual(tuple((self.root / "assets").glob("*.pdf")), ())
         self.assertEqual(tuple(self.root.glob(".ingest-*")), ())
 
     def test_reingesting_identical_snapshot_is_a_noop(self) -> None:
@@ -253,7 +248,7 @@ class IngestArxivTests(unittest.TestCase):
             self.ingest(pdf_bytes=b"%PDF-1.7\nchanged\n")
 
         self.assertEqual(
-            (self.root / "projects/nanochat/assets" / f"{SLUG}.pdf").read_bytes(),
+            (self.root / "assets" / f"{SLUG}.pdf").read_bytes(),
             b"%PDF-1.7\nfixture\n",
         )
 
@@ -273,34 +268,7 @@ class IngestArxivTests(unittest.TestCase):
             f"{SLUG}-{suffix}.pdf",
         )
 
-    def test_project_id_must_be_a_single_existing_project_directory(self) -> None:
-        with self.assertRaisesRegex(IngestError, "project"):
-            ingest_paper(
-                self.root,
-                ArxivRef("1508.07909", 5),
-                project="../escape",
-                metadata_loader=lambda _ref: paper_metadata(),
-            )
-
     def test_main_reports_paths_when_vault_argument_is_relative(self) -> None:
-        vault = Path.cwd() / "demo-vault"
-        result = IngestResult(
-            vault / "projects" / "nanochat" / "raw" / f"{SLUG}.md",
-            vault / "projects" / "nanochat" / "assets" / f"{SLUG}.pdf",
-            "created",
-        )
-        output = io.StringIO()
-
-        with patch("ingest_arxiv.ingest_paper", return_value=result):
-            with redirect_stdout(output):
-                exit_code = main(
-                    ["--vault", "demo-vault", "--project", "nanochat", "--id", "1508.07909v5"]
-                )
-
-        self.assertEqual(exit_code, 0)
-        self.assertIn(f"projects/nanochat/raw/{SLUG}.md", output.getvalue())
-
-    def test_main_defaults_to_outer_vault_scope(self) -> None:
         vault = Path.cwd() / "demo-vault"
         result = IngestResult(
             vault / "raw" / f"{SLUG}.md",
@@ -308,11 +276,14 @@ class IngestArxivTests(unittest.TestCase):
             "created",
         )
         output = io.StringIO()
-        with patch("ingest_arxiv.ingest_paper", return_value=result) as ingest:
+
+        with patch("ingest_arxiv.ingest_paper", return_value=result):
             with redirect_stdout(output):
-                exit_code = main(["--vault", "demo-vault", "--id", "1508.07909v5"])
+                exit_code = main(
+                    ["--vault", "demo-vault", "--id", "1508.07909v5"]
+                )
+
         self.assertEqual(exit_code, 0)
-        self.assertIsNone(ingest.call_args.kwargs["project"])
         self.assertIn(f"raw/{SLUG}.md", output.getvalue())
 
 

@@ -1,122 +1,109 @@
 # LLM Wiki for VS Code agent instructions
 
-These instructions apply to the extension, producer tools, and demo vault.
-Preserve user changes and keep implementation work off `main` unless the user
-explicitly requests otherwise.
+These instructions govern the extension, reusable vault tools, and demo vault.
+Preserve user changes and keep implementation work off `main` unless explicitly
+requested otherwise.
 
 ## Product boundaries
 
-- Product name: **LLM Wiki for VS Code**.
-- Preserve package `llm-wiki-vscode`, publisher, `llm-wiki.*` command IDs,
-  view types, `.llm_wiki` storage, and versioned source URI payloads.
-- The extension exports immutable selection artifacts and indexes local Query
-  pages. It never submits or scrapes an external conversation.
-- Do not restore the removed PDF discussion/Ask PDF backend.
-- Do not add a database, mandatory embeddings, `llm-wiki-compiler`, or a
-  `revisions/` collection.
+- Product name: **LLM Wiki for VS Code**. Preserve package
+  `llm-wiki-vscode`, publisher, `llm-wiki.*` identifiers, `.llm_wiki`
+  storage, view types, and versioned source URI payloads.
+- The extension exports immutable Markdown/PDF selections and indexes local
+  Query pages. It never submits, monitors, or scrapes agent conversations.
+- Do not restore the removed PDF discussion backend, add a database or required
+  embeddings, integrate `llm-wiki-compiler`, or implement the deferred graph UI.
+- Vault behavior is specified by the nearest `AGENTS.md`; there is no general
+  LLM Wiki skill. Retain the focused PDF selection skill and installer.
 
-## Vault orientation
+## Canonical vault workflow
 
-Before ingest, query, code study, promotion, or maintenance:
+Before study or maintenance, read the nearest `AGENTS.md`, `SCHEMA.md`, root
+`_index.md`, `tasks/current.md`, and newest `_log.md` entry, then search before
+writing. Canonical navigation and history filenames are `_index.md` and
+`_log.md` only.
 
-1. Read the applicable vault `SCHEMA.md` and `AGENTS.md`.
-2. Read root `_index.md`, the flat `projects/<id>.md` repository card, the
-   paired project-vault index, and `tasks/current.md`.
-3. Read the newest `_log.md` entry.
-4. Search indexes and full text using terms, aliases, abbreviations, and
-   language variants. Do not claim coverage is absent until both are empty.
+A knowledge vault stores graph-visible durable pages under
+`wiki/{concepts,comparisons,entities,queries,daily}`. Summaries and playbooks
+remain outside `wiki/`. Raw textual evidence is flat under `raw/`; binary
+evidence is flat under optional `assets/` and uses Git LFS. Workbench material
+belongs in `inbox/`, `tasks/`, or `scratch/`. `templates/`, `projects/code/`,
+assets, hidden runtime directories, and skill packages are opaque to indexing
+and validation.
 
-Canonical OKF navigation uses `_index.md` only. The outer catalog and each
-registered code vault carry `okf_version: "0.2"` on their own root `_index.md`;
-generated indexes below either root are frontmatter-free. `_log.md` is the only
-log filename. Both are regular files; unprefixed variants and aliases are
-forbidden.
+Use the nearest `templates/*.md.tmpl` and replace every required
+`{{placeholder}}`. Every graph-visible page except generated `_index.md` has a
+JSON-flow `relations` array. Targets are existing contained `.md` paths
+relative to that wiki root. Direction is current page to target; body links do
+not create edges. Allowed kinds are `references`, `depends-on`, `supported-by`,
+`contrasts-with`, `extends`, `supersedes`, `applies-to`, and `example-of`.
+Captions are required, direct, and at most 160 Unicode code points. No self or
+duplicate target/kind edge is allowed.
 
-## Project placement
+## Daily active recall
 
-A code-vault claim describes one repository's implementation, configuration,
-protocol, build/run behavior, code history, or generated repository
-documentation. Keep it under `projects/<id>/`. Put higher-level learning,
-papers, reusable mechanisms, datasets, comparisons, and synthesis in the outer
-vault with explicit `scope: vault` or `scope: cross-project`.
-Compiled code-vault pages declare `code_scope: true`.
+Vault time is `Asia/Shanghai`. On the first study or maintenance session on
+local date `D`, lazily create or refresh `wiki/daily/D.md` from the daily
+template. Do not create empty notes on inactive days and do not add a log entry
+for routine daily-note creation.
 
-Resolve code working copies only through `projects/repositories.yaml`. Each
-card `projects/<id>.md` is paired with a self-contained `projects/<id>/` vault,
-while its ignored checkout lives at `projects/code/<id>/` and is synchronized
-in place by Git, P4, or SVN.
-Never automatically clone, sync, switch, reset, or bulk-update working copies.
-Never create `.gitmodules` or a submodule gitlink for project code.
-Prefer immutable revision reads for
-evidence. Stable claims require repository, revision, path, and verified hash;
-dirty or unavailable evidence remains draft. A newer checkout creates
-currentness debt without falsifying a matching historical claim.
+Preserve every human-owned Goals, review-answer, and Notes marker verbatim.
+Only linked `**Learned**` log bullets enter a cohort. Repeat an exact Query title
+as an active-recall question with a blank human answer, an attempted-before-
+source checkbox, and at most one selected Again/Hard/Good/Easy outcome. Use an
+“I can explain…” checkbox for learned Concepts, Comparisons, and Entities.
+Schedule fixed occurrences at +1/+3/+7/+14/+30/+60/+90 days; outcomes never
+change the schedule. Roll incomplete reviews forward without erasing completed
+occurrences. Show at most ten unresolved prompts ordered by oldest due date,
+then Query, Concept, Comparison, Entity, and statement fallback.
 
-Repository documentation is code-vault material. A committed document supports
-what it says at its exact revision. DeepWiki and other generated repository
-documentation enter `projects/<id>/summaries/` as unverified generated summaries;
-claims about code behavior also need primary code, tests, configuration, or
-protocol evidence.
+## Repository cards and code-owned knowledge
 
-## Authority boundaries
+`projects/<id>.md` is the sole portable project record. It stores VCS identity,
+tracked ref, observed revision/time, status, and ongoing change, but no local
+path, YAML registry, submodule, or paired outer-vault project directory. Its ID
+implies ignored binding `projects/code/<id>`, which may be a checkout or an
+exact symlink. Validate only that binding and its Git remote, P4 mapping, or SVN
+URL. Never automatically clone, sync, switch, reset, or bulk-update it.
 
-- outer `raw/`: append immutable higher-level textual evidence such as papers.
-- outer `assets/`: append flat higher-level binaries through Git LFS; no
-  Markdown or source code. Distinguish original from derived attachments.
-- project `raw/` and `assets/`: reserve for immutable code/repository evidence
-  and code-oriented binary attachments.
-- `projects/code/<id>/`: ignored in-place VCS working copy; read-only unless the user
-  assigned code work.
-- `inbox/`: unprocessed candidates, never durable evidence.
-- `tasks/`: thorough operational state; exactly one `current.md` pointer.
-- `scratch/`: immature hypotheses, never durable evidence.
-- compiled collections: grounded agent-maintained knowledge.
-- `output/`: polished reports/designs; source-backed claims use provenance.
-- `examples/`: stable runnable illustrative code with tests. Exploratory demo
-  code belongs in scratch or the current task.
-- tools, hidden runtime directories, skills, assets, and code are opaque to
-  OKF concept traversal.
+Repository-specific implementation knowledge and Queries live with writable
+code under `docs/llm-wiki/` so they follow repository branches and commits.
+Stable code claims bind to VCS identity, immutable revision, path, and verified
+content hash. Dirty or unavailable evidence remains draft. Higher-level papers,
+reusable mechanisms, and cross-repository synthesis stay in the outer vault.
 
 ## Viewer conversations and Queries
 
-File a viewer conversation automatically only when it is substantial,
-grounded, supported, durable or expensive to reconstruct, novel, clearly
-scoped, complete about limitations, and safe. Ask for borderline cases; keep
-trivial lookups read-only. Persist synthesis, not transcripts.
+Canonical Query discovery is `wiki/queries/*.md` for a knowledge vault and
+`docs/llm-wiki/queries/*.md` for a directly opened code repository. For one
+release, read but do not write legacy `queries/*.md`,
+`projects/*/queries/*.md`, and `wiki/learning/*.md`.
 
-A Query requires a direct answer, evidence, limitations, related durable
-pages, a one- or two-sentence `condensed_summary` of at most 360 Unicode code
-points, `conversation.selection_id`, `sources[]`, and exact `anchors[]`.
-Every anchor has a unique `source_id` bound to one source. Repeated work on a
-selection updates its draft; a materially different later answer creates a
-successor with `supersedes`. Do not silently rewrite stable history.
+File a Query only when the answer is substantial, selection-grounded,
+evidence-supported, durable or expensive to reconstruct, novel, clearly
+scoped, complete about limitations, and safe. Borderline cases require
+confirmation; trivial lookups are read-only. Persist synthesis, not transcripts.
+Queries require a direct answer, evidence, limitations, related pages, a
+one-or-two-sentence `condensed_summary` of at most 360 Unicode code points,
+immutable `conversation.selection_id`, sources, exact source-ID-bound anchors,
+and relations.
 
-Markdown anchors use hash, quote, prefix/suffix, offsets, and lines. Resolve an
-exact hash/range first, then only a unique contextual relocation. PDF anchors
-use PDF hash, page, and exact point rectangles; suppress geometry after a hash
-mismatch. Reuse the exact exported `open_uri`; never manufacture its payload
-or expose `chat_uri` as a user-facing source link.
+Markdown anchors use hash, quote, context, offsets, and lines. PDF anchors use
+PDF hash, page, and exact point rectangles; suppress geometry after a hash
+mismatch. Reuse the exact exported `open_uri`; never manufacture its payload or
+expose `.llm_wiki_anchor`/`chat_uri` as a user-facing link. Persisted vault pages
+use relative Markdown links or wikilinks.
 
-After filing a meaningful Query, update the living project repository guide
-when understanding materially improved, apply the page gates below, rebuild,
-validate, log, and refresh annotations.
+Valid generated host links begin with either:
 
-## Entity and Concept gates
-
-Enrich existing pages automatically. Create an Entity only when there is no
-duplicate and the durable named thing is authoritative, independently
-searchable, clearly scoped, and supports meaningful identity/ownership/
-relationship prose. Never create an Entity for a function, file, RPC, passing
-mention, or temporary object.
-
-Create a Concept only when there is no duplicate and the evidence supports a
-reusable mechanism, invariant, pattern, workflow, failure mode, or process
-that remains valuable outside the conversation. Ask on ambiguous identity or
-scope. Ask before fan-out touching ten or more pages.
+```text
+cursor://llm-wiki.llm-wiki-vscode/open-anchor?target=v1.<generated-payload>
+vscode://llm-wiki.llm-wiki-vscode/open-anchor?target=v1.<generated-payload>
+```
 
 ## Completion
 
-For material vault changes run:
+For material demo-vault changes run:
 
 ```bash
 python3 tools/llm-wiki/rebuild_indexes.py --vault demo-vault
@@ -127,8 +114,8 @@ git diff --check
 git status --short
 ```
 
-For extension behavior also run focused tests, typecheck, build, and the
-appropriate browser/VS Code E2E path. Never claim human verification from
-automated checks. Never stage, commit, push, publish, or write back externally
-unless the user explicitly requests it. Never expose secrets, credentials,
-private identifiers, or redacted values.
+For extension behavior also run focused tests, lint, typecheck, build, and the
+appropriate browser/VS Code E2E path. Log material vault changes newest-first as
+`**Learned**`, `**Changed**`, or `**Maintained**`. Never claim human verification
+from automated checks. Never commit, push, publish, sync code, or write back
+externally without authority. Never expose secrets or private identifiers.

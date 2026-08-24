@@ -2,14 +2,11 @@
 
 ## System boundary
 
-LLM Wiki for VS Code is a filesystem-first extension. VS Code/Cursor hosts the
-trusted extension process and custom Markdown/PDF editors. Git-backed Markdown
-is the durable knowledge format; `.llm_wiki/` contains only local runtime and
-immutable agent-handoff artifacts.
-
-The extension does not submit or scrape conversations. A coding agent receives
-an immutable source selection and, when the answer passes the repository skill's
-quality gates, writes an ordinary OKF Query page.
+The product is filesystem-first. VS Code/Cursor hosts the trusted extension and
+custom Markdown/PDF editors. Git-backed Markdown is durable; `.llm_wiki/`
+contains only local runtime and immutable agent-handoff artifacts. The
+extension does not submit or scrape conversations. Agents follow the nearest
+vault `AGENTS.md`; there is no required general LLM Wiki skill.
 
 ## Components
 
@@ -17,71 +14,62 @@ quality gates, writes an ordinary OKF Query page.
 flowchart LR
     Source["Markdown / PDF / code"] --> Viewer["VS Code custom editors"]
     Viewer --> Export["Immutable selection export"]
-    Export --> Agent["Installed agent draft"]
+    Export --> Agent["Agent using vault AGENTS.md"]
     Agent --> Query["OKF Query Markdown"]
     Query --> Index["QueryAnnotationIndex"]
     Index --> Viewer
-    Registry["projects/repositories.yaml"] --> Source
+    Card["projects/<id>.md"] --> Binding["ignored projects/code/<id>"]
     Tools["tools/llm-wiki"] --> Query
     Tools --> Indexes["Generated _index.md hierarchy"]
 ```
 
 - `packages/vscode-extension`: activation, secure filesystem/URI routing,
   selection handoff, Query indexing, Markdown webview, and PDF host bridge.
-- `packages/pdf-editor`: shared PDFium viewer, text/area selection, exact point
-  rectangles, navigation, Query overlays, and source-view state.
+- `packages/pdf-editor`: PDFium viewer, selection rectangles, navigation,
+  Query overlays, and source-view state.
 - `packages/core`: portable Markdown/PDF reference primitives.
-- `tools/llm-wiki`: deterministic producers and layered vault validation.
-- `.agents/skills/llm-wiki`: Hermes-derived authoring and maintenance policy.
+- `tools/llm-wiki`: deterministic index production and layered validation.
+- `.agents/skills/pdf`: focused PDF selection interpretation only.
 
-## Selection handoff
+## Selection handoff and Query indexing
 
-Markdown and PDF selections become immutable
+Selections become immutable
 `.llm_wiki/agent/exports/<selection-id>/selection.{md,json,png}` snapshots.
-`open_uri` is a product deep link back to the exact source; `chat_uri` is an
-internal attachment bridge. Provider adapters add files or source ranges to an
-existing draft and never press Send.
+`open_uri` is the exact product link back to source; `chat_uri` is an internal
+attachment bridge. Provider adapters add context to a draft and never press
+Send.
 
-## Query indexing and annotations
+`QueryAnnotationIndex` scans canonical `wiki/queries/*.md` and
+`docs/llm-wiki/queries/*.md`. It retains `queries/*.md`,
+`projects/*/queries/*.md`, and `wiki/learning/*.md` for one release as read-only
+compatibility inputs. It parses bounded YAML, rejects traversal and symlinked
+Query files, sorts deterministically, and performs no network calls.
 
-`QueryAnnotationIndex` scans only `queries/*.md`,
-`projects/*/queries/*.md`, and the one-release read-only
-`wiki/learning/*.md` adapter. It parses bounded YAML, rejects traversal and
-symlinked Query files, sorts lifecycle/update/path deterministically, and
-performs no network calls.
+Markdown resolution uses exact hash/offset first and unique contextual
+relocation after an edit. PDF resolution requires the current byte hash before
+returning page rectangles. The Markdown and PDF editors aggregate Queries and
+expose accessible condensed-answer popovers.
 
-Each Query anchor binds through `source_id` to a provenance source. Markdown
-resolution uses exact hash/offset first and unique contextual relocation after
-an edit. PDF resolution requires the current byte hash before returning page
-rectangles. Providers send only resolved annotations to webviews.
+## Vault and repository boundary
 
-The Markdown editor aggregates Queries sharing a range and exposes an
-accessible `✦ Query`/`✦ N Queries` popover on hover, focus, caret, or pinned
-activation. The PDF viewer renders a dedicated non-destructive overlay using
-the same point coordinate system as selections and exposes the same ordered
-answers. Open Query actions use the existing validated Markdown navigation.
+Graph-visible durable knowledge is under `wiki/`; summaries and playbooks are
+outside it. `projects/<id>.md` is a portable VCS card. An optional checkout or
+symlink is implied at opaque `projects/code/<id>`; no registry YAML or
+submodule is involved. Code-owned knowledge stays in writable repositories at
+`docs/llm-wiki/` and therefore follows their commits and branches.
 
-## Vault boundary
+Daily active recall is an AGENTS workflow generated lazily from `.md.tmpl`
+templates and categorized `_log.md` entries. The extension has no daily-note
+generator command.
 
-Canonical OKF navigation uses regular `_index.md` and `_log.md` files only.
-Repository-implementation material stays in
-the project code vault; higher-level learning and papers stay in the outer
-vault. Registered in-place code working copies and flat LFS assets are opaque.
-
-Repository claims bind to an immutable VCS revision and verified content. An
-optional in-place working copy can advance without changing historical truth;
-the validator reports currentness separately. Missing or dirty evidence remains
-draft.
+The `relations[]` property on `wiki/**/*.md` is the only future graph-edge
+source. The current graph implementation remains unchanged until a dedicated
+graph-view phase.
 
 ## Trust and compatibility
 
-The extension host validates all paths, URI payloads, Query metadata, PDF
-geometry, and attachment sizes. Webviews receive bounded serializable data and
-insert untrusted text only through `textContent`. No arbitrary HTML from a
-Query enters a popover.
-
-Compatibility identifiers remain unchanged: package `llm-wiki-vscode`,
-publisher/commands under `llm-wiki`, `.llm_wiki` storage, view types, and the
-versioned open-anchor URI. The `wiki/learning` reader remains a temporary
-compatibility input; producers and new writes use `_index.md`, `_log.md`, and
-OKF Queries.
+The extension validates paths, URI payloads, Query metadata, PDF geometry, and
+attachment sizes. Webviews receive bounded serializable data and insert
+untrusted text with `textContent`. Compatibility identifiers remain unchanged:
+package `llm-wiki-vscode`, publisher/commands under `llm-wiki`, `.llm_wiki`
+storage, view types, and versioned open-anchor URI.
