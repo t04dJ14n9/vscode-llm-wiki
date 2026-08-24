@@ -109,3 +109,7 @@ description: "Oldest-first append-only record of material demo-vault changes."
 ## [2026-08-25] changed | simplified tags and demo guide
 
 - **Changed**: Reduced TAGS.md to canonical headings with direct descriptions, removed unused alias and parent metadata, and rewrote README.md as a practical guide to the corpus, learning loop, evidence boundaries, viewer workflow, and validation.
+
+## [2026-08-25] changed | research workflow skills
+
+- **Changed**: Added framework-neutral arXiv discovery, grounded-citation, and research-paper-writing skills with upstream MIT attribution and installed copies.

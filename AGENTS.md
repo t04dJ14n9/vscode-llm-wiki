@@ -14,8 +14,8 @@ requested otherwise.
 - Do not restore the removed PDF discussion backend, add a database or required
   embeddings, integrate `llm-wiki-compiler`, or implement the deferred graph UI.
 - Vault behavior is specified by the nearest `AGENTS.md`; there is no general
-  LLM Wiki skill. Retain the focused PDF selection skill, the optional
-  humanizer prose-editing skill, and their installer.
+  LLM Wiki skill. Retain the focused PDF selection, humanizer, arXiv,
+  grounded-citations, and research-paper-writing skills and their installer.
 
 ## Canonical vault workflow
 

@@ -96,6 +96,9 @@ packages/
 tools/llm-wiki/                    # deterministic producers and validators
 .agents/skills/pdf/                # focused PDF selection workflow
 .agents/skills/humanizer/          # evidence-preserving prose polish
+.agents/skills/arxiv/              # version-pinned paper discovery
+.agents/skills/grounded-citations/ # claim-level evidence verification
+.agents/skills/research-paper-writing/ # academic research workflow
 demo-vault/                        # graph-ready example vault
 ```
 

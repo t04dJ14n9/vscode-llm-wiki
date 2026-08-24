@@ -5,12 +5,18 @@ description: "Normative AGENTS-only workflow for the graph-ready demo vault."
 status: "stable"
 scope: "vault"
 vault_timezone: "Asia/Shanghai"
-generated: {"by": "codex/gpt-5.6", "at": "2026-08-25T00:20:05+08:00"}
+generated: {"by": "codex/gpt-5.6", "at": "2026-08-25T00:32:09+08:00"}
 ---
 
 # LLM Wiki operator handbook
 
 This file is the complete normative workflow. No LLM Wiki skill is required.
+
+Use installed focused skills when their trigger applies: `arxiv` for
+version-pinned paper discovery, `grounded-citations` for claim-level evidence,
+`research-paper-writing` for academic manuscripts, `pdf` for exact PDF regions,
+and `humanizer` for requested prose polish. The vault workflow in this file
+remains authoritative for placement, metadata, validation, and logging.
 
 ## Start every study or maintenance session
 

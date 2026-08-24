@@ -4,7 +4,7 @@ title: "LLM Wiki demo vault"
 description: "A working example of source-backed reading, durable Queries, repository references, and active recall in LLM Wiki for VS Code."
 status: "stable"
 scope: "vault"
-generated: {"by": "codex/gpt-5.6", "at": "2026-08-25T00:20:05+08:00"}
+generated: {"by": "codex/gpt-5.6", "at": "2026-08-25T00:32:09+08:00"}
 ---
 
 # LLM Wiki demo vault
@@ -105,4 +105,6 @@ git diff --check
 
 The demo requires no database, embeddings service, submodule, scheduled task,
 or `llm-wiki-compiler` runtime. Its durable state is Markdown, Git history, and
-Git LFS assets.
+Git LFS assets. Its installed operational skills cover PDF regions, prose
+polish, version-pinned arXiv discovery, grounded citations, and research-paper
+workflows; skill packages remain opaque to the knowledge graph.

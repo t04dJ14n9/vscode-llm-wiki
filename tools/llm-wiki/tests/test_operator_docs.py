@@ -7,8 +7,14 @@ from pathlib import Path
 TOOLS = Path(__file__).resolve().parents[1]
 REPOSITORY = Path(__file__).resolve().parents[3]
 VAULT = REPOSITORY / "demo-vault"
-PDF_SKILL = REPOSITORY / ".agents/skills/pdf"
-HUMANIZER_SKILL = REPOSITORY / ".agents/skills/humanizer"
+SKILLS_ROOT = REPOSITORY / ".agents/skills"
+SKILL_FILES = {
+    "pdf": ("SKILL.md", "scripts/extract_selection.py"),
+    "humanizer": ("SKILL.md", "LICENSE"),
+    "arxiv": ("SKILL.md", "LICENSE"),
+    "grounded-citations": ("SKILL.md", "LICENSE"),
+    "research-paper-writing": ("SKILL.md", "LICENSE"),
+}
 SKILL_VALIDATOR = (
     Path.home()
     / ".codex/skills/.system/skill-creator/scripts/quick_validate.py"
@@ -47,7 +53,8 @@ class OperatorDocumentationTests(unittest.TestCase):
             self.skipTest("official Codex skill validator is not installed")
         if importlib.util.find_spec("yaml") is None:
             self.skipTest("PyYAML is unavailable for the official skill validator")
-        for skill in (PDF_SKILL, HUMANIZER_SKILL):
+        for name in SKILL_FILES:
+            skill = SKILLS_ROOT / name
             result = subprocess.run(
                 [
                     sys.executable,
@@ -61,10 +68,8 @@ class OperatorDocumentationTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_default_skills_are_installed_as_hidden_operational_metadata(self) -> None:
-        for canonical, relatives in (
-            (PDF_SKILL, ("SKILL.md", "scripts/extract_selection.py")),
-            (HUMANIZER_SKILL, ("SKILL.md", "LICENSE")),
-        ):
+        for name, relatives in SKILL_FILES.items():
+            canonical = SKILLS_ROOT / name
             installed = VAULT / ".agents/skills" / canonical.name
             self.assertTrue(installed.is_dir())
             self.assertFalse(any(installed.rglob("_index.md")))
@@ -75,11 +80,35 @@ class OperatorDocumentationTests(unittest.TestCase):
                 )
 
     def test_humanizer_has_no_framework_specific_content(self) -> None:
-        text = (HUMANIZER_SKILL / "SKILL.md").read_text(encoding="utf-8")
+        humanizer_skill = SKILLS_ROOT / "humanizer"
+        text = (humanizer_skill / "SKILL.md").read_text(encoding="utf-8")
         self.assertNotIn("Hermes", text)
         self.assertNotIn("read_file", text)
         self.assertNotIn("write_file", text)
         self.assertIn("tags: [writing, editing, humanize, voice, prose]", text)
+
+    def test_research_skills_are_framework_neutral(self) -> None:
+        prohibited = (
+            "Hermes Tools",
+            "web_extract",
+            "cronjob",
+            "read_file",
+            "write_file",
+        )
+        expected_tags = {
+            "arxiv": "tags: [research, arxiv, papers, academic, provenance]",
+            "grounded-citations": (
+                "tags: [research, citations, grounding, sources, fact-checking]"
+            ),
+            "research-paper-writing": (
+                "tags: [research, paper-writing, experiments, academic, latex]"
+            ),
+        }
+        for name, tags in expected_tags.items():
+            text = (SKILLS_ROOT / name / "SKILL.md").read_text(encoding="utf-8")
+            for term in prohibited:
+                self.assertNotIn(term, text)
+            self.assertIn(tags, text)
 
     def test_documented_producer_clis_are_runnable(self) -> None:
         for script in (

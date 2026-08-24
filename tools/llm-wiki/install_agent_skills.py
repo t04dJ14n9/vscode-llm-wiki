@@ -10,7 +10,13 @@ from pathlib import Path
 REPOSITORY = Path(__file__).resolve().parents[2]
 CANONICAL_ROOT = REPOSITORY / ".agents/skills"
 DESTINATION_ROOT = Path(".agents/skills")
-SKILL_NAMES = ("pdf", "humanizer")
+SKILL_NAMES = (
+    "pdf",
+    "humanizer",
+    "arxiv",
+    "grounded-citations",
+    "research-paper-writing",
+)
 
 
 def same_tree(left: Path, right: Path) -> bool:
