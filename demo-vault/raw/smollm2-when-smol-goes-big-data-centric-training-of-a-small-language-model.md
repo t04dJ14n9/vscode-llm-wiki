@@ -1,7 +1,7 @@
 ---
 type: "Paper"
 title: "SmolLM2: When Smol Goes Big -- Data-Centric Training of a Small Language Model"
-description: "Immutable arXiv snapshot of SmolLM2: When Smol Goes Big -- Data-Centric Training of a Small Language Model."
+description: "While large language models have facilitated breakthroughs in many applications of artificial intelligence, their inherent largeness makes them computationally expensive and challenging to deploy in resource-constrained settings."
 resource: "https://arxiv.org/abs/2502.02737v1"
 tags: ["paper"]
 status: "stable"

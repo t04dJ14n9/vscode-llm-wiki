@@ -1,7 +1,7 @@
 ---
 type: "Paper"
 title: "FP8 Formats for Deep Learning"
-description: "Immutable arXiv snapshot of FP8 Formats for Deep Learning."
+description: "FP8 is a natural progression for accelerating deep learning training inference beyond the 16-bit formats common in modern processors."
 resource: "https://arxiv.org/abs/2209.05433v2"
 tags: ["paper"]
 status: "stable"

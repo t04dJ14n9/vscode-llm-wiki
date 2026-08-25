@@ -1,7 +1,7 @@
 ---
 type: "Paper"
 title: "DataComp-LM: In search of the next generation of training sets for language models"
-description: "Immutable arXiv snapshot of DataComp-LM: In search of the next generation of training sets for language models."
+description: "We introduce DataComp for Language Models (DCLM), a testbed for controlled dataset experiments with the goal of improving language models."
 resource: "https://arxiv.org/abs/2406.11794v4"
 tags: ["paper"]
 status: "stable"

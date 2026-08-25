@@ -1,6 +1,6 @@
 ---
 type: "Reference"
-title: "Graph-ready LLM Wiki schema"
+title: "Vault schema"
 description: "OKF v0.2 placement, project cards, relations, Queries, templates, and daily-review rules."
 status: "stable"
 scope: "vault"
@@ -35,7 +35,8 @@ source path. The shared generator contains no product or domain vocabulary.
 parseable `##### [YYYY-MM-DD] kind | subject` heading and one categorized bullet
 under year/month/day parents. Sections over 20 direct entries produce a
 non-blocking curation warning. New events
-are appended with `tools/llm-wiki/append_log.py`; prior bytes are immutable.
+are appended from the log template and normalized with `vault.py rebuild`;
+prior bytes are immutable.
 
 `TAGS.md` is the vault-local central tag registry. Its level-two headings are
 canonical lowercase kebab-case tags and the following prose defines when to use

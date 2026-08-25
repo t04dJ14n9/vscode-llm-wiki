@@ -8,11 +8,13 @@ from datetime import date
 from pathlib import Path
 from unittest.mock import patch
 
-SCRIPTS = Path(__file__).resolve().parents[1]
+TOOLS = Path(__file__).resolve().parents[1]
+SCRIPTS = Path(__file__).resolve().parents[3] / ".agents/skills/arxiv/scripts"
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 sys.path.insert(0, str(SCRIPTS))
+sys.path.insert(0, str(TOOLS))
 
-from ingest_arxiv import (
+from ingest import (
     ArxivRef,
     IngestError,
     IngestResult,
@@ -277,7 +279,7 @@ class IngestArxivTests(unittest.TestCase):
         )
         output = io.StringIO()
 
-        with patch("ingest_arxiv.ingest_paper", return_value=result):
+        with patch("ingest.ingest_paper", return_value=result):
             with redirect_stdout(output):
                 exit_code = main(
                     ["--vault", "demo-vault", "--id", "1508.07909v5"]

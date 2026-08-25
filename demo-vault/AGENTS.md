@@ -14,8 +14,8 @@ generated: {"by": "codex/gpt-5.6", "at": "2026-08-25T00:57:53+08:00"}
 
 This file is the complete normative workflow. No LLM Wiki skill is required.
 
-Use installed focused skills when their trigger applies: `arxiv` for
-version-pinned paper discovery, `grounded-citations` for claim-level evidence,
+Use installed focused skills when their trigger applies:
+`grounded-citations` for claim-level evidence,
 `research-paper-writing` for academic manuscripts, `pdf` for exact PDF regions,
 and `humanizer` for requested prose polish. The vault workflow in this file
 remains authoritative for placement, metadata, validation, and logging.
@@ -24,7 +24,7 @@ remains authoritative for placement, metadata, validation, and logging.
 wrappers under `.claude/skills/`, `.cursor/skills/`, and `.codex/skills/` make
 them available immediately without plugins or symlinks; Cursor also receives
 physical commands and an always-applied rule. Regenerate only those wrappers
-with `.agents/render_agent_adapters.py`.
+with the upstream initializer; populated vaults do not carry renderer code.
 
 ## Start every study or maintenance session
 
@@ -48,6 +48,15 @@ human-owned review markers exactly. Do not humanize immutable evidence,
 generated navigation, logs, or code.
 
 Daily generation is lazy and filesystem-only: no scheduler or extension command is required. Pull linked `**Learned**` entries from today's log into the cohort. Review older cohorts at +1, +3, +7, +14, +30, +60, and +90 days. Repeat Query titles with blank human answer blocks; use “I can explain…” checkboxes for Concepts, Comparisons, and Entities. Include at most ten unresolved reviews, oldest first and Queries first. Incomplete reviews roll forward; outcomes do not alter the fixed schedule.
+
+## Outline navigation
+
+Generated `_index.md` files are VS Code Outline trees. Content domains and
+semantic subtopics are headings; document forms and numeric ranges are not
+topics. Every linked document is a compact list leaf with a meaningful
+one-line description. `_log.md` uses year, month, and day headings, with
+individual events as parseable list leaves. Validation warns when a section
+exceeds 20 direct leaves and should gain a meaningful child topic.
 
 ## Place knowledge
 
@@ -195,11 +204,15 @@ links or wikilinks.
 
 ## Finish
 
+From the vault root, run `python3 tools/llm-wiki/vault.py rebuild --check` and
+`python3 tools/llm-wiki/vault.py validate`. Validation includes
+repository-pinned markdownlint. Errors block completion; warnings are advisory
+and may be deferred when the reason is disclosed. Do not add agent Stop hooks.
 Rebuild indexes, validate placement/relations/daily notes/provenance/bindings,
 inspect LFS, run `git diff --check`, and refresh Query annotations. Material
 corpus ingests also complete every semantic gate in the bulk-ingestion playbook
 and retain their report in `output`. Record each
-material event with `tools/llm-wiki/append_log.py`; `_log.md` is oldest-first
+material event directly from the log template, then run `vault.py rebuild`; `_log.md` is oldest-first
 and append-only, so never insert, reorder, condense, or rewrite an earlier
 event. Use `learned`, `changed`, or `maintained` as the event kind. Never commit,
 push, sync a code binding, or write externally without explicit authority.

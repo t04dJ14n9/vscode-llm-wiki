@@ -14,12 +14,10 @@ HUMANIZER_SKILL = REPOSITORY / ".agents/skills/humanizer"
 SKILL_NAMES = (
     "pdf",
     "humanizer",
-    "arxiv",
     "grounded-citations",
     "research-paper-writing",
 )
 HELPER = SKILL / "scripts/extract_selection.py"
-INSTALLER = REPOSITORY / "tools/llm-wiki/install_agent_skills.py"
 PDF_NAME = "direct-preference-optimization-your-language-model-is-secretly-a-reward-model.pdf"
 PDF_RELATIVE = f"assets/{PDF_NAME}"
 PDF_PATH = VAULT / PDF_RELATIVE
@@ -151,58 +149,6 @@ class PdfSkillTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             with self.assertRaises(ValueError):
                 helper.cleanup_render_directory(Path(directory))
-
-    def test_installer_preserves_custom_skills_unless_forced(self) -> None:
-        self.assertTrue(INSTALLER.is_file(), f"missing installer: {INSTALLER}")
-        with tempfile.TemporaryDirectory() as directory:
-            vault = Path(directory)
-            first = subprocess.run(
-                [sys.executable, INSTALLER, "--vault", vault],
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            self.assertEqual(first.returncode, 0, first.stderr)
-            installed = vault / ".agents/skills/pdf"
-            for name in SKILL_NAMES:
-                self.assertEqual(
-                    (vault / ".agents/skills" / name / "SKILL.md").read_bytes(),
-                    (REPOSITORY / ".agents/skills" / name / "SKILL.md").read_bytes(),
-                )
-            (installed / "SKILL.md").write_text("custom\n", encoding="utf-8")
-            refused = subprocess.run(
-                [sys.executable, INSTALLER, "--vault", vault],
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            self.assertNotEqual(refused.returncode, 0)
-            self.assertEqual((installed / "SKILL.md").read_text(), "custom\n")
-            forced = subprocess.run(
-                [sys.executable, INSTALLER, "--vault", vault, "--force"],
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            self.assertEqual(forced.returncode, 0, forced.stderr)
-            self.assertEqual(
-                (installed / "SKILL.md").read_bytes(),
-                (SKILL / "SKILL.md").read_bytes(),
-            )
-
-    def test_installer_can_select_only_humanizer(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            vault = Path(directory)
-            result = subprocess.run(
-                [sys.executable, INSTALLER, "--vault", vault, "--skill", "humanizer"],
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertTrue((vault / ".agents/skills/humanizer/SKILL.md").is_file())
-            self.assertFalse((vault / ".agents/skills/pdf").exists())
-
 
 if __name__ == "__main__":
     unittest.main()

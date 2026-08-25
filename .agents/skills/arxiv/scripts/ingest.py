@@ -2,25 +2,93 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 import os
 import re
 import subprocess
 import sys
 import tempfile
+import unicodedata
 import urllib.request
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from html.parser import HTMLParser
 from pathlib import Path
-from typing import Callable, Literal
+from typing import Any, Callable, Literal
 
-from vaultlib import (
-    default_vault_root,
-    parse_frontmatter,
-    render_frontmatter,
-    sha256_bytes,
-    slugify_title,
-)
+
+@dataclass(frozen=True)
+class FrontmatterDocument:
+    metadata: dict[str, Any]
+    body: str
+
+
+def default_vault_root() -> Path:
+    return Path.cwd()
+
+
+def _decode_scalar(raw: str, line_number: int) -> Any:
+    value = raw.strip()
+    if not value:
+        raise ValueError(f"line {line_number}: use JSON flow values")
+    if value[0] in '"[{':
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError as error:
+            raise ValueError(f"line {line_number}: {error.msg}") from error
+    if value == "true":
+        return True
+    if value == "false":
+        return False
+    if value == "null":
+        return None
+    if re.fullmatch(r"-?[0-9]+", value):
+        return int(value)
+    return value
+
+
+def parse_frontmatter(text: str, *, source: Path | None = None) -> FrontmatterDocument:
+    normalized = text.replace("\r\n", "\n")
+    if not normalized.startswith("---\n"):
+        raise ValueError(f"{source or 'document'}: missing opening frontmatter delimiter")
+    closing = normalized.find("\n---\n", 4)
+    if closing < 0:
+        raise ValueError("missing closing frontmatter delimiter")
+    metadata: dict[str, Any] = {}
+    for line_number, line in enumerate(normalized[4:closing].splitlines(), start=2):
+        if not line.strip():
+            continue
+        key, separator, raw_value = line.partition(":")
+        if not separator or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_-]*", key):
+            raise ValueError(f"line {line_number}: invalid frontmatter key")
+        if key in metadata:
+            raise ValueError(f"line {line_number}: duplicate key {key}")
+        metadata[key] = _decode_scalar(raw_value, line_number)
+    body = normalized[closing + len("\n---\n"):]
+    return FrontmatterDocument(metadata, body[1:] if body.startswith("\n") else body)
+
+
+def render_frontmatter(metadata: dict[str, Any], body: str) -> str:
+    lines = ["---"]
+    for key, value in metadata.items():
+        lines.append(f"{key}: {json.dumps(value, ensure_ascii=False, separators=(', ', ': '))}")
+    lines.extend(["---", "", body.rstrip(), ""])
+    return "\n".join(lines)
+
+
+def sha256_bytes(value: bytes) -> str:
+    return hashlib.sha256(value).hexdigest()
+
+
+def slugify_title(title: str) -> str:
+    normalized = unicodedata.normalize("NFKD", title)
+    ascii_text = "".join(
+        character
+        for character in normalized
+        if character.isascii() and not unicodedata.combining(character)
+    )
+    return re.sub(r"[^a-z0-9]+", "-", ascii_text.lower()).strip("-")
 
 VERSIONED_ID = re.compile(
     r"^(?P<id>(?:[0-9]{4}\.[0-9]{4,5}|"
@@ -67,6 +135,14 @@ class IngestResult:
     markdown_path: Path
     pdf_path: Path
     status: Literal["created", "unchanged"]
+
+
+def concise_description(text: str, maximum: int = 240) -> str:
+    normalized = " ".join(text.split())
+    sentence = re.split(r"(?<=[.!?])\s+", normalized, maxsplit=1)[0]
+    if len(sentence) <= maximum:
+        return sentence
+    return sentence[: maximum - 1].rsplit(" ", 1)[0].rstrip() + "…"
 
 
 class _ArxivHtmlParser(HTMLParser):
@@ -448,7 +524,7 @@ def ingest_paper(
         companion_metadata = {
             "type": "Paper",
             "title": paper.title,
-            "description": f"Immutable arXiv snapshot of {paper.title}.",
+            "description": concise_description(paper.abstract),
             "resource": source_url(ref),
             "tags": ["paper"],
             "status": "stable",

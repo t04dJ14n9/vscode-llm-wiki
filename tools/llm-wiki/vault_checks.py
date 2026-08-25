@@ -4,13 +4,16 @@ import os
 import math
 import re
 import subprocess
+import sys
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path, PurePosixPath
 from typing import Literal, Protocol
 from urllib.parse import urlparse
 
-from rebuild_indexes import INDEX_FILE, LEGACY_INDEX_FILE, LOG_FILE, LEGACY_LOG_FILE, IndexBuildError, build_indexes, owned_directories
+from log_outline import OUTLINE_SPLIT_FACTOR, large_log_sections, validate_log_outline
+
+from rebuild_indexes import INDEX_FILE, LOG_FILE, IndexBuildError, build_indexes, owned_directories
 from vaultlib import (
     ALLOWED_STATUSES,
     RemoteIdentityError,
@@ -26,10 +29,8 @@ LAYERS = frozenset({"okf-base", "karpathy-vault-v1", "project-policy"})
 HEX_SHA256 = re.compile(r"^[0-9a-f]{64}$")
 HEX_GIT_OID = re.compile(r"^[0-9a-f]{40}$")
 ACTOR = re.compile(r"^(?:human:[^\s]+|process:[^\s]+|[A-Za-z0-9_.-]+/[A-Za-z0-9_.:+-]+)$")
-LOG_EVENT_HEADING = re.compile(
-    r"^## \[(\d{4}-\d{2}-\d{2})\] (learned|changed|maintained) \| (\S.*)$",
-    re.MULTILINE,
-)
+INDEX_LINK_HEADING = re.compile(r"^#{1,6} \[[^]]+\]\(.+\)$")
+INDEX_LEAF = re.compile(r"^- \[[^]\n]+\]\([^)\n]+\) - \S.*$")
 TAG_NAME = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 TAG_HEADING = re.compile(r"^## ([a-z0-9]+(?:-[a-z0-9]+)*)$", re.MULTILINE)
 FOOTNOTE_REFERENCE = re.compile(r"\[\^([A-Za-z0-9_.:-]+)\](?!:)")
@@ -251,12 +252,12 @@ def _walk(root: Path, *, hidden: bool = False) -> tuple[Path, ...]:
     for current, directories, files in os.walk(root, followlinks=False):
         current_path = Path(current)
         relative = current_path.relative_to(root)
-        if relative.parts[:2] in {("projects", "code"), ("vaults", "bindings")} or "templates" in relative.parts:
+        if relative.parts[:2] in {("projects", "code"), ("vaults", "bindings")} or relative.parts[:1] == ("tools",) or "templates" in relative.parts:
             directories[:] = []
             continue
         directories[:] = [
             name for name in directories
-            if name != "__pycache__" and (hidden or not name.startswith("."))
+            if name not in {"__pycache__", "node_modules"} and (hidden or not name.startswith("."))
         ]
         paths.extend(current_path / name for name in directories)
         paths.extend(current_path / name for name in files if hidden or not name.startswith("."))
@@ -268,7 +269,7 @@ def _markdown_files(root: Path) -> tuple[Path, ...]:
 
 
 def _concept_files(root: Path) -> tuple[Path, ...]:
-    return tuple(path for path in _markdown_files(root) if path.name not in {INDEX_FILE, LEGACY_INDEX_FILE, LOG_FILE, LEGACY_LOG_FILE})
+    return tuple(path for path in _markdown_files(root) if path.name not in {INDEX_FILE, LOG_FILE})
 
 
 def _read(root: Path, path: Path, *, code: str = "okf.frontmatter"):
@@ -328,10 +329,8 @@ def check_layout(root: Path, state: GitStateReader) -> list[Issue]:
     for relative in forbidden_layouts:
         path = root / relative
         if path.exists():
-            issues.append(_issue("project-policy", "layout.forbidden", root, path, f"legacy layout is forbidden: {relative}"))
+            issues.append(_issue("project-policy", "layout.forbidden", root, path, f"layout is forbidden by the current schema: {relative}"))
     for path in _walk(root):
-        if path.name in {LEGACY_INDEX_FILE, LEGACY_LOG_FILE}:
-            issues.append(_issue("project-policy", "layout.forbidden", root, path, f"legacy {path.name} is forbidden; use {INDEX_FILE if path.name == LEGACY_INDEX_FILE else LOG_FILE}"))
         if path.name in {INDEX_FILE, LOG_FILE} and path.is_symlink():
             issues.append(_issue("project-policy", "layout.forbidden", root, path, f"{path.name} must be a regular canonical file, not a symlink"))
     for path in _walk(root, hidden=True):
@@ -353,6 +352,48 @@ def check_layout(root: Path, state: GitStateReader) -> list[Issue]:
     return issues
 
 
+def _index_outline_error(text: str) -> str | None:
+    has_heading = False
+    for line in text.splitlines():
+        heading = re.fullmatch(r"(#{1,6}) (\S.*)", line)
+        if heading:
+            has_heading = True
+            title = heading.group(2)
+            if re.fullmatch(r"(?:Entries|Items) \d{3}-\d{3}", title, re.IGNORECASE):
+                return "numeric pagination is not a semantic index topic"
+            if INDEX_LINK_HEADING.fullmatch(line):
+                return "index files must be list leaves, not headings"
+            continue
+        if line.startswith(("- [", "* [")):
+            if not INDEX_LEAF.fullmatch(line):
+                return "index entry must use '- [title](target) - meaningful one-line description'"
+            if not has_heading:
+                return "an index entry must be nested under a semantic topic"
+    return None
+
+
+def _large_index_topics(text: str) -> tuple[tuple[str, int], ...]:
+    stack: dict[int, str] = {}
+    counts: dict[tuple[str, ...], int] = {}
+    for line in text.splitlines():
+        heading = re.fullmatch(r"(#{1,6}) (\S.*)", line)
+        if heading:
+            level, title = len(heading.group(1)), heading.group(2)
+            for old_level in tuple(stack):
+                if old_level >= level:
+                    del stack[old_level]
+            stack[level] = title
+            continue
+        if INDEX_LEAF.fullmatch(line):
+            parent = tuple(stack[parent_level] for parent_level in sorted(stack))
+            counts[parent] = counts.get(parent, 0) + 1
+    return tuple(
+        (" / ".join(path) or "root", count)
+        for path, count in sorted(counts.items())
+        if count > OUTLINE_SPLIT_FACTOR
+    )
+
+
 def check_indexes(root: Path, _state: GitStateReader) -> list[Issue]:
     issues: list[Issue] = []
     for directory in owned_directories(root):
@@ -370,8 +411,21 @@ def check_indexes(root: Path, _state: GitStateReader) -> list[Issue]:
     for path, text in expected.items():
         if not path.is_file():
             issues.append(_issue("okf-base", "index.missing", root, path, "every owned directory requires _index.md"))
-        elif path.read_text(encoding="utf-8") != text:
-            issues.append(_issue("karpathy-vault-v1", "index.stale", root, path, "index differs from deterministic output"))
+        else:
+            actual = path.read_text(encoding="utf-8")
+            if actual != text:
+                issues.append(_issue("karpathy-vault-v1", "index.stale", root, path, "index differs from deterministic output"))
+            if outline_error := _index_outline_error(actual):
+                issues.append(_issue("project-policy", "index.outline", root, path, outline_error))
+            for topic, count in _large_index_topics(actual):
+                issues.append(_issue(
+                    "project-policy",
+                    "index.topic-size",
+                    root,
+                    path,
+                    f"semantic section '{topic}' has {count} direct entries; consider creating a meaningful child section (recommended maximum {OUTLINE_SPLIT_FACTOR})",
+                    severity="warning",
+                ))
     root_index = root / INDEX_FILE
     if root_index.is_file():
         document, read_issues = _read(root, root_index, code="index.frontmatter")
@@ -382,6 +436,40 @@ def check_indexes(root: Path, _state: GitStateReader) -> list[Issue]:
         if path != root_index and path.is_file() and path.read_text(encoding="utf-8").startswith("---\n"):
             issues.append(_issue("okf-base", "index.frontmatter", root, path, "nested indexes must be frontmatter-free"))
     return issues
+
+
+def check_markdown_lint(root: Path, _state: GitStateReader) -> list[Issue]:
+    checker = root / "tools/llm-wiki/check_markdown.py"
+    working_directory = root
+    if not checker.is_file():
+        repository = Path(__file__).resolve().parents[2]
+        if root not in {repository / "starter-vault", repository / "demo-vault"}:
+            return []
+        checker = repository / "tools/llm-wiki/check_markdown.py"
+        working_directory = repository
+    if not checker.is_file():
+        return []
+    result = subprocess.run(
+        [sys.executable, str(checker)],
+        cwd=working_directory,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode == 0:
+        return []
+    output = (result.stdout + result.stderr).strip().splitlines()
+    diagnostic = next(
+        (line for line in output if " error MD" in line),
+        output[-1] if output else "markdownlint failed without output",
+    )
+    return [_issue(
+        "project-policy",
+        "markdown.lint",
+        root,
+        checker,
+        f"markdownlint failed: {diagnostic}; run python3 tools/llm-wiki/check_markdown.py",
+    )]
 
 
 def check_tag_registry(root: Path, _state: GitStateReader) -> list[Issue]:
@@ -410,6 +498,43 @@ def check_tag_registry(root: Path, _state: GitStateReader) -> list[Issue]:
         if not prose:
             issues.append(_issue("project-policy", "tag.registry", root, registry_path, f"tag {match.group(1)} requires a prose description"))
 
+    topic_registry = registry.metadata.get("index_topics", {})
+    if not isinstance(topic_registry, dict):
+        issues.append(_issue("project-policy", "index.topic-registry", root, registry_path, "index_topics must be a mapping in TAGS.md frontmatter"))
+        topic_registry = {}
+    for key, spec in topic_registry.items():
+        valid = isinstance(key, str) and TAG_NAME.fullmatch(key) is not None and (
+            isinstance(spec, str) and bool(spec.strip())
+            or isinstance(spec, dict) and isinstance(spec.get("title"), str) and bool(spec["title"].strip())
+        )
+        if not valid:
+            issues.append(_issue("project-policy", "index.topic-registry", root, registry_path, f"index topic {key!r} must use a lowercase kebab-case key and provide a title"))
+            continue
+        if isinstance(spec, dict):
+            parent = spec.get("parent")
+            if parent is not None and parent not in topic_registry:
+                issues.append(_issue("project-policy", "index.topic-registry", root, registry_path, f"index topic {key!r} has an unknown parent {parent!r}"))
+            roots = spec.get("source_roots", [])
+            if not isinstance(roots, list) or any(
+                not isinstance(item, dict)
+                or not isinstance(item.get("prefix"), str)
+                or not item["prefix"].strip()
+                or not isinstance(item.get("topics", []), list)
+                or any(not isinstance(topic, str) or not topic.strip() for topic in item.get("topics", []))
+                for item in roots
+            ):
+                issues.append(_issue("project-policy", "index.topic-registry", root, registry_path, f"index topic {key!r} has invalid source_roots"))
+    for key in topic_registry:
+        seen: set[str] = set()
+        current: object = key
+        while isinstance(current, str) and current in topic_registry:
+            if current in seen:
+                issues.append(_issue("project-policy", "index.topic-registry", root, registry_path, f"index topic parent cycle includes {current!r}"))
+                break
+            seen.add(current)
+            spec = topic_registry[current]
+            current = spec.get("parent") if isinstance(spec, dict) else None
+
     for path in _concept_files(root):
         document, page_issues = _read(root, path)
         issues.extend(page_issues)
@@ -431,6 +556,17 @@ def check_tag_registry(root: Path, _state: GitStateReader) -> list[Issue]:
         ):
             issues.append(_issue("project-policy", "tag.metadata", root, path, "tags must be a unique list of lowercase kebab-case names"))
             continue
+        explicit_topics = document.metadata.get("index_topics")
+        if explicit_topics is not None and (
+            not isinstance(explicit_topics, (str, list))
+            or isinstance(explicit_topics, str) and not explicit_topics.strip()
+            or isinstance(explicit_topics, list) and (
+                not explicit_topics
+                or len(explicit_topics) > 5
+                or any(not isinstance(topic, str) or not topic.strip() for topic in explicit_topics)
+            )
+        ):
+            issues.append(_issue("project-policy", "index.topic-metadata", root, path, "index_topics must be a nonempty string or one to five semantic headings"))
         for tag in tags:
             if tag in canonical_set:
                 continue
@@ -454,6 +590,20 @@ def check_okf_and_profile(root: Path, _state: GitStateReader) -> list[Issue]:
         for key in ("title", "description"):
             if not isinstance(data.get(key), str) or not str(data[key]).strip():
                 issues.append(_issue("karpathy-vault-v1", f"page.{key}", root, path, f"page requires nonempty {key}"))
+        description = data.get("description")
+        if isinstance(description, str) and re.match(
+            r"^Immutable\s+(?:official\s+)?(?:source|snapshot|example|.+?\s+(?:source|snapshot|example))\s+(?:for|from|of)\b",
+            description,
+            re.IGNORECASE,
+        ):
+            issues.append(_issue(
+                "project-policy",
+                "description.boilerplate",
+                root,
+                path,
+                "description states capture form or source path instead of a meaningful one-line summary of the subject",
+                severity="warning",
+            ))
         if data.get("status") not in ALLOWED_STATUSES:
             issues.append(_issue("karpathy-vault-v1", "page.status", root, path, "status must be draft, stable, or deprecated"))
         generated = data.get("generated")
@@ -1109,27 +1259,18 @@ def check_relations_and_daily(root: Path, _state: GitStateReader) -> list[Issue]
         document, read_issues = _read(root, log)
         issues.extend(read_issues)
         if document:
-            headings = tuple(line for line in document.body.splitlines() if line.startswith("## "))
-            events = tuple(LOG_EVENT_HEADING.finditer(document.body))
-            if len(events) != len(headings):
-                issues.append(_issue("project-policy", "log.event", root, log, "every level-two heading must be a canonical dated log event"))
-            event_dates: list[date] = []
-            for event in events:
-                try:
-                    event_dates.append(date.fromisoformat(event.group(1)))
-                except ValueError:
-                    issues.append(_issue("project-policy", "log.event", root, log, "log event headings require real ISO calendar dates"))
-            if event_dates != sorted(event_dates):
-                issues.append(_issue("project-policy", "log.order", root, log, "append-only log events must be ordered oldest first"))
-            event_starts = [event.start() for event in events] + [len(document.body)]
-            labels = {"learned": "Learned", "changed": "Changed", "maintained": "Maintained"}
-            for event, start, end in zip(events, event_starts, event_starts[1:]):
-                bullets = re.findall(r"^- \*\*(Learned|Changed|Maintained)\*\*:", document.body[start:end], re.MULTILINE)
-                if bullets != [labels[event.group(2)]]:
-                    issues.append(_issue("project-policy", "log.category", root, log, "each event requires exactly one categorized bullet matching its heading kind"))
-            for line in document.body.splitlines():
-                if line.startswith("- ") and not re.match(r"^- \*\*(?:Learned|Changed|Maintained)\*\*:", line):
-                    issues.append(_issue("project-policy", "log.category", root, log, "log bullets must begin with **Learned**, **Changed**, or **Maintained**"))
+            for error in validate_log_outline(document.body):
+                code = "log.order" if "ordered oldest" in error else "log.category" if "categorized bullet" in error else "log.outline"
+                issues.append(_issue("project-policy", code, root, log, error))
+            for day, count in large_log_sections(document.body):
+                issues.append(_issue(
+                    "project-policy",
+                    "log.section-size",
+                    root,
+                    log,
+                    f"log day '{day}' has {count} direct events; consider a meaningful child section (recommended maximum {OUTLINE_SPLIT_FACTOR})",
+                    severity="warning",
+                ))
     return issues
 
 
@@ -1143,6 +1284,7 @@ CHECKS = (
     check_workbench_raw_assets,
     check_provenance_queries_links,
     check_relations_and_daily,
+    check_markdown_lint,
 )
 
 

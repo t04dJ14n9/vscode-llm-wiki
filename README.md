@@ -115,7 +115,7 @@ tools/llm-wiki/                    # deterministic producers and validators
 starter-vault/                     # canonical source for the empty vault ZIP
 .agents/skills/pdf/                # focused PDF selection workflow
 .agents/skills/humanizer/          # evidence-preserving prose polish
-.agents/skills/arxiv/              # version-pinned paper discovery
+.agents/skills/arxiv/              # optional discovery package with scripts/ingest.py
 .agents/skills/grounded-citations/ # claim-level evidence verification
 .agents/skills/research-paper-writing/ # academic research workflow
 demo-vault/                        # graph-ready example vault
@@ -131,8 +131,9 @@ pnpm test
 pnpm build
 
 python3 -m unittest discover -s tools/llm-wiki/tests -v
-python3 tools/llm-wiki/rebuild_indexes.py --vault demo-vault --check
-python3 tools/llm-wiki/validate_vault.py --vault demo-vault
+python3 tools/llm-wiki/check_markdown.py
+python3 demo-vault/tools/llm-wiki/vault.py rebuild --check
+python3 demo-vault/tools/llm-wiki/vault.py validate
 python3 tools/llm-wiki/build_starter_bundle.py --check
 ```
 

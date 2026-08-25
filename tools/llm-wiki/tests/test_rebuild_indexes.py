@@ -6,7 +6,7 @@ from pathlib import Path
 TOOLS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(TOOLS))
 
-from rebuild_indexes import IndexBuildError, build_indexes, update_indexes
+from rebuild_indexes import IndexBuildError, OUTLINE_SPLIT_FACTOR, build_indexes, update_indexes
 from vaultlib import parse_frontmatter, render_frontmatter
 
 
@@ -55,11 +55,33 @@ class RebuildIndexesTests(unittest.TestCase):
     def test_indexes_are_immediate_deterministic_and_sorted(self) -> None:
         outputs = build_indexes(self.root)
         root_index = outputs[self.root / "_index.md"]
-        self.assertIn("[wiki](wiki/) - Durable graph-ready knowledge", root_index)
+        self.assertIn("- [wiki](wiki/) - Durable graph-ready knowledge", root_index)
         self.assertNotIn("alpha.md", root_index)
         concepts = outputs[self.root / "wiki/concepts/_index.md"]
+        self.assertEqual(sum(line.startswith("# ") for line in concepts.splitlines()), 1)
+        self.assertIn("# Concepts Index", concepts)
         self.assertLess(concepts.index("[Alpha](alpha.md)"), concepts.index("[Zeta](zeta.md)"))
         self.assertEqual(outputs, build_indexes(self.root))
+
+    def test_large_topics_remain_compact_list_leaves(self) -> None:
+        for number in range(OUTLINE_SPLIT_FACTOR + 1):
+            write_page(self.root / f"wiki/entities/item-{number:02d}.md", "Entity", f"Item {number:02d}")
+        index = build_indexes(self.root)[self.root / "wiki/entities/_index.md"]
+        self.assertNotIn("Entries 001-020", index)
+        self.assertEqual(index.count("- [Item"), OUTLINE_SPLIT_FACTOR + 1)
+        self.assertNotIn("## [Item", index)
+
+    def test_five_level_semantic_path_uses_h6_then_list_leaf(self) -> None:
+        path = self.root / "wiki/concepts/alpha.md"
+        document = parse_frontmatter(path.read_text(encoding="utf-8"))
+        metadata = dict(document.metadata)
+        metadata["index_topics"] = ["Systems", "Runtime", "Cluster", "Control", "Scheduling"]
+        path.write_text(render_frontmatter(metadata, document.body), encoding="utf-8")
+
+        index = build_indexes(self.root)[self.root / "wiki/concepts/_index.md"]
+
+        self.assertIn("###### Scheduling", index)
+        self.assertIn("- [Alpha](alpha.md) - Fixture Alpha.", index)
 
     def test_only_root_index_has_okf_frontmatter(self) -> None:
         outputs = build_indexes(self.root)

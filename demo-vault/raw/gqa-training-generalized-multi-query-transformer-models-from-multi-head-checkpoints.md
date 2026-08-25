@@ -1,7 +1,7 @@
 ---
 type: "Paper"
 title: "GQA: Training Generalized Multi-Query Transformer Models from Multi-Head Checkpoints"
-description: "Immutable arXiv snapshot of GQA: Training Generalized Multi-Query Transformer Models from Multi-Head Checkpoints."
+description: "Multi-query attention (MQA), which only uses a single key-value head, drastically speeds up decoder inference."
 resource: "https://arxiv.org/abs/2305.13245v3"
 tags: ["paper"]
 status: "stable"

@@ -31,10 +31,11 @@ provenance rules remain authoritative.
   count, and the questions the corpus should support.
 - Capture every admitted textual source as a faithful Markdown snapshot under
   `raw/` according to `playbooks/vault-operations.md`. Retain eligible original
-  binaries under `assets/` through Git LFS. Candidate extraction starts from
-  those snapshots, not summaries, transient downloads, or agent memory.
+  binaries under `assets/` through Git LFS. Do not extract candidates from a
+  summary, transient download, or agent memory when the source can be
+  preserved.
 - Search existing durable pages before proposing new targets.
-- Copy `templates/bulk-ingestion-manifest.json.tmpl` into `scratch`,
+- Copy `templates/bulk-ingestion-manifest.json.tmpl` into `tasks` or `scratch`,
   replace every placeholder, and keep it outside the knowledge graph.
 
 ## Procedure
@@ -87,8 +88,8 @@ daily-note, and index failures before semantic evaluation.
 
 ### 5. Evaluate semantics
 
-Record the evaluation set, method, results, and unresolved failures in a report
-under `output`. Complete all five gates:
+Record the evaluation set, method, results, and unresolved failures in `tasks`
+or a polished report under `output`. Complete all five gates:
 
 - **Answerability:** representative in-scope questions are answerable by
   navigating the vault, and the answer cites the supporting pages and sources.
@@ -117,8 +118,6 @@ check independently compared the current page content with its evidence.
   task and affected pages remain draft.
 - Generated indexes are current and the material ingestion event is appended
   to `_log.md` without rewriting earlier history.
-- The frozen manifest and evaluation report are retained under `output`; the
-  task page records only the outcome and remaining actionable work.
 
 ## Limits
 
@@ -127,3 +126,10 @@ single primary paper can justify a durable page, while a frequently mentioned
 term can remain too shallow or promotional to keep. Semantic evaluations are
 sampled evidence about retrieval behavior, not proof that every future question
 will be answered correctly.
+
+## Artifact placement override
+
+Keep the frozen ingestion manifest and intermediate machine output under
+`scratch/`, not `tasks/`. Publish evaluation and migration reports under
+`output/`. A one-goal task may link to those artifacts when work remains, but
+it does not become their storage directory.

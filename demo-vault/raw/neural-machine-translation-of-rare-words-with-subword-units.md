@@ -1,7 +1,7 @@
 ---
 type: "Paper"
 title: "Neural Machine Translation of Rare Words with Subword Units"
-description: "Immutable arXiv snapshot of Neural Machine Translation of Rare Words with Subword Units."
+description: "Neural machine translation (NMT) models typically operate with a fixed vocabulary, but translation is an open-vocabulary problem."
 resource: "https://arxiv.org/abs/1508.07909v5"
 tags: ["paper"]
 status: "stable"

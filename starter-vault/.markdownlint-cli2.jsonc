@@ -1,0 +1,29 @@
+{
+  "globs": [
+    "*.md",
+    "wiki/**/*.md",
+    "playbooks/**/*.md",
+    "projects/**/*.md",
+    "vaults/**/*.md",
+    "tasks/**/*.md",
+    "output/**/*.md",
+    "inbox/**/*.md",
+    "scratch/**/*.md",
+    ".agents/skills/**/*.md",
+    "!raw/**",
+    "!assets/**",
+    "!projects/code/**",
+    "!vaults/bindings/**",
+    "!CLAUDE.md",
+    "!.claude/**",
+    "!.cursor/**",
+    "!.codex/**"
+  ],
+  "config": {
+    "default": true,
+    "MD013": false,
+    "MD060": false,
+    "MD024": { "siblings_only": true },
+    "MD025": { "front_matter_title": "" }
+  }
+}

@@ -1,7 +1,7 @@
 ---
 type: "Paper"
 title: "Direct Preference Optimization: Your Language Model is Secretly a Reward Model"
-description: "Immutable arXiv snapshot of Direct Preference Optimization: Your Language Model is Secretly a Reward Model."
+description: "While large-scale unsupervised language models (LMs) learn broad world knowledge and some reasoning skills, achieving precise control of their behavior is difficult due to the completely unsupervised nature of their training."
 resource: "https://arxiv.org/abs/2305.18290v3"
 tags: ["paper"]
 status: "stable"

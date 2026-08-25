@@ -6,8 +6,14 @@ description: "Oldest-first append-only record of material vault changes."
 
 # {{vault_title}} history
 
-> Append new events at end of file; never rewrite earlier events.
+> Append new events at end of file; never rewrite earlier events. Verification
+> warns when a day exceeds 20 events so maintainers can introduce a meaningful
+> child section rather than numeric pagination.
 
-## [{{date}}] {{kind_slug}} | {{subject}}
+## {{year}}
 
-- **{{kind_title}}**: {{message}}
+### {{year_month}}
+
+#### {{date}}
+
+- [{{date}}] {{kind_slug}} | {{subject}} - **{{kind_title}}**: {{message}}

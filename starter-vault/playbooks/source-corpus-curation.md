@@ -42,18 +42,8 @@ from HTML, PDF, meeting, or office-document format may normalize presentation,
 but it must not paraphrase, translate, correct, reorder, or silently drop the
 source text. Mark unreadable spans and unavailable attachments explicitly.
 
-Run the deterministic auditor from this repository:
-
-```bash
-python3 tools/llm-wiki/audit_source_corpus.py \
-  --source /path/to/legacy/raw \
-  --asset-root /path/to/legacy/assets \
-  --existing /path/to/current-vault/raw \
-  --output /path/to/current-vault/scratch/source-curation/audit.jsonl \
-  --fail-on-blocked
-```
-
-The auditor is read-only except for its declared output. It records source
+Record the audit under `scratch/source-curation/` before any destination write.
+The audit records source
 metadata, canonical URLs, byte count, SHA-256, exact duplicates, credential
 categories and line numbers, attachment closure, frontmatter errors, and a
 conservative proposed disposition. It never records a detected secret value.

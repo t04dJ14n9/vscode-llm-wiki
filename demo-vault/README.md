@@ -130,11 +130,11 @@ vault into this graph or create cross-vault relation targets.
 
 ## Validate the demo
 
-Run these commands from the repository root:
+Run these commands from the demo-vault root:
 
 ```bash
-python3 tools/llm-wiki/rebuild_indexes.py --vault demo-vault --check
-python3 tools/llm-wiki/validate_vault.py --vault demo-vault
+python3 tools/llm-wiki/vault.py rebuild --check
+python3 tools/llm-wiki/vault.py validate
 git lfs ls-files
 git diff --check
 ```
@@ -142,6 +142,6 @@ git diff --check
 The demo requires no database, embeddings service, submodule, scheduled task,
 plugin, symlink, or `llm-wiki-compiler` runtime. Its durable state is Markdown,
 Git history, and Git LFS assets. Complete operational skills live only under
-`.agents/skills/`; generated physical Claude Code, Cursor, and Codex wrappers
+`.agents/skills/`; physical Claude Code, Cursor, and Codex wrappers
 make them immediately discoverable while keeping skill packages opaque to the
 knowledge graph.

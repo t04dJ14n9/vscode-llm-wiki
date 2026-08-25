@@ -8,6 +8,10 @@ description: "Oldest-first append-only record of material bundle changes."
 
 > Append the first material event below this line; never rewrite earlier events.
 
-## [2026-08-25] changed | bulk corpus ingestion workflow
+## 2026
 
-- **Changed**: Added a source-attributed extract-canonicalize-write playbook, frozen candidate manifest, durable-page admission rubric, and semantic gates for answerability, refusal, recall, citation integrity, and duplicate content.
+### 2026-08
+
+#### 2026-08-25
+
+- [2026-08-25] changed | bulk corpus ingestion workflow - **Changed**: Added a source-attributed extract-canonicalize-write playbook, frozen candidate manifest, durable-page admission rubric, and semantic gates for answerability, refusal, recall, citation integrity, and duplicate content.

@@ -1,0 +1,31 @@
+{
+  "globs": [
+    "*.md",
+    "tools/**/*.md",
+    "starter-vault/**/*.md",
+    "demo-vault/**/*.md",
+    "!**/raw/**",
+    "!**/assets/**",
+    "!**/projects/code/**",
+    "!**/vaults/bindings/**",
+    "!**/fixtures/**",
+    "!**/node_modules/**",
+    "!**/CLAUDE.md",
+    "!**/.agents/skills/**",
+    "!**/.claude/**",
+    "!**/.cursor/**",
+    "!**/.codex/**",
+    "!docs/superpowers/**"
+  ],
+  "config": {
+    "default": true,
+    "MD013": false,
+    "MD060": false,
+    "MD024": {
+      "siblings_only": true
+    },
+    "MD025": {
+      "front_matter_title": ""
+    }
+  }
+}

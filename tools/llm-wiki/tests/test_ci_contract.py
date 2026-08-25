@@ -25,8 +25,9 @@ class DemoVaultCiContractTests(unittest.TestCase):
             "lfs: true",
             "python3 -m pip install 'pdfplumber>=0.11,<0.12'",
             "python3 -m unittest discover -s tools/llm-wiki/tests -v",
-            "python3 tools/llm-wiki/rebuild_indexes.py --vault demo-vault --check",
-            "python3 tools/llm-wiki/validate_vault.py --vault demo-vault",
+            "npm ci --prefix demo-vault",
+            "python3 demo-vault/tools/llm-wiki/vault.py rebuild --check",
+            "python3 demo-vault/tools/llm-wiki/vault.py validate",
         ):
             with self.subTest(required_command=required_command):
                 self.assertIn(required_command, workflow)

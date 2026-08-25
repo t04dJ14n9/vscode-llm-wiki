@@ -60,13 +60,13 @@ class ValidateVaultTests(unittest.TestCase):
         self.temporary_directory = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary_directory.name)
         for relative in (
-            "raw", "inbox", "output", "playbooks", "projects",
+            "raw", "inbox", "output", "playbooks", "projects", "vaults",
             "scratch", "tasks", "templates",
             "wiki/summaries", "wiki/concepts", "wiki/comparisons", "wiki/entities", "wiki/queries", "wiki/daily",
         ):
             (self.root / relative).mkdir(parents=True)
         (self.root / ".gitattributes").write_text("/assets/** filter=lfs diff=lfs merge=lfs -text\n", encoding="utf-8")
-        (self.root / ".gitignore").write_text(".llm_wiki/\nprojects/code/\n", encoding="utf-8")
+        (self.root / ".gitignore").write_text(".llm_wiki/\nprojects/code/\nvaults/bindings/\n", encoding="utf-8")
         for filename, page_type in (("README.md", "Reference"), ("SCHEMA.md", "Reference"), ("AGENTS.md", "Playbook")):
             root_metadata = metadata(page_type, filename.removesuffix(".md"))
             root_metadata.pop("tags")
@@ -103,7 +103,8 @@ class ValidateVaultTests(unittest.TestCase):
             "_index.md.tmpl", "_log.md.tmpl", "AGENTS.md.tmpl", "SCHEMA.md.tmpl",
             "daily.md.tmpl", "concept.md.tmpl", "entity.md.tmpl",
             "comparison.md.tmpl", "query.md.tmpl", "summary.md.tmpl",
-            "playbook.md.tmpl", "project-card.md.tmpl", "raw-source.md.tmpl",
+            "playbook.md.tmpl", "project-card.md.tmpl", "vault-card.md.tmpl",
+            "task.md.tmpl", "raw-source.md.tmpl",
             "TAGS.md.tmpl",
         ):
             if filename in tagless_templates:
@@ -376,13 +377,17 @@ No unfinished tasks.
         document = parse_frontmatter(path.read_text())
         body = """# History
 
-## [2026-08-24] learned | newer event
+## 2026
 
-- **Changed**: Wrong category.
+### 2026-08
 
-## [2026-08-23] maintained | older event
+#### 2026-08-24
 
-- **Maintained**: Out of order.
+- [2026-08-24] learned | newer event - **Changed**: Wrong category.
+
+#### 2026-08-23
+
+- [2026-08-23] maintained | older event - **Maintained**: Out of order.
 """
         path.write_text(render_frontmatter(document.metadata, body))
         codes = self.codes()
@@ -392,8 +397,8 @@ No unfinished tasks.
     def test_log_rejects_noncanonical_event_headings(self):
         path = self.root / "_log.md"
         document = parse_frontmatter(path.read_text())
-        path.write_text(render_frontmatter(document.metadata, "# History\n\n## 2026-08-24\n"))
-        self.assertIn("log.event", self.codes())
+        path.write_text(render_frontmatter(document.metadata, "# History\n\n## 2026\n\n### bad-month\n"))
+        self.assertIn("log.outline", self.codes())
 
 
 if __name__ == "__main__":

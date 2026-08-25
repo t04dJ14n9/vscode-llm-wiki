@@ -17,7 +17,8 @@ projects, Queries, or compiled knowledge.
 Generic skills are complete under `.agents/skills/`. Physical wrappers for
 Claude Code, Cursor, and Codex are installed in their native directories, so a
 fresh vault works across all three agents without plugins or symlinks. Run
-`.agents/render_agent_adapters.py --write` after changing canonical skills.
+the upstream initializer again after changing canonical skills; renderer and
+build implementations are intentionally not copied into populated vaults.
 
 Start by reading [AGENTS.md](AGENTS.md), [SCHEMA.md](SCHEMA.md),
 [TAGS.md](TAGS.md), [tasks/current.md](tasks/current.md), and [_index.md](_index.md).
@@ -35,6 +36,8 @@ identity.
 5. Create durable knowledge from the files in `templates/`.
 6. Register code repositories with portable cards under `projects/`; local
    checkouts or symlinks belong only under ignored `projects/code/`.
+7. Run `npm install`, then use `python3 tools/llm-wiki/vault.py rebuild` and
+   `python3 tools/llm-wiki/vault.py validate` for vault maintenance.
 
 For a material collection rather than a single source, follow
 [Bulk corpus ingestion](playbooks/bulk-corpus-ingestion.md). It provides a

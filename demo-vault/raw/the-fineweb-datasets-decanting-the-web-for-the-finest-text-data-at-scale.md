@@ -1,7 +1,7 @@
 ---
 type: "Paper"
 title: "The FineWeb Datasets: Decanting the Web for the Finest Text Data at Scale"
-description: "Immutable arXiv snapshot of The FineWeb Datasets: Decanting the Web for the Finest Text Data at Scale."
+description: "The performance of a large language model (LLM) depends heavily on the quality and size of its pretraining dataset."
 resource: "https://arxiv.org/abs/2406.17557v2"
 tags: ["paper"]
 status: "stable"

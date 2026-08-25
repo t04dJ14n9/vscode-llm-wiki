@@ -99,6 +99,20 @@ and operational templates are tagless. Skills follow their own native metadata
 schema and may declare tags when useful; skill tags are outside the vault tag
 registry, indexing, validation, and graph.
 
+## Outline navigation
+
+Generated indexes and logs are VS Code Outline trees, not flat link lists.
+Indexes use content domains and semantic subtopics as headings; each linked
+document is a compact `- [title](target) - meaningful description` list leaf.
+Types such as `Paper` and numeric ranges are not topics. Each vault owns
+vocabulary and parent relationships through `TAGS.md` frontmatter
+`index_topics`; shared scripts contain no domain names. Logs use year, month,
+and day headings, with each event represented by one parseable list leaf.
+The populated-vault `tools/llm-wiki/vault.py rebuild` command owns these
+shapes; validation rejects
+flat entries and malformed hierarchy, while warning when a semantic section or
+log day exceeds 20 direct entries so a maintainer can add a meaningful split.
+
 ## Daily active recall
 
 Vault time is `Asia/Shanghai`. On the first study or maintenance session on
@@ -140,9 +154,7 @@ reusable mechanisms, and cross-repository synthesis stay in the outer vault.
 ## Viewer conversations and Queries
 
 Canonical Query discovery is `wiki/queries/*.md` for a knowledge vault and
-`docs/llm-wiki/queries/*.md` for a directly opened code repository. For one
-release, read but do not write legacy `queries/*.md`,
-`projects/*/queries/*.md`, and `wiki/learning/*.md`.
+`docs/llm-wiki/queries/*.md` for a directly opened code repository.
 
 File a Query only when the answer is substantial, selection-grounded,
 evidence-supported, durable or expensive to reconstruct, novel, clearly
@@ -171,18 +183,25 @@ vscode://llm-wiki.llm-wiki-vscode/open-anchor?target=v1.<generated-payload>
 For material demo-vault changes run:
 
 ```bash
-python3 tools/llm-wiki/rebuild_indexes.py --vault demo-vault
-python3 tools/llm-wiki/rebuild_indexes.py --vault demo-vault --check
-python3 tools/llm-wiki/validate_vault.py --vault demo-vault
+python3 starter-vault/tools/llm-wiki/vault.py rebuild --check
+python3 starter-vault/tools/llm-wiki/vault.py validate
+python3 demo-vault/tools/llm-wiki/vault.py rebuild --check
+python3 demo-vault/tools/llm-wiki/vault.py validate
 python3 tools/llm-wiki/build_starter_bundle.py --check
 git lfs ls-files
 git diff --check
 git status --short
 ```
 
+`vault.py validate` runs repository-pinned markdownlint for all owned Markdown,
+including generated navigation and canonical skill documentation. Validation
+errors block completion. Warnings are advisory: resolve them when they are in
+scope, or disclose the warning and the reason it was deferred. Do not enforce
+this policy with agent Stop hooks.
+
 For extension behavior also run focused tests, lint, typecheck, build, and the
 appropriate browser/VS Code E2E path. Append material vault events with
-`tools/llm-wiki/append_log.py`; never rewrite earlier log bytes. Never claim human verification
+the log template, then normalize with the vault runtime; never rewrite earlier log bytes. Never claim human verification
 from automated checks. Never commit, push, publish, sync code, or write back
 externally without authority. Never expose secrets or private identifiers.
 

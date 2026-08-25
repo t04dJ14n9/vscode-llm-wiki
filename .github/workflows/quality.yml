@@ -55,14 +55,22 @@ jobs:
       - name: Install PDF skill test dependency
         run: python3 -m pip install 'pdfplumber>=0.11,<0.12'
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install demo-vault validation dependency
+        run: npm ci --prefix demo-vault
+
       - name: Run demo-vault producer tests
         run: python3 -m unittest discover -s tools/llm-wiki/tests -v
 
       - name: Check deterministic demo-vault indexes
-        run: python3 tools/llm-wiki/rebuild_indexes.py --vault demo-vault --check
+        run: python3 demo-vault/tools/llm-wiki/vault.py rebuild --check
 
       - name: Validate demo-vault
-        run: python3 tools/llm-wiki/validate_vault.py --vault demo-vault
+        run: python3 demo-vault/tools/llm-wiki/vault.py validate
 
   webview-regressions:
     name: Markdown and PDF browser regressions (${{ matrix.suite }})

@@ -1,7 +1,7 @@
 ---
 type: "Paper"
 title: "FlashAttention-3: Fast and Accurate Attention with Asynchrony and Low-precision"
-description: "Immutable arXiv snapshot of FlashAttention-3: Fast and Accurate Attention with Asynchrony and Low-precision."
+description: "Attention, as a core layer of the ubiquitous Transformer architecture, is the bottleneck for large language models and long-context applications."
 resource: "https://arxiv.org/abs/2407.08608v2"
 tags: ["paper"]
 status: "stable"

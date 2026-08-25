@@ -12,7 +12,7 @@ from urllib.parse import unquote, urlsplit
 
 from vaultlib import FrontmatterError, parse_frontmatter, sha256_bytes
 
-INDEX_NAMES = {"_index.md", "index.md"}
+INDEX_NAMES = {"_index.md"}
 MARKDOWN_IMAGE = re.compile(r"!\[[^\]]*\]\(([^)]+)\)")
 WIKI_IMAGE = re.compile(r"!\[\[([^\]|#]+)(?:#[^\]|]+)?(?:\|[^\]]+)?\]\]")
 SECRET_PATTERNS = {
