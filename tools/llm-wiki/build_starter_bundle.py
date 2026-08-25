@@ -16,7 +16,7 @@ from vault_checks import validate_vault
 REPOSITORY = Path(__file__).resolve().parents[2]
 SOURCE = REPOSITORY / "starter-vault"
 DEFAULT_OUTPUT = REPOSITORY / "packages/vscode-extension/resources/llm-wiki-empty-vault.zip"
-EMPTY_RUNTIME_DIRECTORIES = ("assets", "projects/code")
+EMPTY_RUNTIME_DIRECTORIES = ("assets", "projects/code", "vaults/bindings")
 ZIP_TIMESTAMP = (1980, 1, 1, 0, 0, 0)
 
 

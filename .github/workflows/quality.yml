@@ -55,10 +55,20 @@ jobs:
       - name: Install PDF skill test dependency
         run: python3 -m pip install 'pdfplumber>=0.11,<0.12'
 
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.28.2
+          run_install: false
+
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: pnpm
+
+      - name: Install producer-test dependencies
+        run: pnpm install --frozen-lockfile
 
       - name: Install demo-vault validation dependency
         run: npm ci --prefix demo-vault
