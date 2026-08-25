@@ -53,7 +53,10 @@ Operational prompts and skills, assets, and `.md.tmpl` templates are outside
 the OKF concept-document set and follow their native formats.
 
 Use the nearest `templates/*.md.tmpl` and replace every required
-`{{placeholder}}`. Every graph-visible page except generated `_index.md` has a
+`{{placeholder}}`. Template body headings and order are reference composition,
+not OKF schema: rename, merge, reorder, or omit them when the document reads
+better. Metadata, provenance, citations, and relations remain normative.
+Every graph-visible page except generated `_index.md` has a
 JSON-flow `relations` array. Targets are existing contained `.md` paths
 relative to that wiki root. Direction is current page to target; body links do
 not create edges. Allowed kinds are `references`, `depends-on`, `supported-by`,

@@ -13,33 +13,12 @@ source_url: "https://arxiv.org/abs/2209.05433v2"
 ingested: "2026-08-13"
 submitted: "2022-09-12"
 revised: "2022-09-29"
-sha256: "a0e57faac2121f3b2c9f32d0d21ab7fdabd820e406cbe832a5ac7c41efe890a5"
+sha256: "11aec3b40ff67e96907ab17859a68ae828e35c89aed6b478c382b6cf31a23ea4"
 arxiv: {"id": "2209.05433", "version": 2}
 license: {"id": "CC-BY-4.0", "url": "https://creativecommons.org/licenses/by/4.0/"}
 attachment: {"resource": "../assets/fp8-formats-for-deep-learning.pdf", "media_type": "application/pdf", "bytes": 281195, "sha256": "809a9557e907765b452c5a1b7308a92e31dd31a07e668d49d14b1594b6c0cf0c", "role": "original"}
 extraction: {"tool": "pdftotext", "version": "pdftotext version 26.04.0"}
 ---
-
-# FP8 Formats for Deep Learning
-
-## Source metadata
-
-- **Authors:** Micikevicius, Paulius, Stosic, Dusan, Burgess, Neil, Cornea, Marius, Dubey, Pradeep, Grisenthwaite, Richard, Ha, Sangwon, Heinecke, Alexander, Judd, Patrick, Kamalu, John, Mellempudi, Naveen, Oberman, Stuart, Shoeybi, Mohammad, Siu, Michael, Wu, Hao
-- **arXiv:** [2209.05433v2](https://arxiv.org/abs/2209.05433v2)
-- **Submitted:** 2022-09-12
-- **Revised:** 2022-09-29
-- **License:** [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)
-- **Local attachment:** [Open the archived PDF](../assets/fp8-formats-for-deep-learning.pdf)
-
-> Extraction notice: The text below was produced mechanically with
-> `pdftotext version 26.04.0`. Reading order, equations, tables, figures, and
-> footnotes may be lossy; use the archived PDF as the visual authority.
-
-## Abstract
-
-FP8 is a natural progression for accelerating deep learning training inference beyond the 16-bit formats common in modern processors. In this paper we propose an 8-bit floating point (FP8) binary interchange format consisting of two encodings - E4M3 (4-bit exponent and 3-bit mantissa) and E5M2 (5-bit exponent and 2-bit mantissa). While E5M2 follows IEEE 754 conventions for representatio of special values, E4M3's dynamic range is extended by not representing infinities and having only one mantissa bit-pattern for NaNs. We demonstrate the efficacy of the FP8 format on a variety of image and language tasks, effectively matching the result quality achieved by 16-bit training sessions. Our study covers the main modern neural network architectures - CNNs, RNNs, and Transformer-based models, leaving all the hyperparameters unchanged from the 16-bit baseline training sessions. Our training experiments include large, up to 175B parameter, language models. We also examine FP8 post-training-quantization of language models trained using 16-bit formats that resisted fixed point int8 quantization.
-
-## Mechanically extracted full text
 
                                                                   FP8 F ORMATS F OR D EEP L EARNING
 

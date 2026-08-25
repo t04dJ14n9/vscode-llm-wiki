@@ -33,7 +33,7 @@ identity.
 3. Add or refine canonical tags in `TAGS.md` before publishing tagged pages.
 4. Put a faithful immutable Markdown snapshot of every textual source in
    `raw/`, and retain eligible original binaries in `assets/`.
-5. Create durable knowledge from the files in `templates/`.
+5. Use files in `templates/` as composition references; their body headings and order are optional.
 6. Register code repositories with portable cards under `projects/`; local
    checkouts or symlinks belong only under ignored `projects/code/`.
 7. Run `npm install`, then use `python3 tools/llm-wiki/vault.py rebuild` and

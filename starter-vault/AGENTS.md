@@ -46,7 +46,7 @@ exceeds 20 direct leaves and should gain a meaningful child topic.
 - `playbooks` remains outside the graph as operational guidance.
 - `raw` is flat immutable textual evidence; `assets` is flat binary evidence through Git LFS.
 - `inbox`, `tasks`, and `scratch` are non-durable workbench state.
-- `templates` is opaque. Copy the closest `.md.tmpl` and replace every required placeholder.
+- `templates` is opaque. Copy the closest `.md.tmpl` and replace every required placeholder. Reader-facing headings and order are reference-only; rename, merge, reorder, or omit them without weakening metadata, provenance, citations, or relations.
 
 Capture an admitted textual source as a Markdown snapshot in `raw/` before
 using it for synthesis. Preserve native Markdown and plain text verbatim. For
@@ -156,7 +156,7 @@ Do not add sample or reference projects unless the user asks for them.
 
 ## File Queries
 
-File a Query only when the answer is substantial, grounded, durable, novel, scoped, complete about limits, and safe. Use `templates/query.md.tmpl`; preserve synthesis rather than transcripts. Every Query needs `condensed_summary`, `conversation.selection_id`, unique sources, exact source-ID-bound anchors, answer, evidence, limitations, related pages, and relations. Reuse exact exported Markdown/PDF source URIs.
+File a Query only when the answer is substantial, grounded, durable, novel, scoped, complete about limits, and safe. Use `templates/query.md.tmpl` as a composition reference; preserve synthesis rather than transcripts. Every Query needs `condensed_summary`, `conversation.selection_id`, unique sources, exact source-ID-bound anchors, answer, evidence, limitations, related-page context, and relations, but no fixed body headings or order. Reuse exact exported Markdown/PDF source URIs.
 
 Valid exported `open_uri` values begin with
 `cursor://llm-wiki.llm-wiki-vscode/open-anchor` or

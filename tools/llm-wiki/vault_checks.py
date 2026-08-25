@@ -661,14 +661,7 @@ def check_okf_and_profile(root: Path, _state: GitStateReader) -> list[Issue]:
                 issues.append(_issue("project-policy", "creation.metadata", root, path, "Concept and Entity pages require created.by and created.at"))
         if page_type in DURABLE_KNOWLEDGE_TYPES:
             conflicts = data.get("conflicts")
-            has_section = "contradictions" in {
-                match.group(1).strip().lower()
-                for match in re.finditer(r"^## (.+)$", document.body, re.MULTILINE)
-            }
-            if conflicts is None:
-                if has_section:
-                    issues.append(_issue("project-policy", "conflict.metadata", root, path, "a Contradictions section requires nonempty conflicts metadata"))
-            else:
+            if conflicts is not None:
                 valid_conflicts = (
                     isinstance(conflicts, list)
                     and bool(conflicts)
@@ -677,8 +670,6 @@ def check_okf_and_profile(root: Path, _state: GitStateReader) -> list[Issue]:
                 )
                 if not valid_conflicts:
                     issues.append(_issue("project-policy", "conflict.metadata", root, path, "conflicts, when present, must be a nonempty unique string list"))
-                elif not has_section:
-                    issues.append(_issue("project-policy", "conflict.section", root, path, "nonempty conflicts metadata requires a Contradictions section"))
     return issues
 
 
@@ -1060,27 +1051,22 @@ def check_provenance_queries_links(root: Path, state: GitStateReader) -> list[Is
                     if target is None or not target.exists():
                         issues.append(_issue("karpathy-vault-v1", "source.missing", root, path, f"source does not resolve: {resource}"))
         stripped = strip_fenced_code_blocks(body)
+        is_raw_snapshot = path.parent == root / "raw"
         references = set(FOOTNOTE_REFERENCE.findall(stripped))
         definitions = set(FOOTNOTE_DEFINITION.findall(stripped))
-        if not references.issubset(source_ids) or not references.issubset(definitions):
+        if not is_raw_snapshot and (not references.issubset(source_ids) or not references.issubset(definitions)):
             issues.append(_issue("karpathy-vault-v1", "source.footnote", root, path, "footnote claims must match source ids and definitions"))
         if data.get("type") == "Query":
             summary = data.get("condensed_summary")
             conversation = data.get("conversation")
             anchors = data.get("anchors")
-            headings = {match.group(1).strip().lower() for match in re.finditer(r"^## (.+)$", body, re.MULTILINE)}
-            required_headings = (
-                {"answer", "evidence", "limitations", "related durable pages"}.issubset(headings)
-                or {"answer", "evidence trail", "limits", "related pages"}.issubset(headings)
-            )
             valid = (
                 isinstance(summary, str) and 0 < len(summary) <= 360
                 and isinstance(conversation, dict) and isinstance(conversation.get("selection_id"), str) and conversation.get("selection_id")
                 and isinstance(anchors, list) and bool(anchors)
-                and required_headings
             )
             if not valid:
-                issues.append(_issue("project-policy", "query.contract", root, path, "Query requires condensed summary, selection id, source anchors, and answer/evidence/limitations/related sections"))
+                issues.append(_issue("project-policy", "query.contract", root, path, "Query requires a condensed summary, selection id, and source anchors"))
             if not isinstance(anchors, list) or not anchors or any(
                 not _query_anchor_valid(
                     catalog,
@@ -1093,7 +1079,7 @@ def check_provenance_queries_links(root: Path, state: GitStateReader) -> list[Is
                 for anchor in anchors
             ):
                 issues.append(_issue("project-policy", "query.anchor", root, path, "each Query anchor must bind a unique source_id and provide a valid Markdown, PDF, or code location"))
-        link_body = body.split("## Mechanically extracted full text", 1)[0] if data.get("type") == "Paper" else body
+        link_body = "" if is_raw_snapshot else body
         for target in markdown_targets(link_body):
             resolved = resolve_local_target(path, target.target, catalog)
             if resolved is not None and resolved.exists():

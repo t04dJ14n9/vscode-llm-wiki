@@ -13,33 +13,12 @@ source_url: "https://arxiv.org/abs/2406.11794v4"
 ingested: "2026-08-13"
 submitted: "2024-06-17"
 revised: "2025-04-21"
-sha256: "a40aa721aaffca91d3749fb4fa6acdee542b2c09892a848b999b7c5cf70e3db5"
+sha256: "a7ce0ac660f39fc07028af4e730dee1113720c0fc8a8ce061f84edf738501a65"
 arxiv: {"id": "2406.11794", "version": 4}
 license: {"id": "CC-BY-4.0", "url": "https://creativecommons.org/licenses/by/4.0/"}
 attachment: {"resource": "../assets/datacomp-lm-in-search-of-the-next-generation-of-training-sets-for-language-models.pdf", "media_type": "application/pdf", "bytes": 1656647, "sha256": "af8fc884ccd601f8c6fbbba8f8e381de652fce1233949c0c64f64b4ab4b0f5b2", "role": "original"}
 extraction: {"tool": "pdftotext", "version": "pdftotext version 26.04.0"}
 ---
-
-# DataComp-LM: In search of the next generation of training sets for language models
-
-## Source metadata
-
-- **Authors:** Li, Jeffrey, Fang, Alex, Smyrnis, Georgios, Ivgi, Maor, Jordan, Matt, Gadre, Samir, Bansal, Hritik, Guha, Etash, Keh, Sedrick, Arora, Kushal, Garg, Saurabh, Xin, Rui, Muennighoff, Niklas, Heckel, Reinhard, Mercat, Jean, Chen, Mayee, Gururangan, Suchin, Wortsman, Mitchell, Albalak, Alon, Bitton, Yonatan, Nezhurina, Marianna, Abbas, Amro, Hsieh, Cheng-Yu, Ghosh, Dhruba, Gardner, Josh, Kilian, Maciej, Zhang, Hanlin, Shao, Rulin, Pratt, Sarah, Sanyal, Sunny, Ilharco, Gabriel, Daras, Giannis, Marathe, Kalyani, Gokaslan, Aaron, Zhang, Jieyu, Chandu, Khyathi, Nguyen, Thao, Vasiljevic, Igor, Kakade, Sham, Song, Shuran, Sanghavi, Sujay, Faghri, Fartash, Oh, Sewoong, Zettlemoyer, Luke, Lo, Kyle, El-Nouby, Alaaeldin, Pouransari, Hadi, Toshev, Alexander, Wang, Stephanie, Groeneveld, Dirk, Soldaini, Luca, Koh, Pang Wei, Jitsev, Jenia, Kollar, Thomas, Dimakis, Alexandros G., Carmon, Yair, Dave, Achal, Schmidt, Ludwig, Shankar, Vaishaal
-- **arXiv:** [2406.11794v4](https://arxiv.org/abs/2406.11794v4)
-- **Submitted:** 2024-06-17
-- **Revised:** 2025-04-21
-- **License:** [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)
-- **Local attachment:** [Open the archived PDF](../assets/datacomp-lm-in-search-of-the-next-generation-of-training-sets-for-language-models.pdf)
-
-> Extraction notice: The text below was produced mechanically with
-> `pdftotext version 26.04.0`. Reading order, equations, tables, figures, and
-> footnotes may be lossy; use the archived PDF as the visual authority.
-
-## Abstract
-
-We introduce DataComp for Language Models (DCLM), a testbed for controlled dataset experiments with the goal of improving language models. As part of DCLM, we provide a standardized corpus of 240T tokens extracted from Common Crawl, effective pretraining recipes based on the OpenLM framework, and a broad suite of 53 downstream evaluations. Participants in the DCLM benchmark can experiment with data curation strategies such as deduplication, filtering, and data mixing at model scales ranging from 412M to 7B parameters. As a baseline for DCLM, we conduct extensive experiments and find that model-based filtering is key to assembling a high-quality training set. The resulting dataset, DCLM-Baseline enables training a 7B parameter language model from scratch to 64% 5-shot accuracy on MMLU with 2.6T training tokens. Compared to MAP-Neo, the previous state-of-the-art in open-data language models, DCLM-Baseline represents a 6.6 percentage point improvement on MMLU while being trained with 40% less compute. Our baseline model is also comparable to Mistral-7B-v0.3 and Llama 3 8B on MMLU (63% & 66%), and performs similarly on an average of 53 natural language understanding tasks while being trained with 6.6x less compute than Llama 3 8B. Our results highlight the importance of dataset design for training language models and offer a starting point for further research on data curation.
-
-## Mechanically extracted full text
 
                                             DataComp-LM: In search of the next generation of
                                                    training sets for language models

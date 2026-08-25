@@ -321,36 +321,9 @@ def extract_with_pdftotext(pdf_path: Path, text_path: Path) -> str:
     return version_lines[0].strip()
 
 
-def _body(
-    paper: PaperMetadata,
-    ref: ArxivRef,
-    attachment_resource: str,
-    extraction_version: str,
-    extracted_text: str,
-) -> str:
-    return f"""# {paper.title}
-
-## Source metadata
-
-- **Authors:** {", ".join(paper.authors)}
-- **arXiv:** [{ref.versioned}]({source_url(ref)})
-- **Submitted:** {paper.submitted}
-- **Revised:** {paper.revised}
-- **License:** [CC BY 4.0]({CANONICAL_LICENSE_URL})
-- **Local attachment:** [Open the archived PDF]({attachment_resource})
-
-> Extraction notice: The text below was produced mechanically with
-> `{extraction_version}`. Reading order, equations, tables, figures, and
-> footnotes may be lossy; use the archived PDF as the visual authority.
-
-## Abstract
-
-{paper.abstract}
-
-## Mechanically extracted full text
-
-{extracted_text}
-"""
+def _body(extracted_text: str) -> str:
+    """Return the faithful extracted source body without synthetic sections."""
+    return extracted_text
 
 
 def _existing_ref(markdown_path: Path) -> ArxivRef | None:
@@ -509,16 +482,7 @@ def ingest_paper(
             pdf_sha256,
         )
         attachment_resource = f"../assets/{basename}.pdf"
-        canonical_body = (
-            _body(
-                paper,
-                ref,
-                attachment_resource,
-                extraction_version,
-                extracted_text,
-            ).rstrip()
-            + "\n"
-        )
+        canonical_body = _body(extracted_text).rstrip() + "\n"
         body_sha256 = sha256_bytes(canonical_body.encode("utf-8"))
         effective_date = ingested_date or date.today()
         companion_metadata = {

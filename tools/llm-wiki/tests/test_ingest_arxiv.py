@@ -194,9 +194,8 @@ class IngestArxivTests(unittest.TestCase):
             document.metadata["sha256"],
             sha256_bytes(document.body.encode("utf-8")),
         )
-        self.assertIn("## Mechanically extracted full text", document.body)
-        self.assertIn(f"(../assets/{SLUG}.pdf)", document.body)
-        self.assertNotIn("## Summary", document.body)
+        self.assertEqual(document.body, "mechanically extracted text\n")
+        self.assertNotIn("## ", document.body)
 
     def test_ingest_defaults_to_outer_raw_and_assets(self) -> None:
         result = ingest_paper(

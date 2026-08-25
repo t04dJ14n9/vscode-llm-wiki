@@ -251,11 +251,10 @@ No unfinished tasks.
         self.write_page(str(path.relative_to(self.root)), metadata("Entity", "No relations"))
         self.assertIn("graph.relations", self.codes())
 
-    def test_conflicts_are_optional_but_require_matching_metadata_and_section(self):
+    def test_conflicts_are_metadata_only_and_body_composition_is_advisory(self):
         path = self.root / "wiki/concepts/target.md"
         document = parse_frontmatter(path.read_text())
         self.assertNotIn("conflict.metadata", self.codes())
-        self.assertNotIn("conflict.section", self.codes())
 
         values = dict(document.metadata)
         values["conflicts"] = []
@@ -264,20 +263,28 @@ No unfinished tasks.
 
         values["conflicts"] = ["A source disagrees about the mechanism"]
         path.write_text(render_frontmatter(values, document.body))
-        self.assertIn("conflict.section", self.codes())
+        self.assertNotIn("conflict.metadata", self.codes())
 
         values.pop("conflicts")
         path.write_text(render_frontmatter(values, document.body + "\n## Contradictions\n\nA source disagrees.\n"))
-        codes = self.codes()
-        self.assertIn("conflict.metadata", codes)
+        self.assertNotIn("conflict.metadata", self.codes())
 
     def test_unresolved_conflicts_require_draft_status(self):
         path = self.root / "wiki/concepts/target.md"
         document = parse_frontmatter(path.read_text())
         values = dict(document.metadata)
         values.update({"status": "stable", "conflicts": ["An unresolved source disagreement"]})
-        path.write_text(render_frontmatter(values, document.body + "\n## Contradictions\n\nThe sources disagree.\n"))
+        path.write_text(render_frontmatter(values, "# Free-form discussion\n\nThe sources disagree.\n"))
         self.assertIn("conflict.status", self.codes())
+
+    def test_query_body_headings_and_order_are_not_normative(self):
+        path = self.root / "wiki/queries/why-target.md"
+        document = parse_frontmatter(path.read_text())
+        path.write_text(render_frontmatter(
+            dict(document.metadata),
+            "# A reader-chosen composition\n\nLimits, evidence, and the answer can be composed together.\n\n[Target](../concepts/target.md)\n",
+        ))
+        self.assertNotIn("query.contract", self.codes())
 
     def test_machine_and_human_verification_events_are_valid(self):
         path = self.root / "wiki/concepts/target.md"

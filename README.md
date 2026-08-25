@@ -55,7 +55,7 @@ vault/
 ├── AGENTS.md
 ├── SCHEMA.md
 ├── TAGS.md                       # vault-local canonical tag registry
-├── templates/                     # opaque .md.tmpl authoring formats
+├── templates/                     # non-normative composition references
 ├── wiki/
 │   ├── daily/
 │   ├── concepts/
@@ -82,9 +82,13 @@ directed graph view; the current graph UI is intentionally unchanged. Daily
 active recall is generated lazily by agents from templates and categorized log
 entries, not by an extension command or platform scheduler.
 
+Templates demonstrate useful compositions but do not prescribe reader-facing
+headings or section order. Only metadata and machine-readable integrity are
+normative; generated indexes, logs, and daily review retain their operational
+Markdown contracts.
+
 Canonical Query inputs are `wiki/queries/*.md` and, for directly opened code
-repositories, `docs/llm-wiki/queries/*.md`. Legacy root/project Query paths and
-`wiki/learning` remain one-release read-only inputs.
+repositories, `docs/llm-wiki/queries/*.md`.
 
 ## Start an empty vault
 

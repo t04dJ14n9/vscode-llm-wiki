@@ -57,7 +57,7 @@ projects/      portable repository cards
 projects/code/ ignored local checkouts or symlinks
 vaults/        portable cards for independently maintained knowledge vaults
 vaults/bindings/ ignored optional child-vault checkouts or symlinks
-templates/     opaque authoring templates, not knowledge pages
+templates/     non-normative composition references, not knowledge pages
 inbox/         unprocessed material
 tasks/         one Markdown file per actionable outcome
 scratch/       temporary hypotheses
@@ -95,6 +95,10 @@ footnotes.
 independent machine or human checks. Lifecycle status is separate: a page can
 be stable without being human-reviewed, and unresolved conflicting evidence
 keeps a page draft.
+
+Templates offer useful starting compositions, but their reader-facing headings
+and section order are optional. Metadata and machine-readable integrity remain
+normative; indexes, logs, and daily review retain strict operational Markdown.
 
 ## Try the viewer workflow
 

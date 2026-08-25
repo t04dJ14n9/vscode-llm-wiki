@@ -25,10 +25,10 @@ The hierarchy is vault-owned data in `TAGS.md` frontmatter under
 `index_topics`: each registered tag may declare a display `title`, optional
 `parent`, and optional `source_roots` rules for deriving deeper headings from a
 source path. The shared generator contains no product or domain vocabulary.
-`_log.md` is an oldest-first append-only event stream: each event has a
-parseable `##### [YYYY-MM-DD] kind | subject` heading and one categorized bullet
-under year/month/day parents. Sections over 20 direct entries produce a
-non-blocking curation warning. New events
+`_log.md` is an oldest-first append-only event stream. Year, month, and day use
+H2, H3, and H4 headings; each event is a parseable
+`- [YYYY-MM-DD] kind | subject - **Kind**: message` list leaf. A day over 20
+direct events produces a non-blocking curation warning. New events
 are appended at the end using `templates/_log.md.tmpl`; prior bytes are
 immutable. Use a deterministic producer when one is available.
 
@@ -62,7 +62,10 @@ existing graph and establish recurrence, reuse, substantial primary-source
 treatment, or explicit user scope. The working task or ingestion manifest
 records the basis; published pages continue to use the ordinary type schema.
 
-Durable templates demonstrate the minimum JSON-flow item shapes:
+The frontmatter and machine-readable integrity rules are normative. Durable
+templates demonstrate reference compositions: reader-facing headings and order
+may be renamed, merged, reordered, or omitted. They also demonstrate the
+minimum JSON-flow item shapes:
 
 ```yaml
 sources: [{"id": "source-id", "resource": "../raw/source.md", "title": "Source title"}]
@@ -75,15 +78,17 @@ the recognized `wiki/` root, not the current page.
 
 Operational prompts and skills, assets, and `.md.tmpl` templates are outside
 the OKF concept-document set. They follow their native schemas and are opaque
-to OKF validation, indexing, and graph discovery.
+to OKF indexing and graph discovery. Template frontmatter examples describe
+the normative data contract; reader-facing body composition is advisory.
 
 Conflicts are optional on Summary, Concept, Comparison, Entity, and Query
-pages. Omit both metadata and prose when none exists. A real conflict requires a
-nonempty unique `conflicts` list, a `Contradictions` section presenting the
-disagreement, and `status: draft` until resolution. Concept and Entity pages
-additionally require creation metadata. Query pages require a concise answer,
-immutable selection identity, provenance, exact anchors, standard
-answer/evidence/limitations/related sections, and relations. Daily notes use
+pages. Omit the metadata when none exists. A real conflict requires a nonempty
+unique `conflicts` list, clear prose presenting the disagreement, and
+`status: draft` until resolution; no heading name is prescribed. Concept and
+Entity pages additionally require creation metadata. Query pages require a
+concise answer, immutable selection identity, provenance, exact anchors,
+evidence, limitations, related-page context, and relations, but no standard
+body headings or order. Daily notes use
 `Asia/Shanghai`, fixed review dates, required human/agent markers, unique
 occurrence IDs, at most ten review prompts, and at most one selected
 Again/Hard/Good/Easy outcome per prompt. Daily notes are chronological entry

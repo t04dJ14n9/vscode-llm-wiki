@@ -13,33 +13,12 @@ source_url: "https://arxiv.org/abs/1508.07909v5"
 ingested: "2026-08-13"
 submitted: "2015-08-31"
 revised: "2016-06-10"
-sha256: "38eced47544d28ee156459ef78438a5c67b9cf47314b21e8a9b3126cc8947f8d"
+sha256: "7b086f19c2307e30433f3a4e4a498d3801b4d38fc9f683330ba893876d493115"
 arxiv: {"id": "1508.07909", "version": 5}
 license: {"id": "CC-BY-4.0", "url": "https://creativecommons.org/licenses/by/4.0/"}
 attachment: {"resource": "../assets/neural-machine-translation-of-rare-words-with-subword-units.pdf", "media_type": "application/pdf", "bytes": 193216, "sha256": "f4e5a6bbbe0d87459997fffe892f8be485e33903cc71f923c2884639fbf96401", "role": "original"}
 extraction: {"tool": "pdftotext", "version": "pdftotext version 26.04.0"}
 ---
-
-# Neural Machine Translation of Rare Words with Subword Units
-
-## Source metadata
-
-- **Authors:** Sennrich, Rico, Haddow, Barry, Birch, Alexandra
-- **arXiv:** [1508.07909v5](https://arxiv.org/abs/1508.07909v5)
-- **Submitted:** 2015-08-31
-- **Revised:** 2016-06-10
-- **License:** [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)
-- **Local attachment:** [Open the archived PDF](../assets/neural-machine-translation-of-rare-words-with-subword-units.pdf)
-
-> Extraction notice: The text below was produced mechanically with
-> `pdftotext version 26.04.0`. Reading order, equations, tables, figures, and
-> footnotes may be lossy; use the archived PDF as the visual authority.
-
-## Abstract
-
-Neural machine translation (NMT) models typically operate with a fixed vocabulary, but translation is an open-vocabulary problem. Previous work addresses the translation of out-of-vocabulary words by backing off to a dictionary. In this paper, we introduce a simpler and more effective approach, making the NMT model capable of open-vocabulary translation by encoding rare and unknown words as sequences of subword units. This is based on the intuition that various word classes are translatable via smaller units than words, for instance names (via character copying or transliteration), compounds (via compositional translation), and cognates and loanwords (via phonological and morphological transformations). We discuss the suitability of different word segmentation techniques, including simple character n-gram models and a segmentation based on the byte pair encoding compression algorithm, and empirically show that subword models improve over a back-off dictionary baseline for the WMT 15 translation tasks English-German and English-Russian by 1.1 and 1.3 BLEU, respectively.
-
-## Mechanically extracted full text
 
                                                  Neural Machine Translation of Rare Words with Subword Units
 
