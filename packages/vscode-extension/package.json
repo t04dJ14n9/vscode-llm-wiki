@@ -1,10 +1,10 @@
 {
   "name": "llm-wiki-vscode",
   "displayName": "LLM Wiki for VS Code",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "private": true,
   "description": "Local-first, source-grounded Markdown, PDF, and code knowledge workbench",
-  "publisher": "llm-wiki",
+  "publisher": "t04dJ14n9",
   "license": "MIT",
   "repository": {
     "type": "git",
