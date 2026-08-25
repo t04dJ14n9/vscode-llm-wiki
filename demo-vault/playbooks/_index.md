@@ -3,3 +3,4 @@
 
 * [Bulk corpus ingestion](bulk-corpus-ingestion.md) - Canonicalize evidence-bound candidates before authoring durable pages, then evaluate coverage and grounded answerability.
 * [Source corpus curation](source-corpus-curation.md) - Audit, deduplicate, route, and preserve a large evidence set before it enters a vault.
+* [Vault operations](vault-operations.md) - Run the evidence-first capture, synthesis, reference maintenance, daily-note, and task-closing loop.

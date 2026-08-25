@@ -6,6 +6,7 @@ okf_version: "0.2"
 # Subdirectories
 
 * [inbox](inbox/) - Unprocessed source candidates.
+* [output](output/) - Polished reports and designs.
 * [playbooks](playbooks/) - Stable operational guidance.
 * [projects](projects/) - Portable repository cards; code knowledge stays with each repository.
 * [raw](raw/) - Flat immutable source companions for the knowledge vault.

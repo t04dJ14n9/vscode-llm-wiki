@@ -121,3 +121,7 @@ description: "Oldest-first append-only record of material demo-vault changes."
 ## [2026-08-25] changed | demonstrate source curation and federated vault ownership
 
 - **Changed**: Reworked demo summaries as thesis-first synthesis, established configurable prose and request-language behavior, added one-goal task hygiene, source-corpus audit/disposition examples, and a reference-only child-vault card without copying knowledge or storing a local binding.
+
+## [2026-08-25] maintained | Vault operating workflow
+
+- **Maintained**: Documented faithful raw snapshots, evidence-first synthesis, atomic cross-reference maintenance, lazy daily notes, and task closure.

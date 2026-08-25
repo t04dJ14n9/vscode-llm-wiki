@@ -33,6 +33,17 @@ belongs in `inbox/`, `tasks/`, or `scratch/`. `templates/`, `projects/code/`,
 assets, hidden runtime directories, and skill packages are opaque to indexing
 and validation.
 
+Every admitted textual source has a Markdown snapshot under `raw/` before it
+supports synthesis. Native Markdown and plain text retain their wording and
+order verbatim. HTML, PDF, meeting, and document exports use a conservative
+Markdown transcription that preserves headings, paragraphs, lists, tables,
+code, speaker labels, and visible text without summarizing, translating,
+correcting, or silently filling gaps. Record provenance, retrieval time,
+revision, capture method, body hash, and every omission in metadata. Preserve
+available original non-Markdown bytes under `assets/` when needed for audit.
+A changed upstream source creates a new snapshot; never rewrite an immutable
+one in place.
+
 `starter-vault/` is the canonical knowledge-empty vault source. Keep
 `packages/vscode-extension/resources/llm-wiki-empty-vault.zip` byte-for-byte
 current with `tools/llm-wiki/build_starter_bundle.py`; the unpacked archive
@@ -70,6 +81,13 @@ extend pages against that manifest. Finish with deterministic validation plus
 answerability, out-of-scope refusal, recall-coverage, citation-integrity, and
 duplicate-content checks. Semantic checks may use agents or optional local
 models, but they must not become a required embeddings or database runtime.
+
+For normal capture, synthesis, page updates, renames, merges, daily notes, and
+task closure, follow `playbooks/vault-operations.md`. Treat a structural change
+as one atomic graph edit: search for incoming metadata targets and body links,
+update the page and every affected reference together, rebuild navigation, and
+only then append the material log event. Never leave stale paths for a later
+cleanup pass.
 
 Each vault owns one `TAGS.md` registry. Use its canonical tag headings. Unknown
 tags are advisory warnings, not base OKF failures. `verified` may record

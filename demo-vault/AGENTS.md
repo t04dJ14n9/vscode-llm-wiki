@@ -61,6 +61,14 @@ Daily generation is lazy and filesystem-only: no scheduler or extension command 
   manifests belong in `output` once complete.
 - `templates` is opaque. Copy the closest `.md.tmpl` and replace every required placeholder.
 
+Capture every admitted textual source as a Markdown snapshot under `raw/`
+before synthesis. Preserve native text verbatim; conservatively transcribe
+HTML, PDF, meeting, and document exports without summarizing, translating,
+correcting, reordering, or hiding gaps. Record source identity, retrieval time,
+revision, capture method, body hash, and omissions. Keep available original
+non-Markdown bytes under `assets/` when needed for audit, and create a new
+snapshot for a new upstream revision.
+
 Durable-page templates show one complete JSON-flow `sources` item and one
 `relations` item. Replace each sample with real entries, or replace the entire
 array with `[]` when the field is genuinely empty. Never publish template
@@ -132,6 +140,14 @@ evidence extraction, canonicalization, and prose authoring: candidate structure
 is reviewed and frozen before pages are written. Candidate manifests belong in
 the workbench and never become graph-visible knowledge or a second source of
 truth after publication.
+
+## Operate and maintain the vault
+
+Follow `playbooks/vault-operations.md` for normal capture, synthesis,
+daily-note creation, page updates, renames, merges, supersession, and task
+closure. Structural changes are atomic graph edits: search incoming and
+outgoing `relations`, sources, daily references, and body links; repair them in
+the same change; rebuild navigation; then record the material event.
 
 After deterministic validation, test whether representative in-scope questions
 are answerable with citations, out-of-scope questions are declined, important

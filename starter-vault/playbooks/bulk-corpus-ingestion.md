@@ -29,9 +29,11 @@ provenance rules remain authoritative.
 
 - Define the corpus boundary, inclusion and exclusion rules, expected source
   count, and the questions the corpus should support.
-- Archive or identify every source according to its license and the vault's
-  provenance rules. Raw textual evidence remains flat under `raw/`; eligible
-  binaries remain flat under `assets/` and use Git LFS.
+- Capture every admitted textual source as a faithful Markdown snapshot under
+  `raw/` according to `playbooks/vault-operations.md`. Retain eligible original
+  binaries under `assets/` through Git LFS. Do not extract candidates from a
+  summary, transient download, or agent memory when the source can be
+  preserved.
 - Search existing durable pages before proposing new targets.
 - Copy `templates/bulk-ingestion-manifest.json.tmpl` into `tasks` or `scratch`,
   replace every placeholder, and keep it outside the knowledge graph.

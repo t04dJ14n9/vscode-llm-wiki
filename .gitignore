@@ -20,6 +20,9 @@ test-results/
 **/test-results/
 e2e-report/
 output/
+!starter-vault/output/
+!starter-vault/output/.gitkeep
+!starter-vault/output/_index.md
 !/demo-vault/output/
 !/demo-vault/output/**
 !/demo-vault/projects/*/output/

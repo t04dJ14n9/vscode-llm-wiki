@@ -26,6 +26,13 @@ included subjects, excluded subjects, and responsible actor. Keep the source
 worktree unchanged. For each candidate, capture its canonical source URL when
 available, exact SHA-256, attachment references, and proposed owner.
 
+Every selected textual record also receives a Markdown snapshot. Freeze its
+destination basename, retrieval time, source revision, capture method, body
+hash, original-asset hash when applicable, and omissions. Format conversion
+may normalize presentation, but it must not paraphrase, translate, correct,
+reorder, or silently drop wording. Mark unreadable spans and missing
+attachments explicitly.
+
 Use `templates/source-curation-manifest.json.tmpl` in `scratch` while decisions
 are active. A small completed example lives at
 `output/source-curation-manifest.example.json`.

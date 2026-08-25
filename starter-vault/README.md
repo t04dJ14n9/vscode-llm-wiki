@@ -30,7 +30,8 @@ identity.
 2. Optionally initialize a Git repository and Git LFS. The included
    `.gitattributes` routes future `assets/` binaries through LFS.
 3. Add or refine canonical tags in `TAGS.md` before publishing tagged pages.
-4. Put immutable textual evidence in `raw/` and eligible binaries in `assets/`.
+4. Put a faithful immutable Markdown snapshot of every textual source in
+   `raw/`, and retain eligible original binaries in `assets/`.
 5. Create durable knowledge from the files in `templates/`.
 6. Register code repositories with portable cards under `projects/`; local
    checkouts or symlinks belong only under ignored `projects/code/`.
@@ -40,6 +41,10 @@ For a material collection rather than a single source, follow
 candidate manifest, a canonicalization checkpoint before prose authoring, a
 durable-page admission rubric, and semantic quality gates for answerability,
 refusal, recall, citations, and duplicate content.
+
+For routine work, follow [Vault operations](playbooks/vault-operations.md).
+It defines source capture, synthesis, atomic cross-reference repair, lazy daily
+notes, page lifecycle changes, and one-goal task closure.
 
 Knowledge pages remain ordinary Markdown. No database, embeddings service,
 submodule, scheduler, or compiler runtime is required.

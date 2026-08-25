@@ -30,6 +30,17 @@ tags without entering the vault taxonomy or graph.
 
 Graph-visible Markdown is limited to `wiki/**` except `_index.md`, including narrative Summaries. Node properties are `title`, `type`, `status`, and `tags`. Directed edges come only from JSON-flow `relations`, whose targets are relative to `wiki/` and use the kinds documented in AGENTS.md. Body links remain navigation and provenance.
 
+Every admitted textual source has one immutable Markdown snapshot under
+`raw/`. Its frontmatter records source identity, retrieval or export time,
+revision when available, capture method, body hash, and documented omissions.
+The body is evidence rather than synthesis: native text remains verbatim, and
+format conversion preserves wording and reading order without translation or
+editorial correction. An available non-Markdown original may be retained in
+`assets/` with its own byte hash. Page identity changes are atomic graph
+migrations: update incoming and outgoing relations, source resources,
+daily-note references, and body links together before rebuilding indexes and
+appending the log event.
+
 Durable page admission is a curation rule, not an additional OKF field. Before
 creating a Concept, Comparison, Entity, or Summary, maintainers search the
 existing graph and establish recurrence, reuse, substantial primary-source

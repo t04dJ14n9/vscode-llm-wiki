@@ -66,7 +66,13 @@ TEMPLATE_FILES = (
 TAGLESS_TEMPLATE_FILES = frozenset({"_index.md.tmpl", "_log.md.tmpl"})
 TAGGED_TEMPLATE_FILES = frozenset(TEMPLATE_FILES) - TAGLESS_TEMPLATE_FILES
 DURABLE_TEMPLATE_FILES = frozenset({"summary.md.tmpl", "concept.md.tmpl", "entity.md.tmpl", "comparison.md.tmpl", "query.md.tmpl"})
-ROOT_TYPES = {"README.md": "Reference", "SCHEMA.md": "Reference", "TAGS.md": "Reference", "AGENTS.md": "Playbook"}
+ROOT_TYPES = {
+    "README.md": "Reference",
+    "SCHEMA.md": "Reference",
+    "TAGS.md": "Reference",
+    "AGENTS.md": "Playbook",
+    "CLAUDE.md": "Playbook",
+}
 UNTAGGED_ROOT_FILES = frozenset(ROOT_TYPES)
 COMPILED_COLLECTION_TYPES = {
     "summaries": "Summary", "concepts": "Concept", "entities": "Entity",
@@ -214,6 +220,32 @@ def _is_url(value: str) -> bool:
     return urlparse(value).scheme.lower() in {"http", "https"}
 
 
+def _is_portable_agent_adapter(relative: Path) -> bool:
+    parts = relative.parts
+    if not parts or parts[0] not in {".claude", ".codex", ".cursor"}:
+        return False
+    if len(parts) == 1:
+        return True
+    if parts[0] in {".claude", ".codex"}:
+        return (
+            parts[1] == "skills"
+            and (
+                len(parts) in {2, 3}
+                or (len(parts) == 4 and parts[3] == "SKILL.md")
+            )
+        )
+    if parts[1] == "skills":
+        return (
+            len(parts) in {2, 3}
+            or (len(parts) == 4 and parts[3] == "SKILL.md")
+        )
+    if parts[1] == "commands":
+        return len(parts) == 2 or (len(parts) == 3 and relative.suffix == ".md")
+    if parts[1] == "rules":
+        return len(parts) == 2 or (len(parts) == 3 and parts[2] == "vault-workflow.mdc")
+    return False
+
+
 def _walk(root: Path, *, hidden: bool = False) -> tuple[Path, ...]:
     paths: list[Path] = []
     for current, directories, files in os.walk(root, followlinks=False):
@@ -303,7 +335,15 @@ def check_layout(root: Path, state: GitStateReader) -> list[Issue]:
         if path.name in {INDEX_FILE, LOG_FILE} and path.is_symlink():
             issues.append(_issue("project-policy", "layout.forbidden", root, path, f"{path.name} must be a regular canonical file, not a symlink"))
     for path in _walk(root, hidden=True):
-        if path.is_dir() and path.name in {".llm_wiki", ".cursor", ".codex", ".claude", ".omc"} and state.is_tracked(path):
+        relative = path.relative_to(root)
+        if (
+            relative.parts
+            and relative.parts[0] in {".cursor", ".codex", ".claude"}
+            and state.is_tracked(path)
+            and not _is_portable_agent_adapter(relative)
+        ):
+            issues.append(_issue("karpathy-vault-v1", "forbidden.runtime-state", root, path, "only generated portable agent adapters may be committed under host directories"))
+        elif path.is_dir() and path.name in {".llm_wiki", ".omc"} and state.is_tracked(path):
             issues.append(_issue("karpathy-vault-v1", "forbidden.runtime-state", root, path, "runtime/editor state must not be committed"))
         if path.is_file() and any(path.name.endswith(suffix) for suffix in (".sqlite", ".sqlite-shm", ".sqlite-wal")) and state.is_tracked(path):
             issues.append(_issue("karpathy-vault-v1", "forbidden.runtime-state", root, path, "database state is outside the vault"))

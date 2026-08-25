@@ -35,6 +35,9 @@ than a copied code wiki.
   source collection is large enough to create duplication and coverage risk.
 - Read [Source corpus curation](playbooks/source-corpus-curation.md) before
   moving a legacy export or another large evidence set into a vault.
+- Read [Vault operations](playbooks/vault-operations.md) for faithful source
+  capture, synthesis, cross-reference maintenance, daily notes, and task
+  closure.
 - Inspect the [reference child-vault card](vaults/upstream-demo-vault.md) to see
   how a parent vault advertises another searchable vault without a submodule or
   a stored local path.
@@ -81,8 +84,10 @@ uncertainty, citations, metadata, and human-owned review text.
 
 ## Evidence and trust
 
-Files in `raw/` preserve extracted source text and hashes. Their matching binary
-attachments live in `assets/`. Compiled pages cite those records or canonical
+Files in `raw/` are faithful Markdown snapshots: native text remains verbatim,
+and converted sources retain wording, order, structure, and explicit gaps
+without synthesis. Provenance and body hashes are recorded, while matching
+binary attachments live in `assets/`. Compiled pages cite those records or canonical
 external sources with stable source IDs, and load-bearing claims use matching
 footnotes.
 

@@ -38,6 +38,15 @@ Daily generation is lazy and filesystem-only: no scheduler or extension command 
 - `inbox`, `tasks`, and `scratch` are non-durable workbench state.
 - `templates` is opaque. Copy the closest `.md.tmpl` and replace every required placeholder.
 
+Capture an admitted textual source as a Markdown snapshot in `raw/` before
+using it for synthesis. Preserve native Markdown and plain text verbatim. For
+HTML, PDF, meeting, or document exports, preserve visible wording, order,
+headings, lists, tables, code, and speaker labels as closely as the format
+allows. Do not summarize, translate, silently correct, or invent missing text.
+Record provenance, retrieval time, revision, capture method, body hash, and any
+omission; retain an available non-Markdown original in `assets/` when needed
+for audit. New upstream content gets a new immutable snapshot.
+
 Durable-page templates show one complete JSON-flow `sources` item and one
 `relations` item. Replace each sample with real entries, or replace the entire
 array with `[]` when the field is genuinely empty. Never publish template
@@ -100,6 +109,16 @@ evidence extraction, canonicalization, and prose authoring: candidate structure
 is reviewed and frozen before pages are written. Candidate manifests belong in
 the workbench and never become graph-visible knowledge or a second source of
 truth after publication.
+
+## Operate and maintain the vault
+
+Follow `playbooks/vault-operations.md` for the normal evidence-first loop,
+daily-note creation, page updates, renames, merges, supersession, and task
+closure. Before changing a path or page identity, search both `relations`
+targets and ordinary Markdown links. Update every affected source path,
+incoming edge, outgoing edge, daily reference, and body link in the same
+change; rebuild navigation before recording the result. Do not defer broken
+cross-references to a cleanup task.
 
 After deterministic validation, test whether representative in-scope questions
 are answerable with citations, out-of-scope questions are declined, important

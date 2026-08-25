@@ -165,6 +165,11 @@ and ignored local bindings under `vaults/bindings/`. Federated search respects
 each child vault's ownership. Body links may cross vaults, but graph relations
 do not.
 
+Initialized vaults include a detailed operating playbook for evidence-first
+capture, faithful `raw/` Markdown snapshots, synthesis, atomic cross-reference
+maintenance, daily-note refresh, page lifecycle changes, and task closure. The
+bulk-ingestion playbook extends that loop for large corpora.
+
 The repository's `.agents/skills/` directory is canonical. Initialized vaults
 include small physical discovery wrappers for Codex, Claude Code, and Cursor,
 plus Cursor commands and its always-applied rule. Regenerate them after adding
