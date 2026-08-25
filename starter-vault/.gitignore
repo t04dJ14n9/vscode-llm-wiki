@@ -1,8 +1,6 @@
 .DS_Store
 .llm_wiki/
 .omc/
-.cursor/
-.claude/settings.local.json
 .ingest-*/
 projects/code/
 __pycache__/
@@ -10,3 +8,26 @@ __pycache__/
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal
+vaults/bindings/
+
+# Ignore device-local host state while tracking portable physical adapters.
+.claude/*
+!.claude/skills/
+.claude/skills/*
+!.claude/skills/*/
+!.claude/skills/*/SKILL.md
+.cursor/*
+!.cursor/rules/
+.cursor/rules/*
+!.cursor/rules/vault-workflow.mdc
+!.cursor/skills/
+.cursor/skills/*
+!.cursor/skills/*/
+!.cursor/skills/*/SKILL.md
+!.cursor/commands/
+!.cursor/commands/*.md
+.codex/*
+!.codex/skills/
+.codex/skills/*
+!.codex/skills/*/
+!.codex/skills/*/SKILL.md

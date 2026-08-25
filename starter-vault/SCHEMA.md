@@ -89,3 +89,24 @@ binding is allowed for reference-only projects. Local paths are never stored in
 the card, and no parallel `workspace/` binding namespace exists.
 Repository-owned knowledge lives at `docs/llm-wiki/` and is versioned with that
 repository.
+
+## Workflow configuration and non-knowledge artifacts
+
+The nearest `AGENTS.md` configures `vault_prose_language` and
+`response_language`. These settings govern new synthesis and agent responses;
+they do not alter OKF page types or immutable source text.
+
+Every `tasks/*.md` page represents one actionable goal, even when it contains
+several implementation checkboxes. Reports are `output/` artifacts, while
+manifests and intermediate machine output are `scratch/` artifacts. Neither is
+a task merely because it was produced while completing one. Bulk-ingestion and
+source-curation manifests remain opaque and never become graph nodes.
+
+`vaults/<id>.md` is the portable record for another knowledge vault and uses
+`type: "Knowledge Vault"`. Its `vault_id` matches the filename and implies the
+only local binding, ignored `vaults/bindings/<id>`. The card records canonical
+identity, tracked ref, observed revision and time, status, a contained Markdown
+entrypoint, contained search roots, and an ownership statement, but never a
+local path. `vaults/bindings`, like
+`projects/code`, is opaque. Cross-vault body links are navigation only;
+`relations[].target` remains inside the current `wiki/` root.

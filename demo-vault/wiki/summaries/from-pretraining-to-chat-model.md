@@ -13,26 +13,27 @@ relations: [{"target": "comparisons/dpo-vs-on-policy-reinforcement-learning.md",
 
 # From pretraining to a chat model
 
-## Scope
+Nanochat does not turn a base model into a chat model with one training switch.
+Chat behavior emerges from four separate contracts: pretraining learns token
+continuation, SFT teaches conversational responses, optional on-policy RL
+rewards a narrow behavior, and inference decides how the trained checkpoint is
+actually sampled. Keeping these stages separate makes it possible to say what
+changed, which checkpoint is being evaluated, and where a behavior came from.
 
-Pretraining makes a model predict continuation tokens across packed documents;
-it does not by itself define roles, decide which tokens should contribute to a
-conversation loss, or guarantee instruction-following behavior. Nanochat keeps
-those responsibilities in distinct scripts and checkpoints.
-
-## Pipeline
+## Four stages, four responsibilities
 
 Base training optimizes next-token cross-entropy over pretraining sequences. Its
 batch is expressed in tokens, accumulated across devices and microsteps, and the
 run duration is derived from a target parameter-to-data ratio.[^base] The
-resulting checkpoint is evaluated as a language model before any chat-specific
-claims are made.
+resulting checkpoint is still a language model, not yet evidence of
+instruction-following behavior.
 
 Supervised finetuning then renders heterogeneous tasks into a common
 conversation format. Its completion mask excludes prompt/system tokens from the
 training objective where appropriate, so the model is trained on the response
 behavior rather than simply copying the entire serialized dialogue.[^sft] This
-is the main transition from a base checkpoint to the default chat checkpoint.
+is Nanochat's main transition from a base checkpoint to its default chat
+checkpoint.
 
 The optional RL script samples multiple answers to GSM8K-style problems,
 extracts final answers, assigns correctness rewards, subtracts the group mean,
@@ -47,7 +48,7 @@ decode, maintains KV caches, applies sampling controls, and stops on configured
 tokens.[^engine] Chat behavior is therefore the product of data formatting,
 training objectives, checkpoint choice, and inference policy.
 
-## Evidence boundary
+## What this account does not claim
 
 This staged account does not imply that SFT always precedes every possible RL
 method, nor that Nanochat’s simplified math-reward loop is a general alignment

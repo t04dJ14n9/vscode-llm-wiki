@@ -1,0 +1,23 @@
+{
+  "schema_version": "llm-wiki-source-curation/v1",
+  "corpus": {
+    "id": "{{corpus_id}}",
+    "source_root": "{{portable_source_identity}}",
+    "source_revision": "{{revision_or_export_timestamp}}",
+    "prepared_by": "{{actor}}",
+    "prepared_at": "{{timestamp}}",
+    "inclusion": "{{included_subjects}}",
+    "exclusion": "{{excluded_subjects}}"
+  },
+  "status": "{{candidate_or_frozen}}",
+  "destinations": [{"id":"{{destination_id}}","root":"{{portable_destination_identity}}","scope":"{{ownership_boundary}}"}],
+  "records": [{
+    "source_path": "{{source_relative_path}}",
+    "source_url": "{{canonical_source_url}}",
+    "sha256": "{{exact_source_sha256}}",
+    "title": "{{source_title}}",
+    "security": {"blocked":false,"categories":[],"line_numbers":[]},
+    "attachments": [{"source":"{{source_attachment_path}}","normalized_name":"{{flat_destination_name}}","media_type":"{{media_type}}","bytes":0,"sha256":"{{attachment_sha256}}"}],
+    "decision": {"disposition":"{{allowed_disposition}}","destination":"{{destination_id_or_null}}","target":"{{destination_relative_path_or_null}}","reason":"{{direct_reason}}"}
+  }]
+}

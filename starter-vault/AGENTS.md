@@ -5,6 +5,8 @@ description: "Normative workflow for maintaining this graph-ready LLM Wiki vault
 status: "stable"
 scope: "vault"
 vault_timezone: "Asia/Shanghai"
+vault_prose_language: "en"
+response_language: "match-request"
 generated: {"by": "codex/gpt-5.6", "at": "2026-08-25T00:57:53+08:00"}
 ---
 
@@ -144,3 +146,54 @@ append-only, so never insert, reorder, condense, or rewrite an earlier event.
 Use `learned`, `changed`, or `maintained` as the event kind and follow the log
 template exactly. Never commit, push, sync a code binding, or write externally
 without explicit authority.
+
+## Vault-specific language and prose
+
+`vault_prose_language` sets the default language for new reader-facing vault
+prose. Change it when naming the vault. Preserve source quotes, identifiers,
+commands, paths, schema keys, and established technical terms when translation
+would reduce precision. `response_language: "match-request"` means answer in
+the language used by the user's current request unless the user explicitly
+chooses another language.
+
+Use `humanizer` when the user asks for prose polish or a reader-facing batch
+rewrite. Keep concrete subjects and direct verbs, and remove migration
+boilerplate that belongs in this handbook. Never humanize `raw/`, quotations,
+generated indexes, `_log.md`, or human-owned markers.
+
+## Task and artifact hygiene
+
+Each `tasks/*.md` file owns one actionable goal. A checklist may break that
+goal into steps, but one page must not combine unrelated work. Keep idea pools
+in `inbox/`, intermediate manifests and machine output in `scratch/`, and
+durable migration, audit, or evaluation reports in `output/`. A task may link
+to those artifacts; it does not absorb them.
+
+For legacy raw material, wiki exports, meeting archives, and other large
+evidence collections, use `playbooks/source-corpus-curation.md` before bulk
+knowledge ingestion. Apply its security hard gate and freeze exactly one
+disposition per source before writing any destination.
+
+## Federated knowledge vaults
+
+Use one portable `vaults/<id>.md` card with `type: "Knowledge Vault"`. Its ID
+implies ignored binding `vaults/bindings/<id>`. Ask for the existing local
+vault location, verify its identity, and create an absolute symlink unless it
+already occupies the canonical binding. Never store a local path, use a Git
+submodule, scan for candidate vaults, clone, sync, or overwrite a binding.
+
+Search only roots declared by active cards. Before using a result, read the
+child vault's `AGENTS.md`, entrypoint, and observation metadata. Search access
+does not grant write ownership: update the vault that owns the subject. Body
+links may cross vaults, but graph `relations` never leave the current `wiki/`
+root.
+
+## Direct skill discovery
+
+`.agents/skills/<skill>` is the only complete skill package. This initialized
+vault also carries generated physical wrappers for Claude Code, Cursor, and
+Codex, plus Cursor commands and its always-applied rule, so every supported
+agent can use the skills without a plugin or symlink. Regenerate wrappers with
+`.agents/render_agent_adapters.py`; never duplicate full skill bodies. Tokens,
+cookies, MCP configuration, CLI state, and other credentials stay in the local
+environment or secret manager and never enter the vault.

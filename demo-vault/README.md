@@ -33,6 +33,11 @@ than a copied code wiki.
 - Read [Bulk corpus ingestion](playbooks/bulk-corpus-ingestion.md) for the
   extract-canonicalize-write workflow and semantic quality gates used when a
   source collection is large enough to create duplication and coverage risk.
+- Read [Source corpus curation](playbooks/source-corpus-curation.md) before
+  moving a legacy export or another large evidence set into a vault.
+- Inspect the [reference child-vault card](vaults/upstream-demo-vault.md) to see
+  how a parent vault advertises another searchable vault without a submodule or
+  a stored local path.
 
 Maintainers should read [AGENTS.md](AGENTS.md), [SCHEMA.md](SCHEMA.md),
 [TAGS.md](TAGS.md), [tasks/current.md](tasks/current.md), and the latest event in
@@ -47,17 +52,32 @@ raw/           immutable, searchable Markdown source records
 assets/        original PDFs tracked through Git LFS
 projects/      portable repository cards
 projects/code/ ignored local checkouts or symlinks
+vaults/        portable cards for independently maintained knowledge vaults
+vaults/bindings/ ignored optional child-vault checkouts or symlinks
 templates/     opaque authoring templates, not knowledge pages
 inbox/         unprocessed material
-tasks/         current and historical work state
+tasks/         one Markdown file per actionable outcome
 scratch/       temporary hypotheses
-output/        polished reports and designs
+output/        completed reports, manifests, and designs
 ```
 
 Every durable wiki page uses canonical tags from [TAGS.md](TAGS.md). Directed
 knowledge-graph edges come from explicit `relations` metadata, not from every
 body link. Sources identify evidence; relations identify durable knowledge
 connections.
+
+## Language and writing
+
+This demo's durable prose is written in English. A real vault can set another
+`content_language` in its `AGENTS.md`; familiar technical terms should keep
+their conventional spelling. Agents answer users in the language of the
+request unless asked otherwise, without treating the conversation language as
+permission to rewrite the corpus.
+
+Reader-facing synthesis starts with the idea the page is trying to convey, not
+with migration history or a generic boundary disclaimer. The bundled
+`humanizer` skill removes formulaic phrasing while preserving evidence,
+uncertainty, citations, metadata, and human-owned review text.
 
 ## Evidence and trust
 
@@ -95,6 +115,14 @@ Implementation-specific knowledge belongs in a writable code repository at
 `docs/llm-wiki/`, where it follows branches and commits. This demo keeps
 higher-level paper-backed learning in the outer vault.
 
+## Child-vault boundary
+
+A child vault remains an independent repository with its own instructions,
+history, and graph. The parent keeps only a portable card under `vaults/` and,
+when the user supplies a checkout, an ignored binding under `vaults/bindings/`.
+Federated search reads the card's declared roots; it does not copy the child
+vault into this graph or create cross-vault relation targets.
+
 ## Validate the demo
 
 Run these commands from the repository root:
@@ -107,7 +135,8 @@ git diff --check
 ```
 
 The demo requires no database, embeddings service, submodule, scheduled task,
-or `llm-wiki-compiler` runtime. Its durable state is Markdown, Git history, and
-Git LFS assets. Its installed operational skills cover PDF regions, prose
-polish, version-pinned arXiv discovery, grounded citations, and research-paper
-workflows; skill packages remain opaque to the knowledge graph.
+plugin, symlink, or `llm-wiki-compiler` runtime. Its durable state is Markdown,
+Git history, and Git LFS assets. Complete operational skills live only under
+`.agents/skills/`; generated physical Claude Code, Cursor, and Codex wrappers
+make them immediately discoverable while keeping skill packages opaque to the
+knowledge graph.

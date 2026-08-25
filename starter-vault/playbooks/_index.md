@@ -2,3 +2,4 @@
 # Playbook
 
 * [Bulk corpus ingestion](bulk-corpus-ingestion.md) - Canonicalize evidence-bound candidates before authoring durable pages, then evaluate coverage and grounded answerability.
+* [Source corpus curation](source-corpus-curation.md) - Audit a legacy evidence corpus, freeze one disposition per source, and migrate without leaking secrets or losing attachments.

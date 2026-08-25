@@ -2,30 +2,84 @@
 from __future__ import annotations
 
 import argparse
-import filecmp
+import os
+import re
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
 REPOSITORY = Path(__file__).resolve().parents[2]
 CANONICAL_ROOT = REPOSITORY / ".agents/skills"
-DESTINATION_ROOT = Path(".agents/skills")
-SKILL_NAMES = (
-    "pdf",
-    "humanizer",
-    "arxiv",
-    "grounded-citations",
-    "research-paper-writing",
-)
+DISCOVERY_ROOTS = (Path(".claude/skills"), Path(".cursor/skills"), Path(".codex/skills"))
+CURSOR_COMMAND_ROOT = Path(".cursor/commands")
+SKILL_NAMES = ("pdf", "humanizer", "arxiv", "grounded-citations", "research-paper-writing")
+SKILL_NAME = re.compile(r"^name:\s*[\"']?([^\"'\s]+)", re.MULTILINE)
 
 
-def same_tree(left: Path, right: Path) -> bool:
-    comparison = filecmp.dircmp(left, right)
-    if comparison.left_only or comparison.right_only or comparison.funny_files:
+def same_location(path: Path, source: Path) -> bool:
+    try:
+        return path.exists() and os.path.samefile(path, source)
+    except OSError:
         return False
-    if any(not filecmp.cmp(left / name, right / name, shallow=False) for name in comparison.common_files):
-        return False
-    return all(same_tree(left / name, right / name) for name in comparison.common_dirs)
+
+
+def create_directory_link(source: Path, destination: Path, *, force: bool) -> None:
+    if same_location(destination, source):
+        return
+    if destination.is_symlink():
+        if not force:
+            raise ValueError(f"preserving existing link at {destination}; rerun with --force")
+        destination.unlink()
+    elif destination.exists():
+        if not force:
+            raise ValueError(f"preserving existing path at {destination}; rerun with --force")
+        if destination.is_dir():
+            shutil.rmtree(destination)
+        else:
+            destination.unlink()
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    relative_source = os.path.relpath(source, destination.parent)
+    try:
+        destination.symlink_to(relative_source, target_is_directory=True)
+        return
+    except OSError:
+        if os.name != "nt":
+            raise
+    result = subprocess.run(
+        ["cmd", "/c", "mklink", "/J", str(destination), str(source)],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        detail = result.stderr.strip() or result.stdout.strip()
+        raise OSError(f"could not create directory junction {destination}: {detail}")
+
+
+def public_skill_name(skill: Path) -> str:
+    match = SKILL_NAME.search((skill / "SKILL.md").read_text(encoding="utf-8"))
+    if not match:
+        raise ValueError(f"skill has no frontmatter name: {skill}")
+    return match.group(1)
+
+
+def write_cursor_command(vault: Path, skill: Path, *, force: bool) -> Path:
+    name = public_skill_name(skill)
+    destination = vault / CURSOR_COMMAND_ROOT / f"{name}.md"
+    target = Path("../../.agents/skills") / skill.name / "SKILL.md"
+    content = (
+        "---\n"
+        f'description: "Run the canonical {name} skill"\n'
+        "---\n\n"
+        f"Read and follow [{name}]({target.as_posix()}) for this request. "
+        "Do not duplicate its rules in this command adapter.\n"
+    )
+    if destination.exists() and destination.read_text(encoding="utf-8") != content and not force:
+        raise ValueError(f"preserving customized Cursor command at {destination}; rerun with --force")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text(content, encoding="utf-8", newline="\n")
+    return destination
 
 
 def install(vault: Path, *, force: bool, skill_names: tuple[str, ...] = SKILL_NAMES) -> tuple[Path, ...]:
@@ -35,54 +89,29 @@ def install(vault: Path, *, force: bool, skill_names: tuple[str, ...] = SKILL_NA
     selected = tuple(dict.fromkeys(skill_names))
     if not selected or any(name not in SKILL_NAMES for name in selected):
         raise ValueError(f"skill must be one of: {', '.join(SKILL_NAMES)}")
-
-    current = root
-    for part in DESTINATION_ROOT.parts:
-        current = current / part
-        if current.is_symlink():
-            raise ValueError("skill destination may not contain symlinks")
-
-    plans: list[tuple[Path, Path, bool]] = []
+    installed: list[Path] = []
     for name in selected:
         canonical = CANONICAL_ROOT / name
-        destination = root / DESTINATION_ROOT / name
         if not (canonical / "SKILL.md").is_file():
             raise ValueError(f"canonical skill is incomplete: {name}")
-        if destination.is_symlink():
-            raise ValueError("skill destination may not be a symlink")
-        unchanged = destination.is_dir() and same_tree(canonical, destination)
-        if destination.exists() and not unchanged:
-            if not destination.is_dir():
-                raise ValueError("skill destination must be a directory")
-            if not force:
-                raise ValueError(
-                    f"preserving customized skill at {destination}; rerun with --force to replace it"
-                )
-        plans.append((canonical, destination, unchanged))
-
-    installed: list[Path] = []
-    for canonical, destination, unchanged in plans:
-        if not unchanged:
-            if destination.exists():
-                shutil.rmtree(destination)
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copytree(canonical, destination)
-        installed.append(destination)
+        for discovery_root in DISCOVERY_ROOTS:
+            destination = root / discovery_root / name
+            create_directory_link(canonical, destination, force=force)
+            installed.append(destination)
+        installed.append(write_cursor_command(root, canonical, force=force))
     return tuple(installed)
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Install default agent skills into a vault")
+    parser = argparse.ArgumentParser(
+        description="Expose canonical skills to Codex, Claude Code, and Cursor without copying packages"
+    )
     parser.add_argument("--vault", required=True, type=Path)
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--skill", action="append", choices=SKILL_NAMES, dest="skills")
     args = parser.parse_args()
     try:
-        destinations = install(
-            args.vault,
-            force=args.force,
-            skill_names=tuple(args.skills) if args.skills else SKILL_NAMES,
-        )
+        destinations = install(args.vault, force=args.force, skill_names=tuple(args.skills) if args.skills else SKILL_NAMES)
     except (OSError, ValueError) as error:
         print(str(error), file=sys.stderr)
         return 1

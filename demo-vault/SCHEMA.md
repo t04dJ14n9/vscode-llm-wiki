@@ -9,6 +9,12 @@ generated: {"by": "codex/gpt-5.6", "at": "2026-08-25T00:57:53+08:00"}
 
 # Graph-ready LLM Wiki schema
 
+This demo declares `content_language: "en"` and
+`response_language_policy: "match-user"` in `AGENTS.md`. The first controls
+durable prose; the second controls conversation. Technical terms may retain
+their conventional spelling in either language. These are vault workflow
+settings, not OKF graph properties.
+
 The root `_index.md` has only `okf_version: "0.2"` frontmatter. Nested `_index.md` files are frontmatter-free immediate-child navigation; `_log.md` is the only log. Assets, templates, `projects/code`, hidden runtime state, and skills are opaque.
 
 Indexes are hierarchical immediate-child catalogs. `_log.md` is an
@@ -68,11 +74,17 @@ Each event contains an OKF actor in `by` and an ISO datetime in `at`.
 Non-human actors provide machine confirmation; any `human:<id>` event records
 human review. Verification remains independent of lifecycle `status`.
 
-Bulk-ingestion manifests are opaque workbench artifacts under `inbox`, `tasks`,
+Active bulk-ingestion manifests are opaque workbench artifacts under `inbox`
 or `scratch`. They may freeze candidate aliases, target paths, admission
 decisions, source IDs, evidence locations, tags, and relations before prose is
 written. They are neither OKF concept documents nor provenance substitutes;
 after publication, durable pages and immutable sources are authoritative.
+Completed manifests and audit reports move to `output`, not `tasks`.
+
+Every `tasks/*.md` file represents one actionable outcome. A task may contain
+several implementation steps, but it must not double as a migration archive,
+manifest collection, status digest, or unrelated backlog. Completed reports
+and machine-readable evidence belong under `output`.
 
 Deterministic validation establishes structural conformance. A material corpus
 ingest additionally records semantic evaluation for answerability,
@@ -88,3 +100,12 @@ binding is allowed for reference-only projects. Local paths are never stored in
 the card, and no parallel `workspace/` binding namespace exists.
 Repository-owned knowledge lives at `docs/llm-wiki/` and is versioned with that
 repository.
+
+Each `vaults/<vault-id>.md` card registers one independently maintained child
+vault with producer extension `type: "Knowledge Vault"`. It stores `vault_id`,
+Git identity, tracked ref, observed revision and time, profile, entrypoint,
+nonempty search roots, and active/reference status. The optional local binding
+is derived as ignored `vaults/bindings/<vault-id>`; cards never store local
+paths, and child vaults are not Git submodules. Parent indexing treats child
+content as opaque. Relations remain inside one graph, so cross-vault evidence
+uses pinned repository URLs rather than relation targets.

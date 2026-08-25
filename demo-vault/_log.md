@@ -117,3 +117,7 @@ description: "Oldest-first append-only record of material demo-vault changes."
 ## [2026-08-25] changed | bulk corpus ingestion workflow
 
 - **Changed**: Added a source-attributed extract-canonicalize-write playbook, frozen candidate manifest, durable-page admission rubric, and semantic gates for answerability, refusal, recall, citation integrity, and duplicate content.
+
+## [2026-08-25] changed | demonstrate source curation and federated vault ownership
+
+- **Changed**: Reworked demo summaries as thesis-first synthesis, established configurable prose and request-language behavior, added one-goal task hygiene, source-corpus audit/disposition examples, and a reference-only child-vault card without copying knowledge or storing a local binding.

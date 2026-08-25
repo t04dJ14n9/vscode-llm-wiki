@@ -14,10 +14,12 @@ okf_version: "0.2"
 * [scratch](scratch/) - Ephemeral working notes and hypotheses.
 * [tasks](tasks/) - Current and historical work state.
 * [templates](templates/) - Opaque authoring templates for agents and humans.
+* [vaults](vaults/) - Portable cards for federated knowledge vaults.
 * [wiki](wiki/) - Durable graph-ready knowledge and daily review notes.
 
 # Playbook
 
+* [Claude Code instruction entrypoint](CLAUDE.md) - Physical Claude Code adapter for the canonical AGENTS.md workflow.
 * [LLM Wiki operator handbook](AGENTS.md) - Normative AGENTS-only workflow for the graph-ready demo vault.
 
 # Reference

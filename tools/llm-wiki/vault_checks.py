@@ -6,7 +6,7 @@ import re
 import subprocess
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Literal, Protocol
 from urllib.parse import urlparse
 
@@ -60,7 +60,8 @@ TEMPLATE_FILES = (
     "_index.md.tmpl", "_log.md.tmpl",
     "daily.md.tmpl", "concept.md.tmpl", "entity.md.tmpl",
     "comparison.md.tmpl", "query.md.tmpl", "summary.md.tmpl",
-    "playbook.md.tmpl", "project-card.md.tmpl", "raw-source.md.tmpl",
+    "playbook.md.tmpl", "project-card.md.tmpl", "vault-card.md.tmpl",
+    "task.md.tmpl", "raw-source.md.tmpl",
 )
 TAGLESS_TEMPLATE_FILES = frozenset({"_index.md.tmpl", "_log.md.tmpl"})
 TAGGED_TEMPLATE_FILES = frozenset(TEMPLATE_FILES) - TAGLESS_TEMPLATE_FILES
@@ -218,7 +219,7 @@ def _walk(root: Path, *, hidden: bool = False) -> tuple[Path, ...]:
     for current, directories, files in os.walk(root, followlinks=False):
         current_path = Path(current)
         relative = current_path.relative_to(root)
-        if relative.parts[:2] == ("projects", "code") or "templates" in relative.parts:
+        if relative.parts[:2] in {("projects", "code"), ("vaults", "bindings")} or "templates" in relative.parts:
             directories[:] = []
             continue
         directories[:] = [
@@ -260,7 +261,7 @@ def check_layout(root: Path, state: GitStateReader) -> list[Issue]:
         tuple(name for name in WORKBENCH_DIRECTORIES if name != "assets")
         if project_vault
         else (
-            "projects", "wiki", *(f"wiki/{name}" for name in (*WIKI_COLLECTIONS, "daily")),
+            "projects", "vaults", "wiki", *(f"wiki/{name}" for name in (*WIKI_COLLECTIONS, "daily")),
             *ROOT_COLLECTIONS, *ROOT_EVIDENCE_DIRECTORIES,
             "inbox", "tasks", "scratch", "output", "templates",
         )
@@ -454,6 +455,8 @@ def check_okf_and_profile(root: Path, _state: GitStateReader) -> list[Issue]:
                 expected_type = "Daily Note"
             elif len(relative.parts) == 2 and relative.parts[0] == "projects" and relative.suffix == ".md":
                 expected_type = "Software Project"
+            elif len(relative.parts) == 2 and relative.parts[0] == "vaults" and relative.suffix == ".md":
+                expected_type = "Knowledge Vault"
             elif len(relative.parts) == 2 and relative.parts[0] == "raw":
                 expected_type = "Paper"
         if expected_type and page_type != expected_type:
@@ -549,6 +552,112 @@ def check_registry_and_sources(root: Path, state: GitStateReader) -> list[Issue]
             valid = bool(source_state.remote) and str(source_state.remote).rstrip("/") == str(data["repository_url"]).rstrip("/")
         if not valid:
             issues.append(_issue("project-policy", "source.binding", root, source_path, f"derived binding is {source_state.kind} or has the wrong VCS identity"))
+    return issues
+
+
+def _portable_vault_path(value: object, *, markdown: bool = False) -> bool:
+    if not isinstance(value, str) or not value or value.startswith("/") or "\\" in value:
+        return False
+    path = PurePosixPath(value)
+    return (
+        not path.is_absolute()
+        and all(part not in {"", ".", ".."} for part in path.parts)
+        and (not markdown or path.suffix.lower() == ".md")
+    )
+
+
+def _contained_existing_path(root: Path, relative: str, *, directory: bool) -> bool:
+    candidate = root / relative
+    try:
+        resolved_root = root.resolve(strict=True)
+        resolved = candidate.resolve(strict=True)
+        resolved.relative_to(resolved_root)
+    except (OSError, ValueError):
+        return False
+    return resolved.is_dir() if directory else resolved.is_file()
+
+
+def check_vault_registry(root: Path, _state: GitStateReader) -> list[Issue]:
+    if _is_project_vault(root):
+        return []
+    issues: list[Issue] = []
+    ignore_file = root / ".gitignore"
+    ignore_lines = {
+        line.strip()
+        for line in ignore_file.read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    } if ignore_file.is_file() else set()
+    if "vaults/bindings/" not in ignore_lines and "/vaults/bindings/" not in ignore_lines:
+        issues.append(_issue("project-policy", "vault.ignore", root, ignore_file, "vaults/bindings/ must be ignored by the vault repository"))
+
+    cards: dict[str, tuple[Path, dict[str, object]]] = {}
+    vaults_root = root / "vaults"
+    for card in sorted(vaults_root.glob("*.md")):
+        if card.name == INDEX_FILE:
+            continue
+        document, read_issues = _read(root, card)
+        issues.extend(read_issues)
+        if not document:
+            continue
+        data = document.metadata
+        vault_id = data.get("vault_id")
+        required_strings = (
+            "repository_url", "tracked_ref", "observed_revision",
+            "observed_at", "ownership", "entrypoint",
+        )
+        search_roots = data.get("search_roots")
+        valid_roots = (
+            isinstance(search_roots, list)
+            and bool(search_roots)
+            and len(search_roots) == len(set(str(item) for item in search_roots))
+            and all(_portable_vault_path(item) for item in search_roots)
+        )
+        valid_card = (
+            isinstance(vault_id, str)
+            and re.fullmatch(r"[a-z0-9][a-z0-9-]*", vault_id) is not None
+            and card.stem == vault_id
+            and data.get("type") == "Knowledge Vault"
+            and all(isinstance(data.get(key), str) and str(data[key]).strip() for key in required_strings)
+            and data.get("vault_status") in {"active", "reference"}
+            and _iso_datetime(data.get("observed_at"))
+            and _portable_vault_path(data.get("entrypoint"), markdown=True)
+            and valid_roots
+        )
+        if not valid_card:
+            issues.append(_issue("project-policy", "vault.card", root, card, "Knowledge Vault card requires a canonical ID and identity, tracked ref, observed revision/time, active/reference status, ownership, contained Markdown entrypoint, and contained search roots"))
+            continue
+        forbidden = {
+            "local_path", "vault_path", "binding_path", "workspace",
+            "workspace_path", "checkout_path", "code_path", "binding_state",
+        }
+        if forbidden.intersection(data):
+            issues.append(_issue("project-policy", "vault.card-local", root, card, "Knowledge Vault card must not store a local path or device binding state"))
+        if vault_id in cards:
+            issues.append(_issue("project-policy", "vault.duplicate", root, card, f"duplicate vault ID: {vault_id}"))
+        cards[vault_id] = (card, data)
+
+    bindings_root = vaults_root / "bindings"
+    registered = set(cards)
+    if bindings_root.is_dir():
+        for binding in bindings_root.iterdir():
+            if binding.name not in registered:
+                issues.append(_issue("project-policy", "vault.unregistered", root, binding, "vault binding has no matching Knowledge Vault card"))
+    for vault_id, (card, data) in cards.items():
+        binding = bindings_root / vault_id
+        if binding.is_symlink() and not binding.exists():
+            issues.append(_issue("project-policy", "vault.binding", root, binding, "vault binding is a broken symlink"))
+            continue
+        if not binding.exists():
+            continue
+        if not binding.is_dir():
+            issues.append(_issue("project-policy", "vault.binding", root, binding, "vault binding must be a directory or directory symlink"))
+            continue
+        entrypoint = str(data["entrypoint"])
+        if not _contained_existing_path(binding, entrypoint, directory=False):
+            issues.append(_issue("project-policy", "vault.entrypoint", root, card, "bound vault entrypoint must exist and remain contained in the bound vault"))
+        for search_root in data["search_roots"]:
+            if not _contained_existing_path(binding, str(search_root), directory=True):
+                issues.append(_issue("project-policy", "vault.search-root", root, card, f"bound vault search root must exist and remain contained: {search_root}"))
     return issues
 
 
@@ -868,6 +977,11 @@ def check_relations_and_daily(root: Path, _state: GitStateReader) -> list[Issue]
                 and "\\" not in target
             )
             target_path = wiki_root / str(target) if valid_target else None
+            if target_path is not None:
+                try:
+                    target_path.resolve(strict=True).relative_to(wiki_root.resolve(strict=True))
+                except (OSError, ValueError):
+                    valid_target = False
             key = (str(target), str(kind))
             valid = (
                 valid_target
@@ -985,6 +1099,7 @@ CHECKS = (
     check_tag_registry,
     check_okf_and_profile,
     check_registry_and_sources,
+    check_vault_registry,
     check_workbench_raw_assets,
     check_provenance_queries_links,
     check_relations_and_daily,

@@ -33,7 +33,7 @@ provenance rules remain authoritative.
   provenance rules. Raw textual evidence remains flat under `raw/`; eligible
   binaries remain flat under `assets/` and use Git LFS.
 - Search existing durable pages before proposing new targets.
-- Copy `templates/bulk-ingestion-manifest.json.tmpl` into `tasks` or `scratch`,
+- Copy `templates/bulk-ingestion-manifest.json.tmpl` into `scratch`,
   replace every placeholder, and keep it outside the knowledge graph.
 
 ## Procedure
@@ -86,8 +86,8 @@ daily-note, and index failures before semantic evaluation.
 
 ### 5. Evaluate semantics
 
-Record the evaluation set, method, results, and unresolved failures in `tasks`
-or a polished report under `output`. Complete all five gates:
+Record the evaluation set, method, results, and unresolved failures in a report
+under `output`. Complete all five gates:
 
 - **Answerability:** representative in-scope questions are answerable by
   navigating the vault, and the answer cites the supporting pages and sources.
@@ -116,6 +116,8 @@ check independently compared the current page content with its evidence.
   task and affected pages remain draft.
 - Generated indexes are current and the material ingestion event is appended
   to `_log.md` without rewriting earlier history.
+- The frozen manifest and evaluation report are retained under `output`; the
+  task page records only the outcome and remaining actionable work.
 
 ## Limits
 

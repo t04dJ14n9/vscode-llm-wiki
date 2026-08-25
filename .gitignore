@@ -34,7 +34,6 @@ artifacts/
 .worktrees/
 .superpower/
 .superpowers/
-.cursor/
 .omc/
 .paperlink/
 .vscode/
@@ -55,3 +54,26 @@ packages/vscode-extension/test/vscode-e2e/fixtures/test-vault/.llm_wiki/*
 !packages/vscode-extension/test/vscode-e2e/fixtures/test-vault/.llm_wiki/config.yaml
 packages/vscode-extension/test/vscode-e2e/fixtures/test-vault/__llm_wiki_vscode_e2e_sandboxes__/
 packages/vscode-extension/test/vscode-e2e/fixtures/test-vault/raw/pdf/multipage-fixture.pdf
+
+# Ignore device-local host state while tracking portable physical adapters.
+.claude/*
+!.claude/skills/
+.claude/skills/*
+!.claude/skills/*/
+!.claude/skills/*/SKILL.md
+!.cursor/
+.cursor/*
+!.cursor/rules/
+.cursor/rules/*
+!.cursor/rules/vault-workflow.mdc
+!.cursor/skills/
+.cursor/skills/*
+!.cursor/skills/*/
+!.cursor/skills/*/SKILL.md
+!.cursor/commands/
+!.cursor/commands/*.md
+.codex/*
+!.codex/skills/
+.codex/skills/*
+!.codex/skills/*/
+!.codex/skills/*/SKILL.md

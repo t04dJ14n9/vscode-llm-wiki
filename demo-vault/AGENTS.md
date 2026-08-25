@@ -5,6 +5,8 @@ description: "Normative AGENTS-only workflow for the graph-ready demo vault."
 status: "stable"
 scope: "vault"
 vault_timezone: "Asia/Shanghai"
+content_language: "en"
+response_language_policy: "match-user"
 generated: {"by": "codex/gpt-5.6", "at": "2026-08-25T00:57:53+08:00"}
 ---
 
@@ -18,12 +20,32 @@ version-pinned paper discovery, `grounded-citations` for claim-level evidence,
 and `humanizer` for requested prose polish. The vault workflow in this file
 remains authoritative for placement, metadata, validation, and logging.
 
+`.agents/skills/` contains the complete canonical packages. Generated physical
+wrappers under `.claude/skills/`, `.cursor/skills/`, and `.codex/skills/` make
+them available immediately without plugins or symlinks; Cursor also receives
+physical commands and an always-applied rule. Regenerate only those wrappers
+with `.agents/render_agent_adapters.py`.
+
 ## Start every study or maintenance session
 
 1. Read `SCHEMA.md`, `TAGS.md`, `_index.md`, `tasks/current.md`, and the newest `_log.md` entry.
 2. Use the `Asia/Shanghai` calendar date. Create or refresh `wiki/daily/YYYY-MM-DD.md` from `templates/daily.md.tmpl` if this is the first session that day.
 3. Preserve every human-owned Goals, review-answer, and Notes marker verbatim.
 4. Search titles, tags, bodies, and Query selection IDs before writing.
+
+## Language and voice
+
+Write durable prose in the vault's `content_language`, which is English in
+this demo. Keep established technical terms in their conventional form rather
+than translating them mechanically. When speaking with a user, answer in the
+language used in the request unless the user asks for another language; this
+conversation rule does not silently change the vault's content language.
+
+Use the `humanizer` skill for reader-facing synthesis. Prefer a concrete
+subject, a direct verb, and a thesis in the opening paragraph. Preserve facts,
+citations, source IDs, relations, selection identities, quotations, and
+human-owned review markers exactly. Do not humanize immutable evidence,
+generated navigation, logs, or code.
 
 Daily generation is lazy and filesystem-only: no scheduler or extension command is required. Pull linked `**Learned**` entries from today's log into the cohort. Review older cohorts at +1, +3, +7, +14, +30, +60, and +90 days. Repeat Query titles with blank human answer blocks; use “I can explain…” checkboxes for Concepts, Comparisons, and Entities. Include at most ten unresolved reviews, oldest first and Queries first. Incomplete reviews roll forward; outcomes do not alter the fixed schedule.
 
@@ -34,6 +56,9 @@ Daily generation is lazy and filesystem-only: no scheduler or extension command 
 - `playbooks` remains outside the graph as operational guidance.
 - `raw` is flat immutable textual evidence; `assets` is flat binary evidence through Git LFS.
 - `inbox`, `tasks`, and `scratch` are non-durable workbench state.
+- `tasks` contains one Markdown file per actionable outcome. Checklists may
+  describe steps toward that outcome, but status reports, audit output, and
+  manifests belong in `output` once complete.
 - `templates` is opaque. Copy the closest `.md.tmpl` and replace every required placeholder.
 
 Durable-page templates show one complete JSON-flow `sources` item and one
@@ -89,6 +114,15 @@ until it clears the bar. Record the admission basis in the active task or bulk
 ingestion manifest; do not add new graph nodes merely to eliminate an orphan or
 increase link density.
 
+## Curate source corpora
+
+Before copying a legacy export or other large evidence set, follow
+`playbooks/source-corpus-curation.md`. Audit for secrets and malformed records,
+deduplicate by canonical source identity or exact hash, route implementation
+evidence to its owning repository, and freeze one disposition per source.
+Move the completed manifest and report to `output`; they are process evidence,
+not tasks or graph nodes.
+
 ## Ingest a corpus
 
 For a material batch of sources, use
@@ -123,6 +157,16 @@ search the filesystem for candidates, clone, or sync automatically.
 Repository-specific knowledge belongs in the repository's `docs/llm-wiki/`.
 Nanochat is reference-only in this demo.
 
+## Register child vaults
+
+Use one portable `vaults/<vault-id>.md` card for each independently maintained
+knowledge vault. A card records Git identity, tracked ref, observed revision,
+profile, entrypoint, search roots, and active/reference status. Its optional
+local binding is derived as ignored `vaults/bindings/<vault-id>`; never store a
+machine-local path or use a Git submodule. Treat child content as opaque, obey
+the child's own instructions when editing it, and use pinned URLs rather than
+cross-vault `relations` for attribution.
+
 ## File Queries
 
 File a Query only when the answer is substantial, grounded, durable, novel, scoped, complete about limits, and safe. Use `templates/query.md.tmpl`; preserve synthesis rather than transcripts. Every Query needs `condensed_summary`, `conversation.selection_id`, unique sources, exact source-ID-bound anchors, answer, evidence, limitations, related pages, and relations. Reuse exact exported Markdown/PDF source URIs.
@@ -138,7 +182,7 @@ links or wikilinks.
 Rebuild indexes, validate placement/relations/daily notes/provenance/bindings,
 inspect LFS, run `git diff --check`, and refresh Query annotations. Material
 corpus ingests also complete every semantic gate in the bulk-ingestion playbook
-and retain their report in `tasks` or `output`. Record each
+and retain their report in `output`. Record each
 material event with `tools/llm-wiki/append_log.py`; `_log.md` is oldest-first
 and append-only, so never insert, reorder, condense, or rewrite an earlier
 event. Use `learned`, `changed`, or `maintained` as the event kind. Never commit,

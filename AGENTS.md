@@ -15,7 +15,8 @@ requested otherwise.
   embeddings, integrate `llm-wiki-compiler`, or implement the deferred graph UI.
 - Vault behavior is specified by the nearest `AGENTS.md`; there is no general
   LLM Wiki skill. Retain the focused PDF selection, humanizer, arXiv,
-  grounded-citations, and research-paper-writing skills and their installer.
+  grounded-citations, and research-paper-writing skills and their physical
+  adapter renderer.
 
 ## Canonical vault workflow
 
@@ -166,3 +167,45 @@ appropriate browser/VS Code E2E path. Append material vault events with
 `tools/llm-wiki/append_log.py`; never rewrite earlier log bytes. Never claim human verification
 from automated checks. Never commit, push, publish, sync code, or write back
 externally without authority. Never expose secrets or private identifiers.
+
+## Portable vault conventions
+
+Each vault declares its prose language and response-language policy in its
+nearest `AGENTS.md`. Use that language for new reader-facing synthesis while
+preserving source quotes, identifiers, commands, paths, schema keys, and
+established technical terms. Unless the user asks otherwise, answer in the
+language of the current request. When prose polish is requested, use the
+`humanizer` skill without rewriting immutable evidence or generated files.
+
+One Markdown file under `tasks/` represents one actionable goal. Its checklist
+may contain several steps, but task pages are not report bundles, idea
+inventories, migration manifests, or audit logs. Keep manifests and
+intermediate machine output under `scratch/`; publish durable reports under
+`output/`, and link them from a task only when follow-up work remains.
+
+Before importing a legacy raw corpus, wiki export, meeting archive, or other
+large evidence collection, follow `playbooks/source-corpus-curation.md`. Audit
+secrets, source identity, duplicate URLs and hashes, frontmatter, attachments,
+and collisions before any destination write. Freeze exactly one disposition
+for every source record. Never include a secret value in an audit artifact.
+
+Register another vault with one portable `vaults/<id>.md` card whose type is
+`Knowledge Vault`. The card stores canonical identity, tracked ref, observed
+revision and time, search roots, ownership, and status, but never a local path.
+Its ID implies ignored local binding `vaults/bindings/<id>`, which may be an
+existing directory or an absolute symlink established after identity
+verification. Do not use Git submodules for vault federation.
+
+Federated search is read-only discovery. Search only roots declared by active
+cards, read the child vault's own instructions before interpreting results, and
+write knowledge only in the vault that owns the subject. A root-vault page may
+link to a child page in its body, but `relations` remain local to one `wiki/`
+root and never target another vault.
+
+`.agents/skills/` is the canonical skill-package location. Initialized vaults
+contain generated physical wrappers under `.claude/skills/`, `.cursor/skills/`,
+and `.codex/skills/`, plus physical Cursor commands and an always-applied rule.
+Regenerate these small adapters with `.agents/render_agent_adapters.py`; never
+copy full skill bodies into them. Credentials, cookies, CLI state, MCP
+configuration, and tokens remain in the local environment or secret manager
+and must not enter a skill package or vault.

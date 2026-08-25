@@ -22,6 +22,8 @@ DIRECTORY_DESCRIPTIONS = {
     "playbooks": "Stable operational guidance.",
     "projects": "Portable repository cards; code knowledge stays with each repository.",
     "projects/code": "Ignored checkout-or-symlink bindings derived from project IDs.",
+    "vaults": "Portable cards for federated knowledge vaults.",
+    "vaults/bindings": "Ignored local bindings derived from knowledge-vault IDs.",
     "scratch": "Ephemeral working notes and hypotheses.",
     "wiki/summaries": "Narrative synthesis and entry points through the knowledge vault.",
     "tasks": "Current and historical work state.",
@@ -59,7 +61,7 @@ def _is_opaque(vault_root: Path, path: Path) -> bool:
     parts = _relative(vault_root, path).parts
     return bool(parts) and (
         parts[0] in {"assets", "templates"}
-        or parts[:2] == ("projects", "code")
+        or parts[:2] in {("projects", "code"), ("vaults", "bindings")}
         or parts[-1] == "assets"
     )
 

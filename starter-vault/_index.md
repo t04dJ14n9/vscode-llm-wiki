@@ -6,17 +6,18 @@ okf_version: "0.2"
 # Subdirectories
 
 * [inbox](inbox/) - Unprocessed source candidates.
-* [output](output/) - Polished reports and designs.
 * [playbooks](playbooks/) - Stable operational guidance.
 * [projects](projects/) - Portable repository cards; code knowledge stays with each repository.
 * [raw](raw/) - Flat immutable source companions for the knowledge vault.
 * [scratch](scratch/) - Ephemeral working notes and hypotheses.
 * [tasks](tasks/) - Current and historical work state.
 * [templates](templates/) - Opaque authoring templates for agents and humans.
+* [vaults](vaults/) - Portable cards for federated knowledge vaults.
 * [wiki](wiki/) - Durable graph-ready knowledge and daily review notes.
 
 # Playbook
 
+* [Claude Code instruction entrypoint](CLAUDE.md) - Physical Claude Code adapter for the canonical AGENTS.md workflow.
 * [Vault agent handbook](AGENTS.md) - Normative workflow for maintaining this graph-ready LLM Wiki vault.
 
 # Reference

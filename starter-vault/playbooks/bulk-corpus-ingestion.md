@@ -124,3 +124,10 @@ single primary paper can justify a durable page, while a frequently mentioned
 term can remain too shallow or promotional to keep. Semantic evaluations are
 sampled evidence about retrieval behavior, not proof that every future question
 will be answered correctly.
+
+## Artifact placement override
+
+Keep the frozen ingestion manifest and intermediate machine output under
+`scratch/`, not `tasks/`. Publish evaluation and migration reports under
+`output/`. A one-goal task may link to those artifacts when work remains, but
+it does not become their storage directory.

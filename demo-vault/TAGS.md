@@ -48,6 +48,10 @@ Training computations coordinated across devices or workers.
 
 Methods and artifacts used to assess model capabilities or quality.
 
+## federated-search
+
+Discovery across independently maintained vaults through portable registry cards.
+
 ## inference
 
 Model execution after training, including decoding and serving behavior.
@@ -55,6 +59,10 @@ Model execution after training, including decoding and serving behavior.
 ## language-models
 
 Broad language-model knowledge that spans more specific mechanisms.
+
+## knowledge-vault
+
+An independently maintained knowledge repository registered for discovery without copying its graph.
 
 ## numerics
 

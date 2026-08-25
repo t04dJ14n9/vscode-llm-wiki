@@ -98,10 +98,11 @@ unzip packages/vscode-extension/resources/llm-wiki-empty-vault.zip -d MyVault
 ```
 
 The archive includes the complete AGENTS workflow, schema, tag registry,
-authoring templates, generated indexes, workbench directories, ignored
+authoring templates, generated indexes, workbench directories, canonical
+generic skills, physical Claude Code/Cursor/Codex adapters, the ignored
 `projects/code/` binding directory, and an empty Git-LFS-ready `assets/`
-directory. It contains no sample knowledge, nested Git repository, or code
-checkout.
+directory. It contains no sample knowledge, plugin dependency, symlink, nested
+Git repository, or code checkout.
 
 ## Repository packages
 
@@ -146,3 +147,32 @@ pnpm --filter llm-wiki-vscode test:vscode-e2e
 ## License
 
 MIT. See `LICENSE`.
+
+## Curation, federation, and agent skills
+
+Run `tools/llm-wiki/audit_source_corpus.py` before moving a legacy corpus. The
+read-only audit detects credential-shaped values without recording them,
+checks frontmatter and attachments, and compares canonical source URLs and
+exact hashes against active destinations. Freeze one disposition per source
+with the starter template before migration.
+
+Keep one actionable goal in each `tasks/*.md` file. Manifests and intermediate
+machine output belong in `scratch/`; durable migration, audit, and evaluation
+reports belong in `output/`.
+
+Other knowledge vaults use portable `Knowledge Vault` cards under `vaults/`
+and ignored local bindings under `vaults/bindings/`. Federated search respects
+each child vault's ownership. Body links may cross vaults, but graph relations
+do not.
+
+The repository's `.agents/skills/` directory is canonical. Initialized vaults
+include small physical discovery wrappers for Codex, Claude Code, and Cursor,
+plus Cursor commands and its always-applied rule. Regenerate them after adding
+or removing a canonical skill:
+
+```bash
+python3 tools/llm-wiki/render_agent_adapters.py --vault /path/to/vault --write
+```
+
+The renderer copies no skill implementation and creates no symlink. It does not
+install plugins or CLIs, write credentials, or create MCP configuration.
