@@ -9,11 +9,26 @@ generated: {"by": "codex/gpt-5.6", "at": "2026-08-25T00:57:53+08:00"}
 
 # Vault schema
 
+## Asset synchronization invariant
+
+Every file under `assets/**` must be version-controlled through Git LFS so the
+vault can reproduce its binary evidence on every device. An asset that is
+untracked, ignored, stored as a plain Git blob, or backed by an LFS object that
+has not been pushed is a completion blocker. Markdown and code do not belong in
+`assets/` and must never be routed through Git LFS.
+
 The root `_index.md` has only `okf_version: "0.2"` frontmatter. Nested `_index.md` files are frontmatter-free immediate-child navigation; `_log.md` is the only log. Assets, templates, `projects/code`, hidden runtime state, and skills are opaque.
 
-Indexes are hierarchical immediate-child catalogs. `_log.md` is an
-oldest-first append-only event stream: each event has a parseable
-`## [YYYY-MM-DD] kind | subject` heading and one categorized bullet. New events
+Indexes are heading-based hierarchical immediate-child catalogs organized by
+content domain and semantic subtopic, never document form or numeric range.
+The hierarchy is vault-owned data in `TAGS.md` frontmatter under
+`index_topics`: each registered tag may declare a display `title`, optional
+`parent`, and optional `source_roots` rules for deriving deeper headings from a
+source path. The shared generator contains no product or domain vocabulary.
+`_log.md` is an oldest-first append-only event stream: each event has a
+parseable `##### [YYYY-MM-DD] kind | subject` heading and one categorized bullet
+under year/month/day parents. Sections over 20 direct entries produce a
+non-blocking curation warning. New events
 are appended at the end using `templates/_log.md.tmpl`; prior bytes are
 immutable. Use a deterministic producer when one is available.
 
