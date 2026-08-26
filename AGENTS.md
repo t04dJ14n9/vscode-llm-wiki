@@ -44,6 +44,12 @@ available original non-Markdown bytes under `assets/` when needed for audit.
 A changed upstream source creates a new snapshot; never rewrite an immutable
 one in place.
 
+Use the Python `pdfplumber` library as the default path for extracting text
+from PDFs. Extract page by page, preserve page boundaries and reading order,
+and treat the original PDF as authoritative for layout, figures, tables, and
+mathematical notation. Record extraction failures and every fallback in
+`snapshot.omissions`; never silently repair columns, equations, or OCR output.
+
 `starter-vault/` is the canonical knowledge-empty vault source. Keep
 `packages/vscode-extension/resources/llm-wiki-empty-vault.zip` byte-for-byte
 current with `tools/llm-wiki/build_starter_bundle.py`; the unpacked archive
