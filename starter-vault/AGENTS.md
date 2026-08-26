@@ -57,6 +57,12 @@ Record provenance, retrieval time, revision, capture method, body hash, and any
 omission; retain an available non-Markdown original in `assets/` when needed
 for audit. New upstream content gets a new immutable snapshot.
 
+Use the Python `pdfplumber` library as the default path for extracting text
+from PDFs. Extract page by page, preserve page boundaries and reading order,
+and treat the original PDF as authoritative for layout, figures, tables, and
+mathematical notation. Record extraction failures and every fallback in
+`snapshot.omissions`; never silently repair columns, equations, or OCR output.
+
 Durable-page templates show one complete JSON-flow `sources` item and one
 `relations` item. Replace each sample with real entries, or replace the entire
 array with `[]` when the field is genuinely empty. Never publish template
