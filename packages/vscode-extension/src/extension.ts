@@ -54,7 +54,7 @@ let graphPanel: KnowledgeGraphPanel | undefined;
 let queryAnnotationIndex: QueryAnnotationIndex | undefined;
 let refreshTimer: NodeJS.Timeout | undefined;
 
-const STARTUP_CUSTOM_EDITOR_RETRY_DELAYS_MS = [0, 250, 1_000] as const;
+const STARTUP_PDF_EDITOR_RETRY_DELAYS_MS = [0, 250, 1_000] as const;
 const WORKSPACE_REQUIRED_MESSAGE =
   'Open a folder to use LLM Wiki Queries and repository features.';
 const AGENT_HANDOFF_ACTIVE_CONTEXT_KEY = 'llmWikiAgentHandoffActive';
@@ -174,7 +174,7 @@ export function activate(context: vscode.ExtensionContext): void {
   });
   registerCommands(context, workspaceRoot, learningNotes);
   if (workspaceRoot) registerMarkdownWatcher(context);
-  registerCustomEditorRouter(context);
+  registerPdfEditorRouter(context);
   refreshAllViews();
   vscode.window.showInformationMessage(
     workspaceRoot
@@ -918,10 +918,6 @@ function isMarkdownDocument(document: vscode.TextDocument): boolean {
   return document.languageId === 'markdown' || isMarkdownUri(document.uri);
 }
 
-function isPdfUri(uri: vscode.Uri | undefined): uri is vscode.Uri {
-  return Boolean(uri?.scheme === 'file' && uri.fsPath.toLowerCase().endsWith('.pdf'));
-}
-
 function isAssociatedUntitledMarkdownUri(uri: vscode.Uri | undefined): uri is vscode.Uri {
   return Boolean(
     uri?.scheme === 'untitled'
@@ -930,33 +926,28 @@ function isAssociatedUntitledMarkdownUri(uri: vscode.Uri | undefined): uri is vs
   );
 }
 
-/**
- * Reopen persisted Markdown/PDF text editors in their custom providers while
- * leaving generic untitled buffers alone. VS Code's CLI creates a file-like
- * `untitled:` document for a missing path; that URI is the signal that the
- * Markdown provider should own it, not its transient `languageId`.
- */
-function registerCustomEditorRouter(context: vscode.ExtensionContext): void {
-  const opening = new Set<string>();
-  const routed = new Set<string>();
-  const reopen = async (uri: vscode.Uri | undefined): Promise<void> => {
-    if (!uri) return;
-    const viewType = isMarkdownUri(uri) || isAssociatedUntitledMarkdownUri(uri)
-      ? MarkdownEditorProvider.viewType
-      : isPdfUri(uri)
-        ? PdfEditorProvider.viewType
-        : undefined;
-    if (!viewType) return;
+function isPdfUri(uri: vscode.Uri | undefined): uri is vscode.Uri {
+  return Boolean(uri?.scheme === 'file' && uri.fsPath.toLowerCase().endsWith('.pdf'));
+}
 
+/**
+ * Recover PDFs that VS Code temporarily opens as text documents during startup
+ * or extension activation. Markdown remains in the editor chosen by the user or
+ * caller unless an LLM Wiki command explicitly opens the custom Markdown editor.
+ */
+function registerPdfEditorRouter(context: vscode.ExtensionContext): void {
+  const opening = new Set<string>();
+  const reopen = async (uri: vscode.Uri | undefined): Promise<void> => {
+    if (!isPdfUri(uri)) return;
+
+    const viewType = PdfEditorProvider.viewType;
     const key = `${viewType}:${uri.toString()}`;
-    const isMarkdown = viewType === MarkdownEditorProvider.viewType;
-    if (opening.has(key) || (isMarkdown && routed.has(key)) || hasCustomEditorTab(uri, viewType)) {
+    if (opening.has(key) || hasCustomEditorTab(uri, viewType)) {
       return;
     }
     opening.add(key);
     try {
       await vscode.commands.executeCommand('vscode.openWith', uri, viewType);
-      if (isMarkdown) routed.add(key);
     } finally {
       opening.delete(key);
     }
@@ -967,16 +958,6 @@ function registerCustomEditorRouter(context: vscode.ExtensionContext): void {
   });
   const openDocumentListener = vscode.workspace.onDidOpenTextDocument(document => {
     void reopen(document.uri);
-  });
-  // A transient guard prevents the open-document and active-editor events from
-  // reopening the same untitled URI. Forget it once that custom tab closes so a
-  // later CLI/open action can route the URI again.
-  const tabCloseListener = vscode.window.tabGroups.onDidChangeTabs(event => {
-    for (const tab of event?.closed ?? []) {
-      const input = tab?.input as { uri?: vscode.Uri; viewType?: unknown } | undefined;
-      if (!input?.uri || typeof input.viewType !== 'string') continue;
-      routed.delete(`${input.viewType}:${input.uri.toString()}`);
-    }
   });
 
   const reopenVisibleEditors = () => {
@@ -995,7 +976,7 @@ function registerCustomEditorRouter(context: vscode.ExtensionContext): void {
     }
     reopenOnce(activeTabUri());
   };
-  const retries = STARTUP_CUSTOM_EDITOR_RETRY_DELAYS_MS.map(delay => {
+  const retries = STARTUP_PDF_EDITOR_RETRY_DELAYS_MS.map(delay => {
     const timer = setTimeout(reopenVisibleEditors, delay);
     timer.unref?.();
     return timer;
@@ -1005,7 +986,6 @@ function registerCustomEditorRouter(context: vscode.ExtensionContext): void {
     dispose() {
       activeEditorListener.dispose();
       openDocumentListener.dispose();
-      tabCloseListener.dispose();
       for (const retry of retries) clearTimeout(retry);
     },
   });

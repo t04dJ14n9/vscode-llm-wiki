@@ -94,6 +94,16 @@ async function openQuickFile(page: Page, query: string, waitMs = 4000): Promise<
   await page.waitForTimeout(waitMs);
 }
 
+async function openQuickFileInMarkdownEditor(
+  page: Page,
+  query: string,
+  waitMs = 4000,
+): Promise<void> {
+  await openQuickFile(page, query, waitMs);
+  await runCommandFromPalette(page, 'LLM Wiki: Open In Markdown Editor', waitMs);
+  await expect(page.locator('iframe.webview:visible').first()).toBeVisible({ timeout: 15_000 });
+}
+
 async function openExplorerOutline(page: Page): Promise<void> {
   const modifier = process.platform === 'darwin' ? 'Meta' : 'Control';
   await focusWorkbenchChrome(page);
@@ -130,8 +140,7 @@ async function ensureHostVimMode(page: Page, docNeedle: string, enabled: boolean
 }
 
 async function openMathAndCode(page: Page): Promise<void> {
-  await openQuickFile(page, 'notes/Concepts/Math and Code.md');
-  await expect(page.locator('iframe.webview:visible').first()).toBeVisible({ timeout: 15_000 });
+  await openQuickFileInMarkdownEditor(page, 'notes/Concepts/Math and Code.md');
 }
 
 async function openVimSandbox(
@@ -143,8 +152,7 @@ async function openVimSandbox(
   await page.keyboard.press(`${modifier}+K`);
   await page.keyboard.press('W');
   await page.waitForTimeout(750);
-  await openQuickFile(page, fixture.relativePath, 4000);
-  await expect(page.locator('iframe.webview:visible').first()).toBeVisible({ timeout: 15_000 });
+  await openQuickFileInMarkdownEditor(page, fixture.relativePath, 4000);
   return fixture.marker;
 }
 
@@ -457,16 +465,15 @@ test.describe('LLM Wiki — VS Code Extension E2E', () => {
     await screenshot(page, '05-quick-open-closed');
   });
 
-  test('can open a markdown file', async ({ vsCodePage: page }) => {
+  test('opens a Markdown file in the native editor by default', async ({ vsCodePage: page }) => {
     // Open FlashAttention.md via Quick Open
     await openQuickFile(page, 'FlashAttention', 3000);
 
     await screenshot(page, '06-markdown-file-opened');
 
-    // Check for editor content
-    const editors = page.locator('.editor-instance, .monaco-editor');
-    const editorCount = await editors.count();
-    console.log(`[info] Editor instances: ${editorCount}`);
+    await expect(page.locator('.editor-instance .monaco-editor:visible').first())
+      .toBeVisible({ timeout: 10_000 });
+    await expect(page.locator('iframe.webview:visible')).toHaveCount(0);
 
     await screenshot(page, '07-markdown-editor-content');
   });
@@ -742,8 +749,7 @@ test.describe('LLM Wiki — VS Code Extension E2E', () => {
   });
 
   test('markdown source reveal preserves prose typography and line-number alignment', async ({ vsCodePage: page }) => {
-    await openQuickFile(page, 'notes/Concepts/Native Typography.md', 4000);
-    await expect(page.locator('iframe.webview:visible').first()).toBeVisible({ timeout: 15_000 });
+    await openQuickFileInMarkdownEditor(page, 'notes/Concepts/Native Typography.md', 4000);
 
     const transition = await evaluateLlmWikiWebview<{
       inactive: EditorPixelMetrics;
@@ -842,7 +848,7 @@ test.describe('LLM Wiki — VS Code Extension E2E', () => {
   });
 
   test('markdown selection overlays use the active VS Code theme colors', async ({ vsCodePage: page }) => {
-    await openQuickFile(page, 'notes/Concepts/Native Typography.md', 4000);
+    await openQuickFileInMarkdownEditor(page, 'notes/Concepts/Native Typography.md', 4000);
     const webview = page.locator('iframe.webview:visible').first();
     await expect(webview).toBeVisible({ timeout: 15_000 });
     await page.bringToFront();
@@ -965,7 +971,7 @@ test.describe('LLM Wiki — VS Code Extension E2E', () => {
   });
 
   test('inactive display math source is hidden in the VS Code webview', async ({ vsCodePage: page }) => {
-    await openQuickFile(page, 'Online Softmax');
+    await openQuickFileInMarkdownEditor(page, 'Online Softmax');
 
     await evaluateLlmWikiWebview('m_k = \\max', `
       const heading = view.state.doc.line(6);
@@ -1212,7 +1218,7 @@ test.describe('LLM Wiki — VS Code Extension E2E', () => {
 
   test('arrow down navigation inside code block does not throw error', async ({ vsCodePage: page }) => {
     const modifier = process.platform === 'darwin' ? 'Meta' : 'Control';
-    await openQuickFile(page, 'notes/Concepts/Math and Code.md', 4000);
+    await openQuickFileInMarkdownEditor(page, 'notes/Concepts/Math and Code.md', 4000);
 
     // Listen for VS Code error notifications and console errors
     const errorMessages: string[] = [];
@@ -1713,7 +1719,7 @@ test.describe('LLM Wiki — VS Code Extension E2E', () => {
   });
 
   test('Vim normal mode inserts on the current VS Code webview line after pressing i', async ({ vsCodePage: page }) => {
-    await openQuickFile(page, 'notes/Concepts/Math and Code.md', 4000);
+    await openQuickFileInMarkdownEditor(page, 'notes/Concepts/Math and Code.md', 4000);
 
     const editorArea = page.locator('iframe.webview:visible').first();
     await editorArea.click();
@@ -1773,7 +1779,7 @@ test.describe('LLM Wiki — VS Code Extension E2E', () => {
   });
 
   test('VS Code webview keeps Ctrl+O stable and opens rendered table cells on their source row', async ({ vsCodePage: page }) => {
-    await openQuickFile(page, 'notes/Concepts/Math and Code.md', 4000);
+    await openQuickFileInMarkdownEditor(page, 'notes/Concepts/Math and Code.md', 4000);
 
     const editorArea = page.locator('iframe.webview:visible').first();
     await editorArea.click();

@@ -158,7 +158,7 @@ function loadTsModule(relativePath, mocks = {}) {
   }
 }
 
-test('activation reopens an already-open markdown vault note in the custom editor', async () => {
+test('activation leaves an already-open Markdown vault note in the native editor', async () => {
   const executeCommandCalls = [];
   const activeDocumentUri = { fsPath: '/vault/notes/Concepts/FlashAttention.md', scheme: 'file' };
   let outlineRegisterCount = 0;
@@ -220,18 +220,29 @@ test('activation reopens an already-open markdown vault note in the custom edito
   activate(context);
   await new Promise(resolve => setTimeout(resolve, 0));
 
-  assert.deepEqual(
-    executeCommandCalls.find(([command]) => command === 'vscode.openWith'),
-    [
-      'vscode.openWith',
-      activeDocumentUri,
-      'llm-wiki.markdownEditor',
-    ],
-  );
+  assert.deepEqual(executeCommandCalls.filter(([command]) => command === 'vscode.openWith'), []);
   assert.equal(outlineRegisterCount, 1);
 });
 
-test('activation persistently routes an associated untitled Markdown document without changing its URI', async () => {
+test('activation leaves a subsequently opened Markdown document in the native editor', async () => {
+  const executeCommandCalls = [];
+  const vscode = createVscodeMock({ executeCommandCalls, activeDocumentUri: undefined });
+  const { activate } = loadTsModule('src/extension.ts', createActivationMocks({ vscode }));
+  const markdownUri = {
+    scheme: 'file',
+    fsPath: '/vault/notes/Edited by Cursor.md',
+    path: '/vault/notes/Edited by Cursor.md',
+    toString: () => 'file:///vault/notes/Edited%20by%20Cursor.md',
+  };
+
+  activate({ subscriptions: [] });
+  vscode.__fireOpenDocument({ uri: markdownUri, languageId: 'markdown' });
+  await new Promise(resolve => setImmediate(resolve));
+
+  assert.deepEqual(executeCommandCalls.filter(([command]) => command === 'vscode.openWith'), []);
+});
+
+test('activation leaves an associated untitled Markdown document in the native editor', async () => {
   const executeCommandCalls = [];
   const vscode = createVscodeMock({ executeCommandCalls, activeDocumentUri: undefined });
   const { activate } = loadTsModule('src/extension.ts', createActivationMocks({ vscode }));
@@ -246,10 +257,7 @@ test('activation persistently routes an associated untitled Markdown document wi
   vscode.__fireOpenDocument({ uri: associatedUntitledUri, languageId: 'markdown' });
   await new Promise(resolve => setImmediate(resolve));
 
-  assert.deepEqual(
-    executeCommandCalls.filter(([command]) => command === 'vscode.openWith'),
-    [['vscode.openWith', associatedUntitledUri, 'llm-wiki.markdownEditor']],
-  );
+  assert.deepEqual(executeCommandCalls.filter(([command]) => command === 'vscode.openWith'), []);
 });
 
 test('activation leaves generic untitled Markdown buffers with the native editor', async () => {
@@ -1625,12 +1633,12 @@ test('activation retries reopening a startup PDF while VS Code keeps it in the t
   );
 });
 
-test('custom-editor recovery uses short startup retries plus persistent document routing instead of polling', () => {
+test('PDF editor recovery uses short startup retries plus persistent document routing instead of polling', () => {
   const source = readFileSync(join(packageRoot, 'src', 'extension.ts'), 'utf8');
 
   assert.match(
     source,
-    /STARTUP_CUSTOM_EDITOR_RETRY_DELAYS_MS\s*=\s*\[0,\s*250,\s*1_000\]/,
+    /STARTUP_PDF_EDITOR_RETRY_DELAYS_MS\s*=\s*\[0,\s*250,\s*1_000\]/,
   );
   assert.match(source, /onDidOpenTextDocument/);
   assert.doesNotMatch(source, /STARTUP_CUSTOM_EDITOR_MONITOR_MS/);
