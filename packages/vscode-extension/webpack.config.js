@@ -5,7 +5,7 @@ const dist = path.resolve(__dirname, 'dist');
 const webviewBundleBudget = 7 * 1024 * 1024;
 
 const tsRule = (configFile = 'tsconfig.json', compilerOptions = {}) => ({
-  test: /\.ts$/,
+  test: /\.tsx?$/,
   exclude: /node_modules/,
   use: [{
     loader: 'ts-loader',
@@ -41,6 +41,9 @@ const markdownEditorAliases = {
 };
 
 const pdfEditorWebviewEntry = require.resolve('@llm-wiki/pdf-editor/webview', {
+  paths: [__dirname],
+});
+const embedPdfSpikeEntry = require.resolve('@llm-wiki/pdf-editor/embedpdf-spike', {
   paths: [__dirname],
 });
 const pdfEditorPackageRoot = path.resolve(path.dirname(pdfEditorWebviewEntry), '../..');
@@ -111,6 +114,35 @@ module.exports = [
         ],
       }),
     ],
+    performance: webviewPerformance,
+    devtool: 'source-map',
+  },
+  {
+    name: 'embedpdf-spike',
+    target: 'web',
+    entry: embedPdfSpikeEntry,
+    output: {
+      path: dist,
+      filename: 'embedpdf-spike.js',
+      chunkFilename: 'embedpdf-spike-[name].[contenthash:8].js',
+      publicPath: 'auto',
+    },
+    resolve: {
+      extensions: ['.tsx', '.ts', '.js'],
+      fallback: {
+        crypto: false,
+      },
+    },
+    module: {
+      rules: [
+        tsRule(pdfEditorWebviewTsConfig, { module: 'ESNext' }),
+        {
+          test: /\.wasm$/,
+          type: 'asset/resource',
+          generator: { emit: false },
+        },
+      ],
+    },
     performance: webviewPerformance,
     devtool: 'source-map',
   },

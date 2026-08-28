@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import { createHash } from 'node:crypto';
 import {
+  formatUnknownError,
   pdfHref,
   pdfWebviewToHostMessage,
   type PdfTextFragment,
@@ -466,7 +467,9 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
         case 'pageChanged':
           break;
         case 'error':
-          vscode.window.showErrorMessage(`LLM Wiki PDF: ${String(message.message)}`);
+          vscode.window.showErrorMessage(
+            `LLM Wiki PDF: ${formatUnknownError(message.message, 'Unknown PDF error')}`,
+          );
           break;
       }
     });
@@ -543,7 +546,7 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
       });
       await this.postQueryAnnotations(active);
     } catch (error) {
-      vscode.window.showErrorMessage(`Failed to load PDF: ${String(error)}`);
+      vscode.window.showErrorMessage(`Failed to load PDF: ${formatUnknownError(error)}`);
     }
   }
 

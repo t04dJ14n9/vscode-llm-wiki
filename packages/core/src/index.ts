@@ -10,3 +10,4 @@ export type {
 } from './links/reference-target';
 export { pdfWebviewToHostMessage } from './pdfProtocol';
 export type { PdfWebviewToHostMessage } from './pdfProtocol';
+export { formatUnknownError, structuredErrorCode } from './errors';

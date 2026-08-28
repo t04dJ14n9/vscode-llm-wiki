@@ -5,10 +5,12 @@
   "description": "Shared, source-bundled PDF editor webview for LLM Wiki extensions",
   "exports": {
     "./webview": "./src/webview/pdf-viewer.ts",
+    "./embedpdf-spike": "./src/embedpdf-spike/embedpdf-viewer-spike.tsx",
     "./toolbar-layout": "./src/webview/domain/pdfToolbarLayout.ts"
   },
   "sideEffects": [
-    "./src/webview/pdf-viewer.ts"
+    "./src/webview/pdf-viewer.ts",
+    "./src/embedpdf-spike/embedpdf-viewer-spike.tsx"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.webview.json --noEmit",
@@ -17,14 +19,31 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@llm-wiki/core": "workspace:*",
-    "@embedpdf/engines": "^2.14.3",
+    "@embedpdf/core": "2.14.3",
+    "@embedpdf/engines": "2.14.3",
     "@embedpdf/models": "^2.14.3",
     "@embedpdf/pdfium": "^2.14.3",
+    "@embedpdf/plugin-bookmark": "2.14.3",
+    "@embedpdf/plugin-document-manager": "2.14.3",
+    "@embedpdf/plugin-interaction-manager": "2.14.3",
+    "@embedpdf/plugin-pan": "2.14.3",
+    "@embedpdf/plugin-render": "2.14.3",
+    "@embedpdf/plugin-scroll": "2.14.3",
+    "@embedpdf/plugin-search": "2.14.3",
+    "@embedpdf/plugin-selection": "2.14.3",
+    "@embedpdf/plugin-spread": "2.14.3",
+    "@embedpdf/plugin-thumbnail": "2.14.3",
+    "@embedpdf/plugin-viewport": "2.14.3",
+    "@embedpdf/plugin-zoom": "2.14.3",
+    "@llm-wiki/core": "workspace:*",
     "dompurify": "^3.4.7",
-    "marked": "^13.0.3"
+    "marked": "^13.0.3",
+    "react": "19.2.6",
+    "react-dom": "19.2.6"
   },
   "devDependencies": {
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
     "typescript": "^5.4.0"
   }
 }

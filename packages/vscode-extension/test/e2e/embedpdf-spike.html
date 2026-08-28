@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>EmbedPDF migration spike</title>
+  <style>
+    :root {
+      --vscode-editor-selectionBackground: rgba(79, 118, 191, .42);
+      --vscode-focusBorder: #9bbcff;
+      --vscode-button-background: #365f91;
+      --vscode-button-foreground: #fff;
+      --vscode-button-hoverBackground: #4474aa;
+      --vscode-editorWidget-background: #20252b;
+      --vscode-editorWidget-foreground: #e7ebf0;
+      --vscode-widget-border: #4b5563;
+      --vscode-widget-shadow: rgba(0, 0, 0, .34);
+      --vscode-toolbar-hoverBackground: rgba(127, 127, 127, .18);
+    }
+    html, body, #embedpdf-spike-root { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+    body { color: #202124; font: 13px system-ui, sans-serif; }
+    button { font: inherit; }
+    .embedpdf-loading { display: grid; height: 100%; place-items: center; }
+    .embedpdf-headless-shell { display: grid; grid-template-rows: 42px 1fr; height: 100%; }
+    .embedpdf-headless-toolbar {
+      align-items: center;
+      background: #fff;
+      border-bottom: 1px solid #d9dce1;
+      display: flex;
+      gap: 8px;
+      padding: 0 12px;
+    }
+    .embedpdf-headless-toolbar span { font-weight: 600; margin-right: auto; }
+    .embedpdf-headless-toolbar button,
+    .embedpdf-selection-menu button {
+      background: #fff;
+      border: 1px solid #c9cdd3;
+      border-radius: 4px;
+      padding: 5px 9px;
+    }
+    .embedpdf-headless-viewport { background: #f2f3f5; height: 100%; overflow: auto; }
+    .embedpdf-headless-page { background: #fff; box-shadow: 0 1px 3px #0002; }
+    .embedpdf-selection-menu {
+      background: #fff;
+      border: 1px solid #c9cdd3;
+      border-radius: 6px;
+      box-shadow: 0 4px 12px #0003;
+      display: flex;
+      gap: 5px;
+      left: 0;
+      padding: 5px;
+      pointer-events: auto;
+      position: absolute;
+      white-space: nowrap;
+      z-index: 10;
+    }
+  </style>
+</head>
+<body>
+  <div id="embedpdf-spike-root"></div>
+  <script>
+    window.__mockMessages = [];
+    window.__pdfiumWasmUrl = '/dist/pdfium.wasm';
+    window.acquireVsCodeApi = () => ({
+      getState: () => ({}),
+      setState: () => {},
+      postMessage: async message => {
+        window.__mockMessages.push(message);
+        if (message.type !== 'ready') return;
+        const response = await fetch('/fixtures/gqa-paper.pdf');
+        const data = await response.arrayBuffer();
+        window.postMessage({ type: 'loadPdf', data }, '*');
+      },
+    });
+  </script>
+  <script src="/dist/embedpdf-spike.js"></script>
+</body>
+</html>

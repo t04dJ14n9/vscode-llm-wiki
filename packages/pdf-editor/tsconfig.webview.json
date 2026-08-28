@@ -2,15 +2,16 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "outDir": "dist/webview",
-    "rootDir": "src/webview",
+    "rootDir": "src",
     "lib": ["ES2022", "DOM"],
     "module": "ESNext",
     "moduleResolution": "Bundler",
+    "jsx": "react-jsx",
     "composite": false,
     "declaration": false,
     "declarationMap": false,
     "types": [],
     "sourceMap": true
   },
-  "include": ["src/webview"]
+  "include": ["src/webview", "src/embedpdf-spike"]
 }

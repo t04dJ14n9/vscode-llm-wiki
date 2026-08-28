@@ -4,6 +4,10 @@ export function pdfWebviewHtml(
   webview: vscode.Webview,
   extensionUri: vscode.Uri,
 ): string {
+    const useEmbedPdfHeadlessSpike = true;
+    if (useEmbedPdfHeadlessSpike) {
+      return embedPdfHeadlessSpikeHtml(webview, extensionUri);
+    }
     const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'dist', 'pdf-viewer.js'));
     const wasmUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'dist', 'pdfium.wasm'));
     const nonce = String(Date.now());
@@ -414,3 +418,48 @@ export function pdfWebviewHtml(
 </body>
 </html>`;
   }
+
+function embedPdfHeadlessSpikeHtml(
+  webview: vscode.Webview,
+  extensionUri: vscode.Uri,
+): string {
+  const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(
+    extensionUri,
+    'dist',
+    'embedpdf-spike.js',
+  ));
+  const wasmUri = webview.asWebviewUri(vscode.Uri.joinPath(
+    extensionUri,
+    'dist',
+    'pdfium.wasm',
+  ));
+  const nonce = String(Date.now());
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; base-uri 'none'; form-action 'none'; img-src ${webview.cspSource} blob: data:; script-src 'nonce-${nonce}' ${webview.cspSource} 'wasm-unsafe-eval'; style-src ${webview.cspSource} 'unsafe-inline'; connect-src ${webview.cspSource} blob: data:;">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LLM Wiki PDF — EmbedPDF headless spike</title>
+  <style>
+    html, body, #embedpdf-spike-root { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+    body { color: var(--vscode-editor-foreground); background: var(--vscode-editor-background); font: 13px var(--vscode-font-family, system-ui, sans-serif); }
+    button { font: inherit; }
+    .embedpdf-loading { display: grid; height: 100%; place-items: center; }
+    .embedpdf-headless-shell { display: grid; grid-template-rows: 42px minmax(0, 1fr); height: 100%; }
+    .embedpdf-headless-toolbar { align-items: center; background: var(--vscode-sideBar-background); border-bottom: 1px solid var(--vscode-panel-border); display: flex; gap: 8px; padding: 0 12px; }
+    .embedpdf-headless-toolbar span { font-weight: 600; margin-right: auto; }
+    .embedpdf-headless-toolbar button, .embedpdf-selection-menu button { background: var(--vscode-button-secondaryBackground); border: 1px solid var(--vscode-button-border, transparent); border-radius: 4px; color: var(--vscode-button-secondaryForeground); padding: 5px 9px; }
+    .embedpdf-headless-viewport { background: #303030; height: 100%; min-height: 0; overflow: auto; }
+    .embedpdf-headless-page { background: #fff; box-shadow: 0 1px 8px #0006; }
+    .embedpdf-selection-menu { background: var(--vscode-editorWidget-background); border: 1px solid var(--vscode-panel-border); border-radius: 6px; box-shadow: 0 4px 12px #0006; display: flex; gap: 5px; left: 0; padding: 5px; pointer-events: auto; position: absolute; white-space: nowrap; z-index: 10; }
+  </style>
+</head>
+<body>
+  <div id="embedpdf-spike-root"></div>
+  <script nonce="${nonce}">window.__pdfiumWasmUrl = ${JSON.stringify(wasmUri.toString())};</script>
+  <script nonce="${nonce}" src="${scriptUri.toString()}?v=${nonce}"></script>
+</body>
+</html>`;
+}

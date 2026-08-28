@@ -29,6 +29,16 @@ const server = createServer((_req, res) => {
     return;
   }
 
+  if (url.pathname === '/fixtures/gqa-paper.pdf') {
+    serveFile(join(
+      __dirname,
+      '..', '..', '..', '..',
+      'demo-vault', 'assets',
+      'gqa-training-generalized-multi-query-transformer-models-from-multi-head-checkpoints.pdf',
+    ), 'application/pdf', res);
+    return;
+  }
+
   if (url.pathname === '/fixtures/large-search.pdf') {
     serveBuffer(largeSearchPdfFixture(), 'application/pdf', res);
     return;
