@@ -8,6 +8,7 @@ import tempfile
 import zipfile
 from pathlib import Path
 
+from build_vault_runtime import render_runtime
 from rebuild_indexes import update_indexes
 from vault_checks import validate_vault
 
@@ -15,7 +16,7 @@ from vault_checks import validate_vault
 REPOSITORY = Path(__file__).resolve().parents[2]
 SOURCE = REPOSITORY / "starter-vault"
 DEFAULT_OUTPUT = REPOSITORY / "packages/vscode-extension/resources/llm-wiki-empty-vault.zip"
-EMPTY_RUNTIME_DIRECTORIES = ("assets", "projects/code")
+EMPTY_RUNTIME_DIRECTORIES = ("assets", "projects/code", "vaults/bindings")
 ZIP_TIMESTAMP = (1980, 1, 1, 0, 0, 0)
 
 
@@ -45,12 +46,21 @@ def build_bundle_bytes(source: Path = SOURCE) -> bytes:
     if not root.is_dir() or root.is_symlink():
         raise ValueError("starter source must be a real directory")
     for path in root.rglob("*"):
+        if "node_modules" in path.relative_to(root).parts:
+            continue
         if path.is_symlink():
             raise ValueError(f"starter source may not contain symlinks: {path}")
 
     with tempfile.TemporaryDirectory(prefix="llm-wiki-starter-") as directory:
         staging = Path(directory) / "vault"
-        shutil.copytree(root, staging)
+        shutil.copytree(
+            root,
+            staging,
+            ignore=shutil.ignore_patterns("node_modules", "__pycache__"),
+        )
+        (staging / "tools/llm-wiki/vault.py").write_text(
+            render_runtime(), encoding="utf-8", newline="\n"
+        )
         for relative in EMPTY_RUNTIME_DIRECTORIES:
             (staging / relative).mkdir(parents=True, exist_ok=True)
         update_indexes(staging, check=False)

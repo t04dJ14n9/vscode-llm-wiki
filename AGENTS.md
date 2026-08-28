@@ -15,7 +15,8 @@ requested otherwise.
   embeddings, integrate `llm-wiki-compiler`, or implement the deferred graph UI.
 - Vault behavior is specified by the nearest `AGENTS.md`; there is no general
   LLM Wiki skill. Retain the focused PDF selection, humanizer, arXiv,
-  grounded-citations, and research-paper-writing skills and their installer.
+  grounded-citations, and research-paper-writing skills and their physical
+  adapter renderer.
 
 ## Canonical vault workflow
 
@@ -32,6 +33,23 @@ belongs in `inbox/`, `tasks/`, or `scratch/`. `templates/`, `projects/code/`,
 assets, hidden runtime directories, and skill packages are opaque to indexing
 and validation.
 
+Every admitted textual source has a Markdown snapshot under `raw/` before it
+supports synthesis. Native Markdown and plain text retain their wording and
+order verbatim. HTML, PDF, meeting, and document exports use a conservative
+Markdown transcription that preserves headings, paragraphs, lists, tables,
+code, speaker labels, and visible text without summarizing, translating,
+correcting, or silently filling gaps. Record provenance, retrieval time,
+revision, capture method, body hash, and every omission in metadata. Preserve
+available original non-Markdown bytes under `assets/` when needed for audit.
+A changed upstream source creates a new snapshot; never rewrite an immutable
+one in place.
+
+Use the Python `pdfplumber` library as the default path for extracting text
+from PDFs. Extract page by page, preserve page boundaries and reading order,
+and treat the original PDF as authoritative for layout, figures, tables, and
+mathematical notation. Record extraction failures and every fallback in
+`snapshot.omissions`; never silently repair columns, equations, or OCR output.
+
 `starter-vault/` is the canonical knowledge-empty vault source. Keep
 `packages/vscode-extension/resources/llm-wiki-empty-vault.zip` byte-for-byte
 current with `tools/llm-wiki/build_starter_bundle.py`; the unpacked archive
@@ -41,7 +59,10 @@ Operational prompts and skills, assets, and `.md.tmpl` templates are outside
 the OKF concept-document set and follow their native formats.
 
 Use the nearest `templates/*.md.tmpl` and replace every required
-`{{placeholder}}`. Every graph-visible page except generated `_index.md` has a
+`{{placeholder}}`. Template body headings and order are reference composition,
+not OKF schema: rename, merge, reorder, or omit them when the document reads
+better. Metadata, provenance, citations, and relations remain normative.
+Every graph-visible page except generated `_index.md` has a
 JSON-flow `relations` array. Targets are existing contained `.md` paths
 relative to that wiki root. Direction is current page to target; body links do
 not create edges. Allowed kinds are `references`, `depends-on`, `supported-by`,
@@ -70,6 +91,13 @@ answerability, out-of-scope refusal, recall-coverage, citation-integrity, and
 duplicate-content checks. Semantic checks may use agents or optional local
 models, but they must not become a required embeddings or database runtime.
 
+For normal capture, synthesis, page updates, renames, merges, daily notes, and
+task closure, follow `playbooks/vault-operations.md`. Treat a structural change
+as one atomic graph edit: search for incoming metadata targets and body links,
+update the page and every affected reference together, rebuild navigation, and
+only then append the material log event. Never leave stale paths for a later
+cleanup pass.
+
 Each vault owns one `TAGS.md` registry. Use its canonical tag headings. Unknown
 tags are advisory warnings, not base OKF failures. `verified` may record
 independent machine and `human:<id>` review
@@ -79,6 +107,20 @@ Substantive content pages require tags. Root operational/navigation documents
 and operational templates are tagless. Skills follow their own native metadata
 schema and may declare tags when useful; skill tags are outside the vault tag
 registry, indexing, validation, and graph.
+
+## Outline navigation
+
+Generated indexes and logs are VS Code Outline trees, not flat link lists.
+Indexes use content domains and semantic subtopics as headings; each linked
+document is a compact `- [title](target) - meaningful description` list leaf.
+Types such as `Paper` and numeric ranges are not topics. Each vault owns
+vocabulary and parent relationships through `TAGS.md` frontmatter
+`index_topics`; shared scripts contain no domain names. Logs use year, month,
+and day headings, with each event represented by one parseable list leaf.
+The populated-vault `tools/llm-wiki/vault.py rebuild` command owns these
+shapes; validation rejects
+flat entries and malformed hierarchy, while warning when a semantic section or
+log day exceeds 20 direct entries so a maintainer can add a meaningful split.
 
 ## Daily active recall
 
@@ -121,9 +163,7 @@ reusable mechanisms, and cross-repository synthesis stay in the outer vault.
 ## Viewer conversations and Queries
 
 Canonical Query discovery is `wiki/queries/*.md` for a knowledge vault and
-`docs/llm-wiki/queries/*.md` for a directly opened code repository. For one
-release, read but do not write legacy `queries/*.md`,
-`projects/*/queries/*.md`, and `wiki/learning/*.md`.
+`docs/llm-wiki/queries/*.md` for a directly opened code repository.
 
 File a Query only when the answer is substantial, selection-grounded,
 evidence-supported, durable or expensive to reconstruct, novel, clearly
@@ -152,17 +192,66 @@ vscode://llm-wiki.llm-wiki-vscode/open-anchor?target=v1.<generated-payload>
 For material demo-vault changes run:
 
 ```bash
-python3 tools/llm-wiki/rebuild_indexes.py --vault demo-vault
-python3 tools/llm-wiki/rebuild_indexes.py --vault demo-vault --check
-python3 tools/llm-wiki/validate_vault.py --vault demo-vault
+python3 starter-vault/tools/llm-wiki/vault.py rebuild --check
+python3 starter-vault/tools/llm-wiki/vault.py validate
+python3 demo-vault/tools/llm-wiki/vault.py rebuild --check
+python3 demo-vault/tools/llm-wiki/vault.py validate
 python3 tools/llm-wiki/build_starter_bundle.py --check
 git lfs ls-files
 git diff --check
 git status --short
 ```
 
+`vault.py validate` runs repository-pinned markdownlint for all owned Markdown,
+including generated navigation and canonical skill documentation. Validation
+errors block completion. Warnings are advisory: resolve them when they are in
+scope, or disclose the warning and the reason it was deferred. Do not enforce
+this policy with agent Stop hooks.
+
 For extension behavior also run focused tests, lint, typecheck, build, and the
 appropriate browser/VS Code E2E path. Append material vault events with
-`tools/llm-wiki/append_log.py`; never rewrite earlier log bytes. Never claim human verification
+the log template, then normalize with the vault runtime; never rewrite earlier log bytes. Never claim human verification
 from automated checks. Never commit, push, publish, sync code, or write back
 externally without authority. Never expose secrets or private identifiers.
+
+## Portable vault conventions
+
+Each vault declares its prose language and response-language policy in its
+nearest `AGENTS.md`. Use that language for new reader-facing synthesis while
+preserving source quotes, identifiers, commands, paths, schema keys, and
+established technical terms. Unless the user asks otherwise, answer in the
+language of the current request. When prose polish is requested, use the
+`humanizer` skill without rewriting immutable evidence or generated files.
+
+One Markdown file under `tasks/` represents one actionable goal. Its checklist
+may contain several steps, but task pages are not report bundles, idea
+inventories, migration manifests, or audit logs. Keep manifests and
+intermediate machine output under `scratch/`; publish durable reports under
+`output/`, and link them from a task only when follow-up work remains.
+
+Before importing a legacy raw corpus, wiki export, meeting archive, or other
+large evidence collection, follow `playbooks/source-corpus-curation.md`. Audit
+secrets, source identity, duplicate URLs and hashes, frontmatter, attachments,
+and collisions before any destination write. Freeze exactly one disposition
+for every source record. Never include a secret value in an audit artifact.
+
+Register another vault with one portable `vaults/<id>.md` card whose type is
+`Knowledge Vault`. The card stores canonical identity, tracked ref, observed
+revision and time, search roots, ownership, and status, but never a local path.
+Its ID implies ignored local binding `vaults/bindings/<id>`, which may be an
+existing directory or an absolute symlink established after identity
+verification. Do not use Git submodules for vault federation.
+
+Federated search is read-only discovery. Search only roots declared by active
+cards, read the child vault's own instructions before interpreting results, and
+write knowledge only in the vault that owns the subject. A root-vault page may
+link to a child page in its body, but `relations` remain local to one `wiki/`
+root and never target another vault.
+
+`.agents/skills/` is the canonical skill-package location. Initialized vaults
+contain generated physical wrappers under `.claude/skills/`, `.cursor/skills/`,
+and `.codex/skills/`, plus physical Cursor commands and an always-applied rule.
+Regenerate these small adapters with `.agents/render_agent_adapters.py`; never
+copy full skill bodies into them. Credentials, cookies, CLI state, MCP
+configuration, and tokens remain in the local environment or secret manager
+and must not enter a skill package or vault.

@@ -1,7 +1,7 @@
 ---
 type: "Paper"
 title: "GQA: Training Generalized Multi-Query Transformer Models from Multi-Head Checkpoints"
-description: "Immutable arXiv snapshot of GQA: Training Generalized Multi-Query Transformer Models from Multi-Head Checkpoints."
+description: "Multi-query attention (MQA), which only uses a single key-value head, drastically speeds up decoder inference."
 resource: "https://arxiv.org/abs/2305.13245v3"
 tags: ["paper"]
 status: "stable"
@@ -13,33 +13,12 @@ source_url: "https://arxiv.org/abs/2305.13245v3"
 ingested: "2026-08-13"
 submitted: "2023-05-22"
 revised: "2023-12-23"
-sha256: "1d8eaf08298ae5d0ca8fcf1454e7732f99fe4bd4eaa1cab858fc5b302399e794"
+sha256: "4fc60f04513b1cb2113942861118ab8c0da7ff48b93442a78c73177a2784f74b"
 arxiv: {"id": "2305.13245", "version": 3}
 license: {"id": "CC-BY-4.0", "url": "https://creativecommons.org/licenses/by/4.0/"}
 attachment: {"resource": "../assets/gqa-training-generalized-multi-query-transformer-models-from-multi-head-checkpoints.pdf", "media_type": "application/pdf", "bytes": 269116, "sha256": "ba9094fe73db9bf515d47ae8b2d502fee9d8a6c7b1327e197ddb160f4c63b94a", "role": "original"}
 extraction: {"tool": "pdftotext", "version": "pdftotext version 26.04.0"}
 ---
-
-# GQA: Training Generalized Multi-Query Transformer Models from Multi-Head Checkpoints
-
-## Source metadata
-
-- **Authors:** Ainslie, Joshua, Lee-Thorp, James, de Jong, Michiel, Zemlyanskiy, Yury, Lebrón, Federico, Sanghai, Sumit
-- **arXiv:** [2305.13245v3](https://arxiv.org/abs/2305.13245v3)
-- **Submitted:** 2023-05-22
-- **Revised:** 2023-12-23
-- **License:** [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)
-- **Local attachment:** [Open the archived PDF](../assets/gqa-training-generalized-multi-query-transformer-models-from-multi-head-checkpoints.pdf)
-
-> Extraction notice: The text below was produced mechanically with
-> `pdftotext version 26.04.0`. Reading order, equations, tables, figures, and
-> footnotes may be lossy; use the archived PDF as the visual authority.
-
-## Abstract
-
-Multi-query attention (MQA), which only uses a single key-value head, drastically speeds up decoder inference. However, MQA can lead to quality degradation, and moreover it may not be desirable to train a separate model just for faster inference. We (1) propose a recipe for uptraining existing multi-head language model checkpoints into models with MQA using 5% of original pre-training compute, and (2) introduce grouped-query attention (GQA), a generalization of multi-query attention which uses an intermediate (more than one, less than number of query heads) number of key-value heads. We show that uptrained GQA achieves quality close to multi-head attention with comparable speed to MQA.
-
-## Mechanically extracted full text
 
                                              GQA: Training Generalized Multi-Query Transformer Models from
                                                                Multi-Head Checkpoints

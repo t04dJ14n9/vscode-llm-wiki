@@ -55,8 +55,15 @@ class StarterBundleTests(unittest.TestCase):
                 "wiki/queries/_index.md",
                 "projects/code/",
                 "assets/",
+                "tools/llm-wiki/vault.py",
             }
             self.assertTrue(required.issubset(names))
+            runtime_python = tuple(
+                name for name in names
+                if name.endswith(".py") and "/.agents/skills/" not in f"/{name}"
+            )
+            self.assertEqual(runtime_python, ("tools/llm-wiki/vault.py",))
+            self.assertFalse(any("/arxiv/" in f"/{name}" for name in names))
             for name in names:
                 path = PurePosixPath(name)
                 self.assertFalse(path.is_absolute())

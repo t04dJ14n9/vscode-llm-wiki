@@ -1,7 +1,7 @@
 ---
 type: "Paper"
 title: "Direct Preference Optimization: Your Language Model is Secretly a Reward Model"
-description: "Immutable arXiv snapshot of Direct Preference Optimization: Your Language Model is Secretly a Reward Model."
+description: "While large-scale unsupervised language models (LMs) learn broad world knowledge and some reasoning skills, achieving precise control of their behavior is difficult due to the completely unsupervised nature of their training."
 resource: "https://arxiv.org/abs/2305.18290v3"
 tags: ["paper"]
 status: "stable"
@@ -13,33 +13,12 @@ source_url: "https://arxiv.org/abs/2305.18290v3"
 ingested: "2026-08-13"
 submitted: "2023-05-29"
 revised: "2024-07-29"
-sha256: "848cdcc2b178873ddc35ca322f76e98016577175eeb12211254d5feca6c28fc2"
+sha256: "59b7d34468968b3813191ba49da9f28fe8e8224263ecca519f18f3ff06cd1a10"
 arxiv: {"id": "2305.18290", "version": 3}
 license: {"id": "CC-BY-4.0", "url": "https://creativecommons.org/licenses/by/4.0/"}
 attachment: {"resource": "../assets/direct-preference-optimization-your-language-model-is-secretly-a-reward-model.pdf", "media_type": "application/pdf", "bytes": 1299212, "sha256": "92cb3a2b71362acda98a789b03d88688fd33cf5fcf13f81d2b1de30ee7d3b67a", "role": "original"}
 extraction: {"tool": "pdftotext", "version": "pdftotext version 26.04.0"}
 ---
-
-# Direct Preference Optimization: Your Language Model is Secretly a Reward Model
-
-## Source metadata
-
-- **Authors:** Rafailov, Rafael, Sharma, Archit, Mitchell, Eric, Ermon, Stefano, Manning, Christopher D., Finn, Chelsea
-- **arXiv:** [2305.18290v3](https://arxiv.org/abs/2305.18290v3)
-- **Submitted:** 2023-05-29
-- **Revised:** 2024-07-29
-- **License:** [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)
-- **Local attachment:** [Open the archived PDF](../assets/direct-preference-optimization-your-language-model-is-secretly-a-reward-model.pdf)
-
-> Extraction notice: The text below was produced mechanically with
-> `pdftotext version 26.04.0`. Reading order, equations, tables, figures, and
-> footnotes may be lossy; use the archived PDF as the visual authority.
-
-## Abstract
-
-While large-scale unsupervised language models (LMs) learn broad world knowledge and some reasoning skills, achieving precise control of their behavior is difficult due to the completely unsupervised nature of their training. Existing methods for gaining such steerability collect human labels of the relative quality of model generations and fine-tune the unsupervised LM to align with these preferences, often with reinforcement learning from human feedback (RLHF). However, RLHF is a complex and often unstable procedure, first fitting a reward model that reflects the human preferences, and then fine-tuning the large unsupervised LM using reinforcement learning to maximize this estimated reward without drifting too far from the original model. In this paper we introduce a new parameterization of the reward model in RLHF that enables extraction of the corresponding optimal policy in closed form, allowing us to solve the standard RLHF problem with only a simple classification loss. The resulting algorithm, which we call Direct Preference Optimization (DPO), is stable, performant, and computationally lightweight, eliminating the need for sampling from the LM during fine-tuning or performing significant hyperparameter tuning. Our experiments show that DPO can fine-tune LMs to align with human preferences as well as or better than existing methods. Notably, fine-tuning with DPO exceeds PPO-based RLHF in ability to control sentiment of generations, and matches or improves response quality in summarization and single-turn dialogue while being substantially simpler to implement and train.
-
-## Mechanically extracted full text
 
                                                      Direct Preference Optimization:
                                              Your Language Model is Secretly a Reward Model

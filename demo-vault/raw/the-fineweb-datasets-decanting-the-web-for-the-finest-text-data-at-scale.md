@@ -1,7 +1,7 @@
 ---
 type: "Paper"
 title: "The FineWeb Datasets: Decanting the Web for the Finest Text Data at Scale"
-description: "Immutable arXiv snapshot of The FineWeb Datasets: Decanting the Web for the Finest Text Data at Scale."
+description: "The performance of a large language model (LLM) depends heavily on the quality and size of its pretraining dataset."
 resource: "https://arxiv.org/abs/2406.17557v2"
 tags: ["paper"]
 status: "stable"
@@ -13,33 +13,12 @@ source_url: "https://arxiv.org/abs/2406.17557v2"
 ingested: "2026-08-13"
 submitted: "2024-06-25"
 revised: "2024-10-31"
-sha256: "17a8c0fe59104cd84cac6fc2facd72328edfcd61983b2517960ff60f4f37bc1e"
+sha256: "290047736ff852370033770f73a1e7b5cb4666e747c9ae496174183bcd2a8711"
 arxiv: {"id": "2406.17557", "version": 2}
 license: {"id": "CC-BY-4.0", "url": "https://creativecommons.org/licenses/by/4.0/"}
 attachment: {"resource": "../assets/the-fineweb-datasets-decanting-the-web-for-the-finest-text-data-at-scale.pdf", "media_type": "application/pdf", "bytes": 3137041, "sha256": "ae632bd6618d2566e708962670f27ab1fbc5ba9bc8de3acaceee8fbda85fbdd4", "role": "original"}
 extraction: {"tool": "pdftotext", "version": "pdftotext version 26.04.0"}
 ---
-
-# The FineWeb Datasets: Decanting the Web for the Finest Text Data at Scale
-
-## Source metadata
-
-- **Authors:** Penedo, Guilherme, Kydlíček, Hynek, allal, Loubna Ben, Lozhkov, Anton, Mitchell, Margaret, Raffel, Colin, Von Werra, Leandro, Wolf, Thomas
-- **arXiv:** [2406.17557v2](https://arxiv.org/abs/2406.17557v2)
-- **Submitted:** 2024-06-25
-- **Revised:** 2024-10-31
-- **License:** [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)
-- **Local attachment:** [Open the archived PDF](../assets/the-fineweb-datasets-decanting-the-web-for-the-finest-text-data-at-scale.pdf)
-
-> Extraction notice: The text below was produced mechanically with
-> `pdftotext version 26.04.0`. Reading order, equations, tables, figures, and
-> footnotes may be lossy; use the archived PDF as the visual authority.
-
-## Abstract
-
-The performance of a large language model (LLM) depends heavily on the quality and size of its pretraining dataset. However, the pretraining datasets for state-of-the-art open LLMs like Llama 3 and Mixtral are not publicly available and very little is known about how they were created. In this work, we introduce FineWeb, a 15-trillion token dataset derived from 96 Common Crawl snapshots that produces better-performing LLMs than other open pretraining datasets. To advance the understanding of how best to curate high-quality pretraining datasets, we carefully document and ablate all of the design choices used in FineWeb, including in-depth investigations of deduplication and filtering strategies. In addition, we introduce FineWeb-Edu, a 1.3-trillion token collection of educational text filtered from FineWeb. LLMs pretrained on FineWeb-Edu exhibit dramatically better performance on knowledge- and reasoning-intensive benchmarks like MMLU and ARC. Along with our datasets, we publicly release our data curation codebase and all of the models trained during our ablation experiments.
-
-## Mechanically extracted full text
 
                                              The FineWeb Datasets: Decanting the Web for the
                                                        Finest Text Data at Scale

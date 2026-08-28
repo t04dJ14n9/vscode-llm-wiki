@@ -5,12 +5,15 @@ description: "Canonical tags and their intended use in the demo knowledge vault.
 status: "stable"
 scope: "vault"
 generated: {"by": "codex/gpt-5.6", "at": "2026-08-25T00:20:05+08:00"}
+index_topics: {"language-models":{"title":"Language Models"},"architecture":{"title":"Architecture","parent":"language-models"},"attention":{"title":"Attention","parent":"architecture"},"inference":{"title":"Inference","parent":"language-models"},"sampling":{"title":"Sampling","parent":"inference"},"tokenization":{"title":"Tokenization","parent":"language-models"},"training-systems":{"title":"Training Systems","parent":"language-models"},"distributed-training":{"title":"Distributed Training","parent":"training-systems"},"numerics":{"title":"Numerics","parent":"training-systems"},"optimization":{"title":"Optimization","parent":"training-systems"},"pretraining":{"title":"Pretraining","parent":"language-models"},"post-training":{"title":"Post-training","parent":"language-models"},"alignment":{"title":"Alignment","parent":"post-training"},"reinforcement-learning":{"title":"Reinforcement Learning","parent":"post-training"},"data":{"title":"Data","parent":"language-models"},"data-curation":{"title":"Data Curation","parent":"data"},"datasets":{"title":"Datasets","parent":"data"},"evaluation":{"title":"Evaluation","parent":"language-models"},"small-models":{"title":"Small Models","parent":"language-models"},"operations":{"title":"Vault Operations"},"knowledge-vault":{"title":"Knowledge Vaults","parent":"operations"},"federated-search":{"title":"Federated Search","parent":"knowledge-vault"},"project-nanochat":{"title":"Nanochat"}}
 ---
 
 # Demo vault tag registry
 
 Use canonical tags from this page in published frontmatter. Add a tag here with
 a direct description before relying on it as a stable browsing category.
+The frontmatter `index_topics` mapping owns the demo's Outline taxonomy; the
+shared generator only interprets that data and contains no domain vocabulary.
 
 ## alignment
 
@@ -48,6 +51,10 @@ Training computations coordinated across devices or workers.
 
 Methods and artifacts used to assess model capabilities or quality.
 
+## federated-search
+
+Discovery across independently maintained vaults through portable registry cards.
+
 ## inference
 
 Model execution after training, including decoding and serving behavior.
@@ -55,6 +62,10 @@ Model execution after training, including decoding and serving behavior.
 ## language-models
 
 Broad language-model knowledge that spans more specific mechanisms.
+
+## knowledge-vault
+
+An independently maintained knowledge repository registered for discovery without copying its graph.
 
 ## numerics
 

@@ -1,7 +1,7 @@
 ---
 type: "Paper"
 title: "SmolLM2: When Smol Goes Big -- Data-Centric Training of a Small Language Model"
-description: "Immutable arXiv snapshot of SmolLM2: When Smol Goes Big -- Data-Centric Training of a Small Language Model."
+description: "While large language models have facilitated breakthroughs in many applications of artificial intelligence, their inherent largeness makes them computationally expensive and challenging to deploy in resource-constrained settings."
 resource: "https://arxiv.org/abs/2502.02737v1"
 tags: ["paper"]
 status: "stable"
@@ -13,33 +13,12 @@ source_url: "https://arxiv.org/abs/2502.02737v1"
 ingested: "2026-08-13"
 submitted: "2025-02-04"
 revised: "2025-02-04"
-sha256: "9efc96de4971c862cfac03ac03c6367a6ab0b83fa67290a525e580e977e680fd"
+sha256: "1a27861eb5bdc90dc80a414c861f54532cd2e2b6ba2e5ea615809710ec6f4c1d"
 arxiv: {"id": "2502.02737", "version": 1}
 license: {"id": "CC-BY-4.0", "url": "https://creativecommons.org/licenses/by/4.0/"}
 attachment: {"resource": "../assets/smollm2-when-smol-goes-big-data-centric-training-of-a-small-language-model.pdf", "media_type": "application/pdf", "bytes": 640228, "sha256": "a95fbda201d21cd25c89e949636373d36c288bd2d287e3cabd208e2041ea36d3", "role": "original"}
 extraction: {"tool": "pdftotext", "version": "pdftotext version 26.04.0"}
 ---
-
-# SmolLM2: When Smol Goes Big -- Data-Centric Training of a Small Language Model
-
-## Source metadata
-
-- **Authors:** Allal, Loubna Ben, Lozhkov, Anton, Bakouch, Elie, Blázquez, Gabriel Martín, Penedo, Guilherme, Tunstall, Lewis, Marafioti, Andrés, Kydlíček, Hynek, Lajarín, Agustín Piqueres, Srivastav, Vaibhav, Lochner, Joshua, Fahlgren, Caleb, Nguyen, Xuan-Son, Fourrier, Clémentine, Burtenshaw, Ben, Larcher, Hugo, Zhao, Haojun, Zakka, Cyril, Morlon, Mathieu, Raffel, Colin, von Werra, Leandro, Wolf, Thomas
-- **arXiv:** [2502.02737v1](https://arxiv.org/abs/2502.02737v1)
-- **Submitted:** 2025-02-04
-- **Revised:** 2025-02-04
-- **License:** [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)
-- **Local attachment:** [Open the archived PDF](../assets/smollm2-when-smol-goes-big-data-centric-training-of-a-small-language-model.pdf)
-
-> Extraction notice: The text below was produced mechanically with
-> `pdftotext version 26.04.0`. Reading order, equations, tables, figures, and
-> footnotes may be lossy; use the archived PDF as the visual authority.
-
-## Abstract
-
-While large language models have facilitated breakthroughs in many applications of artificial intelligence, their inherent largeness makes them computationally expensive and challenging to deploy in resource-constrained settings. In this paper, we document the development of SmolLM2, a state-of-the-art "small" (1.7 billion parameter) language model (LM). To attain strong performance, we overtrain SmolLM2 on ~11 trillion tokens of data using a multi-stage training process that mixes web text with specialized math, code, and instruction-following data. We additionally introduce new specialized datasets (FineMath, Stack-Edu, and SmolTalk) at stages where we found existing datasets to be problematically small or low-quality. To inform our design decisions, we perform both small-scale ablations as well as a manual refinement process that updates the dataset mixing rates at each stage based on the performance at the previous stage. Ultimately, we demonstrate that SmolLM2 outperforms other recent small LMs including Qwen2.5-1.5B and Llama3.2-1B. To facilitate future research on LM development as well as applications of small LMs, we release both SmolLM2 as well as all of the datasets we prepared in the course of this project.
-
-## Mechanically extracted full text
 
                                                                         SmolLM2: When Smol Goes Big —
                                                                   Data-Centric Training of a Small Language Model

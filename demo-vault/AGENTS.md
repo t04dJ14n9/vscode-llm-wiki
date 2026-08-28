@@ -5,6 +5,8 @@ description: "Normative AGENTS-only workflow for the graph-ready demo vault."
 status: "stable"
 scope: "vault"
 vault_timezone: "Asia/Shanghai"
+content_language: "en"
+response_language_policy: "match-user"
 generated: {"by": "codex/gpt-5.6", "at": "2026-08-25T00:57:53+08:00"}
 ---
 
@@ -12,11 +14,17 @@ generated: {"by": "codex/gpt-5.6", "at": "2026-08-25T00:57:53+08:00"}
 
 This file is the complete normative workflow. No LLM Wiki skill is required.
 
-Use installed focused skills when their trigger applies: `arxiv` for
-version-pinned paper discovery, `grounded-citations` for claim-level evidence,
+Use installed focused skills when their trigger applies:
+`grounded-citations` for claim-level evidence,
 `research-paper-writing` for academic manuscripts, `pdf` for exact PDF regions,
 and `humanizer` for requested prose polish. The vault workflow in this file
 remains authoritative for placement, metadata, validation, and logging.
+
+`.agents/skills/` contains the complete canonical packages. Generated physical
+wrappers under `.claude/skills/`, `.cursor/skills/`, and `.codex/skills/` make
+them available immediately without plugins or symlinks; Cursor also receives
+physical commands and an always-applied rule. Regenerate only those wrappers
+with the upstream initializer; populated vaults do not carry renderer code.
 
 ## Start every study or maintenance session
 
@@ -25,7 +33,30 @@ remains authoritative for placement, metadata, validation, and logging.
 3. Preserve every human-owned Goals, review-answer, and Notes marker verbatim.
 4. Search titles, tags, bodies, and Query selection IDs before writing.
 
+## Language and voice
+
+Write durable prose in the vault's `content_language`, which is English in
+this demo. Keep established technical terms in their conventional form rather
+than translating them mechanically. When speaking with a user, answer in the
+language used in the request unless the user asks for another language; this
+conversation rule does not silently change the vault's content language.
+
+Use the `humanizer` skill for reader-facing synthesis. Prefer a concrete
+subject, a direct verb, and a thesis in the opening paragraph. Preserve facts,
+citations, source IDs, relations, selection identities, quotations, and
+human-owned review markers exactly. Do not humanize immutable evidence,
+generated navigation, logs, or code.
+
 Daily generation is lazy and filesystem-only: no scheduler or extension command is required. Pull linked `**Learned**` entries from today's log into the cohort. Review older cohorts at +1, +3, +7, +14, +30, +60, and +90 days. Repeat Query titles with blank human answer blocks; use “I can explain…” checkboxes for Concepts, Comparisons, and Entities. Include at most ten unresolved reviews, oldest first and Queries first. Incomplete reviews roll forward; outcomes do not alter the fixed schedule.
+
+## Outline navigation
+
+Generated `_index.md` files are VS Code Outline trees. Content domains and
+semantic subtopics are headings; document forms and numeric ranges are not
+topics. Every linked document is a compact list leaf with a meaningful
+one-line description. `_log.md` uses year, month, and day headings, with
+individual events as parseable list leaves. Validation warns when a section
+exceeds 20 direct leaves and should gain a meaningful child topic.
 
 ## Place knowledge
 
@@ -34,7 +65,24 @@ Daily generation is lazy and filesystem-only: no scheduler or extension command 
 - `playbooks` remains outside the graph as operational guidance.
 - `raw` is flat immutable textual evidence; `assets` is flat binary evidence through Git LFS.
 - `inbox`, `tasks`, and `scratch` are non-durable workbench state.
-- `templates` is opaque. Copy the closest `.md.tmpl` and replace every required placeholder.
+- `tasks` contains one Markdown file per actionable outcome. Checklists may
+  describe steps toward that outcome, but status reports, audit output, and
+  manifests belong in `output` once complete.
+- `templates` is opaque. Copy the closest `.md.tmpl` and replace every required placeholder. Reader-facing headings and order are reference-only; rename, merge, reorder, or omit them without weakening metadata, provenance, citations, or relations.
+
+Capture every admitted textual source as a Markdown snapshot under `raw/`
+before synthesis. Preserve native text verbatim; conservatively transcribe
+HTML, PDF, meeting, and document exports without summarizing, translating,
+correcting, reordering, or hiding gaps. Record source identity, retrieval time,
+revision, capture method, body hash, and omissions. Keep available original
+non-Markdown bytes under `assets/` when needed for audit, and create a new
+snapshot for a new upstream revision.
+
+Use the Python `pdfplumber` library as the default path for extracting text
+from PDFs. Extract page by page, preserve page boundaries and reading order,
+and treat the original PDF as authoritative for layout, figures, tables, and
+mathematical notation. Record extraction failures and every fallback in
+`snapshot.omissions`; never silently repair columns, equations, or OCR output.
 
 Durable-page templates show one complete JSON-flow `sources` item and one
 `relations` item. Replace each sample with real entries, or replace the entire
@@ -89,6 +137,15 @@ until it clears the bar. Record the admission basis in the active task or bulk
 ingestion manifest; do not add new graph nodes merely to eliminate an orphan or
 increase link density.
 
+## Curate source corpora
+
+Before copying a legacy export or other large evidence set, follow
+`playbooks/source-corpus-curation.md`. Audit for secrets and malformed records,
+deduplicate by canonical source identity or exact hash, route implementation
+evidence to its owning repository, and freeze one disposition per source.
+Move the completed manifest and report to `output`; they are process evidence,
+not tasks or graph nodes.
+
 ## Ingest a corpus
 
 For a material batch of sources, use
@@ -98,6 +155,14 @@ evidence extraction, canonicalization, and prose authoring: candidate structure
 is reviewed and frozen before pages are written. Candidate manifests belong in
 the workbench and never become graph-visible knowledge or a second source of
 truth after publication.
+
+## Operate and maintain the vault
+
+Follow `playbooks/vault-operations.md` for normal capture, synthesis,
+daily-note creation, page updates, renames, merges, supersession, and task
+closure. Structural changes are atomic graph edits: search incoming and
+outgoing `relations`, sources, daily references, and body links; repair them in
+the same change; rebuild navigation; then record the material event.
 
 After deterministic validation, test whether representative in-scope questions
 are answerable with citations, out-of-scope questions are declined, important
@@ -123,9 +188,19 @@ search the filesystem for candidates, clone, or sync automatically.
 Repository-specific knowledge belongs in the repository's `docs/llm-wiki/`.
 Nanochat is reference-only in this demo.
 
+## Register child vaults
+
+Use one portable `vaults/<vault-id>.md` card for each independently maintained
+knowledge vault. A card records Git identity, tracked ref, observed revision,
+profile, entrypoint, search roots, and active/reference status. Its optional
+local binding is derived as ignored `vaults/bindings/<vault-id>`; never store a
+machine-local path or use a Git submodule. Treat child content as opaque, obey
+the child's own instructions when editing it, and use pinned URLs rather than
+cross-vault `relations` for attribution.
+
 ## File Queries
 
-File a Query only when the answer is substantial, grounded, durable, novel, scoped, complete about limits, and safe. Use `templates/query.md.tmpl`; preserve synthesis rather than transcripts. Every Query needs `condensed_summary`, `conversation.selection_id`, unique sources, exact source-ID-bound anchors, answer, evidence, limitations, related pages, and relations. Reuse exact exported Markdown/PDF source URIs.
+File a Query only when the answer is substantial, grounded, durable, novel, scoped, complete about limits, and safe. Use `templates/query.md.tmpl` as a composition reference; preserve synthesis rather than transcripts. Every Query needs `condensed_summary`, `conversation.selection_id`, unique sources, exact source-ID-bound anchors, answer, evidence, limitations, related-page context, and relations, but no fixed body headings or order. Reuse exact exported Markdown/PDF source URIs.
 
 Valid exported `open_uri` values begin with
 `cursor://llm-wiki.llm-wiki-vscode/open-anchor` or
@@ -135,11 +210,15 @@ links or wikilinks.
 
 ## Finish
 
+From the vault root, run `python3 tools/llm-wiki/vault.py rebuild --check` and
+`python3 tools/llm-wiki/vault.py validate`. Validation includes
+repository-pinned markdownlint. Errors block completion; warnings are advisory
+and may be deferred when the reason is disclosed. Do not add agent Stop hooks.
 Rebuild indexes, validate placement/relations/daily notes/provenance/bindings,
 inspect LFS, run `git diff --check`, and refresh Query annotations. Material
 corpus ingests also complete every semantic gate in the bulk-ingestion playbook
-and retain their report in `tasks` or `output`. Record each
-material event with `tools/llm-wiki/append_log.py`; `_log.md` is oldest-first
+and retain their report in `output`. Record each
+material event directly from the log template, then run `vault.py rebuild`; `_log.md` is oldest-first
 and append-only, so never insert, reorder, condense, or rewrite an earlier
 event. Use `learned`, `changed`, or `maintained` as the event kind. Never commit,
 push, sync a code binding, or write externally without explicit authority.

@@ -1,0 +1,11 @@
+{
+  "name": "llm-wiki-vault-runtime",
+  "private": true,
+  "scripts": {
+    "validate": "python3 tools/llm-wiki/vault.py validate",
+    "rebuild": "python3 tools/llm-wiki/vault.py rebuild"
+  },
+  "devDependencies": {
+    "markdownlint-cli2": "0.23.2"
+  }
+}

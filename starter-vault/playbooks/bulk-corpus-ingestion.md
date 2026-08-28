@@ -29,9 +29,11 @@ provenance rules remain authoritative.
 
 - Define the corpus boundary, inclusion and exclusion rules, expected source
   count, and the questions the corpus should support.
-- Archive or identify every source according to its license and the vault's
-  provenance rules. Raw textual evidence remains flat under `raw/`; eligible
-  binaries remain flat under `assets/` and use Git LFS.
+- Capture every admitted textual source as a faithful Markdown snapshot under
+  `raw/` according to `playbooks/vault-operations.md`. Retain eligible original
+  binaries under `assets/` through Git LFS. Do not extract candidates from a
+  summary, transient download, or agent memory when the source can be
+  preserved.
 - Search existing durable pages before proposing new targets.
 - Copy `templates/bulk-ingestion-manifest.json.tmpl` into `tasks` or `scratch`,
   replace every placeholder, and keep it outside the knowledge graph.
@@ -124,3 +126,10 @@ single primary paper can justify a durable page, while a frequently mentioned
 term can remain too shallow or promotional to keep. Semantic evaluations are
 sampled evidence about retrieval behavior, not proof that every future question
 will be answered correctly.
+
+## Artifact placement override
+
+Keep the frozen ingestion manifest and intermediate machine output under
+`scratch/`, not `tasks/`. Publish evaluation and migration reports under
+`output/`. A one-goal task may link to those artifacts when work remains, but
+it does not become their storage directory.

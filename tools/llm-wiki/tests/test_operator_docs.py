@@ -11,7 +11,6 @@ SKILLS_ROOT = REPOSITORY / ".agents/skills"
 SKILL_FILES = {
     "pdf": ("SKILL.md", "scripts/extract_selection.py"),
     "humanizer": ("SKILL.md", "LICENSE"),
-    "arxiv": ("SKILL.md", "LICENSE"),
     "grounded-citations": ("SKILL.md", "LICENSE"),
     "research-paper-writing": ("SKILL.md", "LICENSE"),
 }
@@ -115,7 +114,6 @@ class OperatorDocumentationTests(unittest.TestCase):
             "write_file",
         )
         expected_tags = {
-            "arxiv": "tags: [research, arxiv, papers, academic, provenance]",
             "grounded-citations": (
                 "tags: [research, citations, grounding, sources, fact-checking]"
             ),
@@ -131,10 +129,8 @@ class OperatorDocumentationTests(unittest.TestCase):
 
     def test_documented_producer_clis_are_runnable(self) -> None:
         for script in (
-            "append_log.py",
             "build_starter_bundle.py",
-            "install_agent_skills.py",
-            "ingest_arxiv.py",
+            "check_markdown.py",
             "rebuild_indexes.py",
             "validate_vault.py",
         ):
@@ -147,6 +143,37 @@ class OperatorDocumentationTests(unittest.TestCase):
             )
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn("usage:", result.stdout)
+
+        optional_ingest = REPOSITORY / ".agents/skills/arxiv/scripts/ingest.py"
+        result = subprocess.run(
+            [sys.executable, optional_ingest, "--help"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("usage:", result.stdout)
+
+    def test_initialized_vaults_expose_one_runtime_entrypoint(self) -> None:
+        for name in ("starter-vault", "demo-vault"):
+            vault = REPOSITORY / name
+            runtime = vault / "tools/llm-wiki/vault.py"
+            public_python = tuple(
+                path for path in vault.rglob("*.py")
+                if ".agents/skills" not in path.as_posix()
+                and "node_modules" not in path.parts
+            )
+            self.assertEqual(public_python, (runtime,))
+            result = subprocess.run(
+                [sys.executable, runtime, "--help"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("{validate,rebuild}", result.stdout)
+            self.assertNotIn("search", result.stdout)
+            self.assertNotIn("append", result.stdout)
 
 
 if __name__ == "__main__":

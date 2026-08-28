@@ -33,6 +33,7 @@
 | `llm_wiki search --mode lexical` | 2d | BM25 via FTS5, JSON output for agents |
 
 **Deliverables**:
+
 - `llm_wiki init demo-vault && llm_wiki doctor --json` succeeds
 - `llm_wiki ingest notes/ && llm_wiki search "FlashAttention" --json` returns results
 
@@ -60,6 +61,7 @@
 | Claude commands skeleton | 1d | `.claude/commands/llm-wiki-*.md` |
 
 **Deliverables**:
+
 - `llm_wiki links rebuild && llm_wiki links check --json` resolves real links
 - `llm_wiki context export --source notes/Concepts/Foo.md` writes selection files
 - `AGENTS.md` and `CLAUDE.md` exist with correct rules
@@ -86,6 +88,7 @@
 | FileSystemWatcher | 1d | Re-parse on note changes, debounced |
 
 **Deliverables**:
+
 - Click `[source](llm-wiki://code/src/kernel.cu?lines=80-145)` → opens file at line 80
 - Sidebar shows backlinks/forward links for current note
 - "Add Selection to Agent Context" populates `.llm_wiki/agent/selection.md`
@@ -132,6 +135,7 @@
 | PDF → note referenced-by popup | 2d | Click overlay → list of citing notes → open at line |
 
 **Deliverables**:
+
 - Select PDF paragraph → insert source link into note → Cmd-click link → PDF opens at highlighted region → click region → popup shows referencing note
 
 ---
@@ -154,6 +158,7 @@
 | Code-trace mode (agent-driven) | 2d | Predict output; agent prompt evaluates against actual behavior |
 
 **Deliverables**:
+
 - Select PDF paragraph → "Create Review Item" → item appears in queue → review → record score → reschedule
 
 **Note**: Teach-back and code-trace modes are agent-driven in this phase — they generate a prompt for Claude Code/Codex to evaluate, rather than implementing native evaluation.
@@ -194,6 +199,7 @@
 | Resources + prompts | 1d | `llm-wiki://selection/current`, prompt templates |
 
 **Deliverables**:
+
 - CodeMirror editor: active line shows raw markdown, inactive lines render
 - `llm_wiki today --write` produces a daily study summary
 - Claude Code configured with MCP can call `llm_wiki.search`, `llm_wiki.get_backlinks`

@@ -1,15 +1,15 @@
 ---
 type: "Paper"
 title: "{{title}}"
-description: "Immutable source snapshot of {{title}}."
+description: "{{meaningful_one_line_description_of_the_source_subject}}"
 tags: {{canonical_registered_tags}}
 status: "stable"
 scope: "vault"
 generated: {"by": "{{actor}}", "at": "{{timestamp}}"}
 sha256: "{{body_sha256}}"
+source: {"resource": "{{canonical_source_uri}}", "retrieved_at": "{{retrieved_at}}", "revision": "{{source_revision}}"}
+snapshot: {"method": "{{capture_method}}", "fidelity": "faithful-text", "omissions": {{documented_omissions_or_empty_array}}}
 attachment: {"resource": "../assets/{{asset_name}}", "role": "original", "media_type": "{{media_type}}", "bytes": {{bytes}}, "sha256": "{{asset_sha256}}"}
 ---
 
-# {{title}}
-
-{{immutable_source_body}}
+{{faithful_original_text_without_synthesis}}

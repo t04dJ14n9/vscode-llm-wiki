@@ -12,20 +12,20 @@ relations: [{"target": "concepts/byte-pair-encoding.md", "kind": "references", "
 
 # Research corpus overview
 
-## Scope
+This eight-paper corpus is an evidence map for studying Nanochat, not a claim
+that Nanochat implements every paper it cites. It gives a reader primary-source
+context for five decisions visible around the project: tokenization, data
+curation, attention, numerical precision, and post-training. Each raw companion
+pins one arXiv version and keeps its metadata, searchable text, and original PDF
+together.
 
-The raw corpus is a deliberately small reading set organized around decisions a
-Nanochat reader can observe: tokenization, data, attention, numerics, and
-post-training. Each companion captures one exact arXiv version, its canonical
-metadata, a mechanically extracted text layer, and the original PDF.
+## What the corpus explains
 
 The BPE paper supplies the historical subword construction behind the
 [tokenization concept](../concepts/byte-pair-encoding.md).[^bpe] FineWeb and
 DataComp-LM supply contrasting evidence about turning web crawls into training
 data.[^fineweb][^dclm] SmolLM2 connects data mixtures and staged training to the
 small-model regime.[^smollm2]
-
-## Pipeline
 
 The architecture cluster starts with GQA, which reduces key/value heads while
 retaining multiple query heads.[^gqa] FlashAttention-3 studies how attention can
@@ -41,12 +41,12 @@ rewarded by answer correctness, not a DPO implementation.
 
 The productive reading order is:
 
-2. open the corresponding concept or comparison;
-3. follow its footnote into the immutable raw companion;
-4. open the local PDF when equations, figures, or reading order matter;
-5. follow the code source to see whether and how the idea appears in Nanochat.
+1. Open the corresponding concept or comparison.
+2. Follow its footnote into the immutable raw companion.
+3. Open the local PDF when equations, figures, or reading order matter.
+4. Follow the code source to see whether and how the idea appears in Nanochat.
 
-## Evidence boundary
+## What relevance does not prove
 
 “Relevant to Nanochat” is not the same as “used by Nanochat.” FineWeb is useful
 data-curation context even though the pinned dataset loader points to ClimbMix.

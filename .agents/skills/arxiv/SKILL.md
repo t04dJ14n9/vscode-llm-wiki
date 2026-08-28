@@ -52,8 +52,9 @@ properly rather than constructing ambiguous URLs.
   Distinguish the authors' result from your inference.
 - Before archiving full text or a PDF, check the paper's explicit license. A
   public arXiv page does not by itself grant redistribution rights.
-- When `tools/llm-wiki/ingest_arxiv.py` is available, use it only with an exact
-  versioned identifier and a license accepted by that producer. Otherwise cite
+- When `.agents/skills/arxiv/scripts/ingest.py` is available, run it with
+  `python3 .agents/skills/arxiv/scripts/ingest.py --vault . --id <versioned-id>`
+  only for an exact version and a license accepted by that producer. Otherwise cite
   the canonical versioned URL without copying the paper.
 - Store immutable textual evidence in `raw/`, eligible binary papers in
   `assets/`, and synthesis in the applicable `wiki/` page. Preserve hashes and

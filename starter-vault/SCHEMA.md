@@ -9,11 +9,26 @@ generated: {"by": "codex/gpt-5.6", "at": "2026-08-25T00:57:53+08:00"}
 
 # Vault schema
 
+## Asset synchronization invariant
+
+Every file under `assets/**` must be version-controlled through Git LFS so the
+vault can reproduce its binary evidence on every device. An asset that is
+untracked, ignored, stored as a plain Git blob, or backed by an LFS object that
+has not been pushed is a completion blocker. Markdown and code do not belong in
+`assets/` and must never be routed through Git LFS.
+
 The root `_index.md` has only `okf_version: "0.2"` frontmatter. Nested `_index.md` files are frontmatter-free immediate-child navigation; `_log.md` is the only log. Assets, templates, `projects/code`, hidden runtime state, and skills are opaque.
 
-Indexes are hierarchical immediate-child catalogs. `_log.md` is an
-oldest-first append-only event stream: each event has a parseable
-`## [YYYY-MM-DD] kind | subject` heading and one categorized bullet. New events
+Indexes are heading-based hierarchical immediate-child catalogs organized by
+content domain and semantic subtopic, never document form or numeric range.
+The hierarchy is vault-owned data in `TAGS.md` frontmatter under
+`index_topics`: each registered tag may declare a display `title`, optional
+`parent`, and optional `source_roots` rules for deriving deeper headings from a
+source path. The shared generator contains no product or domain vocabulary.
+`_log.md` is an oldest-first append-only event stream. Year, month, and day use
+H2, H3, and H4 headings; each event is a parseable
+`- [YYYY-MM-DD] kind | subject - **Kind**: message` list leaf. A day over 20
+direct events produces a non-blocking curation warning. New events
 are appended at the end using `templates/_log.md.tmpl`; prior bytes are
 immutable. Use a deterministic producer when one is available.
 
@@ -30,13 +45,27 @@ tags without entering the vault taxonomy or graph.
 
 Graph-visible Markdown is limited to `wiki/**` except `_index.md`, including narrative Summaries. Node properties are `title`, `type`, `status`, and `tags`. Directed edges come only from JSON-flow `relations`, whose targets are relative to `wiki/` and use the kinds documented in AGENTS.md. Body links remain navigation and provenance.
 
+Every admitted textual source has one immutable Markdown snapshot under
+`raw/`. Its frontmatter records source identity, retrieval or export time,
+revision when available, capture method, body hash, and documented omissions.
+The body is evidence rather than synthesis: native text remains verbatim, and
+format conversion preserves wording and reading order without translation or
+editorial correction. An available non-Markdown original may be retained in
+`assets/` with its own byte hash. Page identity changes are atomic graph
+migrations: update incoming and outgoing relations, source resources,
+daily-note references, and body links together before rebuilding indexes and
+appending the log event.
+
 Durable page admission is a curation rule, not an additional OKF field. Before
 creating a Concept, Comparison, Entity, or Summary, maintainers search the
 existing graph and establish recurrence, reuse, substantial primary-source
 treatment, or explicit user scope. The working task or ingestion manifest
 records the basis; published pages continue to use the ordinary type schema.
 
-Durable templates demonstrate the minimum JSON-flow item shapes:
+The frontmatter and machine-readable integrity rules are normative. Durable
+templates demonstrate reference compositions: reader-facing headings and order
+may be renamed, merged, reordered, or omitted. They also demonstrate the
+minimum JSON-flow item shapes:
 
 ```yaml
 sources: [{"id": "source-id", "resource": "../raw/source.md", "title": "Source title"}]
@@ -49,15 +78,17 @@ the recognized `wiki/` root, not the current page.
 
 Operational prompts and skills, assets, and `.md.tmpl` templates are outside
 the OKF concept-document set. They follow their native schemas and are opaque
-to OKF validation, indexing, and graph discovery.
+to OKF indexing and graph discovery. Template frontmatter examples describe
+the normative data contract; reader-facing body composition is advisory.
 
 Conflicts are optional on Summary, Concept, Comparison, Entity, and Query
-pages. Omit both metadata and prose when none exists. A real conflict requires a
-nonempty unique `conflicts` list, a `Contradictions` section presenting the
-disagreement, and `status: draft` until resolution. Concept and Entity pages
-additionally require creation metadata. Query pages require a concise answer,
-immutable selection identity, provenance, exact anchors, standard
-answer/evidence/limitations/related sections, and relations. Daily notes use
+pages. Omit the metadata when none exists. A real conflict requires a nonempty
+unique `conflicts` list, clear prose presenting the disagreement, and
+`status: draft` until resolution; no heading name is prescribed. Concept and
+Entity pages additionally require creation metadata. Query pages require a
+concise answer, immutable selection identity, provenance, exact anchors,
+evidence, limitations, related-page context, and relations, but no standard
+body headings or order. Daily notes use
 `Asia/Shanghai`, fixed review dates, required human/agent markers, unique
 occurrence IDs, at most ten review prompts, and at most one selected
 Again/Hard/Good/Easy outcome per prompt. Daily notes are chronological entry
@@ -89,3 +120,24 @@ binding is allowed for reference-only projects. Local paths are never stored in
 the card, and no parallel `workspace/` binding namespace exists.
 Repository-owned knowledge lives at `docs/llm-wiki/` and is versioned with that
 repository.
+
+## Workflow configuration and non-knowledge artifacts
+
+The nearest `AGENTS.md` configures `vault_prose_language` and
+`response_language`. These settings govern new synthesis and agent responses;
+they do not alter OKF page types or immutable source text.
+
+Every `tasks/*.md` page represents one actionable goal, even when it contains
+several implementation checkboxes. Reports are `output/` artifacts, while
+manifests and intermediate machine output are `scratch/` artifacts. Neither is
+a task merely because it was produced while completing one. Bulk-ingestion and
+source-curation manifests remain opaque and never become graph nodes.
+
+`vaults/<id>.md` is the portable record for another knowledge vault and uses
+`type: "Knowledge Vault"`. Its `vault_id` matches the filename and implies the
+only local binding, ignored `vaults/bindings/<id>`. The card records canonical
+identity, tracked ref, observed revision and time, status, a contained Markdown
+entrypoint, contained search roots, and an ownership statement, but never a
+local path. `vaults/bindings`, like
+`projects/code`, is opaque. Cross-vault body links are navigation only;
+`relations[].target` remains inside the current `wiki/` root.

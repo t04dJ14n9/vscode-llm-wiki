@@ -1,7 +1,7 @@
 ---
 type: "Paper"
 title: "FlashAttention-3: Fast and Accurate Attention with Asynchrony and Low-precision"
-description: "Immutable arXiv snapshot of FlashAttention-3: Fast and Accurate Attention with Asynchrony and Low-precision."
+description: "Attention, as a core layer of the ubiquitous Transformer architecture, is the bottleneck for large language models and long-context applications."
 resource: "https://arxiv.org/abs/2407.08608v2"
 tags: ["paper"]
 status: "stable"
@@ -13,33 +13,12 @@ source_url: "https://arxiv.org/abs/2407.08608v2"
 ingested: "2026-08-13"
 submitted: "2024-07-11"
 revised: "2024-07-12"
-sha256: "ee0e31a0703477887b615d7195ba1b8d16510611d7d2b14afde891f0a32e133f"
+sha256: "2d9f6628102bcf2dbece2978d23e7c3c7db7b9fff905b0973ceddb0956fe57f8"
 arxiv: {"id": "2407.08608", "version": 2}
 license: {"id": "CC-BY-4.0", "url": "https://creativecommons.org/licenses/by/4.0/"}
 attachment: {"resource": "../assets/flashattention-3-fast-and-accurate-attention-with-asynchrony-and-low-precision.pdf", "media_type": "application/pdf", "bytes": 1096663, "sha256": "3d05ca102802e6b8ebbae5181efe777b7d258cd75e2fe9cca209efd2f5e6c6cb", "role": "original"}
 extraction: {"tool": "pdftotext", "version": "pdftotext version 26.04.0"}
 ---
-
-# FlashAttention-3: Fast and Accurate Attention with Asynchrony and Low-precision
-
-## Source metadata
-
-- **Authors:** Shah, Jay, Bikshandi, Ganesh, Zhang, Ying, Thakkar, Vijay, Ramani, Pradeep, Dao, Tri
-- **arXiv:** [2407.08608v2](https://arxiv.org/abs/2407.08608v2)
-- **Submitted:** 2024-07-11
-- **Revised:** 2024-07-12
-- **License:** [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)
-- **Local attachment:** [Open the archived PDF](../assets/flashattention-3-fast-and-accurate-attention-with-asynchrony-and-low-precision.pdf)
-
-> Extraction notice: The text below was produced mechanically with
-> `pdftotext version 26.04.0`. Reading order, equations, tables, figures, and
-> footnotes may be lossy; use the archived PDF as the visual authority.
-
-## Abstract
-
-Attention, as a core layer of the ubiquitous Transformer architecture, is the bottleneck for large language models and long-context applications. FlashAttention elaborated an approach to speed up attention on GPUs through minimizing memory reads/writes. However, it has yet to take advantage of new capabilities present in recent hardware, with FlashAttention-2 achieving only 35% utilization on the H100 GPU. We develop three main techniques to speed up attention on Hopper GPUs: exploiting asynchrony of the Tensor Cores and TMA to (1) overlap overall computation and data movement via warp-specialization and (2) interleave block-wise matmul and softmax operations, and (3) block quantization and incoherent processing that leverages hardware support for FP8 low-precision. We demonstrate that our method, FlashAttention-3, achieves speedup on H100 GPUs by 1.5-2.0$\times$ with FP16 reaching up to 740 TFLOPs/s (75% utilization), and with FP8 reaching close to 1.2 PFLOPs/s. We validate that FP8 FlashAttention-3 achieves 2.6$\times$ lower numerical error than a baseline FP8 attention.
-
-## Mechanically extracted full text
 
                                                                     FlashAttention-3:
                                               Fast and Accurate Attention with Asynchrony and Low-precision
