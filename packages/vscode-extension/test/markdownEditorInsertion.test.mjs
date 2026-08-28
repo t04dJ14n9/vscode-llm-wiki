@@ -40,6 +40,7 @@ function loadTsModule(relativePath, mocks = {}) {
     }
     if (request === './queryAnnotationIndex') {
       return mocks['./queryAnnotationIndex'] ?? {
+        isQueryPagePath: path => typeof path === 'string' && path.includes('queries/'),
         resolveMarkdownAnchor: (anchor) => ({
           range: typeof anchor?.from === 'number' && typeof anchor?.to === 'number'
             ? { from: anchor.from, to: anchor.to, startLine: 1, endLine: 1 }
@@ -47,6 +48,8 @@ function loadTsModule(relativePath, mocks = {}) {
         }),
       };
     }
+    if (request === './editorHost') return loadTsModule('src/editorHost.ts', mocks);
+    if (request === './markdownDocumentBridge') return loadTsModule('src/markdownDocumentBridge.ts', mocks);
     if (request === './pdfPngConstraints') return { MAX_PNG_BYTES: 5 * 1024 * 1024 };
     if (request === './cursorCrop') return cursorCrop;
     if (request === './linkPreviewResolver') return linkPreviewResolver;
@@ -228,7 +231,8 @@ test('markdown editor provider sends webview resource roots for note images', as
 
   const setTextMessage = messages.find(message => message.type === 'setText');
   assert.equal(setTextMessage.currentNotePath, 'notes/Concepts/Math and Code.md');
-  assert.deepEqual(setTextMessage.notePaths, [
+  assert.equal(setTextMessage.notePaths, undefined);
+  assert.deepEqual(messages.find(message => message.type === 'setNotePaths')?.notePaths, [
     'notes/Concepts/Math and Code.md',
     'notes/Papers/FlashAttention Paper.md',
     'Projects/Standalone.md',
@@ -299,13 +303,46 @@ test('markdown editor provider reuses the workspace note index across panels', a
   await new Promise(resolve => setTimeout(resolve, 300));
 
   assert.equal(findFilesCalls.length, 1);
-  assert.deepEqual(firstMessages.find(message => message.type === 'setText')?.notePaths, [
+  assert.deepEqual(firstMessages.find(message => message.type === 'setNotePaths')?.notePaths, [
     'notes/First.md',
     'notes/Second.md',
   ]);
-  assert.deepEqual(secondMessages.find(message => message.type === 'setText')?.notePaths, [
+  assert.deepEqual(secondMessages.find(message => message.type === 'setNotePaths')?.notePaths, [
     'notes/First.md',
     'notes/Second.md',
+  ]);
+});
+
+test('markdown editor posts document text before workspace note discovery completes', async () => {
+  const messages = [];
+  let resolveNotePaths;
+  const notePaths = new Promise(resolve => {
+    resolveNotePaths = resolve;
+  });
+  const vscode = createVscodeMock({
+    workspaceFolder: { uri: createUri('/vault') },
+    findFiles: notePaths,
+  });
+  const { MarkdownEditorProvider } = loadTsModule('src/markdownEditorProvider.ts', { vscode });
+  const provider = new MarkdownEditorProvider({ extensionUri: createUri('/extension') });
+  const panel = createPanelMock(messages);
+
+  await provider.resolveCustomTextEditor(
+    createDocumentMock({ uri: createUri('/vault/notes/Note.md'), text: '# Immediate\n' }),
+    panel,
+    {},
+  );
+  await panel.fireMessage({ type: 'ready' });
+  await new Promise(resolve => setImmediate(resolve));
+
+  assert.equal(messages.find(message => message.type === 'setText')?.text, '# Immediate\n');
+  assert.equal(messages.some(message => message.type === 'setNotePaths'), false);
+
+  resolveNotePaths([createUri('/vault/notes/Note.md')]);
+  await new Promise(resolve => setImmediate(resolve));
+
+  assert.deepEqual(messages.find(message => message.type === 'setNotePaths')?.notePaths, [
+    'notes/Note.md',
   ]);
 });
 
@@ -329,7 +366,9 @@ test('markdown editor provider still initializes when workspace note discovery f
 
   const setText = messages.find(message => message.type === 'setText');
   assert.equal(setText?.text, '# Note\n');
-  assert.deepEqual(setText?.notePaths, ['notes/Note.md']);
+  assert.deepEqual(messages.find(message => message.type === 'setNotePaths')?.notePaths, [
+    'notes/Note.md',
+  ]);
 });
 
 test('markdown editor webview CSP allows rendered note images', async () => {
@@ -357,7 +396,7 @@ test('markdown editor webview script URI is cache-busted for rebuilt editor bund
   await provider.resolveCustomTextEditor(createDocumentMock(), panel, {});
 
   const scriptSrc = panel.webview.html.match(/<script nonce="[^"]+" src="([^"]+)"><\/script>/)?.[1] ?? '';
-  assert.match(scriptSrc, /^webview:\/\/\/extension\/dist\/markdown-editor\.js\?v=\d+$/);
+  assert.match(scriptSrc, /^webview:\/\/\/extension\/dist\/markdown-editor\.js\?v=[a-z0-9]+$/);
 });
 
 test('markdown editor provider renames the note when the webview title changes', async () => {
@@ -389,11 +428,47 @@ test('markdown editor provider renames the note when the webview title changes',
   assert.equal(renameCalls[0][0], oldUri);
   assert.equal(renameCalls[0][1].fsPath, '/vault/notes/Concepts/Renamed Math Note.md');
   assert.deepEqual(renameCalls[0][2], { overwrite: false });
-  assert.deepEqual(executeCommandCalls.at(-1), [
-    'vscode.openWith',
-    renameCalls[0][1],
-    'llm-wiki.markdownEditor',
-  ]);
+  assert.equal(executeCommandCalls.some(([command]) => command === 'vscode.openWith'), false);
+});
+
+test('markdown title rename waits for queued edits and uses an integrated workspace rename', async () => {
+  const messages = [];
+  const renameCalls = [];
+  let completeContentEdit;
+  let document;
+  const vscode = createVscodeMock({
+    applyEdit: edit => {
+      if (edit.replacements.length > 0) {
+        return new Promise(resolve => {
+          completeContentEdit = () => {
+            document.setText(documentTextAfterReplacement(document, edit.replacements[0]));
+            resolve(true);
+          };
+        });
+      }
+      renameCalls.push(...edit.renames.map(rename => [rename.oldUri, rename.newUri, rename.options]));
+      return true;
+    },
+  });
+  const { MarkdownEditorProvider } = loadTsModule('src/markdownEditorProvider.ts', { vscode });
+  const provider = new MarkdownEditorProvider({ extensionUri: createUri('/extension') });
+  const panel = createPanelMock(messages);
+  document = createDocumentMock({
+    uri: createUri('/vault/notes/Queued.md'),
+    text: '# Before\n',
+  });
+
+  await provider.resolveCustomTextEditor(document, panel, {});
+  await panel.fireMessage({ type: 'edit', text: '# Latest\n' });
+  const rename = panel.fireMessage({ type: 'renameTitle', title: 'Renamed' });
+  await new Promise(resolve => setImmediate(resolve));
+
+  assert.deepEqual(renameCalls, []);
+  completeContentEdit();
+  await rename;
+
+  assert.equal(document.getText(), '# Latest\n');
+  assert.equal(renameCalls[0][1].fsPath, '/vault/notes/Renamed.md');
 });
 
 test('markdown editor provider reveals the webview without preserving focus when ready', async () => {
@@ -767,6 +842,40 @@ test('markdown editor provider does not replay stale text while webview edits ar
   assert.equal(document.getText(), '# Note\n\nBody');
 });
 
+test('markdown editor accepts an external edit that matches a recent webview state', async () => {
+  const messages = [];
+  const documentChangeListeners = [];
+  const document = createDocumentMock({ text: '# Note\n\nBody a' });
+  const vscode = createVscodeMock({
+    applyEdit: async edit => {
+      document.setText(documentTextAfterReplacement(document, edit.replacements.at(-1)));
+      for (const listener of documentChangeListeners) listener({ document });
+      return true;
+    },
+    onDidChangeTextDocument: listener => {
+      documentChangeListeners.push(listener);
+      return { dispose() {} };
+    },
+  });
+  const { MarkdownEditorProvider } = loadTsModule('src/markdownEditorProvider.ts', { vscode });
+  const provider = new MarkdownEditorProvider({ extensionUri: createUri('/extension') });
+  const panel = createPanelMock(messages);
+
+  await provider.resolveCustomTextEditor(document, panel, {});
+  messages.length = 0;
+  await panel.fireMessage({ type: 'edit', text: '# Note\n\nBody ab' });
+  await new Promise(resolve => setImmediate(resolve));
+  await panel.fireMessage({ type: 'edit', text: '# Note\n\nBody abc' });
+  await new Promise(resolve => setImmediate(resolve));
+
+  document.setText('# Note\n\nBody ab');
+  for (const listener of documentChangeListeners) listener({ document });
+  await new Promise(resolve => setImmediate(resolve));
+
+  assert.equal(document.getText(), '# Note\n\nBody ab');
+  assert.equal(messages.filter(message => message.type === 'setText').at(-1)?.text, '# Note\n\nBody ab');
+});
+
 test('markdown editor provider persists Vim mode and notifies markdown webviews when toggled', async () => {
   const messages = [];
   const workspaceState = createStorageMock();
@@ -982,6 +1091,42 @@ test('markdown editor provider requests the live webview selection before host c
   });
 
   assert.equal((await capture)?.text, '**beta**');
+});
+
+test('markdown selection capture stays bound to the panel that received the request', async () => {
+  const firstMessages = [];
+  const secondMessages = [];
+  const vscode = createVscodeMock();
+  const { MarkdownEditorProvider } = loadTsModule('src/markdownEditorProvider.ts', { vscode });
+  const provider = new MarkdownEditorProvider({
+    extensionUri: createUri('/extension'),
+    workspaceState: createStorageMock(),
+  });
+  const firstDocument = createDocumentMock({
+    uri: createUri('/vault/notes/First.md'),
+    text: '# First\nAlpha selection\n',
+  });
+  const secondDocument = createDocumentMock({
+    uri: createUri('/vault/notes/Second.md'),
+    text: '# Second\nBeta selection\n',
+  });
+  const firstPanel = createPanelMock(firstMessages);
+  const secondPanel = createPanelMock(secondMessages);
+
+  await provider.resolveCustomTextEditor(firstDocument, firstPanel, {});
+  await provider.resolveCustomTextEditor(secondDocument, secondPanel, {});
+  await firstPanel.fireMessage({ type: 'active' });
+  const capture = provider.captureActiveSelectionContext();
+  const request = firstMessages.at(-1);
+  await secondPanel.fireMessage({ type: 'active' });
+  await firstPanel.fireMessage({
+    type: 'selectionResponse',
+    requestId: request.requestId,
+    selection: { from: 8, to: 23 },
+  });
+
+  assert.equal((await capture)?.text, 'Alpha selection');
+  assert.equal(provider.getActiveSelectionContext()?.text, '# Second\nBeta selection\n');
 });
 
 test('markdown host commands resolve the selected custom-editor tab without recent webview focus', async () => {
@@ -1563,9 +1708,13 @@ function createVscodeMock(options = {}) {
   class WorkspaceEdit {
     constructor() {
       this.replacements = [];
+      this.renames = [];
     }
     replace(uri, range, text) {
       this.replacements.push({ uri, range, text });
+    }
+    renameFile(oldUri, newUri, options) {
+      this.renames.push({ oldUri, newUri, options });
     }
   }
   return {
@@ -1595,7 +1744,14 @@ function createVscodeMock(options = {}) {
           return fallback;
         },
       }),
-      applyEdit: options.applyEdit ?? (async () => true),
+      applyEdit: options.applyEdit ?? (async edit => {
+        options.renameCalls?.push(...edit.renames.map(rename => [
+          rename.oldUri,
+          rename.newUri,
+          rename.options,
+        ]));
+        return true;
+      }),
       openTextDocument: async (...args) => {
         options.openTextDocumentCalls?.push(args);
         return options.document ?? createOpenDocumentMock(args[0]);

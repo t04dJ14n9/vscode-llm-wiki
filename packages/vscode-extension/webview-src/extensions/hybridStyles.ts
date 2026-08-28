@@ -47,6 +47,22 @@ const codeSurfaceBackdrop = {
   pointerEvents: 'none',
 };
 
+const blockquoteStyles = {
+  '.cm-hybrid-blockquote-line': {
+    position: 'relative',
+    borderLeft: '3px solid var(--vscode-textBlockQuote-border, var(--vscode-textLink-foreground))',
+    paddingLeft: '10px',
+    color: 'var(--vscode-descriptionForeground)',
+    backgroundColor: 'transparent',
+    '--llm-wiki-blockquote-surface': 'var(--vscode-textBlockQuote-background, transparent)',
+  },
+  '.cm-hybrid-blockquote-line::before': {
+    ...codeSurfaceBackdrop,
+    borderRadius: '0',
+    backgroundColor: 'var(--llm-wiki-blockquote-surface)',
+  },
+};
+
 const imagePreviewStyles = {
   '.cm-hybrid-image': {
     display: 'inline-block',
@@ -74,6 +90,43 @@ const imagePreviewStyles = {
   '.cm-hybrid-image-expand:focus-visible': {
     outline: '1px solid var(--vscode-focusBorder)',
     outlineOffset: '2px',
+  },
+};
+
+const mathBlockInteractionStyles = {
+  '.cm-hybrid-math-block-content': {
+    minWidth: '0',
+  },
+  '.cm-hybrid-math-block-edit': {
+    position: 'absolute',
+    top: '50%',
+    right: '0.55em',
+    border: '0',
+    padding: '0.1em 0.2em',
+    color: 'var(--vscode-descriptionForeground, var(--vscode-editor-foreground))',
+    backgroundColor: 'transparent',
+    fontFamily: 'var(--vscode-editor-font-family, monospace)',
+    fontSize: '0.72em',
+    lineHeight: '1',
+    opacity: '0',
+    cursor: 'pointer',
+    transform: 'translateY(-50%)',
+    transition: 'opacity 100ms ease',
+  },
+  '.cm-hybrid-math-block-inner:hover .cm-hybrid-math-block-edit, .cm-hybrid-math-block-edit:focus-visible': {
+    opacity: '1',
+  },
+  '.cm-hybrid-math-block-edit:focus-visible': {
+    outline: '1px solid var(--vscode-focusBorder)',
+    outlineOffset: '2px',
+  },
+  '.cm-hybrid-math-block-line-preview .cm-hybrid-math-block-inner': {
+    width: '100%',
+    minHeight: '0',
+    padding: '0',
+  },
+  '.cm-hybrid-math-block-line-preview .cm-hybrid-math-block-edit': {
+    display: 'none',
   },
 };
 
@@ -339,12 +392,7 @@ export function hybridStyles() {
       padding: '0 4px',
       fontWeight: '500',
     },
-    '.cm-hybrid-blockquote-line': {
-      borderLeft: '3px solid var(--vscode-textBlockQuote-border, var(--vscode-textLink-foreground))',
-      paddingLeft: '10px',
-      color: 'var(--vscode-descriptionForeground)',
-      backgroundColor: 'var(--vscode-textBlockQuote-background, transparent)',
-    },
+    ...blockquoteStyles,
     '.cm-hybrid-callout': {
       '--llm-wiki-callout-color': 'var(--vscode-charts-blue, var(--vscode-textLink-foreground, var(--vscode-editor-foreground)))',
       display: 'block',
@@ -743,7 +791,9 @@ export function hybridStyles() {
     },
     '.cm-hybrid-math-block-inner': {
       boxSizing: 'border-box',
-      padding: '0',
+      position: 'relative',
+      minHeight: '2.35em',
+      padding: '0.42em 2em',
       border: '1px solid transparent',
       borderRadius: '4px',
       backgroundColor: 'transparent',
@@ -753,6 +803,7 @@ export function hybridStyles() {
     '.cm-hybrid-math-block-inner:hover, .cm-hybrid-math-block-inner:focus-within': {
       borderColor: 'var(--vscode-panel-border, rgba(127,127,127,.35))',
     },
+    ...mathBlockInteractionStyles,
     '.cm-hybrid-math-block mjx-container[display="true"]': {
       margin: '0',
     },

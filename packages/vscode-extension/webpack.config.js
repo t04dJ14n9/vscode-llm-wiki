@@ -4,7 +4,7 @@ const CopyPlugin = require('copy-webpack-plugin');
 const dist = path.resolve(__dirname, 'dist');
 const webviewBundleBudget = 7 * 1024 * 1024;
 
-const tsRule = (configFile = 'tsconfig.json') => ({
+const tsRule = (configFile = 'tsconfig.json', compilerOptions = {}) => ({
   test: /\.ts$/,
   exclude: /node_modules/,
   use: [{
@@ -15,8 +15,9 @@ const tsRule = (configFile = 'tsconfig.json') => ({
       compilerOptions: {
         composite: false,
         declaration: false,
-        declarationMap: false,
-        incremental: false,
+      declarationMap: false,
+      incremental: false,
+      ...compilerOptions,
       },
     },
   }],
@@ -120,7 +121,7 @@ module.exports = [
     output: {
       path: dist,
       filename: 'markdown-editor.js',
-      chunkLoading: false,
+      chunkFilename: 'markdown-[name].[contenthash:8].js',
       publicPath: '',
     },
     optimization: {
@@ -131,7 +132,7 @@ module.exports = [
       alias: markdownEditorAliases,
     },
     module: {
-      rules: [tsRule()],
+      rules: [tsRule('tsconfig.json', { module: 'ESNext' })],
     },
     performance: webviewPerformance,
     devtool: 'source-map',

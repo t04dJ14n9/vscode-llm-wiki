@@ -29,8 +29,11 @@ export interface ExperimentalBrowserSelectionCapture {
 export type ExperimentalBrowserWebviewMessage =
   | { type: 'ready' }
   | { type: 'navigate'; url: string }
+  | { type: 'navigateHistory'; direction: 'back' | 'forward' | 'reload' }
   | { type: 'openExternal'; url: string }
   | { type: 'selectionChanged'; selection?: ExperimentalBrowserSelectionCapture }
+  | { type: 'copySelectionForAgent'; token: string; fingerprint: string }
+  | { type: 'copySelectionLink'; token: string; fingerprint: string }
   | {
       type: 'sendSelection';
       token: string;
@@ -52,6 +55,8 @@ export type ExperimentalBrowserHostMessage =
       url: string;
       title: string;
       html: string;
+      canGoBack: boolean;
+      canGoForward: boolean;
       screenshotAvailable: boolean;
       screenshotReason?: string;
     }
@@ -59,6 +64,12 @@ export type ExperimentalBrowserHostMessage =
       type: 'loadError';
       token: string;
       url: string;
+      message: string;
+    }
+  | {
+      type: 'selectionActionResult';
+      action: 'copyForAgent' | 'copyLink';
+      ok: boolean;
       message: string;
     }
   | {

@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { isAbsolute } from 'node:path';
+import { isAbsolute, resolve } from 'node:path';
 import type { PdfTextFragment } from '@llm-wiki/core';
 import {
   addSelectionToContext,
@@ -21,6 +21,7 @@ import {
 } from './cursorBrowserSelection';
 import {
   registerExperimentalOwnedBrowser,
+  type ExperimentalOwnedBrowserController,
 } from './experimentalOwnedBrowser';
 import { getConceptGraph, loadFilesystemWiki } from './filesystemWiki';
 import { KnowledgeGraphPanel } from './knowledgeGraphPanel';
@@ -43,6 +44,7 @@ import {
 } from './queryAnnotationIndex';
 import { syncRepository } from './repositorySync';
 import type { SelectionContext } from './selectionContext';
+import { registerTerminalCliBridge } from './terminalCliBridge';
 import { dispatchUri } from './uriDispatcher';
 
 let backlinksProvider: BacklinksProvider | undefined;
@@ -52,9 +54,9 @@ let markdownEditorProvider: MarkdownEditorProvider | undefined;
 let markdownOutlineProvider: MarkdownOutlineTreeProvider | undefined;
 let graphPanel: KnowledgeGraphPanel | undefined;
 let queryAnnotationIndex: QueryAnnotationIndex | undefined;
+let webBrowserController: ExperimentalOwnedBrowserController | undefined;
 let refreshTimer: NodeJS.Timeout | undefined;
 
-const STARTUP_PDF_EDITOR_RETRY_DELAYS_MS = [0, 250, 1_000] as const;
 const WORKSPACE_REQUIRED_MESSAGE =
   'Open a folder to use LLM Wiki Queries and repository features.';
 const AGENT_HANDOFF_ACTIVE_CONTEXT_KEY = 'llmWikiAgentHandoffActive';
@@ -91,6 +93,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
   registerLinkProvider(context);
   registerMarkdownOutlineProvider(context);
+  registerTerminalCliBridge(context);
 
   const agentCapabilitySource = createAgentSurfaceCapabilitySource();
   context.subscriptions.push(agentCapabilitySource);
@@ -101,7 +104,6 @@ export function activate(context: vscode.ExtensionContext): void {
     ...(queryDiagnostics ? { queryDiagnostics } : {}),
   });
   pdfEditorProvider = new PdfEditorProvider(context, {
-    ...(workspaceRoot ? { vaultRoot: workspaceRoot, documentRoot: workspaceRoot } : {}),
     agentCapabilities: () => agentCapabilitySource.read(),
     onDidChangeAgentCapabilities: agentCapabilitySource.onDidChange,
     ...(queryAnnotationIndex ? { queryAnnotationIndex } : {}),
@@ -136,7 +138,9 @@ export function activate(context: vscode.ExtensionContext): void {
           vscode.window.showWarningMessage('This LLM Wiki link is invalid.');
           return;
         }
-        await dispatchUri(vaultRootForSource(activeSourceUri(), workspaceRoot), target);
+        await dispatchUri(vaultRootForSource(activeSourceUri(), workspaceRoot), target, {
+          openWebTarget: url => webBrowserController?.open(url),
+        });
       },
     }),
     graphPanel,
@@ -157,7 +161,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.window.tabGroups.onDidChangeTabs(() => refreshAllViews()),
   );
 
-  registerExperimentalOwnedBrowser({
+  webBrowserController = registerExperimentalOwnedBrowser({
     context,
     onSendSelection: async payload => {
       const root = requireWorkspaceRoot(workspaceRoot);
@@ -166,7 +170,7 @@ export function activate(context: vscode.ExtensionContext): void {
         root,
         payload.selection,
         payload.attachment?.bytes,
-        'The experimental browser crop could not be saved; the active agent will use text context only.',
+        'The browser selection image could not be saved; the active agent will use text context only.',
         { kind: 'picker' },
       );
       if (!sent) throw new Error('The browser selection could not be exported.');
@@ -174,7 +178,6 @@ export function activate(context: vscode.ExtensionContext): void {
   });
   registerCommands(context, workspaceRoot, learningNotes);
   if (workspaceRoot) registerMarkdownWatcher(context);
-  registerPdfEditorRouter(context);
   refreshAllViews();
   vscode.window.showInformationMessage(
     workspaceRoot
@@ -221,7 +224,10 @@ function registerCommands(
         await dispatchUri(
           vaultRootForSource(activeSourceUri(), workspaceRoot),
           target,
-          { allowAbsoluteTargets: true },
+          {
+            allowAbsoluteTargets: true,
+            openWebTarget: url => webBrowserController?.open(url),
+          },
         );
       }
     }),
@@ -233,7 +239,10 @@ function registerCommands(
         await dispatchUri(
           vaultRootForSource(sourceUri ?? activeSourceUri(), workspaceRoot),
           uri,
-          { allowAbsoluteTargets: true },
+          {
+            allowAbsoluteTargets: true,
+            openWebTarget: url => webBrowserController?.open(url),
+          },
         );
       }
     }),
@@ -250,7 +259,10 @@ function registerCommands(
         requireWorkspaceRoot(workspaceRoot);
         return;
       }
-      await pdfEditorProvider?.openPdfAtTarget(args.pdfPath, args.page, args.textFragment);
+      const pdfPath = isAbsolute(args.pdfPath)
+        ? args.pdfPath
+        : resolve(workspaceRoot!, args.pdfPath);
+      await pdfEditorProvider?.openPdfAtTarget(pdfPath, args.page, args.textFragment);
     }),
     vscode.commands.registerCommand('llm-wiki.openInMarkdownEditor', async () => {
       const uri = getActiveMarkdownUri();
@@ -333,7 +345,7 @@ function registerCommands(
         const capture = await captureActiveCursorBrowserSelection();
         if (!capture) {
           vscode.window.showWarningMessage(
-            'No active Cursor Browser text selection was available. In stock VS Code, use LLM Wiki: Open Experimental Web Reader.',
+            'No active Cursor Browser text selection was available. In stock VS Code, use LLM Wiki: Open Web Browser.',
           );
           return;
         }
@@ -537,6 +549,7 @@ export function deactivate(): void {
   graphPanel = undefined;
   queryAnnotationIndex?.dispose();
   queryAnnotationIndex = undefined;
+  webBrowserController = undefined;
 }
 
 function setAgentHandoffActive(active: boolean): void {
@@ -928,74 +941,6 @@ function isAssociatedUntitledMarkdownUri(uri: vscode.Uri | undefined): uri is vs
 
 function isPdfUri(uri: vscode.Uri | undefined): uri is vscode.Uri {
   return Boolean(uri?.scheme === 'file' && uri.fsPath.toLowerCase().endsWith('.pdf'));
-}
-
-/**
- * Recover PDFs that VS Code temporarily opens as text documents during startup
- * or extension activation. Markdown remains in the editor chosen by the user or
- * caller unless an LLM Wiki command explicitly opens the custom Markdown editor.
- */
-function registerPdfEditorRouter(context: vscode.ExtensionContext): void {
-  const opening = new Set<string>();
-  const reopen = async (uri: vscode.Uri | undefined): Promise<void> => {
-    if (!isPdfUri(uri)) return;
-
-    const viewType = PdfEditorProvider.viewType;
-    const key = `${viewType}:${uri.toString()}`;
-    if (opening.has(key) || hasCustomEditorTab(uri, viewType)) {
-      return;
-    }
-    opening.add(key);
-    try {
-      await vscode.commands.executeCommand('vscode.openWith', uri, viewType);
-    } finally {
-      opening.delete(key);
-    }
-  };
-
-  const activeEditorListener = vscode.window.onDidChangeActiveTextEditor(editor => {
-    void reopen(editor?.document.uri);
-  });
-  const openDocumentListener = vscode.workspace.onDidOpenTextDocument(document => {
-    void reopen(document.uri);
-  });
-
-  const reopenVisibleEditors = () => {
-    const reopened = new Set<string>();
-    const reopenOnce = (uri: vscode.Uri | undefined) => {
-      if (!uri) return;
-      const key = uri.fsPath || uri.toString();
-      if (reopened.has(key)) return;
-      reopened.add(key);
-      void reopen(uri);
-    };
-    const active = vscode.window.activeTextEditor;
-    reopenOnce(active?.document.uri);
-    for (const editor of vscode.window.visibleTextEditors) {
-      reopenOnce(editor.document.uri);
-    }
-    reopenOnce(activeTabUri());
-  };
-  const retries = STARTUP_PDF_EDITOR_RETRY_DELAYS_MS.map(delay => {
-    const timer = setTimeout(reopenVisibleEditors, delay);
-    timer.unref?.();
-    return timer;
-  });
-
-  context.subscriptions.push({
-    dispose() {
-      activeEditorListener.dispose();
-      openDocumentListener.dispose();
-      for (const retry of retries) clearTimeout(retry);
-    },
-  });
-}
-
-function hasCustomEditorTab(uri: vscode.Uri, viewType: string): boolean {
-  return (vscode.window.tabGroups?.all ?? []).some(group => (group?.tabs ?? []).some(tab => {
-    const input = tab?.input as { uri?: vscode.Uri; viewType?: unknown } | undefined;
-    return input?.viewType === viewType && input.uri?.toString() === uri.toString();
-  }));
 }
 
 function errorMessage(error: unknown): string {

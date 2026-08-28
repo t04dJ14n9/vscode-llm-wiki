@@ -99,14 +99,24 @@
         "icon": "$(globe)"
       },
       {
-        "command": "llm-wiki.experimentalBrowser.open",
-        "title": "LLM Wiki: Open Experimental Web Reader",
+        "command": "llm-wiki.browser.open",
+        "title": "LLM Wiki: Open Web Browser",
         "icon": "$(preview)"
       },
       {
-        "command": "llm-wiki.experimentalBrowser.sendSelection",
-        "title": "LLM Wiki: Add Experimental Web Selection to Chat",
+        "command": "llm-wiki.browser.addSelectionToAgent",
+        "title": "LLM Wiki: Add Web Selection to Agent",
         "icon": "$(comment-discussion)"
+      },
+      {
+        "command": "llm-wiki.browser.copySelectionForAgent",
+        "title": "LLM Wiki: Copy Web Selection for Agent",
+        "icon": "$(copy)"
+      },
+      {
+        "command": "llm-wiki.browser.copySelectionLink",
+        "title": "LLM Wiki: Copy Web Selection Link",
+        "icon": "$(link)"
       },
       {
         "command": "llm-wiki.showKnowledgeGraph",
@@ -407,7 +417,6 @@
     "@codemirror/commands": "^6.10.3",
     "@codemirror/lang-markdown": "^6.5.0",
     "@codemirror/language": "^6.12.3",
-    "@codemirror/language-data": "^6.5.2",
     "@codemirror/search": "^6.7.0",
     "@codemirror/state": "^6.6.0",
     "@codemirror/view": "^6.43.0",

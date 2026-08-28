@@ -17,6 +17,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
+    "@llm-wiki/core": "workspace:*",
     "@embedpdf/engines": "^2.14.3",
     "@embedpdf/models": "^2.14.3",
     "@embedpdf/pdfium": "^2.14.3",

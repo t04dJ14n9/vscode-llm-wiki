@@ -119,12 +119,15 @@ export async function dispatchUri(
 
     case 'pdf': {
       if (!target.path) break;
-      if (!isAbsolute(target.path) && !workspacePdfFilePath(workspaceRoot, target.path)) {
+      const pdfPath = isAbsolute(target.path)
+        ? target.path
+        : workspacePdfFilePath(workspaceRoot, target.path);
+      if (!pdfPath) {
         showOutsideWorkspaceError(target.path);
         return;
       }
       const args: { pdfPath: string; page?: number; textFragment?: PdfTextFragment } = {
-        pdfPath: target.path,
+        pdfPath,
       };
       if (target.page) args.page = target.page;
       if (target.textFragment) args.textFragment = target.textFragment;

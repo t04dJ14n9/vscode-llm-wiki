@@ -8,7 +8,7 @@ const testRoot = dirname(fileURLToPath(import.meta.url));
 
 test('combined and fixture PDF viewports suppress the programmatic focus frame', () => {
   for (const relativePath of [
-    '../src/pdfEditorProvider.ts',
+    '../src/pdfWebviewHtml.ts',
     './e2e/pdf-viewer.html',
   ]) {
     const source = readFileSync(resolve(testRoot, relativePath), 'utf8');

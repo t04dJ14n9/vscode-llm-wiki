@@ -25,14 +25,23 @@ let selectionCaptureGeneration = 0;
 app.innerHTML = `
   <div class="shell">
     <form class="toolbar" id="toolbar">
-      <span class="experiment-pill" title="This is an extension-owned text reader, not the VS Code Simple Browser.">Experiment</span>
+      <nav class="navigation" aria-label="Browser navigation">
+        <button type="button" id="back" class="icon-button" title="Back" aria-label="Back" disabled>←</button>
+        <button type="button" id="forward" class="icon-button" title="Forward" aria-label="Forward" disabled>→</button>
+        <button type="button" id="reload" class="icon-button" title="Reload" aria-label="Reload" disabled>↻</button>
+      </nav>
       <input id="url" aria-label="Public page URL" autocomplete="off" spellcheck="false">
       <button type="submit" class="primary">Go</button>
-      <button type="button" id="external" title="Open this URL in your system browser">Open externally</button>
-      <button type="button" id="send" disabled>Add selection to chat</button>
+      <button type="button" id="external" title="Open the live page in VS Code's browser when available">Open live</button>
     </form>
+    <div class="selection-actions" aria-label="Selection actions">
+      <span class="selection-label">Select a passage to use it as grounded agent context.</span>
+      <button type="button" id="copy-link" disabled>Copy source link</button>
+      <button type="button" id="copy-agent" disabled>Copy for Agent</button>
+      <button type="button" id="send" class="primary" disabled>Add to Agent</button>
+    </div>
     <div class="notice">
-      <strong>Safe text-only reader.</strong>
+      <strong>Safe public-page reader.</strong>
       Scripts, sign-in, cookies, forms, hidden controls, media, remote images, and full-page
       persistence are disabled. Some sites will be unsupported.
       <span id="screenshot-note"></span>
@@ -45,7 +54,12 @@ installStyles();
 
 const toolbar = requiredElement<HTMLFormElement>('toolbar');
 const urlInput = requiredElement<HTMLInputElement>('url');
+const backButton = requiredElement<HTMLButtonElement>('back');
+const forwardButton = requiredElement<HTMLButtonElement>('forward');
+const reloadButton = requiredElement<HTMLButtonElement>('reload');
 const externalButton = requiredElement<HTMLButtonElement>('external');
+const copyLinkButton = requiredElement<HTMLButtonElement>('copy-link');
+const copyAgentButton = requiredElement<HTMLButtonElement>('copy-agent');
 const sendButton = requiredElement<HTMLButtonElement>('send');
 const reader = requiredElement<HTMLElement>('reader');
 const status = requiredElement<HTMLElement>('status');
@@ -58,6 +72,25 @@ toolbar.addEventListener('submit', event => {
 externalButton.addEventListener('click', () => {
   if (currentUrl) post({ type: 'openExternal', url: currentUrl });
 });
+backButton.addEventListener('click', () => post({ type: 'navigateHistory', direction: 'back' }));
+forwardButton.addEventListener('click', () => post({ type: 'navigateHistory', direction: 'forward' }));
+reloadButton.addEventListener('click', () => post({ type: 'navigateHistory', direction: 'reload' }));
+copyLinkButton.addEventListener('click', () => {
+  if (!currentSelection) return;
+  post({
+    type: 'copySelectionLink',
+    token: currentSelection.token,
+    fingerprint: currentSelection.fingerprint,
+  });
+});
+copyAgentButton.addEventListener('click', () => {
+  if (!currentSelection) return;
+  post({
+    type: 'copySelectionForAgent',
+    token: currentSelection.token,
+    fingerprint: currentSelection.fingerprint,
+  });
+});
 sendButton.addEventListener('click', () => {
   void sendSelectionWithBestEffortCrop();
 });
@@ -69,6 +102,18 @@ reader.addEventListener('click', event => {
   if (!link) return;
   event.preventDefault();
   post({ type: 'navigate', url: link.href });
+});
+window.addEventListener('keydown', event => {
+  if (event.altKey && event.key === 'ArrowLeft') {
+    event.preventDefault();
+    post({ type: 'navigateHistory', direction: 'back' });
+  } else if (event.altKey && event.key === 'ArrowRight') {
+    event.preventDefault();
+    post({ type: 'navigateHistory', direction: 'forward' });
+  } else if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'r') {
+    event.preventDefault();
+    post({ type: 'navigateHistory', direction: 'reload' });
+  }
 });
 
 window.addEventListener('message', event => {
@@ -86,7 +131,8 @@ window.addEventListener('message', event => {
       currentSelection = undefined;
       selectionCaptureGeneration += 1;
       urlInput.value = message.url;
-      sendButton.disabled = true;
+      setSelectionActionsEnabled(false);
+      reloadButton.disabled = true;
       status.textContent = `Loading ${message.url}…`;
       reader.replaceChildren(emptyState('Loading safe reader copy…'));
       return;
@@ -95,8 +141,11 @@ window.addEventListener('message', event => {
       currentUrl = message.url;
       currentTitle = message.title;
       urlInput.value = message.url;
+      backButton.disabled = !message.canGoBack;
+      forwardButton.disabled = !message.canGoForward;
+      reloadButton.disabled = false;
       screenshotNote.textContent = message.screenshotAvailable
-        ? ' A selection crop adapter is available.'
+        ? ' Add to Agent includes a bounded synthetic selection image when capture succeeds.'
         : ` ${message.screenshotReason ?? 'Screenshot capture is unavailable.'}`;
       renderReaderPage(message.html, message.url, message.title);
       return;
@@ -104,14 +153,18 @@ window.addEventListener('message', event => {
       if (message.token !== currentToken) return;
       currentSelection = undefined;
       selectionCaptureGeneration += 1;
-      sendButton.disabled = true;
+      setSelectionActionsEnabled(false);
+      reloadButton.disabled = false;
       status.textContent = `Unsupported page: ${message.message}`;
       reader.replaceChildren(emptyState(
-        'This page could not be rendered by the experiment.',
+        'This page could not be rendered by the safe reader.',
         message.message,
       ));
       return;
     case 'sendResult':
+      status.textContent = message.message;
+      return;
+    case 'selectionActionResult':
       status.textContent = message.message;
   }
 });
@@ -156,7 +209,7 @@ function renderReaderPage(html: string, baseUrl: string, fallbackTitle: string):
   reader.replaceChildren(article);
   reader.scrollTop = 0;
   currentSelection = undefined;
-  sendButton.disabled = true;
+  setSelectionActionsEnabled(false);
   post({ type: 'selectionChanged' });
 
   const textLength = normalizeWhitespace(content.textContent ?? '').length;
@@ -247,7 +300,7 @@ function deferCaptureSelection(): void {
   window.setTimeout(() => {
     void captureSelection().catch(error => {
       currentSelection = undefined;
-      sendButton.disabled = true;
+      setSelectionActionsEnabled(false);
       status.textContent = `Could not capture selection: ${errorMessage(error)}`;
       post({ type: 'selectionChanged' });
     });
@@ -260,7 +313,7 @@ async function captureSelection(): Promise<void> {
   const selection = window.getSelection();
   if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
     currentSelection = undefined;
-    sendButton.disabled = true;
+    setSelectionActionsEnabled(false);
     post({ type: 'selectionChanged' });
     return;
   }
@@ -269,7 +322,7 @@ async function captureSelection(): Promise<void> {
   const exactText = selection.toString();
   if (exactText.length > MAX_SELECTION_CHARS) {
     currentSelection = undefined;
-    sendButton.disabled = true;
+    setSelectionActionsEnabled(false);
     status.textContent =
       `Selection is too large. Select at most ${MAX_SELECTION_CHARS.toLocaleString()} characters.`;
     post({ type: 'selectionChanged' });
@@ -316,7 +369,7 @@ async function captureSelection(): Promise<void> {
   }
   if (generation !== selectionCaptureGeneration || tokenAtStart !== currentToken) return;
   currentSelection = { ...candidate, fingerprint };
-  sendButton.disabled = false;
+  setSelectionActionsEnabled(true);
   status.textContent = `Selected ${exactText.trim().length.toLocaleString()} characters.`;
   post({ type: 'selectionChanged', selection: currentSelection });
 }
@@ -327,7 +380,7 @@ async function sendSelectionWithBestEffortCrop(): Promise<void> {
     return;
   }
   const selectionToSend = currentSelection;
-  sendButton.disabled = true;
+  setSelectionActionsEnabled(false);
   status.textContent = 'Preparing a bounded selection crop…';
   try {
     const selectionPngBase64 = await rasterizeSelectionContext(selectionToSend);
@@ -349,7 +402,7 @@ async function sendSelectionWithBestEffortCrop(): Promise<void> {
       currentSelection?.fingerprint === selectionToSend.fingerprint
       && currentToken === selectionToSend.token
     ) {
-      sendButton.disabled = false;
+      setSelectionActionsEnabled(true);
     }
   }
 }
@@ -520,14 +573,17 @@ function installStyles(): void {
   if (nonce) style.nonce = nonce;
   style.textContent = `
     *{box-sizing:border-box}
-    .shell{height:100%;display:grid;grid-template-rows:42px auto 28px minmax(0,1fr)}
+    .shell{height:100%;display:grid;grid-template-rows:auto auto auto 28px minmax(0,1fr)}
     .toolbar{display:flex;gap:6px;align-items:center;padding:7px 9px;border-bottom:1px solid var(--vscode-panel-border);background:var(--vscode-sideBar-background)}
-    .experiment-pill{flex:none;padding:2px 6px;border:1px solid var(--vscode-charts-orange,#cca700);border-radius:999px;color:var(--vscode-charts-orange,#cca700);font-size:11px;font-weight:600}
+    .navigation{display:flex;gap:2px;align-items:center}
     input{min-width:140px;flex:1;height:27px;padding:0 8px;border:1px solid var(--vscode-input-border,transparent);outline:none;border-radius:3px;background:var(--vscode-input-background);color:var(--vscode-input-foreground)}
     input:focus{border-color:var(--vscode-focusBorder)}
     button{height:27px;padding:0 9px;border:1px solid var(--vscode-button-border,transparent);border-radius:3px;background:var(--vscode-button-secondaryBackground);color:var(--vscode-button-secondaryForeground);cursor:pointer}
     button.primary,#send:not(:disabled){background:var(--vscode-button-background);color:var(--vscode-button-foreground)}
     button:disabled{opacity:.55;cursor:default}
+    .icon-button{width:28px;padding:0;font-size:16px}
+    .selection-actions{display:flex;gap:6px;align-items:center;padding:6px 9px;border-bottom:1px solid var(--vscode-panel-border);background:var(--vscode-editorWidget-background)}
+    .selection-label{min-width:160px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--vscode-descriptionForeground);font-size:12px}
     .notice{padding:7px 12px;border-bottom:1px solid var(--vscode-panel-border);background:var(--vscode-textBlockQuote-background);color:var(--vscode-descriptionForeground);font-size:12px;line-height:1.45}
     .notice strong{color:var(--vscode-editor-foreground)}
     #status{padding:5px 12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border-bottom:1px solid var(--vscode-panel-border);color:var(--vscode-descriptionForeground);font-size:11px}
@@ -552,9 +608,15 @@ function installStyles(): void {
     .capture-measure-warning{margin-bottom:5px;color:#f0a000;font-size:11px;font-weight:700;letter-spacing:.04em}
     .capture-measure-label{margin-bottom:12px;color:#8c8c8c;font-size:12px}
     .capture-measure-selection{padding:1px 2px;border-radius:2px;background:#264f78;color:#fff}
-    @media(max-width:680px){.shell{grid-template-rows:auto auto 28px minmax(0,1fr)}.toolbar{flex-wrap:wrap}.experiment-pill{display:none}#reader{padding-inline:16px}.reader-article{padding-top:20px}}
+    @media(max-width:760px){.shell{grid-template-rows:auto auto auto 28px minmax(0,1fr)}.toolbar,.selection-actions{flex-wrap:wrap}.selection-label{flex-basis:100%}#reader{padding-inline:16px}.reader-article{padding-top:20px}}
   `;
   document.head.appendChild(style);
+}
+
+function setSelectionActionsEnabled(enabled: boolean): void {
+  copyLinkButton.disabled = !enabled;
+  copyAgentButton.disabled = !enabled;
+  sendButton.disabled = !enabled;
 }
 
 function emptyState(heading: string, detail = ''): HTMLElement {

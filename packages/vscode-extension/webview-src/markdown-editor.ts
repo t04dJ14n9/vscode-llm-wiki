@@ -4,7 +4,6 @@ import { acceptCompletion, autocompletion, completionStatus, startCompletion } f
 import type { Completion, CompletionContext, CompletionResult } from '@codemirror/autocomplete';
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
 import { markdown } from '@codemirror/lang-markdown';
-import { languages } from '@codemirror/language-data';
 import { bracketMatching, foldGutter, syntaxHighlighting } from '@codemirror/language';
 import {
   Annotation,
@@ -59,6 +58,12 @@ import {
 import type { InlineCodeSpan } from './markdownSpans';
 import { setextHeadingLevelForLines } from '../src/markdownHeadingSyntax';
 import { parseWikiLinkTarget } from '../src/wikiLinks';
+
+declare let __webpack_public_path__: string;
+const markdownEditorScript = document.currentScript;
+if (markdownEditorScript instanceof HTMLScriptElement) {
+  __webpack_public_path__ = new URL('.', markdownEditorScript.src).toString();
+}
 
 const vscode = acquireVsCodeApi();
 
@@ -204,6 +209,7 @@ interface GitDiffLine {
 
 const setMarkdownDiagnostics = StateEffect.define<readonly MarkdownDiagnostic[]>();
 const setGitDiffLines = StateEffect.define<readonly GitDiffLine[]>();
+const refreshKnownNotePaths = StateEffect.define<null>();
 
 class DiagnosticGutterMarker extends GutterMarker {
   constructor(readonly severity: MarkdownDiagnostic['severity']) {
@@ -1121,7 +1127,9 @@ const llmWikiLinkRendering = ViewPlugin.fromClass(class {
       update.viewportChanged ||
       update.selectionSet ||
       update.transactions.some(transaction =>
-        transaction.effects.some(effect => effect.is(setMarkdownDiagnostics))
+        transaction.effects.some(effect => (
+          effect.is(setMarkdownDiagnostics) || effect.is(refreshKnownNotePaths)
+        ))
       ) ||
       isHybridPreviewEnabled(update.startState) !== isHybridPreviewEnabled(update.state)
     ) {
@@ -1532,7 +1540,7 @@ function createView(text: string, title?: string): EditorView {
         vimModeCompartment.of(vimModeEnabled ? [vim()] : []),
         history(),
         drawSelection(),
-        markdown({ codeLanguages: languages }),
+        markdown(),
         syntaxHighlighting(llmWikiHighlightStyle, { fallback: true }),
         bracketMatching(),
         search({ top: true }),
@@ -1855,7 +1863,8 @@ function createView(text: string, title?: string): EditorView {
           },
           '&:not(.cm-focused) .cm-vimCursorLayer .cm-fat-cursor': {
             background: 'none !important',
-            outlineColor: `${editorCaret} !important`,
+            outline: 'none !important',
+            boxShadow: `inset 0 0 0 1px ${editorCaret} !important`,
           },
           '.cm-selectionBackground': {
             backgroundColor: 'var(--vscode-editor-inactiveSelectionBackground, rgba(127, 127, 127, 0.24))',
@@ -3803,9 +3812,11 @@ window.addEventListener('message', event => {
       if (typeof message.text !== 'string') return;
       const documentTitle = typeof message.title === 'string' ? message.title : undefined;
       currentNotePath = typeof message.currentNotePath === 'string' ? message.currentNotePath : undefined;
-      knownNotePaths = Array.isArray(message.notePaths)
-        ? message.notePaths.filter((path: unknown): path is string => typeof path === 'string')
-        : [];
+      if (Array.isArray(message.notePaths)) {
+        knownNotePaths = message.notePaths.filter(
+          (path: unknown): path is string => typeof path === 'string',
+        );
+      }
       setImageResourceContext({
         baseUri: typeof message.resourceBaseUri === 'string' ? message.resourceBaseUri : undefined,
         rootUri: typeof message.resourceRootUri === 'string' ? message.resourceRootUri : undefined,
@@ -3838,6 +3849,14 @@ window.addEventListener('message', event => {
       applyingHostUpdate = false;
       break;
     }
+
+    case 'setNotePaths':
+      if (!Array.isArray(message.notePaths)) return;
+      knownNotePaths = message.notePaths.filter(
+        (path: unknown): path is string => typeof path === 'string',
+      );
+      if (view) view.dispatch({ effects: refreshKnownNotePaths.of(null) });
+      break;
 
     case 'requestText':
       if (view) {

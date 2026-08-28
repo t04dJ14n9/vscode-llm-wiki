@@ -42,6 +42,13 @@ const cursorCrop = loadTsModule('src/cursorCrop.ts', {
   './pdfPngConstraints': { MAX_PNG_BYTES },
 });
 const registeredCommands = [];
+const executedCommands = [];
+const clipboardWrites = [];
+const externalOpens = [];
+let availableCommands = [];
+let createPanel = () => {
+  throw new Error('panel creation is outside this test');
+};
 const vscode = {
   Uri: {
     parse: value => ({ value, toString: () => value }),
@@ -49,18 +56,29 @@ const vscode = {
   },
   ViewColumn: { Beside: 2 },
   commands: {
+    getCommands: async () => availableCommands,
+    executeCommand: async (...args) => {
+      executedCommands.push(args);
+    },
     registerCommand: (id, handler) => {
       registeredCommands.push({ id, handler });
       return { dispose() {} };
     },
   },
   env: {
-    openExternal: async () => true,
+    clipboard: {
+      writeText: async value => {
+        clipboardWrites.push(value);
+      },
+    },
+    openExternal: async uri => {
+      externalOpens.push(uri.toString());
+      return true;
+    },
   },
   window: {
-    createWebviewPanel: () => {
-      throw new Error('panel creation is outside these unit tests');
-    },
+    createWebviewPanel: (...args) => createPanel(...args),
+    showInformationMessage() {},
     showWarningMessage() {},
   },
 };
@@ -70,7 +88,7 @@ const browser = loadTsModule('src/experimentalOwnedBrowser.ts', {
   './experimentalOwnedBrowserProtocol': protocol,
 });
 
-test('experimental browser registration stays opt-in and exposes stable command hooks', () => {
+test('web browser registration exposes product commands and compatibility aliases', () => {
   const context = { subscriptions: [], extensionUri: { toString: () => 'extension:' } };
   const controller = browser.registerExperimentalOwnedBrowser({
     context,
@@ -78,14 +96,178 @@ test('experimental browser registration stays opt-in and exposes stable command 
   });
 
   assert.deepEqual(
-    registeredCommands.slice(-2).map(value => value.id),
+    registeredCommands.slice(-6).map(value => value.id),
     [
+      'llm-wiki.browser.open',
+      'llm-wiki.browser.addSelectionToAgent',
+      'llm-wiki.browser.copySelectionForAgent',
+      'llm-wiki.browser.copySelectionLink',
       'llm-wiki.experimentalBrowser.open',
       'llm-wiki.experimentalBrowser.sendSelection',
     ],
   );
-  assert.equal(context.subscriptions.length, 3);
+  assert.equal(context.subscriptions.length, 7);
   controller.dispose();
+});
+
+test('live-page delegation prefers VS Code Integrated Browser and falls back externally', async () => {
+  availableCommands = ['workbench.action.browser.open'];
+  executedCommands.length = 0;
+  externalOpens.length = 0;
+  await browser.openInBestAvailableBrowser('https://example.com/docs');
+  assert.deepEqual(executedCommands, [[
+    'workbench.action.browser.open',
+    'https://example.com/docs',
+  ]]);
+  assert.deepEqual(externalOpens, []);
+
+  availableCommands = [];
+  await browser.openInBestAvailableBrowser('https://example.com/fallback');
+  assert.deepEqual(externalOpens, ['https://example.com/fallback']);
+});
+
+test('browser selection actions copy agent context and a portable source link', async () => {
+  const posted = [];
+  let receiveMessage;
+  createPanel = () => ({
+    title: '',
+    webview: {
+      html: '',
+      cspSource: 'webview-source',
+      asWebviewUri: uri => uri,
+      onDidReceiveMessage: listener => {
+        receiveMessage = listener;
+        return { dispose() {} };
+      },
+      postMessage: async message => {
+        posted.push(message);
+        return true;
+      },
+    },
+    onDidDispose: () => ({ dispose() {} }),
+    reveal() {},
+    dispose() {},
+  });
+  clipboardWrites.length = 0;
+  const context = { subscriptions: [], extensionUri: { toString: () => 'extension:' } };
+  const controller = browser.registerExperimentalOwnedBrowser({
+    context,
+    fetchPage: async url => ({
+      url,
+      title: 'Browser page',
+      html: '<main><p>Before selected browser passage after.</p></main>',
+    }),
+    onSendSelection: async () => undefined,
+  });
+  await controller.open('https://example.com/article');
+  const loaded = posted.find(message => message.type === 'loaded');
+  assert.ok(loaded);
+  const selectionInput = {
+    token: loaded.token,
+    url: loaded.url,
+    title: loaded.title,
+    text: 'selected browser passage',
+    prefix: 'Before ',
+    suffix: ' after.',
+    rects: [{ x: 1, y: 2, width: 3, height: 4 }],
+  };
+  await receiveMessage({
+    type: 'selectionChanged',
+    selection: fingerprintCapture(selectionInput),
+  });
+  await new Promise(resolvePromise => setImmediate(resolvePromise));
+
+  const latestCommands = new Map(registeredCommands.map(value => [value.id, value.handler]));
+  await latestCommands.get('llm-wiki.browser.copySelectionForAgent')();
+  await latestCommands.get('llm-wiki.browser.copySelectionLink')();
+
+  assert.equal(clipboardWrites.length, 2);
+  assert.match(clipboardWrites[0], /^Source: \[Browser page\]/);
+  assert.match(clipboardWrites[0], /UNTRUSTED WEB CONTENT/);
+  assert.match(clipboardWrites[1], /^https:\/\/example\.com\/article#:~:text=/);
+  assert.deepEqual(
+    posted.filter(message => message.type === 'selectionActionResult').map(message => ({
+      action: message.action,
+      ok: message.ok,
+    })),
+    [
+      { action: 'copyForAgent', ok: true },
+      { action: 'copyLink', ok: true },
+    ],
+  );
+  controller.dispose();
+  createPanel = () => {
+    throw new Error('panel creation is outside this test');
+  };
+});
+
+test('browser navigation maintains back, forward, and reload history', async () => {
+  const posted = [];
+  const fetched = [];
+  let receiveMessage;
+  createPanel = () => ({
+    title: '',
+    webview: {
+      html: '',
+      cspSource: 'webview-source',
+      asWebviewUri: uri => uri,
+      onDidReceiveMessage: listener => {
+        receiveMessage = listener;
+        return { dispose() {} };
+      },
+      postMessage: async message => {
+        posted.push(message);
+        return true;
+      },
+    },
+    onDidDispose: () => ({ dispose() {} }),
+    reveal() {},
+    dispose() {},
+  });
+  const context = { subscriptions: [], extensionUri: { toString: () => 'extension:' } };
+  const controller = browser.registerExperimentalOwnedBrowser({
+    context,
+    fetchPage: async url => {
+      fetched.push(url);
+      return { url, title: new URL(url).pathname, html: `<main>${url}</main>` };
+    },
+    onSendSelection: async () => undefined,
+  });
+  await controller.open('https://example.com/one');
+  receiveMessage({ type: 'navigate', url: 'https://example.com/two' });
+  await new Promise(resolvePromise => setImmediate(resolvePromise));
+  receiveMessage({ type: 'navigateHistory', direction: 'back' });
+  await new Promise(resolvePromise => setImmediate(resolvePromise));
+  receiveMessage({ type: 'navigateHistory', direction: 'reload' });
+  await new Promise(resolvePromise => setImmediate(resolvePromise));
+  receiveMessage({ type: 'navigateHistory', direction: 'forward' });
+  await new Promise(resolvePromise => setImmediate(resolvePromise));
+
+  assert.deepEqual(fetched, [
+    'https://example.com/one',
+    'https://example.com/two',
+    'https://example.com/one',
+    'https://example.com/one',
+    'https://example.com/two',
+  ]);
+  assert.deepEqual(
+    posted.filter(message => message.type === 'loaded').map(message => ({
+      url: message.url,
+      canGoBack: message.canGoBack,
+      canGoForward: message.canGoForward,
+    })),
+    [
+      { url: 'https://example.com/one', canGoBack: false, canGoForward: false },
+      { url: 'https://example.com/two', canGoBack: true, canGoForward: false },
+      { url: 'https://example.com/one', canGoBack: false, canGoForward: true },
+      { url: 'https://example.com/one', canGoBack: false, canGoForward: true },
+      { url: 'https://example.com/two', canGoBack: true, canGoForward: false },
+    ],
+  );
+  controller.dispose();
+  createPanel = () => {
+    throw new Error('panel creation is outside this test');
+  };
 });
 
 test('URL normalization allows ordinary public HTTP(S) input but rejects ambient authority', () => {
@@ -312,6 +494,31 @@ test('agent-facing selection includes an untrusted-content warning and bounded c
   assert.equal(context.anchorUri.startsWith('https://example.com/article#:~:text='), true);
 });
 
+test('Copy for Agent formats a source-linked untrusted web selection', () => {
+  const text = browser.formatExperimentalBrowserSelectionForAgent({
+    token: 'token',
+    fingerprint: 'fingerprint',
+    url: 'https://example.com/article',
+    title: 'Example article',
+    text: 'Selected browser passage.',
+    prefix: 'Before the selection. ',
+    suffix: ' After the selection.',
+    rects: [],
+  }, {
+    url: 'https://example.com/article',
+    title: 'Example [article]',
+  });
+
+  assert.equal(
+    text.startsWith('Source: [Example \\[article\\]](<https://example.com/article#:~:text='),
+    true,
+  );
+  assert.match(text, /UNTRUSTED WEB CONTENT/);
+  assert.match(text, /--- Selected passage ---\nSelected browser passage\./);
+  assert.match(text, /--- Context before ---\nBefore the selection\./);
+  assert.match(text, /--- Context after ---\n After the selection\./);
+});
+
 test('selection-card bounds contain only exact passage and limited adjacent context', () => {
   const excerpt = protocol.boundedExperimentalCaptureExcerpt({
     text: 'selected',
@@ -353,7 +560,7 @@ test('owned webview is strict-CSP and source capture cannot include a remote pag
   }, {
     toString: () => 'extension:',
   }, 'fixed-nonce');
-  assert.match(html, /LLM Wiki Browser \(Experimental\)/);
+  assert.match(html, /<title>LLM Wiki Browser<\/title>/);
   assert.match(html, /default-src 'none'/);
   assert.match(html, /connect-src 'none'/);
   assert.match(html, /img-src blob: data:/);
@@ -368,6 +575,12 @@ test('owned webview is strict-CSP and source capture cannot include a remote pag
   assert.match(source, /foreignObject/);
   assert.match(source, /canvas\.toBlob/);
   assert.match(source, /UNTRUSTED WEB EXCERPT — reference only/);
+  assert.match(source, /id="copy-agent"/);
+  assert.match(source, /id="copy-link"/);
+  assert.match(source, /id="back"/);
+  assert.match(source, /type: 'navigateHistory'/);
+  assert.match(source, /type: 'copySelectionForAgent'/);
+  assert.match(source, /type: 'copySelectionLink'/);
   assert.match(source, /boundedExperimentalCaptureExcerpt\(capture\)/);
   assert.doesNotMatch(
     source.slice(

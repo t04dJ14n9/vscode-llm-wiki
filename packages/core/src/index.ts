@@ -8,3 +8,5 @@ export type {
   ReferenceKind,
   ReferenceTarget,
 } from './links/reference-target';
+export { pdfWebviewToHostMessage } from './pdfProtocol';
+export type { PdfWebviewToHostMessage } from './pdfProtocol';

@@ -26,6 +26,18 @@ const MAX_TITLE_CHARS = 500;
 const MAX_LOCATOR_CHARS = 2_048;
 const MAX_RECTS = 64;
 
+export const WEB_BROWSER_COMMANDS = {
+  open: 'llm-wiki.browser.open',
+  addSelectionToAgent: 'llm-wiki.browser.addSelectionToAgent',
+  copySelectionForAgent: 'llm-wiki.browser.copySelectionForAgent',
+  copySelectionLink: 'llm-wiki.browser.copySelectionLink',
+} as const;
+
+const LEGACY_WEB_BROWSER_COMMANDS = {
+  open: 'llm-wiki.experimentalBrowser.open',
+  addSelectionToAgent: 'llm-wiki.experimentalBrowser.sendSelection',
+} as const;
+
 export interface ExperimentalOwnedBrowserAttachment {
   bytes: Uint8Array;
   mediaType: 'image/png';
@@ -62,13 +74,21 @@ export interface ExperimentalOwnedBrowserOptions {
 export interface ExperimentalOwnedBrowserController extends vscode.Disposable {
   open(initialUrl?: string): Promise<void>;
   getActiveSelectionContext(): SelectionContext | undefined;
+  copySelectionForAgent(): Promise<boolean>;
+  copySelectionLink(): Promise<boolean>;
 }
 
 interface LoadedPage {
   token: string;
   url: string;
   title: string;
+  html: string;
 }
+
+type BrowserHistoryNavigation =
+  | { mode: 'push' }
+  | { mode: 'traverse'; index: number }
+  | { mode: 'reload' };
 
 interface PublicReaderPage {
   url: string;
@@ -92,9 +112,9 @@ export function registerExperimentalOwnedBrowser(
   options: ExperimentalOwnedBrowserOptions,
 ): ExperimentalOwnedBrowserController {
   const controller = new OwnedBrowserController(options);
-  const openCommand = options.openCommand ?? 'llm-wiki.experimentalBrowser.open';
+  const openCommand = options.openCommand ?? WEB_BROWSER_COMMANDS.open;
   const sendCommand = options.sendSelectionCommand
-    ?? 'llm-wiki.experimentalBrowser.sendSelection';
+    ?? WEB_BROWSER_COMMANDS.addSelectionToAgent;
   const subscriptions = [
     vscode.commands.registerCommand(openCommand, async (value?: unknown) => {
       const candidate = typeof value === 'string' ? value : undefined;
@@ -103,6 +123,24 @@ export function registerExperimentalOwnedBrowser(
     vscode.commands.registerCommand(sendCommand, async () => {
       await controller.sendSelection();
     }),
+    vscode.commands.registerCommand(WEB_BROWSER_COMMANDS.copySelectionForAgent, async () => {
+      await controller.copySelectionForAgent();
+    }),
+    vscode.commands.registerCommand(WEB_BROWSER_COMMANDS.copySelectionLink, async () => {
+      await controller.copySelectionLink();
+    }),
+    ...(openCommand === LEGACY_WEB_BROWSER_COMMANDS.open
+      ? []
+      : [vscode.commands.registerCommand(LEGACY_WEB_BROWSER_COMMANDS.open, async (value?: unknown) => {
+          const candidate = typeof value === 'string' ? value : undefined;
+          await controller.open(candidate);
+        })]),
+    ...(sendCommand === LEGACY_WEB_BROWSER_COMMANDS.addSelectionToAgent
+      ? []
+      : [vscode.commands.registerCommand(
+          LEGACY_WEB_BROWSER_COMMANDS.addSelectionToAgent,
+          async () => controller.sendSelection(),
+        )]),
     controller,
   ];
   options.context.subscriptions.push(...subscriptions);
@@ -114,18 +152,20 @@ class OwnedBrowserController implements ExperimentalOwnedBrowserController {
   private page: LoadedPage | undefined;
   private selection: ExperimentalBrowserSelectionCapture | undefined;
   private pendingNavigationToken: string | undefined;
+  private history: string[] = [];
+  private historyIndex = -1;
   private readonly fetchPage: typeof fetchPublicReaderPage;
 
   constructor(private readonly options: ExperimentalOwnedBrowserOptions) {
     this.fetchPage = options.fetchPage ?? fetchPublicReaderPage;
   }
 
-  async open(initialUrl = DEFAULT_START_URL): Promise<void> {
-    const url = normalizeExperimentalBrowserUrl(initialUrl);
+  async open(initialUrl?: string): Promise<void> {
+    const url = normalizeExperimentalBrowserUrl(initialUrl ?? DEFAULT_START_URL);
     if (!this.panel) {
       this.panel = vscode.window.createWebviewPanel(
         EXPERIMENTAL_BROWSER_VIEW_TYPE,
-        'LLM Wiki Browser (Experimental)',
+        'LLM Wiki Browser',
         vscode.ViewColumn.Beside,
         {
           enableScripts: true,
@@ -142,7 +182,7 @@ class OwnedBrowserController implements ExperimentalOwnedBrowserController {
       this.panel.webview.onDidReceiveMessage(message => {
         void this.handleMessage(message).catch(error => {
           vscode.window.showErrorMessage(
-            `Experimental browser message failed: ${errorMessage(error)}`,
+            `Browser message failed: ${errorMessage(error)}`,
           );
         });
       });
@@ -151,11 +191,14 @@ class OwnedBrowserController implements ExperimentalOwnedBrowserController {
         this.page = undefined;
         this.selection = undefined;
         this.pendingNavigationToken = undefined;
+        this.history = [];
+        this.historyIndex = -1;
       });
     } else {
       this.panel.reveal(vscode.ViewColumn.Beside);
+      if (initialUrl === undefined) return;
     }
-    await this.navigate(url);
+    await this.navigate(url, { mode: 'push' });
   }
 
   getActiveSelectionContext(): SelectionContext | undefined {
@@ -173,12 +216,12 @@ class OwnedBrowserController implements ExperimentalOwnedBrowserController {
     const panel = this.panel;
     if (!selection || !panel || !this.page || !this.selection) {
       vscode.window.showWarningMessage(
-        'Select text in the experimental browser before adding it to chat.',
+        'Select text in the browser before adding it to an agent.',
       );
       await this.post({
         type: 'sendResult',
         ok: false,
-        message: 'Select text before adding it to chat.',
+        message: 'Select text before adding it to an agent.',
       });
       return;
     }
@@ -252,8 +295,8 @@ class OwnedBrowserController implements ExperimentalOwnedBrowserController {
         type: 'sendResult',
         ok: true,
         message: attachment
-          ? 'Selection and crop added to the active chat draft.'
-          : 'Selection added to the active chat draft without a screenshot.',
+          ? 'Selection and image added to the active agent draft.'
+          : 'Selection added to the active agent draft without an image.',
       });
     } catch (error) {
       await this.post({
@@ -263,6 +306,53 @@ class OwnedBrowserController implements ExperimentalOwnedBrowserController {
       });
       throw error;
     }
+  }
+
+  async copySelectionForAgent(
+    requestedToken?: string,
+    requestedFingerprint?: string,
+  ): Promise<boolean> {
+    const capture = this.currentRequestedSelection(requestedToken, requestedFingerprint);
+    if (!capture || !this.page) {
+      await this.reportSelectionAction(
+        'copyForAgent',
+        false,
+        'Select text in the browser before copying it for an agent.',
+      );
+      return false;
+    }
+    const text = formatExperimentalBrowserSelectionForAgent(capture, this.page);
+    await vscode.env.clipboard.writeText(text);
+    await this.reportSelectionAction(
+      'copyForAgent',
+      true,
+      'Selection copied with its source and untrusted-content boundary.',
+    );
+    return true;
+  }
+
+  async copySelectionLink(
+    requestedToken?: string,
+    requestedFingerprint?: string,
+  ): Promise<boolean> {
+    const capture = this.currentRequestedSelection(requestedToken, requestedFingerprint);
+    if (!capture || !this.page) {
+      await this.reportSelectionAction(
+        'copyLink',
+        false,
+        'Select text in the browser before copying its source link.',
+      );
+      return false;
+    }
+    const link = buildTextFragmentUri(
+      this.page.url,
+      capture.text,
+      capture.prefix,
+      capture.suffix,
+    );
+    await vscode.env.clipboard.writeText(link);
+    await this.reportSelectionAction('copyLink', true, 'Selection source link copied.');
+    return true;
   }
 
   dispose(): void {
@@ -279,15 +369,18 @@ class OwnedBrowserController implements ExperimentalOwnedBrowserController {
     switch (message.type) {
       case 'ready':
         if (this.page) {
-          await this.post({ type: 'navigate', url: this.page.url });
+          await this.postLoadedPage(this.page);
         }
         return;
       case 'navigate':
-        await this.navigate(message.url);
+        await this.navigate(message.url, { mode: 'push' });
+        return;
+      case 'navigateHistory':
+        await this.navigateHistory(message.direction);
         return;
       case 'openExternal': {
         const url = normalizeExperimentalBrowserUrl(message.url);
-        await vscode.env.openExternal(vscode.Uri.parse(url));
+        await openInBestAvailableBrowser(url);
         return;
       }
       case 'selectionChanged': {
@@ -303,10 +396,19 @@ class OwnedBrowserController implements ExperimentalOwnedBrowserController {
           message.token,
           message.fingerprint,
         );
+        return;
+      case 'copySelectionForAgent':
+        await this.copySelectionForAgent(message.token, message.fingerprint);
+        return;
+      case 'copySelectionLink':
+        await this.copySelectionLink(message.token, message.fingerprint);
     }
   }
 
-  private async navigate(input: string): Promise<void> {
+  private async navigate(
+    input: string,
+    historyNavigation: BrowserHistoryNavigation,
+  ): Promise<void> {
     const panel = this.panel;
     if (!panel) return;
     const token = randomUUID();
@@ -331,18 +433,15 @@ class OwnedBrowserController implements ExperimentalOwnedBrowserController {
     try {
       const result = await this.fetchPage(url);
       if (this.panel !== panel || this.pendingNavigationToken !== token) return;
-      this.page = { token, url: result.url, title: result.title };
-      panel.title = `Browser (Experimental): ${result.title}`;
-      await this.post({
-        type: 'loaded',
+      this.commitHistory(result.url, historyNavigation);
+      this.page = {
         token,
         url: result.url,
         title: result.title,
         html: result.html,
-        screenshotAvailable: true,
-        screenshotReason:
-          'Best-effort crop contains only sanitized selected text and bounded context.',
-      });
+      };
+      panel.title = `Browser: ${result.title}`;
+      await this.postLoadedPage(this.page);
     } catch (error) {
       if (this.panel !== panel || this.pendingNavigationToken !== token) return;
       await this.post({
@@ -356,6 +455,73 @@ class OwnedBrowserController implements ExperimentalOwnedBrowserController {
 
   private async post(message: ExperimentalBrowserHostMessage): Promise<void> {
     await this.panel?.webview.postMessage(message);
+  }
+
+  private async postLoadedPage(page: LoadedPage): Promise<void> {
+    await this.post({
+      type: 'loaded',
+      token: page.token,
+      url: page.url,
+      title: page.title,
+      html: page.html,
+      canGoBack: this.historyIndex > 0,
+      canGoForward: this.historyIndex >= 0 && this.historyIndex < this.history.length - 1,
+      screenshotAvailable: true,
+      screenshotReason:
+        'Best-effort crop contains only sanitized selected text and bounded context.',
+    });
+  }
+
+  private async navigateHistory(direction: 'back' | 'forward' | 'reload'): Promise<void> {
+    if (direction === 'reload') {
+      const url = this.page?.url ?? this.history[this.historyIndex];
+      if (url) await this.navigate(url, { mode: 'reload' });
+      return;
+    }
+    const delta = direction === 'back' ? -1 : 1;
+    const nextIndex = this.historyIndex + delta;
+    const url = this.history[nextIndex];
+    if (!url) return;
+    await this.navigate(url, { mode: 'traverse', index: nextIndex });
+  }
+
+  private commitHistory(url: string, navigation: BrowserHistoryNavigation): void {
+    if (navigation.mode === 'traverse') {
+      this.historyIndex = navigation.index;
+      this.history[this.historyIndex] = url;
+      return;
+    }
+    if (navigation.mode === 'reload') {
+      if (this.historyIndex >= 0) this.history[this.historyIndex] = url;
+      else {
+        this.history = [url];
+        this.historyIndex = 0;
+      }
+      return;
+    }
+    if (this.history[this.historyIndex] === url) return;
+    this.history = [...this.history.slice(0, this.historyIndex + 1), url];
+    this.historyIndex = this.history.length - 1;
+  }
+
+  private currentRequestedSelection(
+    requestedToken?: string,
+    requestedFingerprint?: string,
+  ): ExperimentalBrowserSelectionCapture | undefined {
+    if (!this.page || !this.selection) return undefined;
+    if (requestedToken && requestedToken !== this.page.token) return undefined;
+    if (requestedFingerprint && requestedFingerprint !== this.selection.fingerprint) return undefined;
+    return this.selection;
+  }
+
+  private async reportSelectionAction(
+    action: 'copyForAgent' | 'copyLink',
+    ok: boolean,
+    message: string,
+  ): Promise<void> {
+    if (ok) vscode.window.showInformationMessage(message);
+    else vscode.window.showWarningMessage(message);
+    await this.post({ type: 'selectionActionResult', action, ok, message });
   }
 
   private async rejectStaleSelection(): Promise<void> {
@@ -410,7 +576,7 @@ export function selectionContextFromBrowserCapture(
     metadata: {
       kind: 'web',
       contentTrust: 'untrusted',
-      browser: 'llm-wiki-owned-experimental',
+      browser: 'llm-wiki-owned-reader',
       title: page.title,
       selectedText: capture.text,
       prefix: capture.prefix,
@@ -431,6 +597,32 @@ export function selectionContextFromBrowserCapture(
       },
     },
   };
+}
+
+export function formatExperimentalBrowserSelectionForAgent(
+  capture: ExperimentalBrowserSelectionCapture,
+  page: Pick<LoadedPage, 'url' | 'title'>,
+): string {
+  const sourceLink = buildTextFragmentUri(
+    page.url,
+    capture.text,
+    capture.prefix,
+    capture.suffix,
+  );
+  const title = escapeMarkdownLinkLabel(
+    safeUntrustedWebText(page.title).replace(/[\r\n]+/g, ' ').trim() || hostnameLabel(page.url),
+  );
+  const context = selectionContextFromBrowserCapture(capture, {
+    token: capture.token,
+    url: page.url,
+    title: page.title,
+    html: '',
+  });
+  return [
+    `Source: [${title}](<${sourceLink}>)`,
+    '',
+    context.text,
+  ].join('\n');
 }
 
 export function parseBrowserSelectionCapture(
@@ -506,7 +698,7 @@ export function normalizeExperimentalBrowserUrl(input: string): string {
     : `https://${trimmed || 'example.com'}`;
   const url = new URL(candidate);
   if (url.protocol !== 'https:' && url.protocol !== 'http:') {
-    throw new Error('The experimental browser supports only HTTP(S) public pages.');
+    throw new Error('The browser supports only HTTP(S) public pages.');
   }
   if (url.username || url.password) {
     throw new Error('URLs containing credentials are not supported.');
@@ -519,6 +711,21 @@ export function normalizeExperimentalBrowserUrl(input: string): string {
   }
   url.hash = '';
   return url.toString();
+}
+
+export async function openInBestAvailableBrowser(url: string): Promise<void> {
+  const normalized = normalizeExperimentalBrowserUrl(url);
+  let commands: readonly string[] = [];
+  try {
+    commands = await vscode.commands.getCommands(true);
+  } catch {
+    // Fall through to the public external-browser API.
+  }
+  if (commands.includes('workbench.action.browser.open')) {
+    await vscode.commands.executeCommand('workbench.action.browser.open', normalized);
+    return;
+  }
+  await vscode.env.openExternal(vscode.Uri.parse(normalized));
 }
 
 export async function fetchPublicReaderPage(
@@ -565,7 +772,7 @@ export async function fetchPublicReaderPage(
       throw new Error(`Unsupported page type: ${contentType || 'unknown'}.`);
     }
     if (response.body.byteLength > EXPERIMENTAL_BROWSER_MAX_HTML_BYTES) {
-      throw new Error('Page is too large for the experimental reader.');
+      throw new Error('Page is too large for the safe reader.');
     }
     const html = new TextDecoder().decode(response.body);
     return {
@@ -662,14 +869,14 @@ export function renderExperimentalOwnedBrowserHtml(
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'; object-src 'none'; connect-src 'none'; img-src blob: data:; media-src 'none'; font-src ${webview.cspSource}; style-src 'nonce-${escapeAttribute(nonce)}'; script-src 'nonce-${escapeAttribute(nonce)}' ${webview.cspSource};">
   <meta name="llm-wiki-csp-nonce" content="${escapeAttribute(nonce)}">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>LLM Wiki Browser (Experimental)</title>
+  <title>LLM Wiki Browser</title>
   <style nonce="${escapeAttribute(nonce)}">
     html,body{height:100%;margin:0;overflow:hidden;background:var(--vscode-editor-background);color:var(--vscode-editor-foreground);font:13px var(--vscode-font-family,sans-serif)}
     #app{height:100%}
   </style>
 </head>
 <body>
-  <div id="app" aria-label="LLM Wiki experimental browser"></div>
+  <div id="app" aria-label="LLM Wiki browser"></div>
   <script nonce="${escapeAttribute(nonce)}" src="${escapeAttribute(scriptUri.toString())}"></script>
 </body>
 </html>`;
@@ -678,6 +885,20 @@ export function renderExperimentalOwnedBrowserHtml(
 function parseWebviewMessage(raw: unknown): ExperimentalBrowserWebviewMessage | undefined {
   if (!isRecord(raw) || typeof raw.type !== 'string') return undefined;
   if (raw.type === 'ready') return { type: 'ready' };
+  if (
+    raw.type === 'navigateHistory'
+    && (raw.direction === 'back' || raw.direction === 'forward' || raw.direction === 'reload')
+  ) {
+    return { type: 'navigateHistory', direction: raw.direction };
+  }
+  if (raw.type === 'copySelectionForAgent' || raw.type === 'copySelectionLink') {
+    if (typeof raw.token !== 'string' || typeof raw.fingerprint !== 'string') return undefined;
+    return {
+      type: raw.type,
+      token: raw.token,
+      fingerprint: raw.fingerprint,
+    };
+  }
   if (raw.type === 'sendSelection') {
     if (typeof raw.token !== 'string' || typeof raw.fingerprint !== 'string') return undefined;
     return {
@@ -734,7 +955,7 @@ export function requestPinnedPublicPage(
       headers: {
         Accept: 'text/html, application/xhtml+xml, text/plain;q=0.8',
         'Accept-Encoding': 'identity',
-        'User-Agent': 'Human-Learning-Experimental-Reader/0.1',
+        'User-Agent': 'LLM-Wiki-Safe-Reader/0.2',
       },
     }, response => {
       const remoteAddress = response.socket.remoteAddress;
@@ -749,7 +970,7 @@ export function requestPinnedPublicPage(
         && declaredLength > EXPERIMENTAL_BROWSER_MAX_HTML_BYTES
       ) {
         response.destroy();
-        finishReject(new Error('Page is too large for the experimental reader.'));
+        finishReject(new Error('Page is too large for the safe reader.'));
         return;
       }
       const chunks: Buffer[] = [];
@@ -759,7 +980,7 @@ export function requestPinnedPublicPage(
         total += bytes.byteLength;
         if (total > EXPERIMENTAL_BROWSER_MAX_HTML_BYTES) {
           response.destroy();
-          finishReject(new Error('Page is too large for the experimental reader.'));
+          finishReject(new Error('Page is too large for the safe reader.'));
           return;
         }
         chunks.push(bytes);
@@ -838,6 +1059,10 @@ function safeUntrustedWebText(value: string): string {
   return value
     .replace(/\u0000/g, '')
     .replace(/```/g, '``\u200b`');
+}
+
+function escapeMarkdownLinkLabel(value: string): string {
+  return value.replace(/[\\[\]`*_{}<>&|~]/gu, '\\$&');
 }
 
 function titleFromHtml(html: string): string | undefined {

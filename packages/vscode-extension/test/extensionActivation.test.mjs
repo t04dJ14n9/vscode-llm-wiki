@@ -106,7 +106,10 @@ function loadTsModule(relativePath, mocks = {}) {
     }
     if (request === './experimentalOwnedBrowser') {
       return {
-        registerExperimentalOwnedBrowser: () => ({ dispose() {} }),
+        registerExperimentalOwnedBrowser: () => ({
+          async open() {},
+          dispose() {},
+        }),
       };
     }
     if (request === './learningNoteStore') {
@@ -146,6 +149,11 @@ function loadTsModule(relativePath, mocks = {}) {
           changed: false,
           requiresConfirmation: false,
         }),
+      };
+    }
+    if (request === './terminalCliBridge') {
+      return {
+        registerTerminalCliBridge: () => undefined,
       };
     }
     return originalLoad.call(this, request, parent, isMain);
@@ -315,7 +323,10 @@ test('activation routes product URI anchor links through the LLM Wiki dispatcher
     query: `target=${encodedTarget}`,
   });
 
-  assert.deepEqual(dispatchCalls, [['/vault', target]]);
+  assert.equal(dispatchCalls.length, 1);
+  assert.equal(dispatchCalls[0][0], '/vault');
+  assert.equal(dispatchCalls[0][1], target);
+  assert.equal(typeof dispatchCalls[0][2].openWebTarget, 'function');
   assert.deepEqual(warningMessages, ['This LLM Wiki link is invalid.']);
 });
 
@@ -1333,7 +1344,7 @@ test('Cursor Browser selection is exported with its crop and routed to the activ
   }]);
 });
 
-test('experimental owned reader routes its validated text and synthetic crop through the same handoff', async () => {
+test('owned browser routes its validated text and synthetic crop through the same handoff', async () => {
   let browserOptions;
   const exports = [];
   const handoffs = [];
@@ -1397,7 +1408,7 @@ test('experimental owned reader routes its validated text and synthetic crop thr
   }]);
 });
 
-test('activation reopens an already-open PDF vault file in the custom viewer', async () => {
+test('activation leaves an explicitly opened PDF text document in its selected editor', async () => {
   const executeCommandCalls = [];
   const activeDocumentUri = { fsPath: '/vault/raw/pdf/ddia.pdf', scheme: 'file' };
   const vscode = createVscodeMock({
@@ -1466,344 +1477,7 @@ test('activation reopens an already-open PDF vault file in the custom viewer', a
   activate(context);
   await new Promise(resolve => setTimeout(resolve, 0));
 
-  assert.deepEqual(
-    executeCommandCalls.find(([command, uri]) =>
-      command === 'vscode.openWith' && uri?.fsPath === activeDocumentUri.fsPath
-    ),
-    [
-      'vscode.openWith',
-      activeDocumentUri,
-      'llm-wiki.pdfViewer',
-    ],
-  );
-});
-
-test('activation reopens a startup PDF when it becomes the active text editor after activation', async () => {
-  const executeCommandCalls = [];
-  const activeDocumentUri = { fsPath: '/vault/raw/pdf/ddia.pdf', scheme: 'file' };
-  const vscode = createVscodeMock({
-    executeCommandCalls,
-    activeDocumentUri: undefined,
-  });
-
-  const { activate } = loadTsModule('src/extension.ts', {
-    vscode,
-    '@llm-wiki/core': {
-      detectVaultRoot: () => '/vault',
-      openDatabase: async () => ({}),
-      closeDatabase: () => undefined,
-      getBacklinks: () => [],
-      getForwardLinks: () => [],
-      checkLinks: () => [],
-      rebuildLinksForNote: () => undefined,
-      rebuildAllLinks: () => undefined,
-      registerSource: () => ({ id: 1 }),
-      ingestFile: async () => undefined,
-      runMigrations: () => undefined,
-    },
-    './linkProvider': { registerLinkProvider: () => undefined },
-    './backlinksProvider': {
-      BacklinksProvider: class {
-        refresh() {}
-      },
-    },
-    './agentContext': {
-      addSelectionToContext: async () => undefined,
-    },
-    './uriDispatcher': { dispatchUri: () => undefined },
-    './pdfEditorProvider': {
-      PdfEditorProvider: class {
-        static viewType = 'llm-wiki.pdfViewer';
-        constructor() {}
-        getActiveWebview() {
-          return undefined;
-        }
-      },
-    },
-    './markdownEditorProvider': {
-      MarkdownEditorProvider: class {
-        static viewType = 'llm-wiki.markdownEditor';
-        constructor() {}
-      },
-    },
-    './markdownSymbols': {
-      registerMarkdownOutlineProvider: () => undefined,
-      registerMarkdownOutlineTreeProvider: () => ({ refresh() {} }),
-    },
-    './wikiLinks': { notePathToUri: value => `llm-wiki://note/${value}` },
-  });
-
-  const context = {
-    subscriptions: [],
-  };
-
-  activate(context);
-  vscode.__fireActiveEditorChange({
-    document: {
-      uri: activeDocumentUri,
-      languageId: 'plaintext',
-    },
-  });
-  await new Promise(resolve => setTimeout(resolve, 0));
-
-  assert.deepEqual(
-    executeCommandCalls.find(([command, uri]) =>
-      command === 'vscode.openWith' && uri?.fsPath === activeDocumentUri.fsPath
-    ),
-    [
-      'vscode.openWith',
-      activeDocumentUri,
-      'llm-wiki.pdfViewer',
-    ],
-  );
-});
-
-test('activation retries reopening a startup PDF while VS Code keeps it in the text editor', async () => {
-  const executeCommandCalls = [];
-  const activeDocumentUri = { fsPath: '/vault/raw/pdf/ddia.pdf', scheme: 'file' };
-  const vscode = createVscodeMock({
-    executeCommandCalls,
-    activeDocumentUri,
-    activeDocumentLanguageId: 'plaintext',
-  });
-
-  const { activate } = loadTsModule('src/extension.ts', {
-    vscode,
-    '@llm-wiki/core': {
-      detectVaultRoot: () => '/vault',
-      openDatabase: async () => ({}),
-      closeDatabase: () => undefined,
-      getBacklinks: () => [],
-      getForwardLinks: () => [],
-      checkLinks: () => [],
-      rebuildLinksForNote: () => undefined,
-      rebuildAllLinks: () => undefined,
-      registerSource: () => ({ id: 1 }),
-      ingestFile: async () => undefined,
-      runMigrations: () => undefined,
-    },
-    './linkProvider': { registerLinkProvider: () => undefined },
-    './backlinksProvider': {
-      BacklinksProvider: class {
-        refresh() {}
-      },
-    },
-    './agentContext': {
-      addSelectionToContext: async () => undefined,
-    },
-    './uriDispatcher': { dispatchUri: () => undefined },
-    './pdfEditorProvider': {
-      PdfEditorProvider: class {
-        static viewType = 'llm-wiki.pdfViewer';
-        constructor() {}
-        getActiveWebview() {
-          return undefined;
-        }
-      },
-    },
-    './markdownEditorProvider': {
-      MarkdownEditorProvider: class {
-        static viewType = 'llm-wiki.markdownEditor';
-        constructor() {}
-      },
-    },
-    './markdownSymbols': {
-      registerMarkdownOutlineProvider: () => undefined,
-      registerMarkdownOutlineTreeProvider: () => ({ refresh() {} }),
-    },
-    './wikiLinks': { notePathToUri: value => `llm-wiki://note/${value}` },
-  });
-
-  const context = {
-    subscriptions: [],
-  };
-
-  activate(context);
-  await new Promise(resolve => setTimeout(resolve, 1300));
-
-  const pdfReopenCalls = executeCommandCalls.filter(([command, uri, viewType]) =>
-    command === 'vscode.openWith'
-    && uri?.fsPath === activeDocumentUri.fsPath
-    && viewType === 'llm-wiki.pdfViewer'
-  );
-
-  assert.ok(
-    pdfReopenCalls.length >= 2,
-    `expected at least two reopen attempts for the startup PDF, received ${pdfReopenCalls.length}`,
-  );
-});
-
-test('PDF editor recovery uses short startup retries plus persistent document routing instead of polling', () => {
-  const source = readFileSync(join(packageRoot, 'src', 'extension.ts'), 'utf8');
-
-  assert.match(
-    source,
-    /STARTUP_PDF_EDITOR_RETRY_DELAYS_MS\s*=\s*\[0,\s*250,\s*1_000\]/,
-  );
-  assert.match(source, /onDidOpenTextDocument/);
-  assert.doesNotMatch(source, /STARTUP_CUSTOM_EDITOR_MONITOR_MS/);
-  assert.doesNotMatch(source, /stopMonitoring/);
-  assert.doesNotMatch(source, /\bsetInterval\s*\(/);
-  assert.doesNotMatch(source, /\b20_000\b/);
-});
-
-test('activation reopens a startup PDF that is visible even when no active text editor is focused', async () => {
-  const executeCommandCalls = [];
-  const visiblePdfEditor = {
-    document: {
-      uri: { fsPath: '/vault/raw/pdf/ddia.pdf', scheme: 'file' },
-      languageId: 'plaintext',
-    },
-  };
-  const vscode = createVscodeMock({
-    executeCommandCalls,
-    activeDocumentUri: undefined,
-    visibleTextEditors: [visiblePdfEditor],
-  });
-
-  const { activate } = loadTsModule('src/extension.ts', {
-    vscode,
-    '@llm-wiki/core': {
-      detectVaultRoot: () => '/vault',
-      openDatabase: async () => ({}),
-      closeDatabase: () => undefined,
-      getBacklinks: () => [],
-      getForwardLinks: () => [],
-      checkLinks: () => [],
-      rebuildLinksForNote: () => undefined,
-      rebuildAllLinks: () => undefined,
-      registerSource: () => ({ id: 1 }),
-      ingestFile: async () => undefined,
-      runMigrations: () => undefined,
-    },
-    './linkProvider': { registerLinkProvider: () => undefined },
-    './backlinksProvider': {
-      BacklinksProvider: class {
-        refresh() {}
-      },
-    },
-    './agentContext': {
-      addSelectionToContext: async () => undefined,
-    },
-    './uriDispatcher': { dispatchUri: () => undefined },
-    './pdfEditorProvider': {
-      PdfEditorProvider: class {
-        static viewType = 'llm-wiki.pdfViewer';
-        constructor() {}
-        getActiveWebview() {
-          return undefined;
-        }
-      },
-    },
-    './markdownEditorProvider': {
-      MarkdownEditorProvider: class {
-        static viewType = 'llm-wiki.markdownEditor';
-        constructor() {}
-      },
-    },
-    './markdownSymbols': {
-      registerMarkdownOutlineProvider: () => undefined,
-      registerMarkdownOutlineTreeProvider: () => ({ refresh() {} }),
-    },
-    './wikiLinks': { notePathToUri: value => `llm-wiki://note/${value}` },
-  });
-
-  const context = {
-    subscriptions: [],
-  };
-
-  activate(context);
-  await new Promise(resolve => setTimeout(resolve, 50));
-
-  assert.deepEqual(
-    executeCommandCalls.find(([command, uri, viewType]) =>
-      command === 'vscode.openWith'
-      && uri?.fsPath === '/vault/raw/pdf/ddia.pdf'
-      && viewType === 'llm-wiki.pdfViewer'
-    ),
-    [
-      'vscode.openWith',
-      { fsPath: '/vault/raw/pdf/ddia.pdf', scheme: 'file' },
-      'llm-wiki.pdfViewer',
-    ],
-  );
-});
-
-test('activation reopens a startup PDF tab even when VS Code has not created a text editor for it yet', async () => {
-  const executeCommandCalls = [];
-  const vscode = createVscodeMock({
-    executeCommandCalls,
-    activeDocumentUri: undefined,
-    visibleTextEditors: [],
-    activeTabUri: { fsPath: '/vault/raw/pdf/ddia.pdf', scheme: 'file' },
-  });
-
-  const { activate } = loadTsModule('src/extension.ts', {
-    vscode,
-    '@llm-wiki/core': {
-      detectVaultRoot: () => '/vault',
-      openDatabase: async () => ({}),
-      closeDatabase: () => undefined,
-      getBacklinks: () => [],
-      getForwardLinks: () => [],
-      checkLinks: () => [],
-      rebuildLinksForNote: () => undefined,
-      rebuildAllLinks: () => undefined,
-      registerSource: () => ({ id: 1 }),
-      ingestFile: async () => undefined,
-      runMigrations: () => undefined,
-    },
-    './linkProvider': { registerLinkProvider: () => undefined },
-    './backlinksProvider': {
-      BacklinksProvider: class {
-        refresh() {}
-      },
-    },
-    './agentContext': {
-      addSelectionToContext: async () => undefined,
-    },
-    './uriDispatcher': { dispatchUri: () => undefined },
-    './pdfEditorProvider': {
-      PdfEditorProvider: class {
-        static viewType = 'llm-wiki.pdfViewer';
-        constructor() {}
-        getActiveWebview() {
-          return undefined;
-        }
-      },
-    },
-    './markdownEditorProvider': {
-      MarkdownEditorProvider: class {
-        static viewType = 'llm-wiki.markdownEditor';
-        constructor() {}
-      },
-    },
-    './markdownSymbols': {
-      registerMarkdownOutlineProvider: () => undefined,
-      registerMarkdownOutlineTreeProvider: () => ({ refresh() {} }),
-    },
-    './wikiLinks': { notePathToUri: value => `llm-wiki://note/${value}` },
-  });
-
-  const context = {
-    subscriptions: [],
-  };
-
-  activate(context);
-  await new Promise(resolve => setTimeout(resolve, 50));
-
-  assert.deepEqual(
-    executeCommandCalls.find(([command, uri, viewType]) =>
-      command === 'vscode.openWith'
-      && uri?.fsPath === '/vault/raw/pdf/ddia.pdf'
-      && viewType === 'llm-wiki.pdfViewer'
-    ),
-    [
-      'vscode.openWith',
-      { fsPath: '/vault/raw/pdf/ddia.pdf', scheme: 'file' },
-      'llm-wiki.pdfViewer',
-    ],
-  );
+  assert.equal(executeCommandCalls.some(([command]) => command === 'vscode.openWith'), false);
 });
 
 test('activation registers a Vim mode toggle command for the markdown custom editor', async () => {
@@ -1989,6 +1663,7 @@ test('activation routes markdown link targets through the LLM Wiki dispatcher', 
   const executeCommandCalls = [];
   const openExternalCalls = [];
   const dispatched = [];
+  const browserOpens = [];
   const vscode = createVscodeMock({
     executeCommandCalls,
     openExternalCalls,
@@ -2018,7 +1693,22 @@ test('activation routes markdown link targets through the LLM Wiki dispatcher', 
     './agentContext': {
       addSelectionToContext: async () => undefined,
     },
-    './uriDispatcher': { dispatchUri: (...args) => dispatched.push(args) },
+    './uriDispatcher': {
+      dispatchUri: async (...args) => {
+        dispatched.push(args);
+        if (String(args[1]).startsWith('https://')) {
+          await args[2]?.openWebTarget?.(args[1]);
+        }
+      },
+    },
+    './experimentalOwnedBrowser': {
+      registerExperimentalOwnedBrowser: () => ({
+        async open(url) {
+          browserOpens.push(url);
+        },
+        dispose() {},
+      }),
+    },
     './pdfEditorProvider': {
       PdfEditorProvider: class {
         static viewType = 'llm-wiki.pdfViewer';
@@ -2051,7 +1741,9 @@ test('activation routes markdown link targets through the LLM Wiki dispatcher', 
   assert.equal(dispatched.length, 1);
   assert.equal(dispatched[0][0], '/vault');
   assert.equal(dispatched[0][1], 'https://example.com/docs');
-  assert.deepEqual(dispatched[0][2], { allowAbsoluteTargets: true });
+  assert.equal(dispatched[0][2].allowAbsoluteTargets, true);
+  assert.equal(typeof dispatched[0][2].openWebTarget, 'function');
+  assert.deepEqual(browserOpens, ['https://example.com/docs']);
 });
 
 test('activation resolves link targets against the folder that owns the source document', async () => {
@@ -2291,8 +1983,6 @@ test('combined activation treats any folder as a filesystem wiki without opening
   assert.equal(customEditorRegistrations.length, 2);
   assert.equal(customEditorRegistrations[0].viewType, 'llm-wiki.pdfViewer');
   assert.equal(providerOptions.length, 1);
-  assert.equal(providerOptions[0].vaultRoot, '/documents');
-  assert.equal(providerOptions[0].documentRoot, '/documents');
   assert.equal(outlineRegistrationCount, 1);
   assert.equal(databaseOpenCount, 0);
 });
@@ -2392,8 +2082,6 @@ test('no-folder activation keeps custom viewers read-only and gates repository l
   assert.equal(customEditorRegistrations.length, 2);
   assert.deepEqual(markdownStores, [undefined]);
   assert.equal(providerOptions.length, 1);
-  assert.equal(providerOptions[0].vaultRoot, undefined);
-  assert.equal(providerOptions[0].documentRoot, undefined);
   assert.equal(learningNoteStoreCount, 0);
   assert.equal(backlinksCount, 0);
   assert.equal(treeProviderIds.length, 0);

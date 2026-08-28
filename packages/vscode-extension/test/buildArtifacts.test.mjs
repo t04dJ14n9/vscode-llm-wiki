@@ -301,10 +301,18 @@ test('manifest exposes Copy for Agent while omitting the selection export comman
   assert.equal(commandIds.includes('llm-wiki.addSelectionToContext'), false);
   assert.equal(commandIds.includes('llm-wiki.addSelectionToChat'), true);
   assert.equal(commandIds.includes('llm-wiki.addCursorBrowserSelectionToChat'), true);
-  assert.equal(commandIds.includes('llm-wiki.experimentalBrowser.open'), true);
+  assert.equal(commandIds.includes('llm-wiki.browser.open'), true);
   assert.equal((manifest.activationEvents ?? []).includes('onUri'), true);
   assert.equal(
-    commandIds.includes('llm-wiki.experimentalBrowser.sendSelection'),
+    commandIds.includes('llm-wiki.browser.addSelectionToAgent'),
+    true,
+  );
+  assert.equal(
+    commandIds.includes('llm-wiki.browser.copySelectionForAgent'),
+    true,
+  );
+  assert.equal(
+    commandIds.includes('llm-wiki.browser.copySelectionLink'),
     true,
   );
   assert.equal(

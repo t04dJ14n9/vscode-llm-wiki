@@ -1,19 +1,19 @@
 import * as vscode from 'vscode';
-import * as fs from 'fs';
 import * as path from 'path';
 import type { LearningNoteStore } from './learningNoteStore';
 import type { SelectionContext } from './selectionContext';
 import type {
-  AgentHandoffCapability,
   AgentSurfaceCapabilities,
-  ExternalAgentId,
 } from './agentHandoff';
-import { resolveLinkPreviewTarget } from './linkPreviewResolver';
 import {
-  isQueryPagePath,
-  resolveMarkdownAnchor,
-  type QueryAnnotationIndex,
-} from './queryAnnotationIndex';
+  agentHandoffCapabilitiesMessage,
+  lookupSelectionInDictionary,
+  messageRecord,
+  queryNavigationPath,
+} from './editorHost';
+import { resolveLinkPreviewTarget } from './linkPreviewResolver';
+import { resolveMarkdownAnchor, type QueryAnnotationIndex } from './queryAnnotationIndex';
+import { MarkdownDocumentBridge } from './markdownDocumentBridge';
 
 interface ActiveMarkdownWebview {
   panel: vscode.WebviewPanel;
@@ -196,7 +196,7 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
     if (!options.allowEmpty && (!active.selection || active.selection.from === active.selection.to)) {
       return undefined;
     }
-    return this.getActiveSelectionContext();
+    return this.selectionContext(active);
   }
 
   async flushActiveEditsBeforeSave(uri?: vscode.Uri): Promise<boolean> {
@@ -235,7 +235,6 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
       localResourceRoots: markdownEditorLocalResourceRoots(
         document.uri,
         this.context.extensionUri,
-        this.context.globalStorageUri,
       ),
     };
     const key = document.uri.toString();
@@ -251,18 +250,15 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
       this.activePanel = webviewPanel;
     }
 
-    let applyingWebviewEdit = false;
-    let pendingWebviewText: string | undefined;
-    let latestWebviewDocumentText: string | undefined = document.getText();
-    const recentWebviewDocumentTexts = new Set<string>();
-    const recentWebviewDocumentTextOrder: string[] = [];
-    let suppressedWebviewDocumentChanges = 0;
-    let queuedWebviewEditPromise: Promise<void> | undefined;
     let closingEditorTab = false;
     let panelViewColumn = webviewPanel.viewColumn;
-    let unappliedWebviewText: string | undefined;
     let initialTextPush: Promise<void> | undefined;
     let initialTextTimeout: ReturnType<typeof setTimeout> | undefined;
+    let notePathsPush: Promise<void> | undefined;
+    const documentBridge = new MarkdownDocumentBridge(document, error => {
+      vscode.window.showErrorMessage(`Failed to update markdown note: ${String(error)}`);
+    });
+    flushBeforeSave = () => documentBridge.flushBeforeSave();
 
     const pushSettings = () => {
       webviewPanel.webview.postMessage({
@@ -271,18 +267,27 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
       });
     };
 
+    const ensureNotePaths = (): Promise<void> => {
+      notePathsPush ??= this.markdownNotePaths(document.uri).then(async notePaths => {
+        await webviewPanel.webview.postMessage({ type: 'setNotePaths', notePaths });
+      }).catch(() => {
+        // Note discovery and hydration are optional; document text is already visible.
+      });
+      return notePathsPush;
+    };
+
     const pushText = async () => {
       const text = document.getText();
-      latestWebviewDocumentText = text;
-      await webviewPanel.webview.postMessage({
+      documentBridge.rememberHostText(text);
+      const posted = await webviewPanel.webview.postMessage({
         type: 'setText',
         text,
         title: noteTitleFromUri(document.uri),
         currentNotePath: documentRelativePath(document.uri),
-        notePaths: await this.markdownNotePaths(document.uri),
         resourceBaseUri: webviewResourceUriString(webviewPanel.webview, documentDirectoryUri(document.uri)),
         resourceRootUri: webviewResourceUriString(webviewPanel.webview, workspaceRootUri(document.uri)),
       });
+      if (posted) void ensureNotePaths();
       await this.postQueryAnnotations(
         document,
         message => webviewPanel.webview.postMessage(message),
@@ -324,89 +329,6 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
       }
     };
 
-    const rememberWebviewDocumentText = (text: string) => {
-      latestWebviewDocumentText = text;
-      if (recentWebviewDocumentTexts.has(text)) return;
-      recentWebviewDocumentTexts.add(text);
-      recentWebviewDocumentTextOrder.push(text);
-      if (recentWebviewDocumentTextOrder.length > 20) {
-        const staleText = recentWebviewDocumentTextOrder.shift();
-        if (staleText !== undefined) recentWebviewDocumentTexts.delete(staleText);
-      }
-    };
-
-    const applyQueuedWebviewEdits = async () => {
-      if (applyingWebviewEdit) return;
-      applyingWebviewEdit = true;
-      try {
-        while (pendingWebviewText !== undefined) {
-          const nextText = pendingWebviewText;
-          pendingWebviewText = undefined;
-          rememberWebviewDocumentText(nextText);
-          if (nextText === document.getText()) continue;
-          suppressedWebviewDocumentChanges += 1;
-          try {
-            await replaceDocument(document, nextText);
-          } catch (error) {
-            // A rejected WorkspaceEdit emits no document change event. Keep the
-            // text around so an explicit save/close can retry rather than
-            // silently persisting the previous buffer.
-            suppressedWebviewDocumentChanges -= 1;
-            unappliedWebviewText = nextText;
-            throw error;
-          }
-          unappliedWebviewText = undefined;
-        }
-      } finally {
-        applyingWebviewEdit = false;
-      }
-    };
-
-    const reportWebviewEditFailure = (error: unknown) => {
-      vscode.window.showErrorMessage(`Failed to update markdown note: ${String(error)}`);
-    };
-
-    const queueWebviewEdits = (): Promise<void> => {
-      if (!queuedWebviewEditPromise) {
-        queuedWebviewEditPromise = applyQueuedWebviewEdits().finally(() => {
-          queuedWebviewEditPromise = undefined;
-          if (pendingWebviewText !== undefined) {
-            void queueWebviewEdits().catch(reportWebviewEditFailure);
-          }
-        });
-      }
-      return queuedWebviewEditPromise;
-    };
-
-    const flushQueuedWebviewEdits = async (): Promise<void> => {
-      while (queuedWebviewEditPromise || pendingWebviewText !== undefined) {
-        await (queuedWebviewEditPromise ?? queueWebviewEdits());
-      }
-    };
-
-    // Saving or closing with an unapplied edit would lose user input. Retry a
-    // failed replacement once, then abort the operation and surface the error.
-    flushBeforeSave = async (): Promise<boolean> => {
-      const attemptFlush = async (): Promise<boolean> => {
-        try {
-          await flushQueuedWebviewEdits();
-        } catch {
-          return false;
-        }
-        return unappliedWebviewText === undefined;
-      };
-
-      if (await attemptFlush()) return true;
-      if (unappliedWebviewText !== undefined) {
-        pendingWebviewText = unappliedWebviewText;
-        if (await attemptFlush()) return true;
-      }
-      vscode.window.showErrorMessage(
-        'Markdown note not saved because the latest edit could not be applied.',
-      );
-      return false;
-    };
-
     // Close this document's own tab so a concurrent host-level close cannot
     // accidentally close whichever editor became active in the meantime. A
     // tab close remains native VS Code behavior, including dirty/untitled and
@@ -421,29 +343,9 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
       }
     };
 
-    const restoreLatestWebviewText = () => {
-      if (latestWebviewDocumentText === undefined || latestWebviewDocumentText === document.getText()) return;
-      pendingWebviewText = latestWebviewDocumentText;
-      void queueWebviewEdits().catch(reportWebviewEditFailure);
-    };
-
     const changeSub = vscode.workspace.onDidChangeTextDocument(event => {
       if (event.document.uri.toString() !== document.uri.toString()) return;
-      const currentText = document.getText();
-      if (suppressedWebviewDocumentChanges > 0) {
-        suppressedWebviewDocumentChanges -= 1;
-        if (recentWebviewDocumentTexts.has(currentText) && currentText !== latestWebviewDocumentText) {
-          restoreLatestWebviewText();
-        }
-        return;
-      }
-      if (recentWebviewDocumentTexts.has(currentText)) {
-        if (currentText !== latestWebviewDocumentText) {
-          restoreLatestWebviewText();
-        }
-        return;
-      }
-      void pushText();
+      if (documentBridge.hostDocumentChanged()) void pushText();
     });
 
     const configSub = vscode.workspace.onDidChangeConfiguration(event => {
@@ -476,7 +378,7 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
     });
 
     webviewPanel.webview.onDidReceiveMessage(async (rawMessage: unknown) => {
-      const message = asMessageRecord(rawMessage);
+      const message = messageRecord(rawMessage);
       switch (message?.type) {
         case 'active':
           this.activePanel = webviewPanel;
@@ -497,15 +399,13 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
           break;
         case 'edit':
           {
-            const nextText = webviewEditText(message, latestWebviewDocumentText);
+            const nextText = webviewEditText(message, documentBridge.webviewText);
             if (nextText === undefined) {
               void webviewPanel.webview.postMessage({ type: 'requestText' });
               return;
             }
-            rememberWebviewDocumentText(nextText);
-            pendingWebviewText = nextText;
+            documentBridge.queueWebviewText(nextText);
           }
-          void queueWebviewEdits().catch(reportWebviewEditFailure);
           break;
         case 'selectionChanged': {
           const selection = normalizeSelectionMessage(message.selection);
@@ -618,18 +518,11 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
             });
             break;
           }
-          if (
-            target.kind !== 'query'
-            || typeof target.queryPath !== 'string'
-            || path.isAbsolute(target.queryPath)
-            || target.queryPath.includes('\\')
-            || target.queryPath.split('/').includes('..')
-            || !target.queryPath.toLowerCase().endsWith('.md')
-            || !isQueryPagePath(target.queryPath)
-          ) return;
+          const queryPath = queryNavigationPath(target);
+          if (!queryPath) return;
           await vscode.commands.executeCommand(
             'llm-wiki.openLinkTarget',
-            target.queryPath,
+            queryPath,
             document.uri,
           );
           break;
@@ -640,7 +533,7 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
           }
           break;
         case 'lookupSelection':
-          await this.lookupSelection(message.text);
+          await lookupSelectionInDictionary(message.text);
           break;
         case 'addSelectionToCursorChat':
           this.activePanel = webviewPanel;
@@ -668,9 +561,8 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
         case 'renameTitle': {
           if (document.isUntitled) return;
           if (typeof message.title !== 'string') return;
-          const renamedUri = await renameMarkdownDocumentTitle(document, message.title);
-          if (!renamedUri) return;
-          await vscode.commands.executeCommand('vscode.openWith', renamedUri, MarkdownEditorProvider.viewType);
+          if (!await flushBeforeSave()) break;
+          await renameMarkdownDocumentTitle(document, message.title);
           break;
         }
         case 'error': {
@@ -695,7 +587,10 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
   getActiveSelectionContext(): SelectionContext | undefined {
     const active = this.getActiveWebview();
     if (!active) return undefined;
+    return this.selectionContext(active);
+  }
 
+  private selectionContext(active: ActiveMarkdownWebview): SelectionContext {
     const text = active.document.getText();
     const selection = active.selection ?? { from: 0, to: 0 };
     const from = clampOffset(Math.min(selection.from, selection.to), text.length);
@@ -748,40 +643,14 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
   }
 
   private postAgentHandoffCapabilities(webview: vscode.Webview): void {
-    void webview.postMessage(this.agentHandoffCapabilitiesMessage());
+    void webview.postMessage(agentHandoffCapabilitiesMessage(this.agentCapabilities()));
   }
 
   private broadcastAgentHandoffCapabilities(): void {
-    const message = this.agentHandoffCapabilitiesMessage();
+    const message = agentHandoffCapabilitiesMessage(this.agentCapabilities());
     for (const active of this.webviews.values()) {
       void active.postMessage(message);
     }
-  }
-
-  private agentHandoffCapabilitiesMessage(): {
-    type: 'agentHandoffCapabilities';
-    cursorAgent: boolean;
-    providers: AgentHandoffCapability[];
-  } {
-    const capabilities = this.agentCapabilities();
-    const seen = new Set<ExternalAgentId>();
-    const providers = Array.isArray(capabilities?.providers)
-      ? capabilities.providers.flatMap(provider => {
-          if (
-            !isExternalAgentId(provider?.id)
-            || typeof provider.label !== 'string'
-            || !provider.label.trim()
-            || seen.has(provider.id)
-          ) return [];
-          seen.add(provider.id);
-          return [{ id: provider.id, label: provider.label.trim() }];
-        })
-      : [];
-    return {
-      type: 'agentHandoffCapabilities',
-      cursorAgent: capabilities?.cursorAgent === true,
-      providers,
-    };
   }
 
   private getActiveWebview(): ActiveMarkdownWebview | undefined {
@@ -912,7 +781,7 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
   private getHtml(webview: vscode.Webview): string {
     const nonce = String(Date.now());
     const scriptUri = webview.asWebviewUri(
-      versionedMarkdownEditorScriptUri(this.context.extensionUri, this.context.globalStorageUri),
+      versionedMarkdownEditorScriptUri(this.context.extensionUri),
     );
     return `<!DOCTYPE html>
 <html lang="en">
@@ -953,62 +822,6 @@ export class MarkdownEditorProvider implements vscode.CustomTextEditorProvider {
     };
   }
 
-  private async lookupSelection(rawText: unknown): Promise<void> {
-    const text = normalizeLookupText(rawText);
-    if (!text) return;
-    const uri = vscode.Uri.parse(`dict://${encodeURIComponent(text)}`);
-    const opened = await vscode.env.openExternal(uri);
-    if (opened) {
-      vscode.window.showInformationMessage(`Looking up "${text}" in Dictionary`);
-      return;
-    }
-    await vscode.env.clipboard.writeText(text);
-    vscode.window.showWarningMessage('Dictionary lookup was not available. Selected text copied to clipboard.');
-  }
-}
-
-async function replaceDocument(document: vscode.TextDocument, text: string): Promise<void> {
-  const current = document.getText();
-  if (current === text) return;
-  const replacement = minimalDocumentReplacement(current, text);
-  const edit = new vscode.WorkspaceEdit();
-  edit.replace(
-    document.uri,
-    new vscode.Range(
-      document.positionAt(replacement.from),
-      document.positionAt(replacement.to),
-    ),
-    replacement.text,
-  );
-  if (!await vscode.workspace.applyEdit(edit)) {
-    throw new Error('The editor rejected the markdown update.');
-  }
-}
-
-function minimalDocumentReplacement(
-  current: string,
-  next: string,
-): { from: number; to: number; text: string } {
-  let from = 0;
-  const sharedLength = Math.min(current.length, next.length);
-  while (from < sharedLength && current[from] === next[from]) from++;
-
-  let currentTo = current.length;
-  let nextTo = next.length;
-  while (
-    currentTo > from
-    && nextTo > from
-    && current[currentTo - 1] === next[nextTo - 1]
-  ) {
-    currentTo--;
-    nextTo--;
-  }
-
-  return {
-    from,
-    to: currentTo,
-    text: next.slice(from, nextTo),
-  };
 }
 
 function markdownEditorTabForDocument(
@@ -1057,79 +870,15 @@ function normalizeNumber(value: number | undefined, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
 }
 
-function normalizeLookupText(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined;
-  const text = value.replace(/\s+/g, ' ').trim();
-  return text.length > 0 ? text.slice(0, 200) : undefined;
-}
+const markdownEditorBundleVersion = Date.now().toString(36);
 
-function versionedMarkdownEditorScriptUri(extensionUri: vscode.Uri, globalStorageUri?: vscode.Uri): vscode.Uri {
+function versionedMarkdownEditorScriptUri(extensionUri: vscode.Uri): vscode.Uri {
   const source = vscode.Uri.joinPath(extensionUri, 'dist', 'markdown-editor.js');
-  const version = markdownEditorBundleVersion(source);
-  const fileName = `markdown-editor-${version}.js`;
-
-  if (globalStorageUri?.fsPath && source.fsPath) {
-    try {
-      const cacheDir = path.join(globalStorageUri.fsPath, 'webview-cache');
-      if (copyVersionedMarkdownEditorBundle(source.fsPath, cacheDir, fileName)) {
-        return vscode.Uri.joinPath(globalStorageUri, 'webview-cache', fileName);
-      }
-    } catch {
-      // Fall through to the extension-local cache. Some VS Code storage URIs are not local files.
-    }
-  }
-
-  if (source.fsPath) {
-    try {
-      const distUri = vscode.Uri.joinPath(extensionUri, 'dist');
-      const cacheDir = path.join(distUri.fsPath, 'webview-cache');
-      if (copyVersionedMarkdownEditorBundle(source.fsPath, cacheDir, fileName)) {
-        return vscode.Uri.joinPath(distUri, 'webview-cache', fileName);
-      }
-    } catch {
-      // Fall through to the query-string fallback below.
-    }
-  }
-
-  return source.with({ query: `v=${version}` });
+  return source.with({ query: `v=${markdownEditorBundleVersion}` });
 }
 
-function markdownEditorBundleVersion(source: vscode.Uri): string {
-  try {
-    const stat = fs.statSync(source.fsPath);
-    return `${Math.trunc(stat.mtimeMs)}-${stat.size}`;
-  } catch {
-    return encodeURIComponent(String(Date.now()));
-  }
-}
-
-function pruneStaleMarkdownEditorBundles(cacheDir: string, currentFileName: string): void {
-  for (const fileName of fs.readdirSync(cacheDir)) {
-    if (fileName === currentFileName) continue;
-    if (!/^markdown-editor-\d+-\d+\.js$/.test(fileName)) continue;
-    try {
-      fs.unlinkSync(path.join(cacheDir, fileName));
-    } catch {
-      // Ignore stale-cache cleanup failures; the fresh bundle has already been copied.
-    }
-  }
-}
-
-function copyVersionedMarkdownEditorBundle(sourcePath: string, cacheDir: string, fileName: string): boolean {
-  fs.mkdirSync(cacheDir, { recursive: true });
-  const target = path.join(cacheDir, fileName);
-  if (!fs.existsSync(target)) {
-    fs.copyFileSync(sourcePath, target);
-    pruneStaleMarkdownEditorBundles(cacheDir, fileName);
-  }
-  return true;
-}
-
-function markdownEditorLocalResourceRoots(documentUri: vscode.Uri, extensionUri: vscode.Uri, globalStorageUri?: vscode.Uri): vscode.Uri[] {
+function markdownEditorLocalResourceRoots(documentUri: vscode.Uri, extensionUri: vscode.Uri): vscode.Uri[] {
   const roots = [vscode.Uri.joinPath(extensionUri, 'dist')];
-  if (globalStorageUri) {
-    roots.push(globalStorageUri);
-  }
   const workspaceRoot = workspaceRootUri(documentUri);
   const documentDirectory = documentDirectoryUri(documentUri);
   if (workspaceRoot) {
@@ -1242,7 +991,11 @@ async function renameMarkdownDocumentTitle(document: vscode.TextDocument, title:
   const nextTitle = normalizeNoteTitle(title);
   if (!nextTitle || nextTitle === noteTitleFromUri(document.uri)) return undefined;
   const targetUri = vscode.Uri.file(path.join(path.dirname(document.uri.fsPath), `${nextTitle}.md`));
-  await vscode.workspace.fs.rename(document.uri, targetUri, { overwrite: false });
+  const edit = new vscode.WorkspaceEdit();
+  edit.renameFile(document.uri, targetUri, { overwrite: false });
+  if (!await vscode.workspace.applyEdit(edit)) {
+    throw new Error('The editor rejected the markdown note rename.');
+  }
   return targetUri;
 }
 
@@ -1267,12 +1020,6 @@ function normalizeSelectionMessage(selection: unknown): RevealSelection | undefi
     from: Math.trunc(maybeSelection.from),
     to: Math.trunc(maybeSelection.to),
   };
-}
-
-function asMessageRecord(message: unknown): Record<string, unknown> | undefined {
-  return message && typeof message === 'object'
-    ? message as Record<string, unknown>
-    : undefined;
 }
 
 function webviewEditText(
@@ -1305,10 +1052,6 @@ function webviewEditText(
     cursor = change.to;
   }
   return result + currentText.slice(cursor);
-}
-
-function isExternalAgentId(value: unknown): value is ExternalAgentId {
-  return value === 'codex' || value === 'claude' || value === 'codebuddy';
 }
 
 function clampOffset(offset: number, documentLength: number): number {

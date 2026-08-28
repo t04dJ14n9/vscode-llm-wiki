@@ -7,7 +7,7 @@ VS Code and Cursor. It combines:
 - a PDF reader with portable text-fragment links and Query annotations;
 - backlinks, outlines, daily notes, and a filesystem-backed knowledge graph;
 - explicit **Add to Chat** handoff for supported agent extensions; and
-- an experimental, sanitized web reader for attaching selected passages.
+- a sanitized public-page browser for copying or attaching selected passages.
 
 The extension keeps durable OKF Queries in ordinary Markdown, displays their
 condensed answers on original source ranges, and reads legacy learning notes

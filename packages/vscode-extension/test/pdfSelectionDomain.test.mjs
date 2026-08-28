@@ -111,6 +111,7 @@ const pdfViewer = compileTsModule(viewerSource, {
   './obsidianContextMenu': {},
   './pdfTextBands': {},
   './pdfQueryAnnotations': pdfQueryAnnotations,
+  './pdfSearchController': { PdfSearchController: class {} },
 });
 if (originalWindow === undefined) delete globalThis.window;
 else globalThis.window = originalWindow;
@@ -295,17 +296,12 @@ function selectionSnapshotWithMiddlePage(selection, middlePageReady) {
 
 test('PDF copy for agent posts only the host-precomputed portable text', () => {
   const state = resetPdfAgentClipboardState();
-  const { context, viewer } = agentClipboardCopyViewer();
+  const { viewer } = agentClipboardCopyViewer();
   postedViewerMessages.length = 0;
 
   viewer.copySelectionForAgent();
 
-  assert.deepEqual(postedViewerMessages, [{
-    type: 'agentClipboardResult',
-    status: 'text-fallback',
-    selectionKey: context.selectionKey,
-    plainText: context.plainText,
-  }]);
+  assert.deepEqual(postedViewerMessages, [{ type: 'copySelectionForAgent' }]);
   assert.equal(state.captureInputs.length, 0);
   assert.equal(state.writeInputs.length, 0);
 });

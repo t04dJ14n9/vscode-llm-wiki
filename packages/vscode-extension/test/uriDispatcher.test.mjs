@@ -583,7 +583,7 @@ test('dispatchUri transports portable PDF text fragments without database lookup
     assert.deepEqual(executeCommandCalls, [[
       'llm-wiki.openPdfTarget',
       {
-        pdfPath: 'raw/pdf/paper.pdf',
+        pdfPath: '/vault/raw/pdf/paper.pdf',
         page: 7,
         textFragment,
       },
@@ -625,7 +625,7 @@ test('dispatchUri unwraps LLM Wiki product links before opening an anchored PDF'
   assert.deepEqual(executeCommandCalls, [[
     'llm-wiki.openPdfTarget',
     {
-      pdfPath: 'raw/pdf/ddia.pdf',
+      pdfPath: '/vault/raw/pdf/ddia.pdf',
       page: 25,
       textFragment: { textStart: 'The Internet was done so well' },
     },
@@ -1008,7 +1008,7 @@ test('trusted workspaces can open a final PDF file symlink without allowing syml
 
     assert.deepEqual(executeCommandCalls, [[
       'llm-wiki.openPdfTarget',
-      { pdfPath: 'raw/pdf/paper.pdf', page: 2 },
+      { pdfPath: join(root, 'raw/pdf/paper.pdf'), page: 2 },
     ]]);
     assert.deepEqual(errorMessages, [
       'Cannot open link outside the workspace: linked-pdfs/paper.pdf',

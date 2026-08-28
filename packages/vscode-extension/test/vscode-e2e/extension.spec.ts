@@ -311,6 +311,53 @@ async function evaluateLlmWikiPdfWebview<T>(body: string): Promise<T> {
   throw new Error(`LLM Wiki PDF webview not found. Candidates: ${mismatches.join(' | ')}`);
 }
 
+async function evaluateLlmWikiBrowserWebview<T>(body: string): Promise<T> {
+  const debugPort = Number(fs.readFileSync(DEBUG_PORT_FILE, 'utf-8').trim());
+  const deadline = Date.now() + 20_000;
+  let mismatches: string[] = [];
+
+  while (Date.now() < deadline) {
+    const response = await fetch(`http://127.0.0.1:${debugPort}/json/list`);
+    const targets = await response.json() as DevtoolsTarget[];
+    const webviews = targets.filter(target => (
+      target.type === 'iframe'
+      && typeof target.webSocketDebuggerUrl === 'string'
+      && (target.url ?? '').includes('extensionId=llm-wiki.llm-wiki-vscode')
+    ));
+
+    mismatches = [];
+    for (const target of webviews) {
+      const result = await cdpEvaluate<{
+        ok: boolean;
+        value?: T;
+        reason?: string;
+        preview?: string;
+      }>(target.webSocketDebuggerUrl!, `(async () => {
+        const hostFrame = document.getElementById('active-frame');
+        const doc = hostFrame?.contentDocument;
+        const address = doc?.querySelector('#url');
+        if (!doc || !address) {
+          return {
+            ok: false,
+            reason: 'missing web browser',
+            preview: doc?.body?.textContent?.trim().slice(0, 160) ?? 'no document',
+          };
+        }
+        return { ok: true, value: await (async () => {
+          ${body}
+        })() };
+      })()`);
+
+      if (result.ok) return result.value as T;
+      mismatches.push(`${result.reason ?? 'unknown'}: ${result.preview ?? target.title ?? target.url ?? ''}`);
+    }
+
+    await new Promise(resolve => setTimeout(resolve, 250));
+  }
+
+  throw new Error(`LLM Wiki browser webview not found. Candidates: ${mismatches.join(' | ')}`);
+}
+
 async function cdpEvaluate<T>(wsUrl: string, expression: string): Promise<T> {
   return new Promise((resolve, reject) => {
     const socket = new WebSocket(wsUrl);
@@ -362,7 +409,7 @@ function expectCloseTo(actual: number, expected: number, tolerance = 1): void {
 
 test.describe('LLM Wiki — VS Code Extension E2E', () => {
 
-  test('the real VS Code CLI opens a missing Markdown path as an unsaved LLM Wiki document', async ({ vsCodePage: page }) => {
+  test('the real VS Code CLI opens a missing Markdown path as an unsaved native document', async ({ vsCodePage: page }) => {
     const filename = `cli-untitled-${Date.now()}.md`;
     const target = path.resolve(TEST_DIR, 'fixtures', 'test-vault', 'notes', filename);
     const content = '# CLI untitled markdown\n\nOnly explicit save creates this file.\n';
@@ -383,9 +430,12 @@ test.describe('LLM Wiki — VS Code Extension E2E', () => {
     await expect(page.locator('.tab.active, .tab[aria-selected="true"]').filter({ hasText: filename }).last()).toBeVisible({
       timeout: 15_000,
     });
-    await evaluateLlmWikiWebview('', `
-      view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: ${JSON.stringify(content)} } });
-    `, filename.replace(/\.md$/i, ''));
+    const nativeEditor = page.locator('.editor-instance .monaco-editor:visible').first();
+    await expect(nativeEditor).toBeVisible({ timeout: 15_000 });
+    await expect(page.locator('iframe.webview:visible')).toHaveCount(0);
+    await nativeEditor.click();
+    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A');
+    await page.keyboard.type(content);
     await page.waitForTimeout(450);
     expect(fs.existsSync(target)).toBe(false);
 
@@ -504,6 +554,42 @@ test.describe('LLM Wiki — VS Code Extension E2E', () => {
 
     // Close palette
     await closeQuickInput(page);
+  });
+
+  test('opens the web browser with navigation and agent selection actions', async ({ vsCodePage: page }) => {
+    await runCommandFromPalette(page, 'LLM Wiki: Open Web Browser', 1_500);
+    await expect(page.locator('iframe.webview:visible').first()).toBeVisible({ timeout: 15_000 });
+
+    await expect.poll(() => evaluateLlmWikiBrowserWebview<{
+      address: string;
+      controls: string[];
+    }>(`
+      return {
+        address: doc.querySelector('#url')?.value ?? '',
+        controls: [
+          'back',
+          'forward',
+          'reload',
+          'toolbar',
+          'external',
+          'copy-link',
+          'copy-agent',
+          'send',
+        ].filter(id => doc.getElementById(id)),
+      };
+    `)).toEqual({
+      address: 'https://example.com/',
+      controls: [
+        'back',
+        'forward',
+        'reload',
+        'toolbar',
+        'external',
+        'copy-link',
+        'copy-agent',
+        'send',
+      ],
+    });
   });
 
   test('can open a synthetic multi-page PDF with production controls and a prefetched neighbor', async ({ vsCodePage: page }) => {
@@ -1202,7 +1288,7 @@ test.describe('LLM Wiki — VS Code Extension E2E', () => {
       };
     `);
     expect(listMathState.selectedLine).toBeLessThan(10);
-    expect(listMathState.htmlScripts.some(script => /markdown-editor-\d+-\d+\.js/.test(script))).toBe(true);
+    expect(listMathState.htmlScripts.some(script => /markdown-editor\.js(?:\?|$)/.test(script))).toBe(true);
     expect(listMathState.renderedInlineMath).toBeGreaterThanOrEqual(3);
     expect(listMathState.listRows).toHaveLength(3);
     expect(listMathState.listRows.map(row => row.sourceText)).toEqual([

@@ -1,14 +1,7 @@
 import { Decoration, type EditorView, WidgetType } from '@codemirror/view';
 import type { EditorState, Range } from '@codemirror/state';
-import { browserAdaptor } from '@mathjax/src/cjs/adaptors/browserAdaptor.js';
-import { RegisterHTMLHandler } from '@mathjax/src/cjs/handlers/html.js';
-import { mathjax } from '@mathjax/src/cjs/mathjax.js';
-import { TeX } from '@mathjax/src/cjs/input/tex.js';
-import { SVG } from '@mathjax/src/cjs/output/svg.js';
-import '@mathjax/src/cjs/input/tex/ams/AmsConfiguration.js';
-import '@mathjax/src/cjs/input/tex/mathtools/MathtoolsConfiguration.js';
-import '@mathjax/src/cjs/input/tex/newcommand/NewcommandConfiguration.js';
-import '@mathjax/src/cjs/input/tex/noundefined/NoUndefinedConfiguration.js';
+import type * as MathJaxRuntime from './mathJaxRuntime';
+import type { MathRenderResult } from './mathJaxRuntime';
 
 interface MathBlockPreview {
   content: string;
@@ -18,21 +11,7 @@ interface MathBlockPreview {
   endLine: number;
 }
 
-const mathJaxAdaptor = browserAdaptor();
-RegisterHTMLHandler(mathJaxAdaptor);
-const mathJaxInput = new TeX({
-  packages: ['base', 'ams', 'mathtools', 'newcommand', 'noundefined'],
-});
-const mathJaxOutput = new SVG({ fontCache: 'local' });
-const mathJaxDocument = mathjax.document(document, {
-  InputJax: mathJaxInput,
-  OutputJax: mathJaxOutput,
-});
-const mathJaxRenderOptions = {
-  em: 16,
-  ex: 8,
-  containerWidth: 80 * 16,
-};
+let mathJaxRuntime: Promise<typeof MathJaxRuntime> | undefined;
 
 export class InlineMathWidget extends WidgetType {
   constructor(
@@ -81,16 +60,59 @@ export class MathBlockWidget extends WidgetType {
     wrapper.dataset.sourceTo = String(this.blockTo);
     const inner = document.createElement('div');
     inner.className = 'cm-hybrid-math-block-inner';
-    renderMathInto(inner, this.expression, true);
+    const content = document.createElement('div');
+    content.className = 'cm-hybrid-math-block-content';
+    renderMathInto(content, this.expression, true);
+
+    const editSource = document.createElement('button');
+    editSource.type = 'button';
+    editSource.className = 'cm-hybrid-math-block-edit';
+    editSource.textContent = '</>';
+    editSource.title = 'Edit this block';
+    editSource.ariaLabel = 'Edit this block';
+    inner.append(content, editSource);
     wrapper.appendChild(inner);
 
-    wrapper.addEventListener('mousedown', (event) => {
+    const revealSource = (event: Event) => {
       event.preventDefault();
       event.stopPropagation();
-      view.dispatch({ selection: { anchor: this.blockFrom } });
+      view.dispatch({ selection: this.editableSelection(view) });
+      view.focus();
+    };
+
+    wrapper.addEventListener('mousedown', revealSource);
+    editSource.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      revealSource(event);
     });
 
     return wrapper;
+  }
+
+  private editableSelection(view: EditorView): { anchor: number; head?: number } {
+    const openingLine = view.state.doc.lineAt(this.blockFrom);
+    const closingLine = view.state.doc.lineAt(this.blockTo);
+
+    if (openingLine.number === closingLine.number) {
+      const opener = openingLine.text.indexOf('$$');
+      const closer = openingLine.text.lastIndexOf('$$');
+      if (opener >= 0 && closer > opener) {
+        return {
+          anchor: openingLine.from + opener + 2,
+          head: openingLine.from + closer,
+        };
+      }
+      return { anchor: this.blockFrom };
+    }
+
+    if (openingLine.number + 1 < closingLine.number) {
+      return {
+        anchor: view.state.doc.line(openingLine.number + 1).from,
+        head: view.state.doc.line(closingLine.number - 1).to,
+      };
+    }
+
+    return { anchor: closingLine.from };
   }
 
   override eq(other: MathBlockWidget): boolean {
@@ -106,68 +128,48 @@ export class MathBlockWidget extends WidgetType {
   }
 }
 
-class HiddenSourceWidget extends WidgetType {
-  override toDOM(): HTMLElement {
-    const element = document.createElement('span');
-    element.className = 'cm-hybrid-hidden-source';
-    element.ariaHidden = 'true';
-    element.textContent = '\u00A0';
-    return element;
-  }
-
-  override eq(): boolean {
-    return true;
-  }
-
-  override ignoreEvent(): boolean {
-    return true;
-  }
-}
-
 export function addSingleLineMathDecorations(
-  state: EditorState,
+  _state: EditorState,
   block: MathBlockPreview,
-  decorations: Range<Decoration>[],
-): void {
-  const line = state.doc.line(block.startLine);
-  hideSourceLine(line.from, line.to, decorations);
-  decorations.push(Decoration.widget({
-    widget: new MathBlockWidget(block.content, block.from, block.to),
-    block: true,
-    side: 1,
-  }).range(line.to));
-}
-
-export function addMultiLineMathDecorations(
-  state: EditorState,
-  block: MathBlockPreview,
-  decorations: Range<Decoration>[],
-): void {
-  for (let lineNumber = block.startLine; lineNumber <= block.endLine; lineNumber++) {
-    const line = state.doc.line(lineNumber);
-    hideSourceLine(line.from, line.to, decorations);
-  }
-
-  const closingLine = state.doc.line(block.endLine);
-  decorations.push(Decoration.widget({
-    widget: new MathBlockWidget(block.content, block.from, block.to),
-    block: true,
-    side: 1,
-  }).range(closingLine.to));
-}
-
-function hideSourceLine(
-  from: number,
-  to: number,
   decorations: Range<Decoration>[],
 ): void {
   decorations.push(Decoration.replace({
-    widget: new HiddenSourceWidget(),
-  }).range(from, to));
+    widget: new MathBlockWidget(block.content, block.from, block.to),
+    block: true,
+  }).range(block.from, block.to));
+}
+
+export function addMultiLineMathDecorations(
+  _state: EditorState,
+  block: MathBlockPreview,
+  decorations: Range<Decoration>[],
+): void {
+  decorations.push(Decoration.replace({
+    widget: new MathBlockWidget(block.content, block.from, block.to),
+    block: true,
+  }).range(block.from, block.to));
 }
 
 export function renderMathInto(container: HTMLElement, expression: string, displayMode: boolean): void {
-  const rendered = renderMathJax(expression, displayMode);
+  container.setAttribute('aria-busy', 'true');
+  mathJaxRuntime ??= import(
+    /* webpackChunkName: "markdown-mathjax" */ './mathJaxRuntime'
+  );
+  void mathJaxRuntime.then(runtime => {
+    container.removeAttribute('aria-busy');
+    applyMathRender(container, expression, displayMode, runtime.renderMath(expression, displayMode));
+  }).catch(error => {
+    container.removeAttribute('aria-busy');
+    container.replaceChildren(createMathErrorElement(expression, mathErrorMessage(error), displayMode));
+  });
+}
+
+function applyMathRender(
+  container: HTMLElement,
+  expression: string,
+  displayMode: boolean,
+  rendered: MathRenderResult,
+): void {
   if (rendered.ok) {
     container.innerHTML = rendered.html;
     const mathContainer = container.querySelector<HTMLElement>('mjx-container');
@@ -181,36 +183,6 @@ export function renderMathInto(container: HTMLElement, expression: string, displ
   }
 
   container.replaceChildren(createMathErrorElement(expression, rendered.error, displayMode));
-}
-
-function renderMathJax(
-  expression: string,
-  displayMode: boolean,
-): { ok: true; html: string } | { ok: false; error: string } {
-  try {
-    const node = mathJaxDocument.convert(expression, {
-      ...mathJaxRenderOptions,
-      display: displayMode,
-    });
-    const html = mathJaxAdaptor.outerHTML(node as HTMLElement);
-    const error = mathJaxErrorFromHtml(html);
-    if (error) return { ok: false, error };
-    return { ok: true, html };
-  } catch (error) {
-    return { ok: false, error: mathErrorMessage(error) };
-  }
-}
-
-function mathJaxErrorFromHtml(html: string): string | null {
-  const match = html.match(/\sdata-mjx-error="([^"]+)"/);
-  if (!match) return null;
-  return decodeHtmlEntities(match[1] ?? '').trim() || 'MathJax could not parse this expression.';
-}
-
-function decodeHtmlEntities(text: string): string {
-  const textarea = document.createElement('textarea');
-  textarea.innerHTML = text;
-  return textarea.value;
 }
 
 function createMathErrorElement(

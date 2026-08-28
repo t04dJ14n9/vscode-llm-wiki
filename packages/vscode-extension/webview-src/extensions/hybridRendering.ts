@@ -3,7 +3,6 @@ import type { DecorationSet } from '@codemirror/view';
 import { EditorSelection, EditorState, StateEffect, StateField } from '@codemirror/state';
 import type { Range, Transaction } from '@codemirror/state';
 import DOMPurify from 'dompurify';
-import mermaid from 'mermaid';
 import {
   htmlCommentSourceSpans,
   inlineCodeSourceSpans,
@@ -51,22 +50,35 @@ import {
   tableAlignmentsFromSeparator,
 } from './hybridTables';
 import type { TableAlignment, TableCell } from './hybridTables';
+import type mermaidApi from 'mermaid';
 export { initialBodyPositionAfterFrontmatter } from './hybridFrontmatter';
 export { setImageResourceContext } from './hybridImages';
 
-mermaid.initialize({
-  startOnLoad: false,
-  securityLevel: 'strict',
-  theme: 'dark',
-  flowchart: {
-    nodeSpacing: 36,
-    rankSpacing: 36,
-  },
-  themeVariables: {
-    fontSize: '12px',
-  },
-});
+type Mermaid = typeof mermaidApi;
+let mermaidPromise: Promise<Mermaid> | undefined;
 let mermaidRenderSequence = 0;
+
+function loadMermaid(): Promise<Mermaid> {
+  mermaidPromise ??= import(
+    /* webpackChunkName: "markdown-mermaid" */ 'mermaid'
+  ).then(module => {
+    const mermaid = module.default;
+    mermaid.initialize({
+      startOnLoad: false,
+      securityLevel: 'strict',
+      theme: 'dark',
+      flowchart: {
+        nodeSpacing: 36,
+        rankSpacing: 36,
+      },
+      themeVariables: {
+        fontSize: '12px',
+      },
+    });
+    return mermaid;
+  });
+  return mermaidPromise;
+}
 
 class EmptyWidget extends WidgetType {
   override toDOM(): HTMLElement {
@@ -1101,6 +1113,7 @@ async function renderMermaidInto(
   root: HTMLElement,
 ): Promise<void> {
   try {
+    const mermaid = await loadMermaid();
     const { svg, bindFunctions } = await mermaid.render(id, source);
     if (!root.isConnected) return;
     container.innerHTML = svg;
@@ -1341,6 +1354,7 @@ function buildHybridDecorations(state: EditorState): DecorationSet {
 
   const decorations: Range<Decoration>[] = [];
   const active = activeLinesFromState(state);
+  const blocks = state.field(hybridBlockIndex);
   const frontmatter = state.field(parsedFrontmatter, false) ?? null;
   const sourceText = state.doc.toString();
   // Obsidian comments are hidden in reading mode. HTML comments remain ordinary
@@ -1362,28 +1376,23 @@ function buildHybridDecorations(state: EditorState): DecorationSet {
       continue;
     }
 
-    const callout = findCalloutBlock(state.doc, line.number);
+    const callout = blocks.calloutsByStart.get(line.number);
     if (callout) {
-      const calloutHasSelection = [...active].some(activeLine => (
-        activeLine >= callout.startLine && activeLine <= callout.endLine
-      ));
+      const calloutHasSelection = activeLinesOverlap(active, callout);
       if (!calloutHasSelection) {
         lineNumber = callout.endLine + 1;
         continue;
       }
     }
 
-    const specialBlock = findSpecialBlock(state.doc, line.number)
-      ?? findContainingCodeBlock(state.doc, line.number);
+    const specialBlock = blocks.specialsByLine.get(line.number);
     if (specialBlock) {
       if (specialBlock.kind === 'code' && !isMermaidBlock(specialBlock)) {
         lineNumber = specialBlock.endLine + 1;
         continue;
       }
 
-      const blockHasSelection = [...active].some(activeLine => (
-        activeLine >= specialBlock.startLine && activeLine <= specialBlock.endLine
-      ));
+      const blockHasSelection = activeLinesOverlap(active, specialBlock);
       if (!blockHasSelection) {
         lineNumber = specialBlock.endLine + 1;
         continue;
@@ -1392,9 +1401,7 @@ function buildHybridDecorations(state: EditorState): DecorationSet {
 
     const table = findTableBlock(state.doc, line.number);
     if (table) {
-      const tableHasSelection = [...active].some(activeLine => (
-        activeLine >= table.startLine && activeLine <= table.endLine
-      ));
+      const tableHasSelection = activeLinesOverlap(active, table);
       if (!tableHasSelection) {
         lineNumber = table.endLine + 1;
         continue;
@@ -1634,18 +1641,9 @@ function buildCalloutDecorations(state: EditorState): DecorationSet {
 
   const decorations: Range<Decoration>[] = [];
   const active = activeLinesFromState(state);
-  let lineNumber = 1;
-  while (lineNumber <= state.doc.lines) {
-    const callout = findCalloutBlock(state.doc, lineNumber);
-    if (!callout) {
-      lineNumber++;
-      continue;
-    }
-
-    const calloutHasSelection = [...active].some(activeLine => (
-      activeLine >= callout.startLine && activeLine <= callout.endLine
-    ));
-    if (!calloutHasSelection) {
+  const blocks = state.field(hybridBlockIndex);
+  for (const callout of blocks.calloutsByStart.values()) {
+    if (!activeLinesOverlap(active, callout)) {
       decorations.push(Decoration.replace({
         widget: new CalloutWidget(
           callout.type,
@@ -1659,7 +1657,6 @@ function buildCalloutDecorations(state: EditorState): DecorationSet {
         block: true,
       }).range(callout.from, callout.to));
     }
-    lineNumber = callout.endLine + 1;
   }
 
   decorations.sort((a, b) => a.from - b.from || a.to - b.to);
@@ -1688,19 +1685,73 @@ interface SpecialBlock {
   content: string;
 }
 
+interface HybridBlockIndex {
+  calloutsByStart: Map<number, CalloutBlock>;
+  specialsByStart: Map<number, SpecialBlock>;
+  specialsByLine: Map<number, SpecialBlock>;
+}
+
+const hybridBlockIndex = StateField.define<HybridBlockIndex>({
+  create: state => indexHybridBlocks(state.doc),
+  update(value, transaction) {
+    return transaction.docChanged ? indexHybridBlocks(transaction.state.doc) : value;
+  },
+});
+
+function indexHybridBlocks(doc: EditorState['doc']): HybridBlockIndex {
+  const calloutsByStart = new Map<number, CalloutBlock>();
+  const specialsByStart = new Map<number, SpecialBlock>();
+  const specialsByLine = new Map<number, SpecialBlock>();
+  let lineNumber = 1;
+
+  while (lineNumber <= doc.lines) {
+    const callout = findCalloutBlock(doc, lineNumber);
+    if (callout) {
+      calloutsByStart.set(lineNumber, callout);
+      lineNumber = callout.endLine + 1;
+      continue;
+    }
+
+    const special = findSpecialBlock(doc, lineNumber);
+    if (special) {
+      specialsByStart.set(lineNumber, special);
+      for (let blockLine = special.startLine; blockLine <= special.endLine; blockLine++) {
+        specialsByLine.set(blockLine, special);
+      }
+      lineNumber = special.endLine + 1;
+      continue;
+    }
+
+    lineNumber++;
+  }
+
+  return { calloutsByStart, specialsByStart, specialsByLine };
+}
+
+function activeLinesOverlap(
+  activeLines: ReadonlySet<number>,
+  block: Pick<CalloutBlock, 'startLine' | 'endLine'>,
+): boolean {
+  for (const line of activeLines) {
+    if (line >= block.startLine && line <= block.endLine) return true;
+  }
+  return false;
+}
+
 function buildTableDecorations(state: EditorState): DecorationSet {
   if (!isHybridPreviewEnabled(state)) return Decoration.none;
 
+  const blocks = state.field(hybridBlockIndex);
   return buildTableRenderingDecorations(state, {
     activeLines: activeLinesFromState(state),
     renderCellInlineMarkdown: (container, source, classPrefix, sourceFrom, view) => {
       appendCalloutInlineMarkdownLine(container, source, calloutInlineContext(view, sourceFrom), classPrefix);
     },
     skipBlockAtLine(lineNumber) {
-      const callout = findCalloutBlock(state.doc, lineNumber);
+      const callout = blocks.calloutsByStart.get(lineNumber);
       if (callout) return callout;
 
-      const specialBlock = findSpecialBlock(state.doc, lineNumber);
+      const specialBlock = blocks.specialsByStart.get(lineNumber);
       if (specialBlock) return specialBlock;
       return null;
     },
@@ -1712,23 +1763,22 @@ function buildSpecialBlockDecorations(state: EditorState): DecorationSet {
 
   const decorations: Range<Decoration>[] = [];
   const active = activeLinesFromState(state);
+  const blocks = state.field(hybridBlockIndex);
   let lineNumber = 1;
   while (lineNumber <= state.doc.lines) {
-    const callout = findCalloutBlock(state.doc, lineNumber);
+    const callout = blocks.calloutsByStart.get(lineNumber);
     if (callout) {
       lineNumber = callout.endLine + 1;
       continue;
     }
 
-    const block = findSpecialBlock(state.doc, lineNumber);
+    const block = blocks.specialsByStart.get(lineNumber);
     if (!block) {
       lineNumber++;
       continue;
     }
 
-    const blockHasSelection = [...active].some(activeLine => (
-      activeLine >= block.startLine && activeLine <= block.endLine
-    ));
+    const blockHasSelection = activeLinesOverlap(active, block);
     if (block.kind === 'code') {
       if (isMermaidBlock(block)) {
         if (!blockHasSelection) {
@@ -1943,58 +1993,6 @@ function findSpecialBlock(
     };
   }
 
-  return null;
-}
-
-function findContainingCodeBlock(
-  doc: EditorView['state']['doc'],
-  lineNumber: number,
-): SpecialBlock | null {
-  let opening: { lineNumber: number; marker: string; language?: string; from: number } | null = null;
-
-  for (let currentLineNumber = 1; currentLineNumber <= doc.lines; currentLineNumber++) {
-    const line = doc.line(currentLineNumber);
-    if (!opening) {
-      const codeFence = parseCodeFenceOpening(line.text);
-      if (codeFence) {
-        opening = {
-          lineNumber: currentLineNumber,
-          marker: codeFence.marker,
-          language: codeFence.language,
-          from: line.from,
-        };
-      }
-    } else if (isCodeFenceClosing(line.text, opening.marker)) {
-      if (lineNumber >= opening.lineNumber && lineNumber <= currentLineNumber) {
-        return {
-          kind: 'code',
-          from: opening.from,
-          to: line.to,
-          startLine: opening.lineNumber,
-          endLine: currentLineNumber,
-          language: opening.language,
-          content: collectBlockContent(doc, opening.lineNumber + 1, currentLineNumber - 1),
-        };
-      }
-      opening = null;
-    }
-
-    if (currentLineNumber >= lineNumber && !opening) {
-      return null;
-    }
-  }
-
-  if (opening && lineNumber >= opening.lineNumber) {
-    return {
-      kind: 'code',
-      from: opening.from,
-      to: doc.line(doc.lines).to,
-      startLine: opening.lineNumber,
-      endLine: doc.lines,
-      language: opening.language,
-      content: collectBlockContent(doc, opening.lineNumber + 1, doc.lines),
-    };
-  }
   return null;
 }
 
@@ -2599,6 +2597,7 @@ export function hybridRendering() {
     frontmatterSelectionFilter,
     hybridPreviewEnabled,
     parsedFrontmatter,
+    hybridBlockIndex,
     documentTitleRendering,
     frontmatterRendering,
     calloutRendering,

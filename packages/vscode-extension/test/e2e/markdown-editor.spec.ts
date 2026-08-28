@@ -2020,11 +2020,17 @@ test.describe('LLM Wiki — E2E Bidirectional Links', () => {
     });
     await page.locator('#tab-editor').focus();
     await page.waitForFunction(() => !document.querySelector('.cm-editor')?.classList.contains('cm-focused'));
-    const unfocusedOutline = await block.evaluate(element => getComputedStyle(element).outlineColor);
+    const unfocused = await block.evaluate(element => {
+      const style = getComputedStyle(element);
+      return { boxShadow: style.boxShadow, outlineStyle: style.outlineStyle };
+    });
 
-    expect({ focused, unfocusedOutline }).toEqual({
+    expect({ focused, unfocused }).toEqual({
       focused: { background: 'rgb(18, 52, 86)', color: 'rgb(254, 220, 186)' },
-      unfocusedOutline: 'rgb(18, 52, 86)',
+      unfocused: {
+        boxShadow: 'rgb(18, 52, 86) 0px 0px 0px 1px inset',
+        outlineStyle: 'none',
+      },
     });
   });
 
@@ -2039,12 +2045,64 @@ test.describe('LLM Wiki — E2E Bidirectional Links', () => {
     });
     await page.locator('#tab-editor').focus();
     await page.waitForFunction(() => !document.querySelector('.cm-editor')?.classList.contains('cm-focused'));
-    const unfocusedOutline = await block.evaluate(element => getComputedStyle(element).outlineColor);
-
-    expect({ focused, unfocusedOutline }).toEqual({
-      focused: { background: 'rgb(101, 67, 33)', color: 'rgb(254, 220, 186)' },
-      unfocusedOutline: 'rgb(101, 67, 33)',
+    const unfocused = await block.evaluate(element => {
+      const style = getComputedStyle(element);
+      return { boxShadow: style.boxShadow, outlineStyle: style.outlineStyle };
     });
+
+    expect({ focused, unfocused }).toEqual({
+      focused: { background: 'rgb(101, 67, 33)', color: 'rgb(254, 220, 186)' },
+      unfocused: {
+        boxShadow: 'rgb(101, 67, 33) 0px 0px 0px 1px inset',
+        outlineStyle: 'none',
+      },
+    });
+  });
+
+  test('unfocused Vim selection cursor stays inside the active line at a line boundary', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+    await waitForEditorBootstrap(page);
+    await page.evaluate(() => {
+      window.postMessage({ type: 'setText', text: 'asdasd\nasdasd' }, '*');
+      window.postMessage({ type: 'setVimMode', enabled: true }, '*');
+    });
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+    await page.locator('.cm-content').click();
+    await page.keyboard.press('Escape');
+    await page.evaluate(() => {
+      const view = window.__cmView;
+      view.dispatch({
+        selection: {
+          anchor: view.state.doc.line(1).from,
+          head: view.state.doc.line(2).from,
+        },
+      });
+    });
+    await page.locator('#tab-editor').focus();
+    await page.waitForFunction(() => !document.querySelector('.cm-editor')?.classList.contains('cm-focused'));
+
+    const geometry = await page.locator('.cm-vimCursorLayer .cm-fat-cursor').last().evaluate(element => {
+      const cursor = element.getBoundingClientRect();
+      const cursorMidpoint = (cursor.top + cursor.bottom) / 2;
+      const line = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
+        .map(candidate => candidate.getBoundingClientRect())
+        .find(candidate => candidate.top <= cursorMidpoint && candidate.bottom >= cursorMidpoint);
+      if (!line) throw new Error('Missing active line');
+      const style = getComputedStyle(element);
+      return {
+        cursorTop: cursor.top,
+        cursorBottom: cursor.bottom,
+        lineTop: line.top,
+        lineBottom: line.bottom,
+        boxShadow: style.boxShadow,
+        outlineStyle: style.outlineStyle,
+      };
+    });
+
+    expect(geometry.outlineStyle).toBe('none');
+    expect(geometry.boxShadow).toContain('inset');
+    expect(geometry.cursorTop).toBeGreaterThanOrEqual(geometry.lineTop);
+    expect(geometry.cursorBottom).toBeLessThanOrEqual(geometry.lineBottom);
   });
 
   test('Vim normal cursor follows a live VS Code theme token change', async ({ page }) => {
@@ -9045,6 +9103,7 @@ test.describe('LLM Wiki — E2E Bidirectional Links', () => {
 
   test('hybrid rendering shows math like Obsidian live preview and keeps active block math preview', async ({ page }) => {
     await page.goto('http://localhost:8979/test.html');
+    await waitForEditorBootstrap(page);
 
     const doc = [
       'Prelude line',
@@ -9080,6 +9139,11 @@ test.describe('LLM Wiki — E2E Bidirectional Links', () => {
     expect(inlineMathSurface.paddingLeft).toBe('0px');
     expect(inlineMathSurface.paddingRight).toBe('0px');
 
+    await page.mouse.move(0, 0);
+    await expect.poll(() => page.locator('.cm-hybrid-math-block-edit').evaluate((element) => (
+      getComputedStyle(element).opacity
+    ))).toBe('0');
+
     const mathSurface = await page.locator('.cm-hybrid-math-block-inner').evaluate((element) => {
       const style = getComputedStyle(element);
       return {
@@ -9087,7 +9151,11 @@ test.describe('LLM Wiki — E2E Bidirectional Links', () => {
         borderTopColor: style.borderTopColor,
         borderTopStyle: style.borderTopStyle,
         borderTopWidth: style.borderTopWidth,
-        paddingTop: style.paddingTop,
+        paddingTop: Number.parseFloat(style.paddingTop),
+        editLabel: element.querySelector('.cm-hybrid-math-block-edit')?.getAttribute('aria-label') ?? '',
+        editOpacity: getComputedStyle(
+          element.querySelector<HTMLElement>('.cm-hybrid-math-block-edit')!,
+        ).opacity,
         textAlign: style.textAlign,
       };
     });
@@ -9096,7 +9164,9 @@ test.describe('LLM Wiki — E2E Bidirectional Links', () => {
     expect(mathSurface.borderTopStyle).toBe('solid');
     expect(mathSurface.borderTopWidth).toBe('1px');
     expect(mathSurface.borderTopColor).toBe('rgba(0, 0, 0, 0)');
-    expect(mathSurface.paddingTop).toBe('0px');
+    expect(mathSurface.paddingTop).toBeGreaterThan(0);
+    expect(mathSurface.editLabel).toBe('Edit this block');
+    expect(mathSurface.editOpacity).toBe('0');
     expect(mathSurface.textAlign).toBe('center');
 
     await page.locator('.cm-hybrid-math-block-inner').hover();
@@ -9112,10 +9182,22 @@ test.describe('LLM Wiki — E2E Bidirectional Links', () => {
       borderTopStyle: 'solid',
       borderTopWidth: '1px',
     });
+    await expect.poll(() => page.locator('.cm-hybrid-math-block-edit').evaluate((element) => (
+      getComputedStyle(element).opacity
+    ))).toBe('1');
 
     const renderedText = await page.locator('.cm-content').textContent();
     expect(renderedText).not.toContain('$e^{i\\pi} + 1 = 0$');
     expect(renderedText).not.toContain('$$');
+
+    await page.locator('.cm-hybrid-math-block-edit').dispatchEvent('mousedown', { button: 0 });
+    expect(await page.evaluate(() => {
+      const view = window.__cmView;
+      return view.state.doc.sliceString(
+        view.state.selection.main.from,
+        view.state.selection.main.to,
+      );
+    })).toBe(doc.split('\n')[5]);
 
     await page.evaluate(() => {
       const view = window.__cmView;
@@ -9340,8 +9422,9 @@ test.describe('LLM Wiki — E2E Bidirectional Links', () => {
     expect(activeMathStyles.sourceFontStyle).toBe('italic');
   });
 
-  test('inactive single-line display math hides source text while keeping its line number and preview', async ({ page }) => {
+  test('inactive single-line display math collapses its hidden source line number like Obsidian', async ({ page }) => {
     await page.goto('http://localhost:8979/test.html');
+    await waitForEditorBootstrap(page);
 
     const doc = [
       '# Online Softmax',
@@ -9369,19 +9452,7 @@ test.describe('LLM Wiki — E2E Bidirectional Links', () => {
     await expect(page.locator('.cm-hybrid-math-block')).toBeVisible();
 
     const mathLayout = await page.evaluate(() => {
-      const editorLines = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
-        .map(line => {
-          const rect = line.getBoundingClientRect();
-          return {
-            text: line.textContent ?? '',
-            top: rect.top,
-            bottom: rect.bottom,
-            height: rect.height,
-          };
-        });
       const preview = document.querySelector<HTMLElement>('.cm-hybrid-math-block');
-      const normalLine = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
-        .find(line => line.textContent === 'Online softmax is the numerical trick that makes FlashAttention work.');
       const numberedRows = Array.from(document.querySelectorAll<HTMLElement>('.cm-lineNumbers .cm-gutterElement'))
         .map(element => {
           const rect = element.getBoundingClientRect();
@@ -9394,53 +9465,32 @@ test.describe('LLM Wiki — E2E Bidirectional Links', () => {
         })
         .filter(row => row.text.length > 0 && row.height > 0);
       const previewRect = preview?.getBoundingClientRect();
-      const normalRect = normalLine?.getBoundingClientRect();
       const sourceLineNumber = window.__cmView.state.doc.lineAt(
         window.__cmView.state.doc.toString().indexOf('$$softmax'),
       ).number;
-      const sourceNumberRow = numberedRows.find(row => row.text === String(sourceLineNumber));
+      const previousNumberRow = numberedRows.find(row => row.text === String(sourceLineNumber - 1));
       const nextNumberRow = numberedRows.find(row => row.text === String(sourceLineNumber + 1));
-      const mathRow = sourceNumberRow
-        ? editorLines.find(line => Math.abs(line.top - sourceNumberRow.top) <= 1)
-        : undefined;
       return {
         sourceLineNumber,
-        visibleRawSourceCount: editorLines.filter(line => line.text.includes('$$softmax')).length,
         renderedEditorText: document.querySelector('.cm-content')?.textContent ?? '',
-        mathRowText: mathRow?.text ?? '',
-        sourceHeight: mathRow?.height ?? 0,
-        normalHeight: normalRect?.height ?? 0,
-        sourceTop: mathRow?.top ?? 0,
-        sourceBottom: mathRow?.bottom ?? 0,
+        lineNumbers: numberedRows.map(row => row.text),
+        previousNumberBottom: previousNumberRow?.bottom ?? 0,
         previewTop: previewRect?.top ?? 0,
         previewBottom: previewRect?.bottom ?? 0,
-        previewIsInsideSourceLine: Boolean(preview?.closest('.cm-line')?.textContent?.includes('$$softmax')),
-        sourceNumberTop: sourceNumberRow?.top ?? 0,
-        sourceNumberBottom: sourceNumberRow?.bottom ?? 0,
         nextNumberTop: nextNumberRow?.top ?? 0,
       };
     });
     expect(mathLayout.sourceLineNumber).toBe(9);
-    expect(mathLayout.visibleRawSourceCount).toBe(0);
     expect(mathLayout.renderedEditorText).not.toContain('$$softmax');
-    expect(mathLayout.mathRowText).not.toContain('$$softmax');
-    expect(Math.abs(mathLayout.sourceHeight - mathLayout.normalHeight)).toBeLessThanOrEqual(1);
-    expect(Math.abs(mathLayout.sourceNumberTop - mathLayout.sourceTop)).toBeLessThanOrEqual(1);
-    expect(Math.abs(mathLayout.sourceNumberBottom - mathLayout.sourceBottom)).toBeLessThanOrEqual(1);
-    expect(mathLayout.previewTop).toBeGreaterThanOrEqual(mathLayout.sourceBottom);
+    expect(mathLayout.lineNumbers).not.toContain('9');
+    expect(mathLayout.lineNumbers).toEqual(expect.arrayContaining(['8', '10']));
+    expect(mathLayout.previewTop).toBeGreaterThanOrEqual(mathLayout.previousNumberBottom);
     expect(mathLayout.nextNumberTop).toBeGreaterThanOrEqual(mathLayout.previewBottom);
-    expect(mathLayout.previewIsInsideSourceLine).toBe(false);
-
-    const lineNumbers = await page.locator('.cm-lineNumbers .cm-gutterElement').evaluateAll(elements => (
-      elements
-        .map(element => element.textContent?.trim() ?? '')
-        .filter(Boolean)
-    ));
-    expect(lineNumbers).toEqual(expect.arrayContaining(['1', '2', '3', '4', '5', '6', '7', '8', '9']));
   });
 
-  test('inactive single-line display math keeps the source row at normal line height', async ({ page }) => {
+  test('editing single-line display math restores its source line number and selects its TeX', async ({ page }) => {
     await page.goto('http://localhost:8979/test.html');
+    await waitForEditorBootstrap(page);
 
     const doc = [
       'Before',
@@ -9461,41 +9511,34 @@ test.describe('LLM Wiki — E2E Bidirectional Links', () => {
     });
     await expect(page.locator('.cm-hybrid-math-block')).toBeVisible();
 
-    const rowHeights = await page.evaluate(() => {
-      const normalLine = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
-        .find(line => line.textContent === 'Before');
-      const numberedRows = Array.from(document.querySelectorAll<HTMLElement>('.cm-lineNumbers .cm-gutterElement'))
-        .map(element => {
-          const rect = element.getBoundingClientRect();
-          return {
-            text: element.textContent?.trim() ?? '',
-            top: rect.top,
-            height: rect.height,
-          };
-        })
-        .filter(row => row.text.length > 0 && row.height > 0);
-      const mathNumber = window.__cmView.state.doc.lineAt(
-        window.__cmView.state.doc.toString().indexOf('$$softmax'),
-      ).number;
-      const mathNumberRow = numberedRows.find(row => row.text === String(mathNumber));
-      const mathLine = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
-        .find(line => {
-          if (!mathNumberRow) return false;
-          return Math.abs(line.getBoundingClientRect().top - mathNumberRow.top) <= 1;
-        });
+    const lineNumbers = () => page.locator('.cm-lineNumbers .cm-gutterElement').evaluateAll(elements => (
+      elements
+        .filter(element => element.getBoundingClientRect().height > 0)
+        .map(element => element.textContent?.trim() ?? '')
+        .filter(Boolean)
+    ));
+    expect(await lineNumbers()).toEqual(['1', '2', '4', '5']);
+
+    await page.locator('.cm-hybrid-math-block-edit').dispatchEvent('mousedown', { button: 0 });
+    expect(await lineNumbers()).toEqual(['1', '2', '3', '4', '5']);
+    expect(await page.evaluate(() => {
+      const view = window.__cmView;
       return {
-        normal: normalLine?.getBoundingClientRect().height ?? 0,
-        math: mathLine?.getBoundingClientRect().height ?? 0,
-        mathText: mathLine?.textContent ?? '',
+        selected: view.state.doc.sliceString(
+          view.state.selection.main.from,
+          view.state.selection.main.to,
+        ),
+        sourceVisible: document.querySelector('.cm-content')?.textContent?.includes('$$softmax') ?? false,
       };
+    })).toEqual({
+      selected: 'softmax(x_i) = exp(x_i) / sum(exp(x_j))',
+      sourceVisible: true,
     });
-    expect(rowHeights.normal).toBeGreaterThan(0);
-    expect(Math.abs(rowHeights.math - rowHeights.normal)).toBeLessThanOrEqual(1);
-    expect(rowHeights.mathText).not.toContain('$$softmax');
   });
 
-  test('inactive multi-line display math keeps source rows and line numbers', async ({ page }) => {
+  test('inactive multi-line display math collapses and restores all hidden source line numbers', async ({ page }) => {
     await page.goto('http://localhost:8979/test.html');
+    await waitForEditorBootstrap(page);
 
     const doc = [
       'Before',
@@ -9519,9 +9562,6 @@ test.describe('LLM Wiki — E2E Bidirectional Links', () => {
     await expect(page.locator('.cm-hybrid-math-block')).toBeVisible();
 
     const mathLayout = await page.evaluate(() => {
-      const normalLine = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
-        .find(line => line.textContent === 'Before');
-      const normalHeight = normalLine?.getBoundingClientRect().height ?? 0;
       const numberedRows = Array.from(document.querySelectorAll<HTMLElement>('.cm-lineNumbers .cm-gutterElement'))
         .map(element => {
           const rect = element.getBoundingClientRect();
@@ -9533,57 +9573,45 @@ test.describe('LLM Wiki — E2E Bidirectional Links', () => {
           };
         })
         .filter(row => row.text.length > 0 && row.height > 0);
-      const editorLines = Array.from(document.querySelectorAll<HTMLElement>('.cm-line'))
-        .map(line => {
-          const rect = line.getBoundingClientRect();
-          return {
-            text: line.textContent ?? '',
-            top: rect.top,
-            bottom: rect.bottom,
-            height: rect.height,
-          };
-        });
-      const sourceRows = [3, 4, 5].map(lineNumber => {
-        const numberRow = numberedRows.find(row => row.text === String(lineNumber));
-        const editorLine = editorLines.find(line => (
-          numberRow ? Math.abs(line.top - numberRow.top) <= 1 : false
-        ));
-        return {
-          lineNumber,
-          numberTop: numberRow?.top ?? 0,
-          numberBottom: numberRow?.bottom ?? 0,
-          text: editorLine?.text ?? '',
-          top: editorLine?.top ?? 0,
-          bottom: editorLine?.bottom ?? 0,
-          height: editorLine?.height ?? 0,
-        };
-      });
       const preview = document.querySelector<HTMLElement>('.cm-hybrid-math-block');
       const previewRect = preview?.getBoundingClientRect();
+      const beforeNumber = numberedRows.find(row => row.text === '2');
+      const afterBlankNumber = numberedRows.find(row => row.text === '6');
       const afterNumber = numberedRows.find(row => row.text === '7');
 
       return {
-        sourceRows,
-        normalHeight,
         renderedText: document.querySelector('.cm-content')?.textContent ?? '',
         lineNumbers: numberedRows.map(row => row.text),
+        beforeBottom: beforeNumber?.bottom ?? 0,
         previewTop: previewRect?.top ?? 0,
         previewBottom: previewRect?.bottom ?? 0,
+        afterBlankTop: afterBlankNumber?.top ?? 0,
         afterTop: afterNumber?.top ?? 0,
       };
     });
 
-    expect(mathLayout.lineNumbers).toEqual(expect.arrayContaining(['3', '4', '5']));
+    expect(mathLayout.lineNumbers).toEqual(['1', '2', '6', '7']);
     expect(mathLayout.renderedText).not.toContain('softmax(x_i) = exp(x_i)');
-    for (const row of mathLayout.sourceRows) {
-      expect(row.text).not.toContain('$$');
-      expect(row.text).not.toContain('softmax(x_i)');
-      expect(Math.abs(row.height - mathLayout.normalHeight)).toBeLessThanOrEqual(1);
-      expect(Math.abs(row.numberTop - row.top)).toBeLessThanOrEqual(1);
-      expect(Math.abs(row.numberBottom - row.bottom)).toBeLessThanOrEqual(1);
-    }
-    expect(mathLayout.previewTop).toBeGreaterThanOrEqual(mathLayout.sourceRows.at(-1)!.bottom);
+    expect(mathLayout.previewTop).toBeGreaterThanOrEqual(mathLayout.beforeBottom);
+    expect(mathLayout.afterBlankTop).toBeGreaterThanOrEqual(mathLayout.previewBottom);
     expect(mathLayout.afterTop).toBeGreaterThanOrEqual(mathLayout.previewBottom);
+
+    await page.locator('.cm-hybrid-math-block-edit').dispatchEvent('mousedown', { button: 0 });
+    const activeState = await page.evaluate(() => {
+      const view = window.__cmView;
+      return {
+        selected: view.state.doc.sliceString(
+          view.state.selection.main.from,
+          view.state.selection.main.to,
+        ),
+        lineNumbers: Array.from(document.querySelectorAll<HTMLElement>('.cm-lineNumbers .cm-gutterElement'))
+          .filter(element => element.getBoundingClientRect().height > 0)
+          .map(element => element.textContent?.trim() ?? '')
+          .filter(Boolean),
+      };
+    });
+    expect(activeState.selected).toBe('softmax(x_i) = exp(x_i) / sum(exp(x_j))');
+    expect(activeState.lineNumbers).toEqual(['1', '2', '3', '4', '5', '6', '7']);
   });
 
   test('inactive single-line display math stays hidden while editing the previous inline math line', async ({ page }) => {
@@ -11499,6 +11527,48 @@ test.describe('LLM Wiki — E2E Bidirectional Links', () => {
     await page.locator('.cm-hybrid-task-checkbox').click();
     await expect.poll(() => page.evaluate(() => window.__cmView.state.doc.toString()))
       .toContain('> - [x] quoted task');
+  });
+
+  test('blockquote text keeps the native selection color above its quote surface', async ({ page }) => {
+    await page.goto('http://localhost:8979/test.html');
+    await page.evaluate(() => {
+      document.documentElement.style.setProperty('--vscode-textBlockQuote-background', 'rgb(70, 40, 40)');
+      document.documentElement.style.setProperty('--vscode-editor-selectionBackground', 'rgb(38, 79, 120)');
+      window.postMessage({
+        type: 'setText',
+        text: '> Selected quoted text remains visible.\n\nafter',
+      }, '*');
+    });
+
+    await page.waitForSelector('#editor .cm-content', { timeout: 10_000 });
+    const state = await page.evaluate(() => {
+      const view = window.__cmView;
+      const line = view.state.doc.line(1);
+      view.focus();
+      view.dispatch({ selection: { anchor: line.from + 2, head: line.to } });
+
+      const quote = document.querySelector<HTMLElement>('.cm-hybrid-blockquote-line');
+      const selection = [...document.querySelectorAll<HTMLElement>('.cm-selectionBackground')]
+        .find(element => {
+          const quoteRect = quote?.getBoundingClientRect();
+          const selectionRect = element.getBoundingClientRect();
+          return Boolean(quoteRect && selectionRect.bottom > quoteRect.top && selectionRect.top < quoteRect.bottom);
+        });
+      if (!quote || !selection) throw new Error('Missing selected blockquote surface');
+      return {
+        quoteBackground: getComputedStyle(quote).backgroundColor,
+        quoteSurface: getComputedStyle(quote, '::before').backgroundColor,
+        quoteSurfaceZIndex: getComputedStyle(quote, '::before').zIndex,
+        selectionBackground: getComputedStyle(selection).backgroundColor,
+      };
+    });
+
+    expect(state).toEqual({
+      quoteBackground: 'rgba(0, 0, 0, 0)',
+      quoteSurface: 'rgb(70, 40, 40)',
+      quoteSurfaceZIndex: '-3',
+      selectionBackground: 'rgb(38, 79, 120)',
+    });
   });
 
   test('hybrid rendering copies thematic breaks as raw markdown like Obsidian', async ({ page }) => {

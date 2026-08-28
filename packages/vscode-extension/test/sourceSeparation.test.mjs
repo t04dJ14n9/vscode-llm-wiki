@@ -33,7 +33,9 @@ test('combined extension owns both editors and uses the shared PDF implementatio
     'src/anchorFileCodec.ts',
     'src/anchorFileEditorProvider.ts',
     'src/markdownEditorProvider.ts',
+    'src/markdownDocumentBridge.ts',
     'src/pdfEditorProvider.ts',
+    'src/pdfWebviewHtml.ts',
     'webview-src/markdown-editor.ts',
     'webpack.config.js',
   ]) {
