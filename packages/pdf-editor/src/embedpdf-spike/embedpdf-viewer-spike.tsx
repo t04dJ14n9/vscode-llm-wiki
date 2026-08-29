@@ -292,6 +292,7 @@ function HeadlessDocument({
   const [areaSelection, setAreaSelection] = useState<AreaSelection>();
   const [paginatedTransition, setPaginatedTransition] = useState<PaginatedTransition>();
   const [adaptTheme, setAdaptTheme] = useState(false);
+  const [cursorAgentAvailable, setCursorAgentAvailable] = useState(false);
   const [reduceAnimation, setReduceAnimation] = useState<ReduceAnimation>('system');
   const [toolbarPreference, setToolbarPreference] = useState<ToolbarPreference>({
     dock: 'top',
@@ -560,6 +561,9 @@ function HeadlessDocument({
         case 'pdfToolbarPreference':
           setToolbarPreference(normalizeToolbarPreference(message.preference));
           break;
+        case 'agentHandoffCapabilities':
+          setCursorAgentAvailable(message.cursorAgent === true);
+          break;
         case 'setQueryAnnotations':
           setQueryAnnotations(normalizePdfQueryAnnotations(message.annotations));
           break;
@@ -589,7 +593,7 @@ function HeadlessDocument({
             : twoPage ? 'single' : 'two');
           break;
         case 'addSelectionToCursorChat':
-          postSelectionAction('addToCursorChat');
+          if (cursorAgentAvailable) postSelectionAction('addToCursorChat');
           break;
         default:
           break;
@@ -601,7 +605,16 @@ function HeadlessDocument({
     };
     window.addEventListener('embedpdf-host-message', handleHostEvent);
     return () => window.removeEventListener('embedpdf-host-message', handleHostEvent);
-  }, [applyDestination, applyPresentation, continuous, goToAnchor, navigate, twoPage, zoom]);
+  }, [
+    applyDestination,
+    applyPresentation,
+    continuous,
+    cursorAgentAvailable,
+    goToAnchor,
+    navigate,
+    twoPage,
+    zoom,
+  ]);
 
   useEffect(() => {
     vscode.postMessage({
@@ -636,7 +649,7 @@ function HeadlessDocument({
         return;
       }
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'l' && !editing) {
-        if (latestAnchor && !latestAnchor.multiPage) {
+        if (cursorAgentAvailable && latestAnchor && !latestAnchor.multiPage) {
           event.preventDefault();
           postSelectionAction('addToCursorChat');
         }
@@ -666,7 +679,7 @@ function HeadlessDocument({
     };
     globalThis.document.addEventListener('keydown', handleKeyDown);
     return () => globalThis.document.removeEventListener('keydown', handleKeyDown);
-  }, [clearAreaSelection, continuous, navigate, toolbarPreference]);
+  }, [clearAreaSelection, continuous, cursorAgentAvailable, navigate, toolbarPreference]);
 
   const handlePaginatedWheel = (event: React.WheelEvent): void => {
     if (continuous) return;
@@ -953,6 +966,7 @@ function HeadlessDocument({
           page={pageIndex + 1}
           scale={scale}
           selection={areaSelection}
+          showAddToChat={cursorAgentAvailable}
         />
         <ColumnSelectionLayer
           page={pageIndex + 1}
@@ -974,7 +988,11 @@ function HeadlessDocument({
             }}
             marqueeClassName="embedpdf-area-selection-marquee"
             selectionMenu={props => (
-              <SelectionMenu {...props} documentId={documentId} />
+              <SelectionMenu
+                {...props}
+                documentId={documentId}
+                showAddToChat={cursorAgentAvailable}
+              />
             )}
           />
         </div>
@@ -1004,6 +1022,7 @@ function HeadlessDocument({
           adaptTheme={adaptTheme}
           reduceAnimation={reduceAnimation}
           dock={toolbarPreference.dock}
+          showAddToChat={cursorAgentAvailable}
           onPageDraft={setPageDraft}
           onCommitPage={commitPage}
           onZoomDraft={setZoomDraft}
@@ -1155,6 +1174,7 @@ interface PdfToolbarProps {
   adaptTheme: boolean;
   reduceAnimation: ReduceAnimation;
   dock: ToolbarPreference['dock'];
+  showAddToChat: boolean;
   onPageDraft(value: string): void;
   onCommitPage(): void;
   onZoomDraft(value: string): void;
@@ -1279,12 +1299,14 @@ function PdfToolbar(props: PdfToolbarProps): React.JSX.Element {
         <button type="button" className="embedpdf-history-back" aria-label="Go back" title="Go back" onClick={props.onBack}>←</button>
       )}
       <span className="toolbar-spacer" />
-      <button
-        type="button"
-        className="cursor-chat-action"
-        disabled={!latestAnchor || latestAnchor.multiPage}
-        onClick={props.onAddToChat}
-      >Add to Chat</button>
+      {props.showAddToChat && (
+        <button
+          type="button"
+          className="cursor-chat-action"
+          disabled={!latestAnchor || latestAnchor.multiPage}
+          onClick={props.onAddToChat}
+        >Add to Chat</button>
+      )}
       {props.displayMenuOpen && (
         <div className="embedpdf-display-menu" role="menu" aria-label="Display options">
           <div className="menu-section">View</div>
@@ -1673,11 +1695,13 @@ function AreaSelectionLayer({
   page,
   scale,
   selection,
+  showAddToChat,
 }: {
   documentId: string;
   page: number;
   scale: number;
   selection?: AreaSelection;
+  showAddToChat: boolean;
 }): React.JSX.Element | null {
   if (!selection || selection.page !== page) return null;
   const [left, top, right, bottom] = selection.rect;
@@ -1709,7 +1733,11 @@ function AreaSelectionLayer({
           transform: 'translateX(-50%)',
         }}
       >
-        <SelectionActionButtons documentId={documentId} includeCopyText={false} />
+        <SelectionActionButtons
+          documentId={documentId}
+          includeCopyText={false}
+          showAddToChat={showAddToChat}
+        />
       </div>
     </div>
   );
@@ -2100,7 +2128,11 @@ function SelectionMenu({
   menuWrapperProps,
   placement,
   documentId,
-}: SelectionSelectionMenuProps & { documentId: string }): React.JSX.Element {
+  showAddToChat,
+}: SelectionSelectionMenuProps & {
+  documentId: string;
+  showAddToChat: boolean;
+}): React.JSX.Element {
   const top = placement.suggestTop ? -42 : rect.size.height + 6;
   return (
     <div {...menuWrapperProps}>
@@ -2111,7 +2143,11 @@ function SelectionMenu({
         aria-label="PDF text selection actions"
         style={{ top }}
       >
-        <SelectionActionButtons documentId={documentId} includeCopyText />
+        <SelectionActionButtons
+          documentId={documentId}
+          includeCopyText
+          showAddToChat={showAddToChat}
+        />
       </div>
     </div>
   );
@@ -2120,26 +2156,32 @@ function SelectionMenu({
 function SelectionActionButtons({
   documentId,
   includeCopyText,
+  showAddToChat,
 }: {
   documentId: string;
   includeCopyText: boolean;
+  showAddToChat: boolean;
 }): React.JSX.Element {
   const { provides: selection } = useSelectionCapability();
   return (
     <>
-      <button
-        className="primary cursor-chat-action"
-        type="button"
-        onClick={() => postSelectionAction(
-          'addToCursorChat',
-          selection ?? undefined,
-          documentId,
-        )}
-      >
-        <span>Add to Chat</span>
-        <kbd aria-hidden="true">⌘L</kbd>
-      </button>
-      <span className="selection-menu-separator" aria-hidden="true" />
+      {showAddToChat && (
+        <>
+          <button
+            className="primary cursor-chat-action"
+            type="button"
+            onClick={() => postSelectionAction(
+              'addToCursorChat',
+              selection ?? undefined,
+              documentId,
+            )}
+          >
+            <span>Add to Chat</span>
+            <kbd aria-hidden="true">⌘L</kbd>
+          </button>
+          <span className="selection-menu-separator" aria-hidden="true" />
+        </>
+      )}
       <button
         className="secondary"
         type="button"

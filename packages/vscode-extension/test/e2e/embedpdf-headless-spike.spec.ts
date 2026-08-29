@@ -182,6 +182,16 @@ test.describe('EmbedPDF headless migration spike', () => {
     expect(rect[2]).toBeGreaterThan(rect[0]!);
     expect(rect[3]).toBeGreaterThan(rect[1]!);
 
+    await page.evaluate(() => window.postMessage({
+      type: 'agentHandoffCapabilities',
+      cursorAgent: false,
+      providers: [{ id: 'codex', label: 'Codex' }],
+    }, '*'));
+    const pdfToolbar = page.getByRole('toolbar', { name: 'PDF toolbar' });
+    await expect(pdfToolbar.getByRole('button', { name: 'Add to Chat' })).toHaveCount(0);
+    await expect(menu.getByRole('button', { name: 'Add to Chat' })).toHaveCount(0);
+    await expect(menu.getByRole('button', { name: 'Copy for Agent' })).toBeVisible();
+
     await menu.getByRole('button', { name: 'Copy for Agent' }).click();
     await expect.poll(() => page.evaluate(() => window.__mockMessages?.some(
       message => message.type === 'copySelectionForAgent',

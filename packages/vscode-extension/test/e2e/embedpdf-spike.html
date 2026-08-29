@@ -67,6 +67,11 @@
       postMessage: async message => {
         window.__mockMessages.push(message);
         if (message.type !== 'ready') return;
+        window.postMessage({
+          type: 'agentHandoffCapabilities',
+          cursorAgent: true,
+          providers: [],
+        }, '*');
         const response = await fetch('/fixtures/gqa-paper.pdf');
         const data = await response.arrayBuffer();
         window.postMessage({ type: 'loadPdf', data }, '*');
