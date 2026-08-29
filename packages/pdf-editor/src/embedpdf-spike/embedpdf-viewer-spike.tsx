@@ -367,6 +367,7 @@ function HeadlessDocument({
   const paginatedWheelAxisDeltaY = useRef(0);
   const paginatedWheelDelta = useRef(0);
   const paginatedWheelDirection = useRef<PdfNavigationDirection | 0>(0);
+  const paginatedWheelLastDirection = useRef<PdfNavigationDirection | 0>(0);
   const paginatedWheelLocked = useRef(false);
   const paginatedWheelPanned = useRef(false);
   const paginatedWheelLastEventTime = useRef<number | undefined>(undefined);
@@ -399,6 +400,7 @@ function HeadlessDocument({
     paginatedWheelAxisDeltaY.current = 0;
     paginatedWheelDelta.current = 0;
     paginatedWheelDirection.current = 0;
+    paginatedWheelLastDirection.current = 0;
     paginatedWheelLocked.current = false;
     paginatedWheelPanned.current = false;
     paginatedWheelLastEventTime.current = undefined;
@@ -865,9 +867,20 @@ function HeadlessDocument({
     ) return;
     const eventTime = event.timeStamp;
     const lastEventTime = paginatedWheelLastEventTime.current;
+    const directionDelta = paginatedWheelAxis.current === 'horizontal'
+      ? deltaX
+      : paginatedWheelAxis.current === 'vertical'
+        ? deltaY
+        : Math.abs(deltaX) > Math.abs(deltaY) ? deltaX : deltaY;
+    const incomingDirection: PdfNavigationDirection | 0 = Math.abs(directionDelta) < 0.1
+      ? 0
+      : directionDelta < 0 ? -1 : 1;
     if (
       lastEventTime !== undefined
       && eventTime - lastEventTime > PAGINATED_WHEEL_IDLE_MS
+      && paginatedWheelLastDirection.current !== 0
+      && incomingDirection !== 0
+      && incomingDirection !== paginatedWheelLastDirection.current
     ) {
       resetPaginatedWheel();
     }
@@ -897,6 +910,7 @@ function HeadlessDocument({
     const delta = (axis === 'horizontal' ? deltaX : deltaY) * unit;
     if (Math.abs(delta) < 0.1) return;
     const direction: PdfNavigationDirection = delta < 0 ? -1 : 1;
+    paginatedWheelLastDirection.current = direction;
     const frame = paginatedFrameRef.current;
     if (
       frame
