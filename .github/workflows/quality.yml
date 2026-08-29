@@ -99,16 +99,19 @@ jobs:
             args: packages/vscode-extension/test/e2e/markdown-editor.spec.ts --fully-parallel --shard=1/2
           - suite: Markdown editor 2 of 2
             args: packages/vscode-extension/test/e2e/markdown-editor.spec.ts --fully-parallel --shard=2/2
-          - suite: PDF and web
+          - suite: PDF viewer
+            args: packages/vscode-extension/test/e2e/pdf-viewer.spec.ts
+          - suite: PDF preview and selection
+            args: >-
+              packages/vscode-extension/test/e2e/pdf-preview-parity.spec.ts
+              packages/vscode-extension/test/e2e/pdf-preview-selection.spec.ts
+          - suite: supporting PDF and web
             args: >-
               packages/vscode-extension/test/e2e/embedpdf-headless-spike.spec.ts
               packages/vscode-extension/test/e2e/pdf-internal-links.spec.ts
               packages/vscode-extension/test/e2e/pdf-manual-smoke.spec.ts
               packages/vscode-extension/test/e2e/pdf-page-turn-prefetch.spec.ts
-              packages/vscode-extension/test/e2e/pdf-preview-parity.spec.ts
-              packages/vscode-extension/test/e2e/pdf-preview-selection.spec.ts
               packages/vscode-extension/test/e2e/pdf-viewer-focus-frame.spec.ts
-              packages/vscode-extension/test/e2e/pdf-viewer.spec.ts
               packages/vscode-extension/test/e2e/web-browser.spec.ts
 
     steps:
