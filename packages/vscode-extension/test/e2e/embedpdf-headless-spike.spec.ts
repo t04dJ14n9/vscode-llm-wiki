@@ -329,10 +329,53 @@ test.describe('EmbedPDF headless migration spike', () => {
     await page.mouse.up();
   });
 
-  test('advances one paginated page per wheel gesture with a smooth transition', async ({ page }) => {
+  test('processes one host navigate-next message exactly once', async ({ page }) => {
+    await openHeadlessViewer(page);
+    const layout = page.getByRole('combobox', { name: 'Page layout' });
+    const pageInput = page.locator('input[aria-label="Page"]');
+
+    await layout.selectOption('single');
+    await expect(pageInput).toHaveValue('1');
+    await page.evaluate(() => window.postMessage({
+      type: 'navigate',
+      direction: 'next',
+    }, '*'));
+
+    // Let React effects settle so a queued host event cannot be replayed by a
+    // subsequent render after briefly visiting the correct page.
+    await page.waitForTimeout(150);
+    expect(await pageInput.inputValue()).toBe('2');
+    expect(await visiblePageIndices(page)).toEqual([1]);
+  });
+
+  test('replaces non-continuous pages without transition state or animation', async ({ page }) => {
+    await openHeadlessViewer(page);
+    await page.getByRole('combobox', { name: 'Page layout' }).selectOption('single');
+    const pageInput = page.locator('input[aria-label="Page"]');
+
+    await page.getByRole('button', { name: 'Next page' }).click();
+    await expect(pageInput).toHaveValue('2');
+    await expect.poll(() => visiblePageIndices(page)).toEqual([1]);
+
+    const presentation = await page.locator(
+      '.embedpdf-paginated-spread[data-paginated-active="true"]',
+    ).evaluate(element => ({
+      direction: element.getAttribute('data-page-transition'),
+      animationName: getComputedStyle(element).animationName,
+      animationDuration: getComputedStyle(element).animationDuration,
+    }));
+    expect(presentation).toEqual({
+      direction: null,
+      animationName: 'none',
+      animationDuration: '0s',
+    });
+  });
+
+  test('advances one paginated page per wheel gesture', async ({ page }) => {
     await openHeadlessViewer(page);
     const layout = page.getByRole('combobox', { name: 'Page layout' });
     const viewport = page.locator('.embedpdf-headless-viewport');
+    const frame = page.locator('.embedpdf-paginated-frame');
     const pageInput = page.locator('input[aria-label="Page"]');
 
     await layout.selectOption('single');
@@ -340,32 +383,140 @@ test.describe('EmbedPDF headless migration spike', () => {
     await expect(page.locator(
       '.embedpdf-headless-page[data-page-index="1"] img',
     )).toHaveAttribute('src', /^(blob:|data:)/);
-    await page.locator('.embedpdf-paginated-frame').evaluate(element => {
-      element.scrollTop = element.scrollHeight;
-    });
+    await frame.evaluate(element => { element.scrollTop = element.scrollHeight; });
     await viewport.hover();
 
     for (let index = 0; index < 10; index += 1) await page.mouse.wheel(0, 15);
     await expect(pageInput).toHaveValue('2');
     await expect.poll(() => visiblePageIndices(page)).toEqual([1]);
-    const activeSpread = page.locator('.embedpdf-paginated-spread[data-paginated-active="true"]');
-    await expect(activeSpread)
-      .toHaveAttribute('data-page-transition', 'forward');
-    await expect(activeSpread)
-      .toHaveCSS('animation-name', 'embedpdf-page-enter-forward');
 
     await page.waitForTimeout(220);
-    await page.locator('.embedpdf-paginated-frame').evaluate(element => {
-      element.scrollTop = element.scrollHeight;
-    });
+    await frame.evaluate(element => { element.scrollTop = element.scrollHeight; });
     for (let index = 0; index < 10; index += 1) await page.mouse.wheel(0, 15);
     await expect(pageInput).toHaveValue('3');
 
     await page.waitForTimeout(220);
     for (let index = 0; index < 10; index += 1) await page.mouse.wheel(0, -15);
     await expect(pageInput).toHaveValue('2');
-    await expect(activeSpread)
-      .toHaveAttribute('data-page-transition', 'backward');
+  });
+
+  test('uses the dominant horizontal trackpad axis to turn fitted pages', async ({ page }) => {
+    await openHeadlessViewer(page);
+    await page.getByRole('combobox', { name: 'Page layout' }).selectOption('single');
+    const viewport = page.locator('.embedpdf-headless-viewport');
+    const pageInput = page.locator('input[aria-label="Page"]');
+    await viewport.hover();
+
+    for (let index = 0; index < 10; index += 1) await page.mouse.wheel(15, 0);
+    await expect(pageInput).toHaveValue('2');
+
+    await page.waitForTimeout(220);
+    for (let index = 0; index < 10; index += 1) await page.mouse.wheel(-15, 0);
+    await expect(pageInput).toHaveValue('1');
+  });
+
+  test('keeps modified wheel and pinch packets zoom-only', async ({ page }) => {
+    await openHeadlessViewer(page);
+    await page.getByRole('combobox', { name: 'Page layout' }).selectOption('single');
+    const viewport = page.locator('.embedpdf-headless-viewport');
+    const pageInput = page.locator('input[aria-label="Page"]');
+    await viewport.hover();
+
+    await page.keyboard.down('Control');
+    await page.mouse.wheel(0, 60);
+    await page.keyboard.up('Control');
+    await page.waitForTimeout(150);
+    await expect(pageInput).toHaveValue('1');
+  });
+
+  test('ArrowDown pans a 200% page without crossing the page boundary', async ({ page }) => {
+    const { frame, pageInput } = await openPaginatedViewer(page, 200);
+
+    await frame.evaluate(element => { element.scrollTop = 0; });
+    await page.keyboard.press('ArrowDown');
+    await page.waitForTimeout(100);
+    expect(await pageInput.inputValue()).toBe('1');
+    expect(await frame.evaluate(element => element.scrollTop)).toBeGreaterThan(0);
+
+    await frame.evaluate(element => { element.scrollTop = element.scrollHeight; });
+    const bottom = await frame.evaluate(element => element.scrollTop);
+    await page.keyboard.press('ArrowDown');
+    await page.waitForTimeout(100);
+    expect(await pageInput.inputValue()).toBe('1');
+    expect(await frame.evaluate(element => element.scrollTop)).toBe(bottom);
+  });
+
+  test('plain arrows turn fitted pages that have no room to pan', async ({ page }) => {
+    await openHeadlessViewer(page);
+    const layout = page.getByRole('combobox', { name: 'Page layout' });
+    await layout.selectOption('single');
+    await layout.evaluate(element => (element as HTMLElement).blur());
+    const pageInput = page.locator('input[aria-label="Page"]');
+
+    await page.keyboard.press('ArrowDown');
+    await expect(pageInput).toHaveValue('2');
+    await page.keyboard.press('ArrowUp');
+    await expect(pageInput).toHaveValue('1');
+  });
+
+  test('PageDown and PageUp pan, then turn one page at the boundary', async ({ page }) => {
+    const { frame, pageInput } = await openPaginatedViewer(page, 300);
+
+    const initial = await frame.evaluate(element => ({
+      viewport: element.clientHeight,
+      maximum: element.scrollHeight - element.clientHeight,
+    }));
+    expect(initial.maximum).toBeGreaterThan(initial.viewport);
+
+    await page.keyboard.press('PageDown');
+    await page.waitForTimeout(100);
+    expect(await pageInput.inputValue()).toBe('1');
+    const firstPan = await frame.evaluate(element => element.scrollTop);
+    expect(Math.abs(firstPan - initial.viewport)).toBeLessThanOrEqual(2);
+
+    await frame.evaluate(element => { element.scrollTop = element.scrollHeight; });
+    await page.keyboard.press('PageDown');
+    await page.waitForTimeout(150);
+    expect(await pageInput.inputValue()).toBe('2');
+    expect(await frame.evaluate(element => element.scrollTop)).toBeLessThanOrEqual(1);
+
+    await page.keyboard.press('PageUp');
+    await page.waitForTimeout(150);
+    expect(await pageInput.inputValue()).toBe('1');
+    const priorPage = await frame.evaluate(element => ({
+      top: element.scrollTop,
+      maximum: element.scrollHeight - element.clientHeight,
+    }));
+    expect(Math.abs(priorPage.top - priorPage.maximum)).toBeLessThanOrEqual(2);
+  });
+
+  test('Alt+ArrowDown and Alt+ArrowUp turn a page immediately', async ({ page }) => {
+    const { frame, pageInput } = await openPaginatedViewer(page, 200);
+
+    await frame.evaluate(element => { element.scrollTop = element.scrollHeight / 2; });
+    await page.keyboard.press('Alt+ArrowDown');
+    await page.waitForTimeout(100);
+    expect(await pageInput.inputValue()).toBe('2');
+
+    await frame.evaluate(element => { element.scrollTop = element.scrollHeight / 2; });
+    await page.keyboard.press('Alt+ArrowUp');
+    await page.waitForTimeout(100);
+    expect(await pageInput.inputValue()).toBe('1');
+  });
+
+  test('uses Preview cover-page spread targets in two-page mode', async ({ page }) => {
+    await openHeadlessViewer(page);
+    const layout = page.getByRole('combobox', { name: 'Page layout' });
+    await layout.selectOption('two');
+    await layout.evaluate(element => (element as HTMLElement).blur());
+    const pageInput = page.locator('input[aria-label="Page"]');
+    await pageInput.fill('6');
+    await pageInput.press('Enter');
+    await expect(pageInput).toHaveValue('6');
+    await pageInput.evaluate(element => (element as HTMLElement).blur());
+
+    await page.keyboard.press('Alt+ArrowUp');
+    await expect(pageInput).toHaveValue('5');
   });
 
   test('pans inside an enlarged paginated page before turning the page', async ({ page }) => {
@@ -387,6 +538,13 @@ test.describe('EmbedPDF headless migration spike', () => {
     await expect(pageInput).toHaveValue('1');
 
     await frame.evaluate(element => { element.scrollTop = element.scrollHeight; });
+    for (let index = 0; index < 10; index += 1) await page.mouse.wheel(0, 15);
+    await page.waitForTimeout(80);
+    await expect(pageInput).toHaveValue('1');
+
+    // Preview requires a new gesture at the page edge; momentum from the
+    // gesture that panned within the page must not turn it as a side effect.
+    await page.waitForTimeout(180);
     for (let index = 0; index < 10; index += 1) await page.mouse.wheel(0, 15);
     await expect(pageInput).toHaveValue('2');
   });
@@ -490,6 +648,25 @@ async function openHeadlessViewer(page: Page): Promise<void> {
       message.type === 'embedPdfReady' && message.implementation === 'headless'
     ))
   ));
+}
+
+async function openPaginatedViewer(page: Page, zoomPercent: number) {
+  await openHeadlessViewer(page);
+  await page.getByRole('combobox', { name: 'Page layout' }).selectOption('single');
+  const zoom = page.locator('input[aria-label="Zoom"]');
+  await zoom.fill(String(zoomPercent));
+  await zoom.press('Enter');
+  await expect(zoom).toHaveValue(String(zoomPercent));
+  await zoom.evaluate(element => (element as HTMLElement).blur());
+
+  const frame = page.locator('.embedpdf-paginated-frame');
+  const pageInput = page.locator('input[aria-label="Page"]');
+  await expect(frame).toBeVisible();
+  await expect.poll(() => frame.evaluate(element => (
+    element.scrollHeight - element.clientHeight
+  ))).toBeGreaterThan(100);
+  await frame.hover();
+  return { frame, pageInput };
 }
 
 async function visiblePageIndices(page: Page): Promise<number[]> {

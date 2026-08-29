@@ -66,11 +66,23 @@ import {
 import React, {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
 } from 'react';
 import { createRoot } from 'react-dom/client';
+import {
+  PDF_VIEWPORT_BOUNDARY_EPSILON_PX,
+  canScrollPdfViewport,
+  capturePdfViewportProgress,
+  pdfNavigationTarget,
+  restorePdfViewportProgress,
+  type PdfNavigationDirection,
+  type PdfViewportAxis,
+  type PdfViewportMetrics,
+  type PdfViewportProgress,
+} from '../webview/domain/pdfNavigation';
 import {
   normalizePdfQueryAnnotations,
   type PdfQueryAnnotation,
@@ -116,6 +128,7 @@ const root = document.getElementById('embedpdf-spike-root') ?? document.body.app
 const reactRoot = createRoot(root);
 let latestAnchor: PdfAnchor | undefined;
 const pendingViewerMessages: unknown[] = [];
+let viewerMessageSink: ((message: unknown) => void) | undefined;
 
 root.style.width = '100%';
 root.style.height = '100%';
@@ -124,8 +137,8 @@ installHeadlessStyles();
 window.addEventListener('message', event => {
   const message = event.data;
   if (message?.type !== 'loadPdf') {
-    pendingViewerMessages.push(message);
-    window.dispatchEvent(new CustomEvent('embedpdf-host-message', { detail: message }));
+    if (viewerMessageSink) viewerMessageSink(message);
+    else pendingViewerMessages.push(message);
     return;
   }
   const buffer = pdfArrayBuffer(message.data);
@@ -238,9 +251,13 @@ interface AreaSelection {
   rect: number[];
 }
 
-interface PaginatedTransition {
+interface PaginatedViewportRequest {
+  progress: PdfViewportProgress;
+  override?: Partial<PdfViewportProgress>;
+}
+
+interface PaginatedViewportTarget extends PaginatedViewportRequest {
   targetPage: number;
-  direction: 'forward' | 'backward';
 }
 
 interface ColumnDragStart {
@@ -261,6 +278,7 @@ interface ColumnPreviewRequest {
 }
 
 const MAX_COLUMN_DRAG_WIDTH = 18;
+const PAGINATED_WHEEL_AXIS_LOCK_THRESHOLD = 6;
 
 function HeadlessDocument({
   documentId,
@@ -290,7 +308,6 @@ function HeadlessDocument({
   const [anchorHighlight, setAnchorHighlight] = useState<AnchorHighlight>();
   const [columnSelection, setColumnSelection] = useState<ColumnSelection>();
   const [areaSelection, setAreaSelection] = useState<AreaSelection>();
-  const [paginatedTransition, setPaginatedTransition] = useState<PaginatedTransition>();
   const [adaptTheme, setAdaptTheme] = useState(false);
   const [cursorAgentAvailable, setCursorAgentAvailable] = useState(false);
   const [reduceAnimation, setReduceAnimation] = useState<ReduceAnimation>('system');
@@ -306,8 +323,18 @@ function HeadlessDocument({
   const columnPreviewFrame = useRef<number | undefined>(undefined);
   const pendingColumnPreview = useRef<ColumnPreviewRequest | undefined>(undefined);
   const columnGeometryCache = useRef(new Map<number, Promise<PdfPageGeometry>>());
+  const paginatedFrameRef = useRef<HTMLDivElement | null>(null);
+  const paginatedPageRef = useRef(1);
+  const pendingPaginatedViewport = useRef<PaginatedViewportTarget | undefined>(undefined);
+  const viewerMessageHandlerRef = useRef<(message: any) => void>(() => undefined);
+  const keyDownHandlerRef = useRef<(event: KeyboardEvent) => void>(() => undefined);
+  const paginatedWheelAxis = useRef<PdfViewportAxis | undefined>(undefined);
+  const paginatedWheelAxisDeltaX = useRef(0);
+  const paginatedWheelAxisDeltaY = useRef(0);
   const paginatedWheelDelta = useRef(0);
+  const paginatedWheelDirection = useRef<PdfNavigationDirection | 0>(0);
   const paginatedWheelLocked = useRef(false);
+  const paginatedWheelPanned = useRef(false);
   const paginatedWheelIdleTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const continuous = presentation.endsWith('continuous');
   const twoPage = presentation.startsWith('two');
@@ -332,13 +359,25 @@ function HeadlessDocument({
     : 'smooth';
 
   const resetPaginatedWheel = useCallback((): void => {
+    paginatedWheelAxis.current = undefined;
+    paginatedWheelAxisDeltaX.current = 0;
+    paginatedWheelAxisDeltaY.current = 0;
     paginatedWheelDelta.current = 0;
+    paginatedWheelDirection.current = 0;
     paginatedWheelLocked.current = false;
+    paginatedWheelPanned.current = false;
     if (paginatedWheelIdleTimer.current !== undefined) {
       clearTimeout(paginatedWheelIdleTimer.current);
       paginatedWheelIdleTimer.current = undefined;
     }
   }, []);
+
+  const schedulePaginatedWheelReset = useCallback((): void => {
+    if (paginatedWheelIdleTimer.current !== undefined) {
+      clearTimeout(paginatedWheelIdleTimer.current);
+    }
+    paginatedWheelIdleTimer.current = setTimeout(resetPaginatedWheel, 160);
+  }, [resetPaginatedWheel]);
 
   const clearAreaSelection = useCallback((notifyHost = true): void => {
     setAreaSelection(undefined);
@@ -372,19 +411,21 @@ function HeadlessDocument({
     };
   }, [continuous, resetPaginatedWheel]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (continuous) return;
-    const frameId = requestAnimationFrame(() => {
-      const frame = globalThis.document.querySelector<HTMLElement>('.embedpdf-paginated-frame');
-      if (!frame) return;
-      frame.scrollLeft = Math.max(0, (frame.scrollWidth - frame.clientWidth) / 2);
-      frame.scrollTop = paginatedTransition?.targetPage === currentPage
-        && paginatedTransition.direction === 'backward'
-        ? Math.max(0, frame.scrollHeight - frame.clientHeight)
-        : 0;
-    });
-    return () => cancelAnimationFrame(frameId);
-  }, [continuous, currentPage, paginatedTransition, spreadMode, twoPage]);
+    const frame = paginatedFrameRef.current;
+    if (!frame) return;
+    const pending = pendingPaginatedViewport.current;
+    const matchesTarget = pending?.targetPage === currentPage;
+    const position = restorePdfViewportProgress(
+      matchesTarget ? pending.progress : { x: 0.5, y: 0 },
+      paginatedViewportMetrics(frame),
+      matchesTarget ? pending.override : undefined,
+    );
+    frame.scrollLeft = position.left;
+    frame.scrollTop = position.top;
+    if (matchesTarget) pendingPaginatedViewport.current = undefined;
+  }, [continuous, currentPage, paginatedLayout?.activeItem.id, spreadMode, twoPage]);
 
   useEffect(() => {
     if (!bookmarks) return;
@@ -435,16 +476,20 @@ function HeadlessDocument({
     page: number,
     behavior: ScrollBehavior = smoothBehavior,
     modeContinuous = continuous,
+    paginatedViewport?: PaginatedViewportRequest,
   ) => {
     if (!scroll) return;
     const target = Math.max(1, Math.min(document.pageCount, Math.round(page)));
-    if (!modeContinuous && target !== currentPage) {
-      setPaginatedTransition({
-        targetPage: target,
-        direction: target > currentPage ? 'forward' : 'backward',
-      });
-    }
     if (!modeContinuous) {
+      if (target === paginatedPageRef.current) return;
+      pendingPaginatedViewport.current = {
+        targetPage: target,
+        progress: paginatedViewport?.progress ?? { x: 0.5, y: 0 },
+        ...(paginatedViewport?.override
+          ? { override: paginatedViewport.override }
+          : {}),
+      };
+      paginatedPageRef.current = target;
       setPaginatedPage(target);
       return;
     }
@@ -481,7 +526,7 @@ function HeadlessDocument({
         if (!applyViewportPosition()) window.setTimeout(applyViewportPosition, 180);
       }, 40);
     }
-  }, [continuous, currentPage, document.pageCount, scroll, smoothBehavior, zoomState.currentZoomLevel]);
+  }, [continuous, document.pageCount, scroll, smoothBehavior, zoomState.currentZoomLevel]);
 
   const applyDestination = useCallback((destination: PdfDestinationObject, remember = true) => {
     if (remember) setHistory(current => [...current.slice(-49), { page: currentPage }]);
@@ -513,16 +558,61 @@ function HeadlessDocument({
     }
   }, [currentPage, goToPage, smoothBehavior, zoom, zoomState.currentZoomLevel]);
 
-  const navigate = useCallback((direction: -1 | 1) => {
-    const step = twoPage ? 2 : 1;
-    goToPage(currentPage + direction * step);
-  }, [currentPage, goToPage, twoPage]);
+  const navigate = useCallback((direction: PdfNavigationDirection) => {
+    const basePage = continuous ? currentPage : paginatedPageRef.current;
+    const target = pdfNavigationTarget(
+      basePage,
+      direction,
+      document.pageCount,
+      twoPage,
+      'even',
+    );
+    if (target === undefined) return;
+    const frame = !continuous ? paginatedFrameRef.current : undefined;
+    goToPage(
+      target,
+      smoothBehavior,
+      continuous,
+      frame ? { progress: capturePdfViewportProgress(paginatedViewportMetrics(frame)) } : undefined,
+    );
+  }, [continuous, currentPage, document.pageCount, goToPage, smoothBehavior, twoPage]);
+
+  const navigateFromPaginatedBoundary = useCallback((
+    direction: PdfNavigationDirection,
+    axis: PdfViewportAxis,
+  ): void => {
+    const frame = paginatedFrameRef.current;
+    const progress = frame
+      ? capturePdfViewportProgress(paginatedViewportMetrics(frame))
+      : { x: 0.5, y: 0.5 };
+    const edge = direction > 0 ? 0 : 1;
+    const target = pdfNavigationTarget(
+      paginatedPageRef.current,
+      direction,
+      document.pageCount,
+      twoPage,
+      'even',
+    );
+    if (target === undefined) return;
+    goToPage(
+      target,
+      'auto',
+      false,
+      {
+        progress,
+        override: axis === 'horizontal' ? { x: edge } : { y: edge },
+      },
+    );
+  }, [document.pageCount, goToPage, twoPage]);
 
   const applyPresentation = useCallback((mode: PresentationMode) => {
     const nextContinuous = mode.endsWith('continuous');
     resetPaginatedWheel();
-    setPaginatedTransition(undefined);
-    if (!nextContinuous) setPaginatedPage(currentPage);
+    pendingPaginatedViewport.current = undefined;
+    if (!nextContinuous) {
+      paginatedPageRef.current = currentPage;
+      setPaginatedPage(currentPage);
+    }
     setPresentation(mode);
     spread?.setSpreadMode(mode.startsWith('two') ? SpreadMode.Even : SpreadMode.None);
     requestAnimationFrame(() => goToPage(currentPage, 'auto', nextContinuous));
@@ -555,66 +645,58 @@ function HeadlessDocument({
     }, () => undefined);
   }, [goToPage, search]);
 
+  viewerMessageHandlerRef.current = (message: any): void => {
+    switch (message?.type) {
+      case 'pdfToolbarPreference':
+        setToolbarPreference(normalizeToolbarPreference(message.preference));
+        break;
+      case 'agentHandoffCapabilities':
+        setCursorAgentAvailable(message.cursorAgent === true);
+        break;
+      case 'setQueryAnnotations':
+        setQueryAnnotations(normalizePdfQueryAnnotations(message.annotations));
+        break;
+      case 'goToAnchor':
+        goToAnchor(message.anchor ?? { page: message.page, textFragment: message.textFragment });
+        break;
+      case 'goToPdfDestination':
+        if (message.destination) applyDestination(message.destination as PdfDestinationObject);
+        break;
+      case 'navigate':
+        navigate(message.direction === 'prev' ? -1 : 1);
+        break;
+      case 'zoom':
+        zoom?.requestZoomBy(Number(message.delta ?? 0));
+        break;
+      case 'fitWidth':
+        zoom?.requestZoom(ZoomMode.FitWidth);
+        break;
+      case 'toggleContinuousScroll':
+        applyPresentation(twoPage
+          ? continuous ? 'two' : 'two-continuous'
+          : continuous ? 'single' : 'single-continuous');
+        break;
+      case 'toggleTwoPageView':
+        applyPresentation(continuous
+          ? twoPage ? 'single-continuous' : 'two-continuous'
+          : twoPage ? 'single' : 'two');
+        break;
+      case 'addSelectionToCursorChat':
+        if (cursorAgentAvailable) postSelectionAction('addToCursorChat');
+        break;
+      default:
+        break;
+    }
+  };
+
   useEffect(() => {
-    const handleMessage = (message: any): void => {
-      switch (message?.type) {
-        case 'pdfToolbarPreference':
-          setToolbarPreference(normalizeToolbarPreference(message.preference));
-          break;
-        case 'agentHandoffCapabilities':
-          setCursorAgentAvailable(message.cursorAgent === true);
-          break;
-        case 'setQueryAnnotations':
-          setQueryAnnotations(normalizePdfQueryAnnotations(message.annotations));
-          break;
-        case 'goToAnchor':
-          goToAnchor(message.anchor ?? { page: message.page, textFragment: message.textFragment });
-          break;
-        case 'goToPdfDestination':
-          if (message.destination) applyDestination(message.destination as PdfDestinationObject);
-          break;
-        case 'navigate':
-          navigate(message.direction === 'prev' ? -1 : 1);
-          break;
-        case 'zoom':
-          zoom?.requestZoomBy(Number(message.delta ?? 0));
-          break;
-        case 'fitWidth':
-          zoom?.requestZoom(ZoomMode.FitWidth);
-          break;
-        case 'toggleContinuousScroll':
-          applyPresentation(twoPage
-            ? continuous ? 'two' : 'two-continuous'
-            : continuous ? 'single' : 'single-continuous');
-          break;
-        case 'toggleTwoPageView':
-          applyPresentation(continuous
-            ? twoPage ? 'single-continuous' : 'two-continuous'
-            : twoPage ? 'single' : 'two');
-          break;
-        case 'addSelectionToCursorChat':
-          if (cursorAgentAvailable) postSelectionAction('addToCursorChat');
-          break;
-        default:
-          break;
-      }
-    };
+    const handleMessage = (message: unknown): void => viewerMessageHandlerRef.current(message);
+    viewerMessageSink = handleMessage;
     pendingViewerMessages.splice(0).forEach(handleMessage);
-    const handleHostEvent = (event: Event): void => {
-      handleMessage((event as CustomEvent).detail);
+    return () => {
+      if (viewerMessageSink === handleMessage) viewerMessageSink = undefined;
     };
-    window.addEventListener('embedpdf-host-message', handleHostEvent);
-    return () => window.removeEventListener('embedpdf-host-message', handleHostEvent);
-  }, [
-    applyDestination,
-    applyPresentation,
-    continuous,
-    cursorAgentAvailable,
-    goToAnchor,
-    navigate,
-    twoPage,
-    zoom,
-  ]);
+  }, []);
 
   useEffect(() => {
     vscode.postMessage({
@@ -638,83 +720,157 @@ function HeadlessDocument({
     return () => window.clearTimeout(timer);
   }, [search, searchOpen, searchQuery]);
 
+  keyDownHandlerRef.current = (event: KeyboardEvent): void => {
+    const target = event.target as HTMLElement | null;
+    const editing = Boolean(target?.closest('input, textarea, select, [contenteditable="true"]'));
+    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'f') {
+      event.preventDefault();
+      setSearchOpen(true);
+      requestAnimationFrame(() => globalThis.document.getElementById('embedpdf-search-input')?.focus());
+      return;
+    }
+    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'l' && !editing) {
+      if (cursorAgentAvailable && latestAnchor && !latestAnchor.multiPage) {
+        event.preventDefault();
+        postSelectionAction('addToCursorChat');
+      }
+      return;
+    }
+    if (event.shiftKey && event.key.toLowerCase() === 't' && !editing) {
+      event.preventDefault();
+      const next = { ...toolbarPreference, hidden: !toolbarPreference.hidden };
+      setToolbarPreference(next);
+      vscode.postMessage({ type: 'pdfToolbarPreferenceChanged', preference: next });
+      return;
+    }
+    if (
+      event.altKey
+      && !event.ctrlKey
+      && !event.metaKey
+      && !event.shiftKey
+      && !editing
+      && event.key.startsWith('Arrow')
+    ) {
+      event.preventDefault();
+      navigate(event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1 : 1);
+      return;
+    }
+    const unmodified = !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey;
+    if (!continuous && !editing && unmodified && event.key.startsWith('Arrow')) {
+      const direction: PdfNavigationDirection = (
+        event.key === 'ArrowLeft' || event.key === 'ArrowUp'
+      ) ? -1 : 1;
+      const axis: PdfViewportAxis = (
+        event.key === 'ArrowLeft' || event.key === 'ArrowRight'
+      ) ? 'horizontal' : 'vertical';
+      event.preventDefault();
+      const frame = paginatedFrameRef.current;
+      if (!frame) {
+        navigateFromPaginatedBoundary(direction, axis);
+        return;
+      }
+      const metrics = paginatedViewportMetrics(frame);
+      if (canScrollPdfViewport(axis, direction, metrics)) {
+        scrollPaginatedFrameBy(frame, axis, direction * 40);
+      } else if (!pdfViewportHasScrollableExtent(axis, metrics)) {
+        navigateFromPaginatedBoundary(direction, axis);
+      }
+      return;
+    }
+    if (
+      !continuous
+      && !editing
+      && unmodified
+      && (event.key === 'PageDown' || event.key === 'PageUp')
+    ) {
+      const direction: PdfNavigationDirection = event.key === 'PageUp' ? -1 : 1;
+      event.preventDefault();
+      const frame = paginatedFrameRef.current;
+      if (!frame) {
+        navigateFromPaginatedBoundary(direction, 'vertical');
+        return;
+      }
+      const metrics = paginatedViewportMetrics(frame);
+      if (canScrollPdfViewport('vertical', direction, metrics)) {
+        frame.scrollBy({ top: direction * frame.clientHeight, behavior: 'auto' });
+      } else {
+        navigateFromPaginatedBoundary(direction, 'vertical');
+      }
+      return;
+    }
+    if (event.key === 'Escape') {
+      setDisplayMenuOpen(false);
+      setSearchOpen(false);
+      clearAreaSelection();
+    }
+  };
+
   useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent): void => {
-      const target = event.target as HTMLElement | null;
-      const editing = Boolean(target?.closest('input, textarea, select, [contenteditable="true"]'));
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'f') {
-        event.preventDefault();
-        setSearchOpen(true);
-        requestAnimationFrame(() => globalThis.document.getElementById('embedpdf-search-input')?.focus());
-        return;
-      }
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'l' && !editing) {
-        if (cursorAgentAvailable && latestAnchor && !latestAnchor.multiPage) {
-          event.preventDefault();
-          postSelectionAction('addToCursorChat');
-        }
-        return;
-      }
-      if (event.shiftKey && event.key.toLowerCase() === 't' && !editing) {
-        event.preventDefault();
-        const next = { ...toolbarPreference, hidden: !toolbarPreference.hidden };
-        setToolbarPreference(next);
-        vscode.postMessage({ type: 'pdfToolbarPreferenceChanged', preference: next });
-        return;
-      }
-      if (event.altKey && !editing && event.key.startsWith('Arrow')) {
-        event.preventDefault();
-        navigate(event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1 : 1);
-        return;
-      }
-      if (!continuous && !editing && event.key.startsWith('Arrow')) {
-        event.preventDefault();
-        navigate(event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1 : 1);
-      }
-      if (event.key === 'Escape') {
-        setDisplayMenuOpen(false);
-        setSearchOpen(false);
-        clearAreaSelection();
-      }
-    };
+    const handleKeyDown = (event: KeyboardEvent): void => keyDownHandlerRef.current(event);
     globalThis.document.addEventListener('keydown', handleKeyDown);
     return () => globalThis.document.removeEventListener('keydown', handleKeyDown);
-  }, [clearAreaSelection, continuous, cursorAgentAvailable, navigate, toolbarPreference]);
+  }, []);
 
   const handlePaginatedWheel = (event: React.WheelEvent): void => {
     if (continuous) return;
-    const unit = event.deltaMode === WheelEvent.DOM_DELTA_LINE
-      ? 16
-      : event.deltaMode === WheelEvent.DOM_DELTA_PAGE
-        ? Math.max(1, event.currentTarget.clientHeight)
-        : 1;
-    const delta = event.deltaY * unit;
-    if (!Number.isFinite(delta) || Math.abs(delta) < 0.1) return;
-    const frame = event.currentTarget.querySelector<HTMLElement>('.embedpdf-paginated-frame');
-    const maximumScrollTop = frame ? Math.max(0, frame.scrollHeight - frame.clientHeight) : 0;
-    const canPanWithinPage = Boolean(frame) && maximumScrollTop > 4 && (
-      delta < 0 ? frame!.scrollTop > 1 : frame!.scrollTop < maximumScrollTop - 1
-    );
-    if (canPanWithinPage) {
+    if (event.defaultPrevented || event.ctrlKey || event.metaKey) {
       resetPaginatedWheel();
       return;
     }
-    event.preventDefault();
-    if (paginatedWheelIdleTimer.current !== undefined) {
-      clearTimeout(paginatedWheelIdleTimer.current);
+    const deltaX = event.deltaX;
+    const deltaY = event.deltaY;
+    if (
+      !Number.isFinite(deltaX)
+      || !Number.isFinite(deltaY)
+      || (Math.abs(deltaX) < 0.1 && Math.abs(deltaY) < 0.1)
+    ) return;
+    schedulePaginatedWheelReset();
+    paginatedWheelAxisDeltaX.current += Math.abs(deltaX);
+    paginatedWheelAxisDeltaY.current += Math.abs(deltaY);
+    if (!paginatedWheelAxis.current) {
+      const dominantDelta = Math.max(
+        paginatedWheelAxisDeltaX.current,
+        paginatedWheelAxisDeltaY.current,
+      );
+      if (dominantDelta < PAGINATED_WHEEL_AXIS_LOCK_THRESHOLD) return;
+      paginatedWheelAxis.current = (
+        paginatedWheelAxisDeltaX.current > paginatedWheelAxisDeltaY.current
+      ) ? 'horizontal' : 'vertical';
     }
-    paginatedWheelIdleTimer.current = setTimeout(() => {
+    const axis = paginatedWheelAxis.current;
+    if (!axis) return;
+    const unit = event.deltaMode === WheelEvent.DOM_DELTA_LINE
+      ? 16
+      : event.deltaMode === WheelEvent.DOM_DELTA_PAGE
+        ? Math.max(1, axis === 'horizontal'
+          ? event.currentTarget.clientWidth
+          : event.currentTarget.clientHeight)
+        : 1;
+    const delta = (axis === 'horizontal' ? deltaX : deltaY) * unit;
+    if (Math.abs(delta) < 0.1) return;
+    const direction: PdfNavigationDirection = delta < 0 ? -1 : 1;
+    const frame = paginatedFrameRef.current;
+    if (
+      frame
+      && canScrollPdfViewport(axis, direction, paginatedViewportMetrics(frame))
+    ) {
       paginatedWheelDelta.current = 0;
+      paginatedWheelDirection.current = 0;
       paginatedWheelLocked.current = false;
-      paginatedWheelIdleTimer.current = undefined;
-    }, 160);
-    if (paginatedWheelLocked.current) return;
-    paginatedWheelDelta.current += delta;
-    if (Math.abs(paginatedWheelDelta.current) < 48) return;
+      paginatedWheelPanned.current = true;
+      return;
+    }
+    event.preventDefault();
+    if (paginatedWheelPanned.current || paginatedWheelLocked.current) return;
+    if (paginatedWheelDirection.current !== direction) {
+      paginatedWheelDirection.current = direction;
+      paginatedWheelDelta.current = 0;
+    }
+    paginatedWheelDelta.current += Math.abs(delta);
+    if (paginatedWheelDelta.current < 48) return;
     paginatedWheelLocked.current = true;
-    const direction = paginatedWheelDelta.current < 0 ? -1 : 1;
     paginatedWheelDelta.current = 0;
-    navigate(direction);
+    navigateFromPaginatedBoundary(direction, axis);
   };
 
   const commitPage = (): void => {
@@ -1103,7 +1259,7 @@ function HeadlessDocument({
                   )}
                 />
               ) : paginatedLayout ? (
-                <div className="embedpdf-paginated-frame">
+                <div ref={paginatedFrameRef} className="embedpdf-paginated-frame">
                   <div
                     className="embedpdf-paginated-stage"
                     style={{
@@ -1113,15 +1269,10 @@ function HeadlessDocument({
                   >
                     {paginatedLayout.bufferedItems.map(item => {
                       const active = item.index === paginatedLayout.activeItem.index;
-                      const transition = active
-                        && paginatedTransition?.targetPage === currentPage
-                        ? paginatedTransition.direction
-                        : undefined;
                       return (
                         <div
                           className="embedpdf-paginated-spread"
                           data-paginated-active={active}
-                          data-page-transition={transition}
                           aria-hidden={!active}
                           key={item.id}
                           style={{
@@ -2023,9 +2174,6 @@ function installHeadlessStyles(): void {
     .embedpdf-paginated-stage { position: relative; box-sizing: border-box; }
     .embedpdf-paginated-spread { position: absolute; top: 50%; left: 50%; display: flex; align-items: center; justify-content: center; transform: translate(-50%, -50%); }
     .embedpdf-headless-page { position: relative; background: #fff; box-shadow: 0 1px 8px #0007; }
-    .embedpdf-paginated-spread[data-page-transition="forward"] { animation: embedpdf-page-enter-forward 180ms cubic-bezier(.2, .8, .2, 1) both; }
-    .embedpdf-paginated-spread[data-page-transition="backward"] { animation: embedpdf-page-enter-backward 180ms cubic-bezier(.2, .8, .2, 1) both; }
-    [data-reduce-animation="true"] .embedpdf-paginated-spread[data-page-transition] { animation: none; }
     [data-adapt-theme="true"] .embedpdf-headless-page canvas { filter: invert(.9) hue-rotate(180deg); }
     .embedpdf-search { position: absolute; z-index: 80; top: 8px; right: 8px; display: grid; grid-template-columns: minmax(150px, 1fr) 26px 26px auto 26px; align-items: center; gap: 2px; width: min(420px, calc(100% - 16px)); padding: 4px; border: 1px solid var(--vscode-widget-border, #555); border-radius: 4px; color: var(--vscode-editorWidget-foreground, #ddd); background: var(--vscode-editorWidget-background, #252526); box-shadow: 0 2px 8px #0008; }
     .embedpdf-search input { box-sizing: border-box; width: 100%; height: 26px; border: 1px solid var(--vscode-input-border, transparent); border-radius: 2px; outline: 0; padding: 2px 6px; color: var(--vscode-input-foreground, #ddd); background: var(--vscode-input-background, #1e1e1e); }
@@ -2084,8 +2232,6 @@ function installHeadlessStyles(): void {
       .embedpdf-area-selection-rect { border: 1px solid Highlight; background: Highlight !important; box-shadow: none; opacity: .42; forced-color-adjust: none; }
     }
     @keyframes embedpdf-anchor-fade { 0%, 72% { opacity: 1; } 100% { opacity: 0; } }
-    @keyframes embedpdf-page-enter-forward { from { opacity: .68; transform: translate(-50%, -50%) translateY(14px); } to { opacity: 1; transform: translate(-50%, -50%) translateY(0); } }
-    @keyframes embedpdf-page-enter-backward { from { opacity: .68; transform: translate(-50%, -50%) translateY(-14px); } to { opacity: 1; transform: translate(-50%, -50%) translateY(0); } }
     .embedpdf-history-back.floating { position: absolute; z-index: 70; left: 14px; bottom: 14px; width: 32px; height: 32px; border: 1px solid var(--vscode-widget-border, #555); border-radius: 5px; color: var(--vscode-button-secondaryForeground, #fff); background: var(--vscode-button-secondaryBackground, #3a3d41); box-shadow: 0 2px 8px #0008; }
   `;
   globalThis.document.head.append(style);
@@ -2272,6 +2418,36 @@ function selectionPage(selection: EmbedPdfFormattedSelection): { page: number; r
       rect.origin.y + rect.size.height,
     ]),
   };
+}
+
+function paginatedViewportMetrics(frame: HTMLElement): PdfViewportMetrics {
+  return {
+    scrollLeft: frame.scrollLeft,
+    scrollTop: frame.scrollTop,
+    scrollWidth: frame.scrollWidth,
+    scrollHeight: frame.scrollHeight,
+    clientWidth: frame.clientWidth,
+    clientHeight: frame.clientHeight,
+  };
+}
+
+function pdfViewportHasScrollableExtent(
+  axis: PdfViewportAxis,
+  viewport: PdfViewportMetrics,
+): boolean {
+  return axis === 'horizontal'
+    ? viewport.scrollWidth - viewport.clientWidth > PDF_VIEWPORT_BOUNDARY_EPSILON_PX
+    : viewport.scrollHeight - viewport.clientHeight > PDF_VIEWPORT_BOUNDARY_EPSILON_PX;
+}
+
+function scrollPaginatedFrameBy(
+  frame: HTMLElement,
+  axis: PdfViewportAxis,
+  delta: number,
+): void {
+  frame.scrollBy(axis === 'horizontal'
+    ? { left: delta, behavior: 'auto' }
+    : { top: delta, behavior: 'auto' });
 }
 
 function pdfArrayBuffer(value: unknown): ArrayBuffer | undefined {
