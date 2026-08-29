@@ -373,6 +373,10 @@ test.describe('EmbedPDF headless migration spike', () => {
     await openHeadlessViewer(page);
     await page.waitForTimeout(700);
 
+    const toolbar = page.getByRole('toolbar', { name: 'PDF toolbar' });
+    await expect(toolbar.getByRole('button', { name: 'Copy for Agent' })).toHaveCount(0);
+    await expect(toolbar.getByRole('button', { name: 'Copy text' })).toHaveCount(0);
+
     const zoom = page.locator('input[aria-label="Zoom"]');
     const initialZoom = Number(await zoom.inputValue());
     await page.getByRole('button', { name: 'Zoom in' }).click();

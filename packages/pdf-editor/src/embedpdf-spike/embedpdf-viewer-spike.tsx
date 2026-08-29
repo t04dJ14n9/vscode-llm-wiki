@@ -1275,9 +1275,6 @@ function PdfToolbar(props: PdfToolbarProps): React.JSX.Element {
         disabled={!latestAnchor || latestAnchor.multiPage}
         onClick={() => postSelectionAction('addToCursorChat')}
       >Add to Chat</button>
-      <button type="button" disabled={!latestAnchor} onClick={() => vscode.postMessage({ type: 'copySelectionForAgent' })}>
-        Copy for Agent
-      </button>
       {props.displayMenuOpen && (
         <div className="embedpdf-display-menu" role="menu" aria-label="Display options">
           <div className="menu-section">View</div>
