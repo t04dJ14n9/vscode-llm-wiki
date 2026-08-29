@@ -92,11 +92,24 @@ jobs:
       matrix:
         include:
           - suite: deterministic fuzz
-            spec: packages/vscode-extension/test/e2e/markdown-editor-fuzz.spec.ts
+            args: packages/vscode-extension/test/e2e/markdown-editor-fuzz.spec.ts
           - suite: Vim command fuzz
-            spec: packages/vscode-extension/test/e2e/markdown-editor-vim-command-fuzz.spec.ts
-          - suite: remaining tests
-            spec: ''
+            args: packages/vscode-extension/test/e2e/markdown-editor-vim-command-fuzz.spec.ts
+          - suite: Markdown editor 1 of 2
+            args: packages/vscode-extension/test/e2e/markdown-editor.spec.ts --fully-parallel --shard=1/2
+          - suite: Markdown editor 2 of 2
+            args: packages/vscode-extension/test/e2e/markdown-editor.spec.ts --fully-parallel --shard=2/2
+          - suite: PDF and web
+            args: >-
+              packages/vscode-extension/test/e2e/embedpdf-headless-spike.spec.ts
+              packages/vscode-extension/test/e2e/pdf-internal-links.spec.ts
+              packages/vscode-extension/test/e2e/pdf-manual-smoke.spec.ts
+              packages/vscode-extension/test/e2e/pdf-page-turn-prefetch.spec.ts
+              packages/vscode-extension/test/e2e/pdf-preview-parity.spec.ts
+              packages/vscode-extension/test/e2e/pdf-preview-selection.spec.ts
+              packages/vscode-extension/test/e2e/pdf-viewer-focus-frame.spec.ts
+              packages/vscode-extension/test/e2e/pdf-viewer.spec.ts
+              packages/vscode-extension/test/e2e/web-browser.spec.ts
 
     steps:
       - name: Check out repository
@@ -123,10 +136,5 @@ jobs:
       - name: Build combined extension
         run: pnpm build:extension
 
-      - name: Run focused browser regression suite
-        if: matrix.spec != ''
-        run: pnpm exec playwright test --config playwright.config.ts ${{ matrix.spec }}
-
-      - name: Run remaining Markdown and PDF browser regressions
-        if: matrix.spec == ''
-        run: pnpm exec playwright test --config playwright.config.ts --grep-invert 'LLM Wiki Markdown (deterministic keystroke fuzzing|expanded Vim command fuzzing)'
+      - name: Run browser regression shard
+        run: pnpm exec playwright test --config playwright.config.ts ${{ matrix.args }}
