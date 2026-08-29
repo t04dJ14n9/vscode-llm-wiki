@@ -1,7 +1,7 @@
 {
   "name": "llm-wiki-vscode",
   "displayName": "LLM Wiki for VS Code",
-  "version": "0.4.3",
+  "version": "0.4.4",
   "private": true,
   "description": "Local-first, source-grounded Markdown, PDF, and code knowledge workbench",
   "publisher": "t04dJ14n9",
