@@ -279,6 +279,39 @@ interface ColumnPreviewRequest {
 
 const MAX_COLUMN_DRAG_WIDTH = 18;
 const PAGINATED_WHEEL_AXIS_LOCK_THRESHOLD = 6;
+const PAGINATED_WHEEL_IDLE_MS = 160;
+const PDF_LOW_ZOOM_RENDER_DPR_CAP = 3;
+
+function currentDevicePixelRatio(): number {
+  const value = globalThis.devicePixelRatio;
+  return Number.isFinite(value) && value > 0 ? value : 1;
+}
+
+function lowZoomRenderDpr(scale: number, devicePixelRatio: number): number {
+  const displayDpr = Math.max(1, devicePixelRatio);
+  const fullZoomDetailDpr = displayDpr / Math.max(0.01, scale);
+  return Math.max(
+    displayDpr,
+    Math.min(PDF_LOW_ZOOM_RENDER_DPR_CAP, fullZoomDetailDpr),
+  );
+}
+
+function useDevicePixelRatio(): number {
+  const [devicePixelRatio, setDevicePixelRatio] = useState(currentDevicePixelRatio);
+
+  useEffect(() => {
+    const update = (): void => setDevicePixelRatio(currentDevicePixelRatio());
+    const resolution = window.matchMedia(`(resolution: ${devicePixelRatio}dppx)`);
+    window.addEventListener('resize', update);
+    resolution.addEventListener('change', update);
+    return () => {
+      window.removeEventListener('resize', update);
+      resolution.removeEventListener('change', update);
+    };
+  }, [devicePixelRatio]);
+
+  return devicePixelRatio;
+}
 
 function HeadlessDocument({
   documentId,
@@ -295,6 +328,7 @@ function HeadlessDocument({
   const { provides: search, state: searchState } = useSearch(documentId);
   const { provides: selectionCapability } = useSelectionCapability();
   const { provides: bookmarks } = useBookmarkCapability();
+  const devicePixelRatio = useDevicePixelRatio();
   const [presentation, setPresentation] = useState<PresentationMode>('single-continuous');
   const [paginatedPage, setPaginatedPage] = useState(1);
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -335,6 +369,7 @@ function HeadlessDocument({
   const paginatedWheelDirection = useRef<PdfNavigationDirection | 0>(0);
   const paginatedWheelLocked = useRef(false);
   const paginatedWheelPanned = useRef(false);
+  const paginatedWheelLastEventTime = useRef<number | undefined>(undefined);
   const paginatedWheelIdleTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const continuous = presentation.endsWith('continuous');
   const twoPage = presentation.startsWith('two');
@@ -366,6 +401,7 @@ function HeadlessDocument({
     paginatedWheelDirection.current = 0;
     paginatedWheelLocked.current = false;
     paginatedWheelPanned.current = false;
+    paginatedWheelLastEventTime.current = undefined;
     if (paginatedWheelIdleTimer.current !== undefined) {
       clearTimeout(paginatedWheelIdleTimer.current);
       paginatedWheelIdleTimer.current = undefined;
@@ -376,7 +412,10 @@ function HeadlessDocument({
     if (paginatedWheelIdleTimer.current !== undefined) {
       clearTimeout(paginatedWheelIdleTimer.current);
     }
-    paginatedWheelIdleTimer.current = setTimeout(resetPaginatedWheel, 160);
+    paginatedWheelIdleTimer.current = setTimeout(
+      resetPaginatedWheel,
+      PAGINATED_WHEEL_IDLE_MS,
+    );
   }, [resetPaginatedWheel]);
 
   const clearAreaSelection = useCallback((notifyHost = true): void => {
@@ -824,6 +863,15 @@ function HeadlessDocument({
       || !Number.isFinite(deltaY)
       || (Math.abs(deltaX) < 0.1 && Math.abs(deltaY) < 0.1)
     ) return;
+    const eventTime = event.timeStamp;
+    const lastEventTime = paginatedWheelLastEventTime.current;
+    if (
+      lastEventTime !== undefined
+      && eventTime - lastEventTime > PAGINATED_WHEEL_IDLE_MS
+    ) {
+      resetPaginatedWheel();
+    }
+    paginatedWheelLastEventTime.current = eventTime;
     schedulePaginatedWheelReset();
     paginatedWheelAxisDeltaX.current += Math.abs(deltaX);
     paginatedWheelAxisDeltaY.current += Math.abs(deltaY);
@@ -1071,6 +1119,7 @@ function HeadlessDocument({
     paginatedActive?: boolean,
   ): React.JSX.Element => {
     const scale = width / Math.max(1, document.pages[pageIndex]?.size.width ?? width);
+    const renderDpr = lowZoomRenderDpr(scale, devicePixelRatio);
     const interactive = paginatedActive !== false;
     return (
       <PagePointerProvider
@@ -1096,6 +1145,7 @@ function HeadlessDocument({
           documentId={documentId}
           pageIndex={pageIndex}
           scale={scale}
+          dpr={renderDpr}
           draggable={false}
           style={{ pointerEvents: 'none', userSelect: 'none' }}
         />

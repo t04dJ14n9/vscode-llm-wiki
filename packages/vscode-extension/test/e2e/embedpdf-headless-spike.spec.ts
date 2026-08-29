@@ -335,6 +335,7 @@ test.describe('EmbedPDF headless migration spike', () => {
     const pageInput = page.locator('input[aria-label="Page"]');
 
     await layout.selectOption('single');
+    await expect(page.locator('.embedpdf-paginated-frame')).toBeVisible();
     await expect(pageInput).toHaveValue('1');
     await page.evaluate(() => window.postMessage({
       type: 'navigate',
@@ -576,6 +577,70 @@ test.describe('EmbedPDF headless migration spike', () => {
           }
         : undefined;
     })).toEqual({ widthDifference: 0, heightDifference: 0 });
+  });
+
+  test.describe('Retina page rasterization', () => {
+    test.use({ deviceScaleFactor: 2 });
+
+    test('supersamples low-zoom page bitmaps without changing layout', async ({ page }) => {
+      await page.setViewportSize({ width: 1280, height: 768 });
+      await openHeadlessViewer(page);
+
+      const zoom = page.locator('input[aria-label="Zoom"]');
+      await zoom.fill('71');
+      await zoom.press('Enter');
+      await page.getByRole('combobox', { name: 'Page layout' }).selectOption('two');
+      const pageInput = page.locator('input[aria-label="Page"]');
+      await pageInput.fill('2');
+      await pageInput.press('Enter');
+
+      const activePages = page.locator(
+        '.embedpdf-paginated-spread[data-paginated-active="true"] .embedpdf-headless-page',
+      );
+      await expect(activePages).toHaveCount(2);
+      await expect.poll(() => activePages.evaluateAll(elements => elements.every(element => {
+        const image = element.querySelector<HTMLImageElement>('img');
+        return image?.complete === true && image.naturalWidth > 0 && image.naturalHeight > 0;
+      }))).toBe(true);
+
+      const metrics = await activePages.evaluateAll(elements => elements.map(element => {
+        const image = element.querySelector<HTMLImageElement>('img')!;
+        const pageRect = element.getBoundingClientRect();
+        const imageRect = image.getBoundingClientRect();
+        return {
+          pageWidth: pageRect.width,
+          pageHeight: pageRect.height,
+          imageWidth: imageRect.width,
+          imageHeight: imageRect.height,
+          naturalWidth: image.naturalWidth,
+          naturalHeight: image.naturalHeight,
+        };
+      }));
+
+      for (const metric of metrics) {
+        // At 71%, retain the source detail of a 100% page on the same 2x
+        // display. This is the low-zoom supersampling that keeps small PDF text
+        // crisp while the image still occupies its original CSS box.
+        expect(metric.naturalWidth * 0.71).toBeGreaterThanOrEqual(metric.pageWidth * 2 - 1);
+        expect(metric.naturalHeight * 0.71).toBeGreaterThanOrEqual(metric.pageHeight * 2 - 1);
+        expect(Math.abs(metric.imageWidth - metric.pageWidth)).toBeLessThanOrEqual(1);
+        expect(Math.abs(metric.imageHeight - metric.pageHeight)).toBeLessThanOrEqual(1);
+      }
+
+      const frameLayout = await page.evaluate(() => {
+        const viewport = document.querySelector<HTMLElement>('.embedpdf-headless-viewport')
+          ?.getBoundingClientRect();
+        const frame = document.querySelector<HTMLElement>('.embedpdf-paginated-frame')
+          ?.getBoundingClientRect();
+        return viewport && frame
+          ? {
+              widthDifference: Math.abs(viewport.width - frame.width),
+              heightDifference: Math.abs(viewport.height - frame.height),
+            }
+          : undefined;
+      });
+      expect(frameLayout).toEqual({ widthDifference: 0, heightDifference: 0 });
+    });
   });
 
   test('ports toolbar modes, zoom, sidebar, search, hover, and link history', async ({ page }) => {
