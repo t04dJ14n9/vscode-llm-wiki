@@ -5,6 +5,10 @@ const smolLmPdf = [
   process.cwd(),
   'demo-vault/assets/smollm2-when-smol-goes-big-data-centric-training-of-a-small-language-model.pdf',
 ].join('/');
+const flashAttentionPdf = [
+  process.cwd(),
+  'demo-vault/assets/flashattention-3-fast-and-accurate-attention-with-asynchrony-and-low-precision.pdf',
+].join('/');
 
 type Point = { x: number; y: number };
 
@@ -48,6 +52,12 @@ test.describe('EmbedPDF headless migration spike', () => {
         message.type === 'selectionAction' && message.action === 'addToCursorChat'
       ),
     ))).toBe(true);
+    const handoff = await page.evaluate(() => window.__mockMessages?.findLast(
+      (message: Record<string, unknown>) => (
+        message.type === 'selectionAction' && message.action === 'addToCursorChat'
+      ),
+    ));
+    expect((handoff?.anchor as { snippet?: string } | undefined)?.snippet).toBe(forward);
 
     await page.evaluate(() => window.__embedPdfSpike!.selection.clear('llm-wiki-document'));
     const reverse = await selectText(page, leftColumnTail, caption);
@@ -240,6 +250,37 @@ test.describe('EmbedPDF headless migration spike', () => {
     await expect.poll(() => page.evaluate(() => Boolean(
       window.__embedPdfSpike!.selection.getState('llm-wiki-document').selection,
     ))).toBe(true);
+  });
+
+  test('does not mistake a vertically selected algorithm for a table column', async ({ page }) => {
+    await page.route('**/fixtures/gqa-paper.pdf', route => route.fulfill({
+      path: flashAttentionPdf,
+      contentType: 'application/pdf',
+    }));
+    await openHeadlessViewer(page);
+    const zoom = page.locator('input[aria-label="Zoom"]');
+    await zoom.fill('143');
+    await zoom.press('Enter');
+    const pageInput = page.locator('input[aria-label="Page"]');
+    await pageInput.fill('5');
+    await pageInput.press('Enter');
+
+    const pdfPage = page.locator('.embedpdf-headless-page[data-page-index="4"]');
+    await expect(pdfPage).toBeVisible();
+    const bounds = await pdfPage.boundingBox();
+    expect(bounds).not.toBeNull();
+    const selected = await selectText(
+      page,
+      { x: bounds!.x + 83 * 1.43, y: bounds!.y + 84 * 1.43 },
+      { x: bounds!.x + 110 * 1.43, y: bounds!.y + 420 * 1.43 },
+    );
+
+    expect(selected).toContain('FlashAttention-3 forward pass');
+    expect(selected).toContain('Initialize pipeline object');
+    expect(selected).toContain('Write O');
+    expect(selected).toContain('26: end i');
+    expect(selected).not.toContain('For our implementation of Algorithm 1');
+    await expect(page.locator('.embedpdf-column-selection-rect')).toHaveCount(0);
   });
 
   test('shows rectangular selection feedback before the pointer is released', async ({ page }) => {

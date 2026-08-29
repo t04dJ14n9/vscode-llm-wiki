@@ -260,6 +260,8 @@ interface ColumnPreviewRequest {
   version: number;
 }
 
+const MAX_COLUMN_DRAG_WIDTH = 18;
+
 function HeadlessDocument({
   documentId,
   document,
@@ -764,8 +766,10 @@ function HeadlessDocument({
         // The pointer may already have been cancelled by the host browser.
       }
     }
-    if (dy < 8 || dx > Math.max(18, dy * 0.35)) return;
-
+    if (dy < 8 || dx > MAX_COLUMN_DRAG_WIDTH) {
+      setColumnSelection(undefined);
+      return;
+    }
     // Give immediate feedback even before PDFium geometry has resolved. The
     // corridor is replaced with glyph-accurate boxes below as soon as the
     // page geometry is available.
@@ -845,7 +849,7 @@ function HeadlessDocument({
     };
     const dx = Math.abs(end.x - start.x);
     const dy = Math.abs(end.y - start.y);
-    if (dy < 18 || dx > Math.max(18, dy * 0.35)) return;
+    if (dy < 18 || dx > MAX_COLUMN_DRAG_WIDTH) return;
     const rect = columnDragRect(start, end);
     const generation = start.generation;
     void loadColumnGeometry(registry, document, pageIndex, columnGeometryCache.current)
@@ -1022,6 +1026,11 @@ function HeadlessDocument({
           }}
           onAdaptTheme={() => setAdaptTheme(value => !value)}
           onReduceAnimation={setReduceAnimation}
+          onAddToChat={() => postSelectionAction(
+            'addToCursorChat',
+            selectionCapability ?? undefined,
+            documentId,
+          )}
           onDock={dock => {
             const next = { dock, hidden: false };
             setToolbarPreference(next);
@@ -1162,6 +1171,7 @@ interface PdfToolbarProps {
   onFit(mode: ZoomMode): void;
   onAdaptTheme(): void;
   onReduceAnimation(value: ReduceAnimation): void;
+  onAddToChat(): void;
   onDock(value: ToolbarPreference['dock']): void;
   onBack(): void;
 }
@@ -1273,7 +1283,7 @@ function PdfToolbar(props: PdfToolbarProps): React.JSX.Element {
         type="button"
         className="cursor-chat-action"
         disabled={!latestAnchor || latestAnchor.multiPage}
-        onClick={() => postSelectionAction('addToCursorChat')}
+        onClick={props.onAddToChat}
       >Add to Chat</button>
       {props.displayMenuOpen && (
         <div className="embedpdf-display-menu" role="menu" aria-label="Display options">
@@ -2120,7 +2130,11 @@ function SelectionActionButtons({
       <button
         className="primary cursor-chat-action"
         type="button"
-        onClick={() => postSelectionAction('addToCursorChat')}
+        onClick={() => postSelectionAction(
+          'addToCursorChat',
+          selection ?? undefined,
+          documentId,
+        )}
       >
         <span>Add to Chat</span>
         <kbd aria-hidden="true">⌘L</kbd>
@@ -2146,12 +2160,26 @@ function SelectionActionButtons({
   );
 }
 
-function postSelectionAction(action: 'addToCursorChat'): void {
+function postSelectionAction(
+  action: 'addToCursorChat',
+  selection?: SelectionCapability,
+  documentId?: string,
+): void {
+  if (selection && documentId && selection.forDocument(documentId).getState().selection) {
+    publishSelection(selection, documentId, anchor => {
+      if (!anchor.multiPage) vscode.postMessage({ type: 'selectionAction', action, anchor });
+    });
+    return;
+  }
   if (!latestAnchor || latestAnchor.multiPage) return;
   vscode.postMessage({ type: 'selectionAction', action, anchor: latestAnchor });
 }
 
-function publishSelection(selection: SelectionCapability, documentId: string): void {
+function publishSelection(
+  selection: SelectionCapability,
+  documentId: string,
+  onPublished?: (anchor: NonNullable<typeof latestAnchor>) => void,
+): void {
   const scope = selection.forDocument(documentId);
   scope.getSelectedText().wait(lines => {
     const formatted = scope.getFormattedSelection();
@@ -2178,6 +2206,7 @@ function publishSelection(selection: SelectionCapability, documentId: string): v
         pages,
       },
     });
+    onPublished?.(latestAnchor);
   }, error => {
     const code = structuredErrorCode(error);
     if (

@@ -628,10 +628,25 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
     if (!isPdfSelectionAction(action)) return;
     if (action === 'addToCursorChat') {
       const active = this.webviews.get(pdfUri.toString());
+      const normalizedAnchor = normalizePdfSelectionAnchor(anchor);
+      const clipboardSelection = normalizedAnchor
+        ? pdfAgentClipboardSelectionFromAnchor(normalizedAnchor)
+        : undefined;
+      const selectionKey = clipboardSelection
+        ? pdfAgentClipboardSelectionKey(clipboardSelection)
+        : undefined;
+      const actionContext = selectionKey && active?.pdfSha256
+        ? createPdfAgentClipboardContext({
+            selectionKey,
+            relativePath: vscode.workspace.asRelativePath(pdfUri),
+            sourceSha256: active.pdfSha256,
+            selection: clipboardSelection!,
+          })
+        : undefined;
       const selection = this.toSelectionContext(
         pdfUri,
-        anchor,
-        active?.agentClipboardContext?.plainText,
+        normalizedAnchor,
+        actionContext?.plainText,
       );
       if (!selection) throw new Error('Cannot add an empty PDF selection to chat');
       await vscode.commands.executeCommand(
@@ -716,6 +731,30 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
     active.postMessage({ type: 'goToAnchor', anchor });
   }
 
+}
+
+function pdfAgentClipboardSelectionFromAnchor(
+  selection: PdfSelectionAnchor,
+): PdfAgentClipboardSelection | undefined {
+  if (!selection.rects?.length) return undefined;
+  const rects = selection.rects.map(rect => (
+    [rect[0]!, rect[1]!, rect[2]!, rect[3]!] as const
+  ));
+  const pages = [{ page: selection.page, rects }];
+  return selection.area
+    ? {
+        kind: 'area',
+        startPage: selection.page,
+        endPage: selection.page,
+        pages,
+      }
+    : {
+        kind: 'text',
+        startPage: selection.page,
+        endPage: selection.page,
+        pages,
+        selectedText: selection.snippet,
+      };
 }
 
 function normalizePdfToolbarPreference(

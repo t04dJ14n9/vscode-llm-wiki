@@ -671,6 +671,65 @@ test('PDF Cursor handoff routes exact portable selection without a screenshot at
   ]);
 });
 
+test('PDF Cursor handoff never reuses agent text from the previous selection', async () => {
+  const commands = [];
+  const vscode = {
+    workspace: {
+      asRelativePath: uri => uri.fsPath.replace('/vault/', ''),
+    },
+    commands: {
+      executeCommand: async (...args) => { commands.push(args); },
+    },
+    Uri: {
+      joinPath: (...parts) => ({ parts }),
+    },
+  };
+  const {
+    ADD_SELECTION_TO_CURSOR_CHAT_COMMAND,
+    PdfEditorProvider,
+  } = loadTsModule('src/pdfEditorProvider.ts', {
+    vscode,
+    '@llm-wiki/core': { pdfHref: portablePdfHref },
+  });
+  const provider = new PdfEditorProvider(
+    { extensionUri: { fsPath: '/extension' } },
+  );
+  const pdfUri = {
+    fsPath: '/vault/raw/pdf/paper.pdf',
+    toString: () => 'file:///vault/raw/pdf/paper.pdf',
+  };
+  const previousSelection = {
+    kind: 'text',
+    startPage: 2,
+    endPage: 2,
+    pages: [{ page: 2, rects: [[10, 20, 110, 36]] }],
+    selectedText: 'previous backward-pass equations',
+  };
+  const previousKey = agentClipboard.pdfAgentClipboardSelectionKey(previousSelection);
+  provider.webviews.set(pdfUri.toString(), {
+    pdfSha256: 'f'.repeat(64),
+    agentClipboardContext: agentClipboard.createPdfAgentClipboardContext({
+      selectionKey: previousKey,
+      relativePath: 'raw/pdf/paper.pdf',
+      sourceSha256: 'f'.repeat(64),
+      selection: previousSelection,
+    }),
+  });
+
+  await provider.handleSelectionAction(pdfUri, 'addToCursorChat', {
+    page: 5,
+    rects: [[82, 84, 470, 486]],
+    snippet: 'Algorithm 1 FlashAttention-3 forward pass',
+  });
+
+  assert.equal(commands.length, 1);
+  assert.equal(commands[0][0], ADD_SELECTION_TO_CURSOR_CHAT_COMMAND);
+  const agentText = commands[0][1].selection.metadata.agentText;
+  assert.match(agentText, /Algorithm 1 FlashAttention-3 forward pass/);
+  assert.doesNotMatch(agentText, /previous backward-pass equations/);
+  assert.match(agentText, /PDF source SHA-256: `f{64}`/);
+});
+
 test('provider-specific PDF selection routing is absent', async () => {
   const commandCalls = [];
   const vscode = {
