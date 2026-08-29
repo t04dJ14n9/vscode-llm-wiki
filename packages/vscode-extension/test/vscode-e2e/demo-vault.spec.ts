@@ -267,7 +267,7 @@ async function evaluateWebviews<T>(expression: string): Promise<T> {
     if (
       target.type !== 'iframe'
       || !target.webSocketDebuggerUrl
-      || !target.url?.includes('extensionId=llm-wiki.llm-wiki-vscode')
+      || !(target.url ?? '').toLowerCase().includes('llm-wiki-vscode')
     ) continue;
     const result = await cdpEvaluate<{
       ok: boolean;

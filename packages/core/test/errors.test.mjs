@@ -23,3 +23,9 @@ test('formatUnknownError never collapses an object to [object Object]', () => {
   circular.reason = circular;
   assert.equal(formatUnknownError(circular, 'Circular PDF error'), 'Circular PDF error');
 });
+
+test('formatUnknownError preserves primitive error details', () => {
+  assert.equal(formatUnknownError(42), '42');
+  assert.equal(formatUnknownError(false), 'false');
+  assert.equal(formatUnknownError(Symbol('pdf-worker')), 'pdf-worker');
+});

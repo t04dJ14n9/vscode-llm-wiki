@@ -385,9 +385,27 @@ function HeadlessDocument({
 
   useEffect(() => {
     if (!bookmarks) return;
+    let active = true;
+    vscode.postMessage({ type: 'pdfOutline', items: [], loading: true });
     const task = bookmarks.forDocument(documentId).getBookmarks();
-    task.wait(result => setOutline(result.bookmarks), () => setOutline([]));
-    return () => task.abort({ code: 1, message: 'Viewer disposed' });
+    task.wait(result => {
+      if (!active) return;
+      setOutline(result.bookmarks);
+      vscode.postMessage({
+        type: 'pdfOutline',
+        items: serializePdfOutline(result.bookmarks),
+        inferred: false,
+        loading: false,
+      });
+    }, () => {
+      if (!active) return;
+      setOutline([]);
+      vscode.postMessage({ type: 'pdfOutline', items: [], inferred: false, loading: false });
+    });
+    return () => {
+      active = false;
+      task.abort({ code: 1, message: 'Viewer disposed' });
+    };
   }, [bookmarks, documentId]);
 
   useEffect(() => {
@@ -1418,6 +1436,21 @@ function BookmarkTree({
       })}
     </ul>
   );
+}
+
+function serializePdfOutline(bookmarks: PdfBookmarkObject[]): Array<{
+  title: string;
+  destination?: PdfDestinationObject;
+  children: ReturnType<typeof serializePdfOutline>;
+}> {
+  return bookmarks.map(bookmark => {
+    const destination = bookmark.target ? targetDestination(bookmark.target) : undefined;
+    return {
+      title: bookmark.title,
+      ...(destination ? { destination } : {}),
+      children: serializePdfOutline(bookmark.children ?? []),
+    };
+  });
 }
 
 function PdfLinkLayer({

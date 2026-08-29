@@ -36,9 +36,15 @@ function formatUnknownErrorInner(
       .filter(Boolean);
     return details.length ? details.join('; ') : fallback;
   }
+  if (typeof value === 'number' || typeof value === 'bigint' || typeof value === 'boolean') {
+    return `${value}`;
+  }
+  if (typeof value === 'symbol') return value.description ?? fallback;
+  if (typeof value === 'function') return value.name || fallback;
+  if (value === undefined || value === null) return fallback;
 
   const record = errorRecord(value);
-  if (!record) return value === undefined || value === null ? fallback : String(value);
+  if (!record) return fallback;
   if (seen.has(record)) return fallback;
   seen.add(record);
 

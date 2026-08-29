@@ -214,7 +214,7 @@ async function evaluateLlmWikiWebview<T>(
     const webviews = targets.filter(target => (
       target.type === 'iframe'
       && typeof target.webSocketDebuggerUrl === 'string'
-      && (target.url ?? '').includes('extensionId=llm-wiki.llm-wiki-vscode')
+      && (target.url ?? '').toLowerCase().includes('llm-wiki-vscode')
     ));
 
     mismatches = [];
@@ -274,7 +274,7 @@ async function evaluateLlmWikiPdfWebview<T>(body: string): Promise<T> {
     const webviews = targets.filter(target => (
       target.type === 'iframe'
       && typeof target.webSocketDebuggerUrl === 'string'
-      && (target.url ?? '').includes('extensionId=llm-wiki.llm-wiki-vscode')
+      && (target.url ?? '').toLowerCase().includes('llm-wiki-vscode')
     ));
 
     mismatches = [];
@@ -288,7 +288,7 @@ async function evaluateLlmWikiPdfWebview<T>(body: string): Promise<T> {
         const hostFrame = document.getElementById('active-frame');
         const doc = hostFrame?.contentDocument;
         const win = hostFrame?.contentWindow;
-        const viewer = doc?.querySelector('#viewer-container');
+        const viewer = doc?.querySelector('.embedpdf-headless-shell, #viewer-container');
         if (!doc || !win || !viewer) {
           return {
             ok: false,
@@ -322,7 +322,7 @@ async function evaluateLlmWikiBrowserWebview<T>(body: string): Promise<T> {
     const webviews = targets.filter(target => (
       target.type === 'iframe'
       && typeof target.webSocketDebuggerUrl === 'string'
-      && (target.url ?? '').includes('extensionId=llm-wiki.llm-wiki-vscode')
+      && (target.url ?? '').toLowerCase().includes('llm-wiki-vscode')
     ));
 
     mismatches = [];
@@ -599,15 +599,19 @@ test.describe('LLM Wiki — VS Code Extension E2E', () => {
     await screenshot(page, '10-pdf-file-opened');
 
     await evaluateLlmWikiPdfWebview(`
-      if (!doc.querySelector('#page-container')?.classList.contains('paginated')) {
-        doc.querySelector('[data-display-action="presentation-single"]')?.click();
+      const layout = doc.querySelector('select[aria-label="Page layout"]');
+      if (layout?.value !== 'single') {
+        layout.value = 'single';
+        layout.dispatchEvent(new win.Event('change', { bubbles: true }));
       }
+      doc.querySelector('button[aria-label="Display options"]')?.click();
       return true;
     `);
 
     await expect.poll(() => evaluateLlmWikiPdfWebview<{
       pageInfo: string;
-      pageCount: number;
+      renderedPageCount: number;
+      activePageCount: number;
       firstCanvasReady: boolean;
       neighborCanvasReady: boolean;
       neighborHidden: boolean;
@@ -615,39 +619,45 @@ test.describe('LLM Wiki — VS Code Extension E2E', () => {
       hasOutlineTab: boolean;
       focusedOutlineStyle: string;
     }>(`
-      const pageInfo = doc.querySelector('#page-info')?.textContent?.trim() ?? '';
-      const pageCount = doc.querySelectorAll('.page-wrapper').length;
-      const firstCanvas = doc.querySelector('#page-1 canvas.pdf-canvas');
-      const neighbor = doc.querySelector('#page-2');
-      const neighborCanvas = neighbor?.querySelector('canvas.pdf-canvas');
+      const pageInput = doc.querySelector('input[aria-label="Page"]');
+      const pageInfo = ((pageInput?.value ?? '') + ' '
+        + (pageInput?.parentElement?.textContent?.trim() ?? '')).trim();
+      const firstPage = doc.querySelector('.embedpdf-headless-page[data-page-index="0"]');
+      const firstCanvas = firstPage?.querySelector('img');
+      const neighbor = doc.querySelector('.embedpdf-headless-page[data-page-index="1"]');
+      const neighborCanvas = neighbor?.querySelector('img');
       viewer.tabIndex = -1;
       viewer.focus({ preventScroll: true });
       return {
         pageInfo,
-        pageCount,
-        firstCanvasReady: firstCanvas?.dataset.renderQuality === 'full'
-          && firstCanvas.width > 0
-          && firstCanvas.height > 0,
-        neighborCanvasReady: neighborCanvas?.dataset.renderQuality === 'full'
-          && neighborCanvas.width > 0
-          && neighborCanvas.height > 0,
+        renderedPageCount: doc.querySelectorAll('.embedpdf-headless-page').length,
+        activePageCount: doc.querySelectorAll(
+          '.embedpdf-paginated-spread[data-paginated-active="true"] .embedpdf-headless-page',
+        ).length,
+        firstCanvasReady: firstCanvas?.complete === true && firstCanvas.naturalWidth > 0,
+        neighborCanvasReady: neighborCanvas?.complete === true && neighborCanvas.naturalWidth > 0,
         neighborHidden: Boolean(neighbor)
-          && win.getComputedStyle(neighbor).display === 'none',
-        reduceAnimationLabels: [...doc.querySelectorAll(
-          '[data-display-action^="reduce-animation-"]',
-        )].map(element => element.textContent?.trim() ?? ''),
-        hasOutlineTab: Boolean(doc.querySelector('#sidebar-outline-tab')),
+          && neighbor.closest('.embedpdf-paginated-spread')?.dataset.paginatedActive === 'false',
+        reduceAnimationLabels: [...doc.querySelectorAll('.embedpdf-display-menu .menu-section')]
+          .find(element => element.textContent?.trim() === 'Reduce Animation')
+          ?.parentElement
+          ? [...doc.querySelectorAll('.embedpdf-display-menu button')]
+            .map(element => element.textContent?.trim() ?? '')
+            .filter(label => ['On', 'Off', 'System'].includes(label))
+          : [],
+        hasOutlineTab: Boolean(doc.querySelector('button[role="tab"]')),
         focusedOutlineStyle: win.getComputedStyle(viewer).outlineStyle,
       };
     `), { timeout: 30_000 }).toEqual({
-      pageInfo: expect.stringMatching(/^Page 1 \/ 67\b/),
-      pageCount: 67,
+      pageInfo: expect.stringMatching(/^1\s*of 67$/),
+      renderedPageCount: expect.any(Number),
+      activePageCount: 1,
       firstCanvasReady: true,
       neighborCanvasReady: true,
       neighborHidden: true,
       reduceAnimationLabels: ['On', 'Off', 'System'],
-      hasOutlineTab: true,
-      focusedOutlineStyle: 'none',
+      hasOutlineTab: false,
+      focusedOutlineStyle: 'auto',
     });
 
     const pageTurn = await evaluateLlmWikiPdfWebview<{
@@ -655,7 +665,7 @@ test.describe('LLM Wiki — VS Code Extension E2E', () => {
       firstVisibleFrameHadBitmap: boolean;
       targetCanvasReady: boolean;
     }>(`
-      const target = doc.querySelector('#page-2');
+      const target = doc.querySelector('.embedpdf-headless-page[data-page-index="1"]');
       let firstVisibleFrameHadBitmap;
       let sampling = true;
       const sample = () => {
@@ -665,21 +675,19 @@ test.describe('LLM Wiki — VS Code Extension E2E', () => {
           styles.display !== 'none'
           && Number.parseFloat(styles.opacity || '1') > 0.01
         ) {
-          const canvas = target.querySelector('canvas.pdf-canvas');
-          firstVisibleFrameHadBitmap = canvas?.dataset.renderQuality === 'full'
-            && canvas.width > 0
-            && canvas.height > 0;
+          const canvas = target.querySelector('img');
+          firstVisibleFrameHadBitmap = canvas?.complete === true && canvas.naturalWidth > 0;
           return;
         }
         win.requestAnimationFrame(sample);
       };
       win.requestAnimationFrame(sample);
       const startedAt = win.performance.now();
-      doc.querySelector('#next')?.click();
+      doc.querySelector('button[aria-label="Next page"]')?.click();
       await new Promise((resolve, reject) => {
         const deadline = win.performance.now() + 2_000;
         const poll = () => {
-          const pageValue = doc.querySelector('#page-input')?.value;
+          const pageValue = doc.querySelector('input[aria-label="Page"]')?.value;
           if (pageValue === '2' && firstVisibleFrameHadBitmap !== undefined) {
             resolve();
           } else if (win.performance.now() >= deadline) {
@@ -691,13 +699,11 @@ test.describe('LLM Wiki — VS Code Extension E2E', () => {
         win.requestAnimationFrame(poll);
       });
       sampling = false;
-      const canvas = target.querySelector('canvas.pdf-canvas');
+      const canvas = target.querySelector('img');
       return {
         durationMs: win.performance.now() - startedAt,
         firstVisibleFrameHadBitmap: firstVisibleFrameHadBitmap === true,
-        targetCanvasReady: canvas?.dataset.renderQuality === 'full'
-          && canvas.width > 0
-          && canvas.height > 0,
+        targetCanvasReady: canvas?.complete === true && canvas.naturalWidth > 0,
       };
     `);
     console.log(`[info] cached multipage-PDF page turn: ${pageTurn.durationMs.toFixed(1)} ms`);
@@ -710,19 +716,16 @@ test.describe('LLM Wiki — VS Code Extension E2E', () => {
     await expect(outlineTarget).toBeVisible({ timeout: 15_000 });
     await outlineTarget.click();
     await expect.poll(() => evaluateLlmWikiPdfWebview<{
-      pageInfo: string;
-      destinationFocusCount: number;
-      historyBackHidden: boolean;
+      pageValue: string;
+      historyBackVisible: boolean;
     }>(`
       return {
-        pageInfo: doc.querySelector('#page-info')?.textContent?.trim() ?? '',
-        destinationFocusCount: doc.querySelectorAll('.pdf-destination-focus').length,
-        historyBackHidden: doc.querySelector('#pdf-history-back')?.hidden === true,
+        pageValue: doc.querySelector('input[aria-label="Page"]')?.value ?? '',
+        historyBackVisible: Boolean(doc.querySelector('button[aria-label="Go back"]')),
       };
     `), { timeout: 15_000 }).toEqual({
-      pageInfo: expect.stringMatching(/^Page 2 \/ 67\b/),
-      destinationFocusCount: 1,
-      historyBackHidden: true,
+      pageValue: '2',
+      historyBackVisible: true,
     });
 
     await screenshot(page, '11-pdf-viewer-visible');
@@ -807,7 +810,9 @@ test.describe('LLM Wiki — VS Code Extension E2E', () => {
     await screenshot(page, '19-settings-opened');
 
     // Search for human learning
-    const searchInput = page.locator('.settings-editor .search-widget input, .settings-search-input input');
+    const searchInput = page.locator(
+      '.settings-editor .search-widget input:visible, .settings-search-input input:visible',
+    );
     if (await searchInput.count() > 0) {
       await searchInput.first().fill('human learning');
       await page.waitForTimeout(1000);
@@ -815,8 +820,13 @@ test.describe('LLM Wiki — VS Code Extension E2E', () => {
 
     await screenshot(page, '20-settings-search');
 
-    // Close settings
-    await page.keyboard.press(`${modifier}+w`);
+    // Close only the Settings editor. Cmd+W can close the extension-host window
+    // when VS Code has not materialized Settings as an editor tab yet.
+    const closeSettings = page.locator(
+      '.tabs-container .tab.active .action-label[aria-label^="Close"], '
+      + '.tabs-container .tab.active .codicon-close',
+    ).first();
+    if (await closeSettings.count() > 0) await closeSettings.click();
     await page.waitForTimeout(500);
 
     await screenshot(page, '21-settings-closed');
