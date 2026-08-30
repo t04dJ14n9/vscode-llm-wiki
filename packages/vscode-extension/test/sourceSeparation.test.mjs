@@ -73,6 +73,13 @@ test('combined build resolves the canonical shared PDF webview entry', () => {
   );
 });
 
+test('PDF host loads only the production EmbedPDF shell', () => {
+  const source = readFileSync(join(extensionRoot, 'src/pdfWebviewHtml.ts'), 'utf8');
+
+  assert.match(source, /embedpdf-spike\.js/);
+  assert.doesNotMatch(source, /pdf-viewer\.js|pdf-reader-layout|useEmbedPdfHeadlessSpike/);
+});
+
 test('combined delivery does not duplicate shared PDF implementation modules', async () => {
   const combinedFiles = await sourceFiles(extensionRoot);
   const sharedImplementationFiles = /(^|\/)(pdfTextBands|pdfTextLayer|pdfLayout|pdfNavigation|pdfOutline|pdfSearch|pdfSelection|pdfTextExtraction)\.ts$/;

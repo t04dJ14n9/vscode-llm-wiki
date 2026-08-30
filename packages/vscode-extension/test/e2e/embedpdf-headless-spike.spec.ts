@@ -331,10 +331,9 @@ test.describe('EmbedPDF headless migration spike', () => {
 
   test('processes one host navigate-next message exactly once', async ({ page }) => {
     await openHeadlessViewer(page);
-    const layout = page.getByRole('combobox', { name: 'Page layout' });
     const pageInput = page.locator('input[aria-label="Page"]');
 
-    await layout.selectOption('single');
+    await selectPresentation(page, 'single');
     await expect(page.locator('.embedpdf-paginated-frame')).toBeVisible();
     await expect(pageInput).toHaveValue('1');
     await page.evaluate(() => window.postMessage({
@@ -351,7 +350,7 @@ test.describe('EmbedPDF headless migration spike', () => {
 
   test('replaces non-continuous pages without transition state or animation', async ({ page }) => {
     await openHeadlessViewer(page);
-    await page.getByRole('combobox', { name: 'Page layout' }).selectOption('single');
+    await selectPresentation(page, 'single');
     const pageInput = page.locator('input[aria-label="Page"]');
 
     await page.getByRole('button', { name: 'Next page' }).click();
@@ -374,12 +373,11 @@ test.describe('EmbedPDF headless migration spike', () => {
 
   test('advances one paginated page per wheel gesture', async ({ page }) => {
     await openHeadlessViewer(page);
-    const layout = page.getByRole('combobox', { name: 'Page layout' });
     const viewport = page.locator('.embedpdf-headless-viewport');
     const frame = page.locator('.embedpdf-paginated-frame');
     const pageInput = page.locator('input[aria-label="Page"]');
 
-    await layout.selectOption('single');
+    await selectPresentation(page, 'single');
     await expect(pageInput).toHaveValue('1');
     await expect(page.locator(
       '.embedpdf-headless-page[data-page-index="1"] img',
@@ -403,7 +401,7 @@ test.describe('EmbedPDF headless migration spike', () => {
 
   test('uses the dominant horizontal trackpad axis to turn fitted pages', async ({ page }) => {
     await openHeadlessViewer(page);
-    await page.getByRole('combobox', { name: 'Page layout' }).selectOption('single');
+    await selectPresentation(page, 'single');
     const viewport = page.locator('.embedpdf-headless-viewport');
     const pageInput = page.locator('input[aria-label="Page"]');
     await viewport.hover();
@@ -418,7 +416,7 @@ test.describe('EmbedPDF headless migration spike', () => {
 
   test('keeps modified wheel and pinch packets zoom-only', async ({ page }) => {
     await openHeadlessViewer(page);
-    await page.getByRole('combobox', { name: 'Page layout' }).selectOption('single');
+    await selectPresentation(page, 'single');
     const viewport = page.locator('.embedpdf-headless-viewport');
     const pageInput = page.locator('input[aria-label="Page"]');
     await viewport.hover();
@@ -449,9 +447,7 @@ test.describe('EmbedPDF headless migration spike', () => {
 
   test('plain arrows turn fitted pages that have no room to pan', async ({ page }) => {
     await openHeadlessViewer(page);
-    const layout = page.getByRole('combobox', { name: 'Page layout' });
-    await layout.selectOption('single');
-    await layout.evaluate(element => (element as HTMLElement).blur());
+    await selectPresentation(page, 'single');
     const pageInput = page.locator('input[aria-label="Page"]');
 
     await page.keyboard.press('ArrowDown');
@@ -507,9 +503,7 @@ test.describe('EmbedPDF headless migration spike', () => {
 
   test('uses Preview cover-page spread targets in two-page mode', async ({ page }) => {
     await openHeadlessViewer(page);
-    const layout = page.getByRole('combobox', { name: 'Page layout' });
-    await layout.selectOption('two');
-    await layout.evaluate(element => (element as HTMLElement).blur());
+    await selectPresentation(page, 'two');
     const pageInput = page.locator('input[aria-label="Page"]');
     await pageInput.fill('6');
     await pageInput.press('Enter');
@@ -522,7 +516,7 @@ test.describe('EmbedPDF headless migration spike', () => {
 
   test('pans inside an enlarged paginated page before turning the page', async ({ page }) => {
     await openHeadlessViewer(page);
-    await page.getByRole('combobox', { name: 'Page layout' }).selectOption('single');
+    await selectPresentation(page, 'single');
     const zoom = page.locator('input[aria-label="Zoom"]');
     await zoom.fill('200');
     await zoom.press('Enter');
@@ -557,7 +551,7 @@ test.describe('EmbedPDF headless migration spike', () => {
     await zoom.fill('109');
     await zoom.press('Enter');
     await expect(zoom).toHaveValue('109');
-    await page.getByRole('combobox', { name: 'Page layout' }).selectOption('single');
+    await selectPresentation(page, 'single');
 
     const activePage = page.locator(
       '.embedpdf-paginated-spread[data-paginated-active="true"] .embedpdf-headless-page',
@@ -589,7 +583,7 @@ test.describe('EmbedPDF headless migration spike', () => {
       const zoom = page.locator('input[aria-label="Zoom"]');
       await zoom.fill('71');
       await zoom.press('Enter');
-      await page.getByRole('combobox', { name: 'Page layout' }).selectOption('two');
+      await selectPresentation(page, 'two');
       const pageInput = page.locator('input[aria-label="Page"]');
       await pageInput.fill('2');
       await pageInput.press('Enter');
@@ -656,11 +650,10 @@ test.describe('EmbedPDF headless migration spike', () => {
     await page.getByRole('button', { name: 'Zoom in' }).click();
     await expect.poll(async () => Number(await zoom.inputValue())).toBeGreaterThan(initialZoom);
 
-    const layout = page.getByRole('combobox', { name: 'Page layout' });
     const viewport = page.locator('.embedpdf-headless-viewport');
-    await expect(layout).toHaveValue('single-continuous');
+    await expect(page.getByRole('combobox', { name: 'Page layout' })).toHaveCount(0);
 
-    await layout.selectOption('single');
+    await selectPresentation(page, 'single');
     await expect(viewport).toHaveClass(/paginated/);
     await expect.poll(() => visiblePageIndices(page)).toEqual([0]);
     await expect.poll(() => page.evaluate(() => (
@@ -671,11 +664,11 @@ test.describe('EmbedPDF headless migration spike', () => {
     await page.getByRole('button', { name: 'Next page' }).click();
     await expect.poll(() => visiblePageIndices(page)).toEqual([1]);
 
-    await layout.selectOption('single-continuous');
+    await selectPresentation(page, 'single-continuous');
     await expect(viewport).not.toHaveClass(/paginated/);
     await expect.poll(() => page.locator('.embedpdf-headless-page').count()).toBeGreaterThan(1);
 
-    await layout.selectOption('two');
+    await selectPresentation(page, 'two');
     await expect(viewport).toHaveClass(/paginated/);
     await expect.poll(() => visiblePageIndices(page)).toEqual([1, 2]);
     await expect.poll(() => page.evaluate(() => (
@@ -683,7 +676,7 @@ test.describe('EmbedPDF headless migration spike', () => {
         .forDocument('llm-wiki-document').getSpreadMode()
     ))).toBe('even');
 
-    await layout.selectOption('two-continuous');
+    await selectPresentation(page, 'two-continuous');
     await expect(viewport).not.toHaveClass(/paginated/);
     await expect.poll(() => page.locator('.embedpdf-headless-page').count()).toBeGreaterThan(2);
     await expect.poll(() => page.evaluate(() => (
@@ -715,9 +708,43 @@ async function openHeadlessViewer(page: Page): Promise<void> {
   ));
 }
 
+type PresentationModeValue = 'single-continuous' | 'two-continuous' | 'single' | 'two';
+
+const presentationLabels: Record<PresentationModeValue, string> = {
+  'single-continuous': 'Single Page Continuous',
+  'two-continuous': 'Two Pages Continuous',
+  single: 'Single Page',
+  two: 'Two Pages',
+};
+
+async function selectPresentation(page: Page, mode: PresentationModeValue): Promise<void> {
+  const menu = page.getByRole('menu', { name: 'Display options' });
+  if (!await menu.isVisible()) {
+    await page.getByRole('button', { name: 'Display options' }).click();
+  }
+  await expect(menu).toBeVisible();
+  await menu.getByRole('menuitemradio', {
+    name: presentationLabels[mode],
+    exact: true,
+  }).click();
+  await expect(menu).toHaveCount(0);
+  await expect.poll(() => page.evaluate(() => ({
+    paginated: document.querySelector('.embedpdf-headless-viewport')
+      ?.classList.contains('paginated') === true,
+    spread: window.__embedPdfSpike!.registry.getPlugin('spread').provides()
+      .forDocument('llm-wiki-document').getSpreadMode(),
+  }))).toEqual({
+    paginated: !mode.endsWith('continuous'),
+    spread: mode.startsWith('two') ? 'even' : 'none',
+  });
+  await page.evaluate(() => new Promise<void>(resolve => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+  }));
+}
+
 async function openPaginatedViewer(page: Page, zoomPercent: number) {
   await openHeadlessViewer(page);
-  await page.getByRole('combobox', { name: 'Page layout' }).selectOption('single');
+  await selectPresentation(page, 'single');
   const zoom = page.locator('input[aria-label="Zoom"]');
   await zoom.fill(String(zoomPercent));
   await zoom.press('Enter');

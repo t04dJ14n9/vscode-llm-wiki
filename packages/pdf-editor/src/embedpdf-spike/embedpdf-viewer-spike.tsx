@@ -1473,18 +1473,6 @@ function PdfToolbar(props: PdfToolbarProps): React.JSX.Element {
         >⌄</button>
       </div>
       <span className="toolbar-separator" />
-      <select
-        className="toolbar-layout-select"
-        aria-label="Page layout"
-        title={`Page layout: ${PRESENTATION_OPTIONS.find(([mode]) => mode === props.presentation)?.[1] ?? ''}`}
-        value={props.presentation}
-        onChange={event => props.onPresentation(event.currentTarget.value as PresentationMode)}
-      >
-        {PRESENTATION_OPTIONS.map(([mode, label]) => (
-          <option value={mode} key={mode}>{label}</option>
-        ))}
-      </select>
-      <span className="toolbar-separator" />
       <div className="toolbar-group" aria-label="Page controls">
         <button type="button" aria-label="Previous page" disabled={props.currentPage <= 1} onClick={props.onPrevious}>‹</button>
         <label className="toolbar-number">
@@ -2214,12 +2202,9 @@ function installHeadlessStyles(): void {
     .toolbar-number { display: inline-flex; align-items: center; height: 26px; border: 1px solid var(--vscode-panel-border, #444); border-radius: 3px; background: var(--vscode-input-background, #1e1e1e); }
     .toolbar-number input { box-sizing: border-box; width: 43px; height: 24px; border: 0; outline: 0; padding: 0 3px; color: var(--vscode-input-foreground, #ddd); background: transparent; text-align: right; }
     .toolbar-number span { padding-right: 5px; color: var(--vscode-descriptionForeground, #aaa); white-space: nowrap; }
-    .toolbar-layout-select { box-sizing: border-box; width: clamp(108px, 16vw, 190px); height: 27px; min-width: 0; flex: 0 1 190px; overflow: hidden; border: 1px solid var(--vscode-dropdown-border, var(--vscode-panel-border, #444)); border-radius: 3px; outline: 0; padding: 0 22px 0 6px; color: var(--vscode-dropdown-foreground, var(--vscode-input-foreground, #ddd)); background: var(--vscode-dropdown-background, var(--vscode-input-background, #1e1e1e)); text-overflow: ellipsis; white-space: nowrap; }
-    .toolbar-layout-select:focus-visible { outline: 2px solid var(--vscode-focusBorder, #007fd4); outline-offset: 1px; }
     .toolbar-left .toolbar-number { width: 100%; height: auto; flex-direction: column; }
     .toolbar-left .toolbar-number input { width: 100%; text-align: center; }
     .toolbar-left .toolbar-number span { padding: 0 2px 2px; font-size: 10px; }
-    .toolbar-left .toolbar-layout-select { width: 40px; max-width: 40px; flex: 0 0 27px; padding: 0 16px 0 3px; font-size: 10px; }
     .cursor-chat-action { color: var(--vscode-button-foreground, #fff) !important; background: var(--vscode-button-background, #0e639c) !important; }
     .embedpdf-display-menu { position: fixed; z-index: 100; top: 42px; left: 105px; display: flex; width: 220px; flex-direction: column; gap: 1px; padding: 5px; border: 1px solid var(--vscode-panel-border, #444); border-radius: 5px; color: var(--vscode-editorWidget-foreground, #ddd); background: var(--vscode-editorWidget-background, #252526); box-shadow: 0 6px 20px #0008; }
     .toolbar-left .embedpdf-display-menu { top: 50px; left: 52px; }
@@ -2231,7 +2216,7 @@ function installHeadlessStyles(): void {
     .toolbar-left > .embedpdf-viewer-shell { grid-area: 1 / 2; }
     [data-toolbar-hidden="true"] > .embedpdf-viewer-shell { grid-area: 1 / 1; }
     .embedpdf-document-area { position: relative; flex: 1 1 auto; min-width: 0; min-height: 0; }
-    .embedpdf-headless-viewport { box-sizing: border-box; width: 100%; height: 100%; min-height: 0; overflow: auto; padding: 10px; background: #303030; }
+    .embedpdf-headless-viewport { box-sizing: border-box; width: 100%; height: 100%; min-height: 0; overflow: auto; outline: none; padding: 10px; background: #303030; }
     .embedpdf-headless-viewport.paginated { overflow: hidden; padding: 0 !important; }
     .embedpdf-headless-viewport.paginated > div { display: block !important; box-sizing: border-box !important; width: 100% !important; height: 100% !important; min-width: 0; min-height: 0; margin-left: 0 !important; }
     .embedpdf-paginated-frame { box-sizing: border-box; width: 100%; height: 100%; overflow: auto; padding: 10px; overscroll-behavior: contain; }

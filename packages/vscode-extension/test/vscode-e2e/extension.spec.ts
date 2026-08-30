@@ -288,7 +288,7 @@ async function evaluateLlmWikiPdfWebview<T>(body: string): Promise<T> {
         const hostFrame = document.getElementById('active-frame');
         const doc = hostFrame?.contentDocument;
         const win = hostFrame?.contentWindow;
-        const viewer = doc?.querySelector('.embedpdf-headless-shell, #viewer-container');
+        const viewer = doc?.querySelector('.embedpdf-headless-viewport, #viewer-container');
         if (!doc || !win || !viewer) {
           return {
             ok: false,
@@ -516,13 +516,16 @@ test.describe('LLM Wiki — VS Code Extension E2E', () => {
     await screenshot(page, '10-pdf-file-opened');
 
     await evaluateLlmWikiPdfWebview(`
-      const layout = doc.querySelector('select[aria-label="Page layout"]');
-      if (layout?.value !== 'single') {
-        layout.value = 'single';
-        layout.dispatchEvent(new win.Event('change', { bubbles: true }));
-      }
-      doc.querySelector('button[aria-label="Display options"]')?.click();
-      return true;
+      const displayOptions = doc.querySelector('button[aria-label="Display options"]');
+      displayOptions?.click();
+      await new Promise(resolve => win.requestAnimationFrame(() => win.requestAnimationFrame(resolve)));
+      const singlePage = [...doc.querySelectorAll('[role="menuitemradio"]')]
+        .find(element => element.textContent?.trim() === 'Single Page');
+      singlePage?.click();
+      await new Promise(resolve => win.requestAnimationFrame(() => win.requestAnimationFrame(resolve)));
+      displayOptions?.click();
+      await new Promise(resolve => win.requestAnimationFrame(() => resolve()));
+      return Boolean(singlePage);
     `);
 
     await expect.poll(() => evaluateLlmWikiPdfWebview<{
@@ -534,6 +537,7 @@ test.describe('LLM Wiki — VS Code Extension E2E', () => {
       neighborHidden: boolean;
       reduceAnimationLabels: string[];
       hasOutlineTab: boolean;
+      hasLayoutSelect: boolean;
       focusedOutlineStyle: string;
     }>(`
       const pageInput = doc.querySelector('input[aria-label="Page"]');
@@ -563,6 +567,7 @@ test.describe('LLM Wiki — VS Code Extension E2E', () => {
             .filter(label => ['On', 'Off', 'System'].includes(label))
           : [],
         hasOutlineTab: Boolean(doc.querySelector('button[role="tab"]')),
+        hasLayoutSelect: Boolean(doc.querySelector('select[aria-label="Page layout"]')),
         focusedOutlineStyle: win.getComputedStyle(viewer).outlineStyle,
       };
     `), { timeout: 30_000 }).toEqual({
@@ -574,7 +579,8 @@ test.describe('LLM Wiki — VS Code Extension E2E', () => {
       neighborHidden: true,
       reduceAnimationLabels: ['On', 'Off', 'System'],
       hasOutlineTab: false,
-      focusedOutlineStyle: 'auto',
+      hasLayoutSelect: false,
+      focusedOutlineStyle: 'none',
     });
 
     const pageTurn = await evaluateLlmWikiPdfWebview<{

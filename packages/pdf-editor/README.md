@@ -5,15 +5,20 @@ extension.
 
 ## Boundaries
 
-- `src/webview/pdf-viewer.ts` is the application shell. It owns DOM events,
-  rendering orchestration, selection state, and host messages.
+- `src/embedpdf-spike/embedpdf-viewer-spike.tsx` is the production application
+  shell. It owns the LLM Wiki UI and host protocol over EmbedPDF's rendering,
+  navigation, and selection plugins.
+- `src/webview/pdf-viewer.ts` is the legacy browser-test fixture. It remains
+  temporarily while its regression coverage is migrated to the production
+  shell, but the VS Code provider no longer loads it.
 - `src/webview/domain/` contains pure PDF policies and geometry. Domain modules
   must not import VS Code, browser globals, the PDF engine, or persistence.
 - `pdfEditorProvider.ts` remains in the combined extension. It is the host
   adapter between VS Code and this browser-side package.
 
-The combined extension resolves `@llm-wiki/pdf-editor/webview` directly
-instead of maintaining a mirrored implementation.
+The combined extension builds the production shell directly from
+`@llm-wiki/pdf-editor/embedpdf-spike` instead of maintaining a mirrored
+implementation.
 
 ## Dependency direction
 
