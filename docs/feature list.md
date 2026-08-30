@@ -16,7 +16,7 @@ the durable source of truth.
 | Distribution unit | Combined `llm-wiki-vscode` extension |
 | Markdown and PDF reading | Included |
 | Markdown/PDF selection handoff | Active supported agent draft, never submitted automatically |
-| Web selection handoff | Cursor Browser capture plus an extension-owned safe browser for stock VS Code |
+| Web selection handoff | Cursor Browser capture when supported; stock VS Code experience deferred |
 | Selection-based, multi-turn questions | Included in the separate Ask PDF panel |
 | Durable learning records | Markdown under `wiki/learning/` |
 | PDF runtime state | v1 JSON sidecar under `.llm_wiki/annotations/pdf/` |
@@ -82,14 +82,9 @@ the active page URL, and a validated selection crop. It verifies that the same
 tab, URL, and selection remain active across capture; if Cursor does not expose
 the required commands, the capability stays unavailable.
 
-Stock VS Code cannot inspect the built-in browser through a stable extension
-API. **Open Web Browser** therefore provides a separate extension-owned safe
-reader for public pages. It fetches through a guarded host path, sanitizes the
-page into a script-free reader, and can copy or attach selected text with its
-source link and a synthetic context image. **Open live** delegates to VS Code's
-Integrated Browser when available and otherwise uses the system browser. The
-safe reader intentionally does not support authenticated sessions, cookies,
-forms, scripts, or remote media.
+In stock VS Code, web links open in the system browser. LLM Wiki does not own a
+browser surface or capture web selections there; that experience is deferred
+until a replacement is designed.
 
 ## 4. Markdown annotations
 

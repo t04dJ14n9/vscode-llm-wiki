@@ -64,7 +64,6 @@ test('build emits all VS Code extension and webview runtime artifacts', () => {
     'extension.js',
     'markdown-editor.js',
     'pdf-viewer.js',
-    'experimental-owned-browser.js',
     'pdfium.wasm',
   ]) {
     assert.equal(
@@ -73,6 +72,11 @@ test('build emits all VS Code extension and webview runtime artifacts', () => {
       `missing dist artifact: ${file}`,
     );
   }
+  assert.equal(
+    existsSync(join(dist, 'experimental-owned-browser.js')),
+    false,
+    'removed owned-browser bundle must not be emitted',
+  );
   assert.equal(existsSync(join(dist, 'sql-wasm.wasm')), false);
   assert.equal(existsSync(join(dist, 'src')), false);
   assert.equal(existsSync(join(dist, 'webview-src')), false);
@@ -134,7 +138,6 @@ test('webview bundles do not depend on webpack automatic publicPath detection', 
   for (const file of [
     'markdown-editor.js',
     'pdf-viewer.js',
-    'experimental-owned-browser.js',
   ]) {
     const bundle = readFileSync(join(dist, file), 'utf8');
     assert.equal(
@@ -187,7 +190,7 @@ test('webview webpack entries use VS Code webview size budgets', () => {
   const configs = require('../webpack.config.js');
   const byName = new Map(configs.map(config => [config.name, config]));
 
-  for (const name of ['pdf-viewer', 'markdown-editor', 'experimental-owned-browser']) {
+  for (const name of ['pdf-viewer', 'markdown-editor']) {
     const performance = byName.get(name)?.performance;
     assert.ok(performance, `${name} should define an explicit performance budget`);
     assert.equal(performance.maxAssetSize, 7 * 1024 * 1024);
@@ -301,19 +304,19 @@ test('manifest exposes Copy for Agent while omitting the selection export comman
   assert.equal(commandIds.includes('llm-wiki.addSelectionToContext'), false);
   assert.equal(commandIds.includes('llm-wiki.addSelectionToChat'), true);
   assert.equal(commandIds.includes('llm-wiki.addCursorBrowserSelectionToChat'), true);
-  assert.equal(commandIds.includes('llm-wiki.browser.open'), true);
+  assert.equal(commandIds.includes('llm-wiki.browser.open'), false);
   assert.equal((manifest.activationEvents ?? []).includes('onUri'), true);
   assert.equal(
     commandIds.includes('llm-wiki.browser.addSelectionToAgent'),
-    true,
+    false,
   );
   assert.equal(
     commandIds.includes('llm-wiki.browser.copySelectionForAgent'),
-    true,
+    false,
   );
   assert.equal(
     commandIds.includes('llm-wiki.browser.copySelectionLink'),
-    true,
+    false,
   );
   assert.equal(
     (manifest.contributes.commands ?? []).some(

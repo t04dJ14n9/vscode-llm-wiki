@@ -169,26 +169,4 @@ module.exports = [
     performance: webviewPerformance,
     devtool: 'source-map',
   },
-  {
-    name: 'experimental-owned-browser',
-    target: 'web',
-    entry: './webview-src/experimental-owned-browser.ts',
-    output: {
-      path: dist,
-      filename: 'experimental-owned-browser.js',
-      chunkLoading: false,
-      publicPath: '',
-    },
-    optimization: {
-      splitChunks: false,
-    },
-    resolve: {
-      extensions: ['.ts', '.js'],
-    },
-    module: {
-      rules: [tsRule()],
-    },
-    performance: webviewPerformance,
-    devtool: 'source-map',
-  },
 ];

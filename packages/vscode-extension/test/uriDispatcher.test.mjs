@@ -1096,47 +1096,6 @@ test('dispatchUri no longer resolves direct internal PDF anchor IDs', async () =
   }
 });
 
-test('dispatchUri can route web targets into the LLM Wiki web browser instead of Chrome', async () => {
-  const executeCommandCalls = [];
-  const openExternalCalls = [];
-  const openedWebTargets = [];
-  const vscode = createVscodeMock({
-    executeCommandCalls,
-    openTextDocumentCalls: [],
-    showTextDocumentCalls: [],
-    openExternalCalls,
-    document: {
-      uri: { fsPath: '/vault/raw/web/vue-props.html' },
-      getText: () => '',
-      positionAt: () => ({ line: 0, character: 0 }),
-    },
-  });
-  const { dispatchUri } = loadTsModule('src/uriDispatcher.ts', {
-    vscode,
-    '@llm-wiki/core': {
-      classifyReferenceTarget: () => ({
-        kind: 'web',
-        url: 'https://vuejs.org/guide/components/props.html',
-      }),
-      openDatabase: async () => ({}),
-      closeDatabase: () => undefined,
-      runMigrations: () => undefined,
-      resolveWebTarget: () => undefined,
-    },
-    fs: { existsSync: () => true },
-  });
-
-  await dispatchUri('/vault', 'https://vuejs.org/guide/components/props.html', {
-    openWebTarget: async url => {
-      openedWebTargets.push(url);
-    },
-  });
-
-  assert.deepEqual(openedWebTargets, ['https://vuejs.org/guide/components/props.html']);
-  assert.deepEqual(openExternalCalls, []);
-  assert.deepEqual(executeCommandCalls, []);
-});
-
 test('dispatchUri preserves absolute PDF paths in default-editor fallback', async () => {
   const textFragment = { textStart: 'selected text' };
   const pdfPath = '/external/papers/paper.pdf';

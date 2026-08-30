@@ -99,26 +99,6 @@
         "icon": "$(globe)"
       },
       {
-        "command": "llm-wiki.browser.open",
-        "title": "LLM Wiki: Open Web Browser",
-        "icon": "$(preview)"
-      },
-      {
-        "command": "llm-wiki.browser.addSelectionToAgent",
-        "title": "LLM Wiki: Add Web Selection to Agent",
-        "icon": "$(comment-discussion)"
-      },
-      {
-        "command": "llm-wiki.browser.copySelectionForAgent",
-        "title": "LLM Wiki: Copy Web Selection for Agent",
-        "icon": "$(copy)"
-      },
-      {
-        "command": "llm-wiki.browser.copySelectionLink",
-        "title": "LLM Wiki: Copy Web Selection Link",
-        "icon": "$(link)"
-      },
-      {
         "command": "llm-wiki.showKnowledgeGraph",
         "title": "LLM Wiki: Show Knowledge Graph",
         "icon": "$(type-hierarchy-sub)"

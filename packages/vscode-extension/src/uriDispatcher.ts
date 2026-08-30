@@ -9,7 +9,6 @@ import { llmWikiAnchorTargetFromString } from './anchorUris';
 import { resolveLocalLinkTarget } from './localLinkTargetResolver';
 
 export interface DispatchUriOptions {
-  openWebTarget?(url: string): Promise<void> | void;
   /**
    * Allow a root-looking target to open a real absolute path outside the vault.
    * Off by default: product deep links are triggerable by any web page, so only
@@ -141,7 +140,7 @@ export async function dispatchUri(
     }
 
     case 'web': {
-      await openWebTarget(workspaceRoot, target.url ?? resolvedUri, target.webTargetId, options);
+      await openExternalWebTarget(target.url ?? resolvedUri);
       return;
     }
 
@@ -160,7 +159,7 @@ export async function dispatchUri(
         }
       }
       if (/^https?:\/\//i.test(navigableUri)) {
-        await openWebTarget(workspaceRoot, navigableUri, undefined, options);
+        await openExternalWebTarget(navigableUri);
         return;
       }
       vscode.window.showErrorMessage(`Cannot open link target: ${navigableUri}`);
@@ -207,16 +206,9 @@ function localAnchorFileUri(value: string): vscode.Uri | undefined {
   }
 }
 
-async function openWebTarget(
-  _vaultRoot: string,
+async function openExternalWebTarget(
   url: string,
-  _webTargetId: string | undefined,
-  options: DispatchUriOptions,
 ): Promise<void> {
-  if (options.openWebTarget) {
-    await options.openWebTarget(url);
-    return;
-  }
   await vscode.env.openExternal(vscode.Uri.parse(url));
 }
 

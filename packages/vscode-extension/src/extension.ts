@@ -19,10 +19,6 @@ import {
   captureActiveCursorBrowserSelection,
   cursorBrowserCaptureToSelectionContext,
 } from './cursorBrowserSelection';
-import {
-  registerExperimentalOwnedBrowser,
-  type ExperimentalOwnedBrowserController,
-} from './experimentalOwnedBrowser';
 import { getConceptGraph, loadFilesystemWiki } from './filesystemWiki';
 import { KnowledgeGraphPanel } from './knowledgeGraphPanel';
 import { LearningNoteStore } from './learningNoteStore';
@@ -54,7 +50,6 @@ let markdownEditorProvider: MarkdownEditorProvider | undefined;
 let markdownOutlineProvider: MarkdownOutlineTreeProvider | undefined;
 let graphPanel: KnowledgeGraphPanel | undefined;
 let queryAnnotationIndex: QueryAnnotationIndex | undefined;
-let webBrowserController: ExperimentalOwnedBrowserController | undefined;
 let refreshTimer: NodeJS.Timeout | undefined;
 
 const WORKSPACE_REQUIRED_MESSAGE =
@@ -138,9 +133,7 @@ export function activate(context: vscode.ExtensionContext): void {
           vscode.window.showWarningMessage('This LLM Wiki link is invalid.');
           return;
         }
-        await dispatchUri(vaultRootForSource(activeSourceUri(), workspaceRoot), target, {
-          openWebTarget: url => webBrowserController?.open(url),
-        });
+        await dispatchUri(vaultRootForSource(activeSourceUri(), workspaceRoot), target);
       },
     }),
     graphPanel,
@@ -161,21 +154,6 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.window.tabGroups.onDidChangeTabs(() => refreshAllViews()),
   );
 
-  webBrowserController = registerExperimentalOwnedBrowser({
-    context,
-    onSendSelection: async payload => {
-      const root = requireWorkspaceRoot(workspaceRoot);
-      if (!root) throw new Error(WORKSPACE_REQUIRED_MESSAGE);
-      const sent = await exportSelectionAndHandoff(
-        root,
-        payload.selection,
-        payload.attachment?.bytes,
-        'The browser selection image could not be saved; the active agent will use text context only.',
-        { kind: 'picker' },
-      );
-      if (!sent) throw new Error('The browser selection could not be exported.');
-    },
-  });
   registerCommands(context, workspaceRoot, learningNotes);
   if (workspaceRoot) registerMarkdownWatcher(context);
   refreshAllViews();
@@ -226,7 +204,6 @@ function registerCommands(
           target,
           {
             allowAbsoluteTargets: true,
-            openWebTarget: url => webBrowserController?.open(url),
           },
         );
       }
@@ -241,7 +218,6 @@ function registerCommands(
           uri,
           {
             allowAbsoluteTargets: true,
-            openWebTarget: url => webBrowserController?.open(url),
           },
         );
       }
@@ -345,7 +321,7 @@ function registerCommands(
         const capture = await captureActiveCursorBrowserSelection();
         if (!capture) {
           vscode.window.showWarningMessage(
-            'No active Cursor Browser text selection was available. In stock VS Code, use LLM Wiki: Open Web Browser.',
+            'No active Cursor Browser text selection was available.',
           );
           return;
         }
@@ -549,7 +525,6 @@ export function deactivate(): void {
   graphPanel = undefined;
   queryAnnotationIndex?.dispose();
   queryAnnotationIndex = undefined;
-  webBrowserController = undefined;
 }
 
 function setAgentHandoffActive(active: boolean): void {

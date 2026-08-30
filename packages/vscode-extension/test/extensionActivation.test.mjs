@@ -104,14 +104,6 @@ function loadTsModule(relativePath, mocks = {}) {
         registerAnchorFileEditorProvider: () => undefined,
       };
     }
-    if (request === './experimentalOwnedBrowser') {
-      return {
-        registerExperimentalOwnedBrowser: () => ({
-          async open() {},
-          dispose() {},
-        }),
-      };
-    }
     if (request === './learningNoteStore') {
       return {
         LearningNoteStore: class {},
@@ -326,7 +318,7 @@ test('activation routes product URI anchor links through the LLM Wiki dispatcher
   assert.equal(dispatchCalls.length, 1);
   assert.equal(dispatchCalls[0][0], '/vault');
   assert.equal(dispatchCalls[0][1], target);
-  assert.equal(typeof dispatchCalls[0][2].openWebTarget, 'function');
+  assert.equal(dispatchCalls[0].length, 2);
   assert.deepEqual(warningMessages, ['This LLM Wiki link is invalid.']);
 });
 
@@ -1344,70 +1336,6 @@ test('Cursor Browser selection is exported with its crop and routed to the activ
   }]);
 });
 
-test('owned browser routes its validated text and synthetic crop through the same handoff', async () => {
-  let browserOptions;
-  const exports = [];
-  const handoffs = [];
-  const snapshotPng = Uint8Array.from([137, 80, 78, 71]);
-  const selection = {
-    uri: { scheme: 'https', fsPath: '', toString: () => 'https://example.com/article' },
-    text: 'UNTRUSTED WEB CONTENT\n\nSelected passage:\n│ Reader passage',
-    startLine: 1,
-    endLine: 1,
-    sourceLabel: 'https://example.com/article',
-    rangeLabel: 'web selection on example.com',
-  };
-  const vscode = createVscodeMock({
-    executeCommandCalls: [],
-    activeDocumentUri: undefined,
-  });
-  const mocks = createActivationMocks({ vscode });
-  mocks['./experimentalOwnedBrowser'] = {
-    registerExperimentalOwnedBrowser: options => {
-      browserOptions = options;
-      return { dispose() {} };
-    },
-  };
-  mocks['./agentContext'] = {
-    addSelectionToContext: async (vaultRoot, options) => {
-      exports.push({ vaultRoot, selection: await options.getActiveSelectionContext() });
-      return {
-        directoryPath: '/vault/.llm_wiki/agent/exports/reader',
-        markdownPath: '/vault/.llm_wiki/agent/exports/reader/selection.md',
-        jsonPath: '/vault/.llm_wiki/agent/exports/reader/selection.json',
-      };
-    },
-    syncSelectionExportAttachment: async (exported, fileName, bytes) =>
-      bytes ? `${exported.directoryPath}/${fileName}` : undefined,
-  };
-  mocks['./cursorCrop'] = {
-    validateCursorCropPng: value => value,
-  };
-  mocks['./agentHandoff'] = {
-    handoffSelectionToAgent: async (context, attachmentUris) => {
-      handoffs.push({
-        contextPath: context.uri.fsPath,
-        attachmentPaths: attachmentUris.map(uri => uri.fsPath),
-      });
-      return 'codebuddy';
-    },
-  };
-
-  const { activate } = loadTsModule('src/extension.ts', mocks);
-  activate({ subscriptions: [] });
-  await browserOptions.onSendSelection({
-    selection,
-    attachment: { bytes: snapshotPng, mediaType: 'image/png' },
-    screenshotStatus: 'captured',
-  });
-
-  assert.deepEqual(exports, [{ vaultRoot: '/vault', selection }]);
-  assert.deepEqual(handoffs, [{
-    contextPath: '/vault/.llm_wiki/agent/exports/reader/selection.md',
-    attachmentPaths: ['/vault/.llm_wiki/agent/exports/reader/selection.png'],
-  }]);
-});
-
 test('activation leaves an explicitly opened PDF text document in its selected editor', async () => {
   const executeCommandCalls = [];
   const activeDocumentUri = { fsPath: '/vault/raw/pdf/ddia.pdf', scheme: 'file' };
@@ -1661,12 +1589,9 @@ test('openPdfMarkdownColumns command opens the active PDF beside an available ma
 
 test('activation routes markdown link targets through the LLM Wiki dispatcher', async () => {
   const executeCommandCalls = [];
-  const openExternalCalls = [];
   const dispatched = [];
-  const browserOpens = [];
   const vscode = createVscodeMock({
     executeCommandCalls,
-    openExternalCalls,
   });
 
   const { activate } = loadTsModule('src/extension.ts', {
@@ -1696,18 +1621,7 @@ test('activation routes markdown link targets through the LLM Wiki dispatcher', 
     './uriDispatcher': {
       dispatchUri: async (...args) => {
         dispatched.push(args);
-        if (String(args[1]).startsWith('https://')) {
-          await args[2]?.openWebTarget?.(args[1]);
-        }
       },
-    },
-    './experimentalOwnedBrowser': {
-      registerExperimentalOwnedBrowser: () => ({
-        async open(url) {
-          browserOpens.push(url);
-        },
-        dispose() {},
-      }),
     },
     './pdfEditorProvider': {
       PdfEditorProvider: class {
@@ -1737,13 +1651,10 @@ test('activation routes markdown link targets through the LLM Wiki dispatcher', 
   assert.ok(vscode.__registeredCommands['llm-wiki.openLinkTarget']);
   await vscode.__registeredCommands['llm-wiki.openLinkTarget']('https://example.com/docs');
 
-  assert.equal(openExternalCalls.length, 0);
   assert.equal(dispatched.length, 1);
   assert.equal(dispatched[0][0], '/vault');
   assert.equal(dispatched[0][1], 'https://example.com/docs');
-  assert.equal(dispatched[0][2].allowAbsoluteTargets, true);
-  assert.equal(typeof dispatched[0][2].openWebTarget, 'function');
-  assert.deepEqual(browserOpens, ['https://example.com/docs']);
+  assert.deepEqual(dispatched[0][2], { allowAbsoluteTargets: true });
 });
 
 test('activation resolves link targets against the folder that owns the source document', async () => {

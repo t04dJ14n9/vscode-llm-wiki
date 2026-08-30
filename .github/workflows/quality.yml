@@ -109,13 +109,12 @@ jobs:
             args: packages/vscode-extension/test/e2e/pdf-manual-smoke.spec.ts --fully-parallel --shard=1/2
           - suite: manual PDF smoke 2 of 2
             args: packages/vscode-extension/test/e2e/pdf-manual-smoke.spec.ts --fully-parallel --shard=2/2
-          - suite: supporting PDF and web
+          - suite: supporting PDF
             args: >-
               packages/vscode-extension/test/e2e/embedpdf-headless-spike.spec.ts
               packages/vscode-extension/test/e2e/pdf-internal-links.spec.ts
               packages/vscode-extension/test/e2e/pdf-page-turn-prefetch.spec.ts
               packages/vscode-extension/test/e2e/pdf-viewer-focus-frame.spec.ts
-              packages/vscode-extension/test/e2e/web-browser.spec.ts
 
     steps:
       - name: Check out repository
